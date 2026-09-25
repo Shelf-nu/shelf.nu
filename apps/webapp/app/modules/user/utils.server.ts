@@ -33,12 +33,12 @@ import {
   resolveRole,
 } from "~/utils/permissions/role-access";
 import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
-import { isDemotion } from "~/utils/roles";
 import { randomUsernameFromEmail } from "~/utils/user";
 import {
   changeUserRole,
+  lockMembership,
   revokeAccessToOrganization,
-  transferEntitiesToNewOwner,
+  transferOnRoleChange,
 } from "./service.server";
 import {
   caseInsensitiveEmailFilter,
@@ -391,99 +391,73 @@ export async function resolveUserAction(
         });
       }
 
-      /** Fetch the target's current role to detect demotion */
-      const targetUserOrg = await db.userOrganization.findFirst({
-        where: { userId: targetUserId, organizationId },
-      });
-
-      if (!targetUserOrg) {
-        throw new ShelfError({
-          cause: null,
-          message: "User is not a member of this organization",
-          label: "Team",
-          shouldBeCaptured: false,
-        });
-      }
-
-      const currentRole = targetUserOrg.roles[0];
-
-      /** Transfer entities on demotion */
-      if (isDemotion(currentRole, newRole)) {
-        const org = await db.organization.findUniqueOrThrow({
+      // `workspaceOwnerId`, not `org`: the role-change email further down in
+      // this same `case` block declares `const [targetUser, org]`.
+      const { userId: workspaceOwnerId } =
+        await db.organization.findUniqueOrThrow({
           where: { id: organizationId },
           select: { userId: true },
         });
 
-        const recipientId = transferToUserId || org.userId;
+      /**
+       * Lock order: the target's membership row FIRST, then entity writes, the
+       * order every path that changes or removes a membership uses (SSO
+       * transitions and account deletion included). Two role changes on the
+       * same member then queue on the membership lock instead of each holding
+       * a lock the other needs. Everything the change moves, and the role the
+       * audit entry records, is read from the persisted row under that lock.
+       */
+      const currentRole = await db.$transaction(async (tx) => {
+        const targetUserOrg = await lockMembership(tx, {
+          userId: targetUserId,
+          organizationId,
+        });
 
-        /** Validate that the transfer recipient is a member of this org */
-        if (transferToUserId) {
-          const recipientOrg = await db.userOrganization.findFirst({
-            where: { userId: transferToUserId, organizationId },
+        if (!targetUserOrg) {
+          throw new ShelfError({
+            cause: null,
+            message: "User is not a member of this organization",
+            additionalData: { targetUserId, organizationId },
+            label: "Team",
+            status: 404,
+            shouldBeCaptured: false,
           });
-
-          if (!recipientOrg) {
-            throw new ShelfError({
-              cause: null,
-              message:
-                "Transfer recipient is not a member of this organization",
-              label: "Team",
-              additionalData: { transferToUserId, organizationId },
-            });
-          }
         }
 
-        await db.$transaction(async (tx) => {
-          // The demoted user keeps their org membership (only their role
-          // rank drops), so only OWNERSHIP columns move — see
-          // EntityTransferReason's JSDoc in service.server.ts.
-          await transferEntitiesToNewOwner({
-            tx,
-            id: targetUserId,
-            newOwnerId: recipientId,
-            organizationId,
-            reason: "demotion",
-          });
+        const previousRole = resolveRole(targetUserOrg.roles);
 
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole: callerAccess.role,
-            tx,
-          });
-
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        // Validate the recipient and move entities before the role or the log
+        // is written: a refused recipient stops the request with nothing
+        // changed.
+        await transferOnRoleChange({
+          tx,
+          targetUserId,
+          organizationId,
+          fromRoles: targetUserOrg.roles,
+          toRole: newRole,
+          recipientId: transferToUserId || workspaceOwnerId,
         });
-      } else {
-        await db.$transaction(async (tx) => {
-          await changeUserRole({
-            userId: targetUserId,
-            organizationId,
-            newRole,
-            callerRole: callerAccess.role,
-            tx,
-          });
 
-          await tx.roleChangeLog.create({
-            data: {
-              userId: targetUserId,
-              changedById: userId,
-              organizationId,
-              previousRole: currentRole,
-              newRole,
-            },
-          });
+        await changeUserRole({
+          userId: targetUserId,
+          organizationId,
+          newRole,
+          actorOwnsWorkspace: callerAccess.ownsWorkspace,
+          tx,
         });
-      }
+
+        await tx.roleChangeLog.create({
+          data: {
+            userId: targetUserId,
+            changedById: userId,
+            organizationId,
+            previousRole,
+            newRole,
+          },
+        });
+
+        return previousRole;
+      });
 
       /** Send email notification to the affected user */
       const [targetUser, org] = await Promise.all([

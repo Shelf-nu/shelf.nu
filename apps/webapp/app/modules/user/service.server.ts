@@ -52,7 +52,20 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id as generateId } from "~/utils/id/id.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
-import { resolveRole } from "~/utils/permissions/role-access";
+import type { RoleChangeTransfers } from "~/utils/permissions/membership-access";
+import {
+  canAssignRole,
+  holdsRoleWhere,
+  roleChangeRequiresOwner,
+  roleChangeTransfers,
+} from "~/utils/permissions/membership-access";
+import {
+  ROLE_LABELS,
+  ROLE_POLICIES,
+  isWorkspaceOwner,
+  resolveRole,
+  rolesWhere,
+} from "~/utils/permissions/role-access";
 import { getRoleFromGroupId } from "~/utils/roles.server";
 import {
   deleteProfilePicture,
@@ -1514,7 +1527,7 @@ export async function softDeleteUser(id: User["id"]) {
     });
 
     const organizationsTheUserDoesNotOwn = user.userOrganizations.filter(
-      (uo) => !uo.roles.includes(OrganizationRoles.OWNER)
+      (uo) => !isWorkspaceOwner(uo.roles)
     );
 
     await db.$transaction(async (tx) => {
@@ -1531,6 +1544,32 @@ export async function softDeleteUser(id: User["id"]) {
        * The new owner should be the owner of the organization
        */
       for (const userOrg of organizationsTheUserDoesNotOwn) {
+        // Membership lock first, then entity writes: the order every
+        // role-change and removal path uses (see lockMembership).
+        const persisted = await lockMembership(tx, {
+          userId: id,
+          organizationId: userOrg.organizationId,
+        });
+
+        if (persisted && isWorkspaceOwner(persisted.roles)) {
+          // They became the owner after the user was read: stop, as revoking
+          // would, so the whole deletion rolls back with nothing moved.
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This user now owns a workspace. Transfer ownership first, then delete the account.",
+            additionalData: {
+              userId: id,
+              organizationId: userOrg.organizationId,
+            },
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
+        // Entities move even when the membership is already gone: they still
+        // belong to the user being deleted.
         const newOwnerId = userOrg.organization?.userId;
 
         if (newOwnerId) {
@@ -1542,10 +1581,9 @@ export async function softDeleteUser(id: User["id"]) {
             reason: "removal",
           });
         }
-        /**
-         * Remove the user from all organizations the user belongs to but doesnt own.
-         * */
-        await revokeAccessToOrganization({
+
+        /** Remove the user from the workspace, inside this transaction. */
+        await revokeMembershipInTx(tx, {
           userId: id,
           organizationId: userOrg.organizationId,
         });
@@ -1708,6 +1746,145 @@ async function deleteMembershipUnlessOwner(
   return count;
 }
 
+/**
+ * Locks a membership row and returns its roles as persisted now.
+ *
+ * Every path that changes a member's role or removes them calls this FIRST in
+ * its transaction, before any entity write, so concurrent role changes and
+ * removals on the same member queue on this lock instead of each holding a lock
+ * the other needs. Decide from the returned roles, never from a snapshot read
+ * before the transaction.
+ *
+ * @param tx - The surrounding transaction
+ * @param args.userId - The member
+ * @param args.organizationId - The workspace
+ * @returns The persisted roles, or `null` when the membership no longer exists
+ */
+export async function lockMembership(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    userId,
+    organizationId,
+  }: { userId: User["id"]; organizationId: Organization["id"] }
+): Promise<{ roles: OrganizationRoles[] } | null> {
+  await tx.$queryRaw`
+    SELECT id FROM "UserOrganization"
+    WHERE "userId" = ${userId} AND "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+
+  return tx.userOrganization.findUnique({
+    where: { userId_organizationId: { userId, organizationId } },
+    select: { roles: true },
+  });
+}
+
+/**
+ * Removes a member from a workspace inside the caller's transaction: takes the
+ * membership lock, refuses the owner, deletes the membership and disconnects
+ * every team member linked to the user in that workspace.
+ *
+ * A membership that no longer exists is not an error: the team-member links
+ * are still cleared. Clearing `lastSelectedOrganizationId` is left to the
+ * caller, after commit (see {@link clearLastSelectedOrganization}).
+ *
+ * @param tx - The surrounding transaction
+ * @param args.userId - The member losing access
+ * @param args.organizationId - The workspace
+ * @returns The updated user row
+ * @throws {ShelfError} 400 when the member owns the workspace
+ */
+export async function revokeMembershipInTx(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    userId,
+    organizationId,
+  }: { userId: User["id"]; organizationId: Organization["id"] }
+) {
+  const persisted = await lockMembership(tx, { userId, organizationId });
+
+  if (persisted && isWorkspaceOwner(persisted.roles)) {
+    throw new ShelfError({
+      cause: null,
+      title: "Cannot revoke the owner's access",
+      message:
+        "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
+      additionalData: { userId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  // Disconnect EVERY linked team member, not just the first: the schema does
+  // not enforce one per (user, org), and a row left linked keeps routing
+  // booking emails and recipient pickers to a user who no longer has access.
+  const teamMembers = await tx.teamMember.findMany({
+    where: { userId, organizationId },
+    select: { id: true },
+  });
+
+  // The conditional delete stays the enforcing check for the owner rule; under
+  // the lock it can only match nothing when the membership is already gone.
+  await deleteMembershipUnlessOwner({ userId, organizationId }, tx);
+
+  return tx.user.update({
+    where: { id: userId },
+    data: {
+      ...(teamMembers.length > 0 && {
+        teamMembers: {
+          disconnect: teamMembers.map(({ id }) => ({ id })),
+        },
+      }),
+    },
+  });
+}
+
+/**
+ * Clears `lastSelectedOrganizationId` when it points at a workspace the user
+ * no longer belongs to, so their next request cannot land there.
+ *
+ * Uses raw SQL so `updatedAt` is not bumped; a no-op when the column already
+ * points elsewhere. Best-effort and outside any transaction: a failure is
+ * logged, never thrown, so it cannot undo a committed revocation.
+ *
+ * @param args.userId - The member who lost access
+ * @param args.organizationId - The workspace they lost
+ */
+export async function clearLastSelectedOrganization({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  try {
+    await db.$executeRaw`
+      UPDATE "User"
+      SET "lastSelectedOrganizationId" = NULL
+      WHERE "id" = ${userId}
+        AND "lastSelectedOrganizationId" = ${organizationId}
+    `;
+  } catch (cleanupError) {
+    Logger.warn(
+      "Failed to clear lastSelectedOrganizationId during access revocation",
+      userId,
+      organizationId,
+      cleanupError
+    );
+  }
+}
+
+/**
+ * Removes a member from a workspace: deletes the membership, disconnects every
+ * linked team member, then clears `lastSelectedOrganizationId` when it points
+ * at this workspace.
+ *
+ * @param args.userId - The member losing access
+ * @param args.organizationId - The workspace
+ * @returns The updated user row
+ * @throws {ShelfError} 400 when the member owns the workspace
+ */
 export async function revokeAccessToOrganization({
   userId,
   organizationId,
@@ -1717,19 +1894,16 @@ export async function revokeAccessToOrganization({
 }) {
   try {
     /**
-     * Read first purely so the common case gets an actionable message instead
-     * of a generic failure. {@link deleteMembershipUnlessOwner} is what
-     * actually enforces the rule — this read can go stale.
-     *
-     * This mirrors `changeUserRole`, which already refuses to touch the OWNER
-     * and points the caller at ownership transfer.
+     * Read first purely so the common case gets an actionable message before a
+     * transaction opens. {@link revokeMembershipInTx} re-reads the membership
+     * under its lock and is what enforces the rule; this read can go stale.
      */
     const targetUserOrg = await db.userOrganization.findFirst({
       where: { userId, organizationId },
       select: { roles: true },
     });
 
-    if (targetUserOrg?.roles.includes(OrganizationRoles.OWNER)) {
+    if (isWorkspaceOwner(targetUserOrg?.roles)) {
       throw new ShelfError({
         cause: null,
         title: "Cannot revoke the owner's access",
@@ -1742,86 +1916,16 @@ export async function revokeAccessToOrganization({
       });
     }
 
-    /**
-     * if I want to revokeAccess access, i simply need to:
-     * 1. Remove relation between user and team member
-     * 2. remove the UserOrganization entry which has the org.id and user.id that i am revoking
-     */
-    // Disconnect EVERY linked team member, not just the first. The schema does
-    // not enforce one per (user, org), and any row left linked keeps routing
-    // booking emails and recipient pickers to a user who no longer has access.
-    const teamMembers = await db.teamMember.findMany({
-      where: { userId, organizationId },
-      select: { id: true },
-    });
+    const result = await db.$transaction((tx) =>
+      revokeMembershipInTx(tx, { userId, organizationId })
+    );
 
-    const result = await db.$transaction(async (tx) => {
-      const deleted = await deleteMembershipUnlessOwner(
-        { userId, organizationId },
-        tx
-      );
-
-      if (deleted === 0) {
-        /**
-         * Either they became the owner since the read above (the race this
-         * conditional delete exists to catch) or they were never a member.
-         * Re-read inside the transaction to tell those apart, so a genuine
-         * ownership race is reported rather than passing silently.
-         */
-        const survivor = await tx.userOrganization.findFirst({
-          where: { userId, organizationId },
-          select: { roles: true },
-        });
-
-        if (survivor) {
-          throw new ShelfError({
-            cause: null,
-            title: "Cannot revoke the owner's access",
-            message:
-              "This user owns the workspace. Transfer ownership to someone else first, then revoke their access.",
-            additionalData: { userId, organizationId },
-            label,
-            status: 400,
-            shouldBeCaptured: false,
-          });
-        }
-      }
-
-      return tx.user.update({
-        where: { id: userId },
-        data: {
-          ...(teamMembers.length > 0 && {
-            teamMembers: {
-              disconnect: teamMembers.map(({ id }) => ({ id })),
-            },
-          }),
-        },
-      });
-    });
-
-    // Clear lastSelectedOrganizationId if it points to the revoked org.
-    // Uses raw SQL to avoid bumping updatedAt. No-op if already different.
-    // Best-effort: don't block revocation if cleanup fails.
-    try {
-      await db.$executeRaw`
-        UPDATE "User"
-        SET "lastSelectedOrganizationId" = NULL
-        WHERE "id" = ${userId}
-          AND "lastSelectedOrganizationId" = ${organizationId}
-      `;
-    } catch (cleanupError) {
-      Logger.warn(
-        "Failed to clear lastSelectedOrganizationId during access revocation",
-        userId,
-        organizationId,
-        cleanupError
-      );
-    }
+    await clearLastSelectedOrganization({ userId, organizationId });
 
     return result;
   } catch (cause) {
-    // Preserve our own errors — the owner guard above is a 400 the user needs
-    // to read, and rewrapping would turn it into a generic captured 500.
+    // Preserve our own errors: the owner guard is a 400 the user needs to
+    // read, and rewrapping would turn it into a generic captured 500.
     if (isLikeShelfError(cause)) {
       throw cause;
     }
@@ -1836,32 +1940,44 @@ export async function revokeAccessToOrganization({
 }
 
 /**
- * Changes a user's role in an organization in-place.
- * This is the same pattern used by ownership transfer and SCIM sync.
- * Does NOT affect TeamMember, Custody, or Booking records.
+ * Changes a member's role in an organization in place. Does NOT move entities:
+ * the caller runs {@link transferOnRoleChange} in the same transaction.
  *
- * Caller role validation:
- * - Only OWNER can promote/demote ADMINs
- * - Cannot assign OWNER role
- * - Cannot change the OWNER's role
+ * Refuses, before writing:
+ * - assigning a role that owns the workspace (ownership moves only through
+ *   `transferOwnership`);
+ * - changing a member who owns the workspace (OWNER anywhere in the
+ *   membership). This refusal also keeps what a role change moves correct:
+ *   an owner stepping down to Administrator would keep the bookings they
+ *   created for others, so an owner must never reach a role change;
+ * - granting a role, or changing a member whose effective role, needs the
+ *   workspace owner (`membership.changeRequiresOwner`) when the actor is not
+ *   the owner.
  *
- * Returns the target user's previous role alongside the updated record.
+ * @param args.userId - The member whose role changes
+ * @param args.organizationId - The workspace
+ * @param args.newRole - The single role they will hold
+ * @param args.actorOwnsWorkspace - `access.ownsWorkspace` of the acting member
+ * @param args.tx - The role-change transaction, when there is one
+ * @returns The updated membership plus the member's previous effective role
+ * @throws {ShelfError} When a refusal above applies (403 for the owner-only
+ *   rules), or the member is not in the workspace
  */
 export async function changeUserRole({
   userId,
   organizationId,
   newRole,
-  callerRole,
+  actorOwnsWorkspace,
   tx: client = db,
 }: {
   userId: User["id"];
   organizationId: Organization["id"];
   newRole: OrganizationRoles;
-  callerRole: OrganizationRoles;
+  actorOwnsWorkspace: boolean;
   tx?: Omit<ExtendedPrismaClient, ITXClientDenyList>;
 }) {
   try {
-    if (newRole === OrganizationRoles.OWNER) {
+    if (ROLE_POLICIES[newRole].membership.ownsWorkspace) {
       throw new ShelfError({
         cause: null,
         message:
@@ -1888,9 +2004,9 @@ export async function changeUserRole({
       });
     }
 
-    const currentRole = userOrg.roles[0];
+    const currentRole = resolveRole(userOrg.roles);
 
-    if (currentRole === OrganizationRoles.OWNER) {
+    if (isWorkspaceOwner(userOrg.roles)) {
       throw new ShelfError({
         cause: null,
         message:
@@ -1900,30 +2016,22 @@ export async function changeUserRole({
       });
     }
 
-    /** Only OWNER can promote someone to ADMIN */
-    if (
-      newRole === OrganizationRoles.ADMIN &&
-      callerRole !== OrganizationRoles.OWNER
-    ) {
+    if (!canAssignRole({ actorOwnsWorkspace, role: newRole })) {
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",
-        message: "Only the workspace owner can promote users to Administrator.",
+        message: `Only the workspace owner can promote users to ${ROLE_LABELS[newRole]}.`,
         label,
         status: 403,
         shouldBeCaptured: false,
       });
     }
 
-    /** Only OWNER can change an ADMIN's role */
-    if (
-      currentRole === OrganizationRoles.ADMIN &&
-      callerRole !== OrganizationRoles.OWNER
-    ) {
+    if (!actorOwnsWorkspace && roleChangeRequiresOwner(currentRole)) {
       throw new ShelfError({
         cause: null,
         title: "Insufficient permissions",
-        message: "Only the workspace owner can change an Administrator's role.",
+        message: `Only the workspace owner can change an ${ROLE_LABELS[currentRole]}'s role.`,
         label,
         status: 403,
         shouldBeCaptured: false,
@@ -1965,8 +2073,9 @@ export async function changeUserRole({
  *   and `Booking.custodianUser` are `onDelete: Cascade` FKs, so they must be
  *   cleared off the departing user. `creatorId` is non-nullable → transferred
  *   rather than nulled.
- * - `"demotion"` — the user KEEPS membership; only their role rank drops. The
- *   `User` row is untouched, so no cascade applies. Only OWNERSHIP columns move.
+ * - `"demotion"`: the user KEEPS membership and their role changes; `moves`
+ *   says which of the two groups move (see `roleChangeTransfers`). The `User`
+ *   row is untouched, so no cascade applies.
  */
 export type EntityTransferReason = "removal" | "demotion";
 
@@ -2002,22 +2111,25 @@ export function bookingsReassignedOnDemotionWhere({
   };
 }
 
-/** Move entries inside an organization from 1 owner to another.
+/**
+ * Moves a user's entities inside an organization to another user.
  *
- * OWNERSHIP — moved for EVERY `reason`: `Asset`/`Category`/`Tag`/`Location`/
- * `CustomField`/`Image.userId`, `Kit`/`AssetReminder.createdById`.
+ * OWNERSHIP, moved on removal, and on a role change when `moves.ownership`:
+ * `Asset`/`Category`/`Tag`/`Location`/`CustomField`/`Image.userId`,
+ * `Kit`/`AssetReminder.createdById`.
  *
  * AUTHORSHIP + ASSIGNMENT:
  * - `removal`: `Invite.inviterId` and `Booking.creatorId` transfer to the new
- *   owner, and `Booking.custodianUserId` is nulled — a departing user must come
+ *   owner, and `Booking.custodianUserId` is nulled. A departing user must come
  *   off every FK before their row is anonymized (`Booking.creator`/`custodianUser`
  *   are `onDelete: Cascade`; `creatorId` is non-nullable, so it transfers rather
  *   than nulls).
  * - `demotion`: the user keeps membership, so `Invite.inviterId` stays theirs
- *   and `Booking.custodianUserId` is left untouched. `Booking.creatorId`
- *   transfers ONLY for bookings whose custodian is a DIFFERENT registered user
- *   — bookings the user created on someone else's behalf. Their own bookings
- *   keep `creatorId`: either they are the custodian, or there is no registered
+ *   and `Booking.custodianUserId` is left untouched. When
+ *   `moves.bookingsCreatedForOthers`, `Booking.creatorId` transfers ONLY for
+ *   bookings whose custodian is a DIFFERENT registered user, the bookings the
+ *   user created on someone else's behalf. Their own bookings keep
+ *   `creatorId`: either they are the custodian, or there is no registered
  *   custodian (an unassigned draft, or a legacy row held via the team-member
  *   link with a null `custodianUserId`).
  *
@@ -2031,88 +2143,100 @@ export function bookingsReassignedOnDemotionWhere({
  *
  * Narrow, accepted residue on `demotion`: a booking created for a NON-registered
  * member (null `custodianUserId`, custody on the team-member link only) keeps
- * the demoted user as creator — there is no registered custodian to hand it to.
+ * the demoted user as creator, since there is no registered custodian to hand
+ * it to.
  *
- * Note: Notes (Note, BookingNote, LocationNote) are intentionally NOT
- * transferred — their userId represents authorship, not ownership.
+ * Notes (Note, BookingNote, LocationNote) are intentionally NOT transferred:
+ * their userId represents authorship, not ownership.
  *
- * Required to be used inside a transaction
+ * Required to be used inside a transaction.
+ *
+ * @param args.tx - The surrounding transaction
+ * @param args.id - The user whose entities move
+ * @param args.newOwnerId - Who receives them
+ * @param args.organizationId - The workspace
+ * @param args.reason - `removal`, or `demotion` with what the role change moves
  */
-export async function transferEntitiesToNewOwner({
-  tx,
-  id,
-  newOwnerId,
-  organizationId,
-  reason,
-}: {
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
-  id: User["id"];
-  newOwnerId: User["id"];
-  organizationId: Organization["id"];
-  reason: EntityTransferReason;
-}) {
-  /** Update assets */
-  await tx.asset.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+export async function transferEntitiesToNewOwner(
+  args: {
+    tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+    id: User["id"];
+    newOwnerId: User["id"];
+    organizationId: Organization["id"];
+  } & (
+    | { reason: "removal" }
+    | { reason: "demotion"; moves: RoleChangeTransfers }
+  )
+) {
+  const { tx, id, newOwnerId, organizationId } = args;
+  // A departing member hands over everything they own; a role change hands
+  // over ownership only when the ownership tier drops.
+  const moveOwnership = args.reason === "removal" || args.moves.ownership;
 
-  /** Update categories */
-  await tx.category.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+  if (moveOwnership) {
+    /** Update assets */
+    await tx.asset.updateMany({
+      where: {
+        userId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
 
-  /** Update tags */
-  await tx.tag.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+    /** Update categories */
+    await tx.category.updateMany({
+      where: {
+        userId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
 
-  /** Update locations */
-  await tx.location.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+    /** Update tags */
+    await tx.tag.updateMany({
+      where: {
+        userId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
 
-  /** Update custom fields */
-  await tx.customField.updateMany({
-    where: {
-      userId: id,
-      organizationId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
-  });
+    /** Update locations */
+    await tx.location.updateMany({
+      where: {
+        userId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
+
+    /** Update custom fields */
+    await tx.customField.updateMany({
+      where: {
+        userId: id,
+        organizationId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
+  }
 
   /**
-   * AUTHORSHIP + ASSIGNMENT rewrites — removal only. On demotion the user
+   * AUTHORSHIP + ASSIGNMENT rewrites, removal only. On a role change the user
    * keeps membership, so inviterId (authorship) stays theirs, and the
-   * Booking.creator/custodianUser cascade-defusing rewrites below don't
-   * apply (see the accepted-consequence note in the JSDoc above).
+   * Booking.creator/custodianUser cascade-defusing rewrites below don't apply
+   * (see the accepted-consequence note in the JSDoc above).
    */
-  if (reason === "removal") {
+  if (args.reason === "removal") {
     /** Update invites */
     await tx.invite.updateMany({
       where: {
@@ -2147,13 +2271,12 @@ export async function transferEntitiesToNewOwner({
     });
   }
 
-  if (reason === "demotion") {
+  if (args.reason === "demotion" && args.moves.bookingsCreatedForOthers) {
     /**
-     * Hand over ONLY the bookings the demoted user created for a different
-     * registered custodian; their own bookings keep `creatorId`. The predicate
-     * (and the reason it is null-safe) lives in
-     * {@link bookingsReassignedOnDemotionWhere}, shared with the count the
-     * change-role dialog shows the admin.
+     * Hand over ONLY the bookings the user created for a different registered
+     * custodian; their own bookings keep `creatorId`. The predicate (and the
+     * reason it is null-safe) lives in {@link bookingsReassignedOnDemotionWhere},
+     * shared with the count the change-role dialog shows the admin.
      */
     await tx.booking.updateMany({
       where: bookingsReassignedOnDemotionWhere({
@@ -2166,38 +2289,154 @@ export async function transferEntitiesToNewOwner({
     });
   }
 
-  /** Update images */
-  await tx.image.updateMany({
-    where: {
-      userId: id,
-      ownerOrgId: organizationId,
-    },
-    data: {
-      userId: newOwnerId,
-    },
+  if (moveOwnership) {
+    /** Update images */
+    await tx.image.updateMany({
+      where: {
+        userId: id,
+        ownerOrgId: organizationId,
+      },
+      data: {
+        userId: newOwnerId,
+      },
+    });
+
+    /** Update kits */
+    await tx.kit.updateMany({
+      where: {
+        createdById: id,
+        organizationId: organizationId,
+      },
+      data: {
+        createdById: newOwnerId,
+      },
+    });
+
+    /** Update asset reminders */
+    await tx.assetReminder.updateMany({
+      where: {
+        createdById: id,
+        organizationId: organizationId,
+      },
+      data: {
+        createdById: newOwnerId,
+      },
+    });
+  }
+}
+
+/**
+ * Refuses a transfer recipient a role change may not use. Runs inside the
+ * role-change transaction, before any write, so a refused request leaves
+ * roles, entities and the role-change log untouched.
+ *
+ * @param args.tx - The role-change transaction
+ * @param args.recipientId - Who would receive the member's entities
+ * @param args.targetUserId - The member whose role changes
+ * @param args.organizationId - The workspace
+ * @throws {ShelfError} 400 when the recipient is the target, not a member, or
+ *   holds no role whose policy may receive transfers
+ */
+export async function assertTransferRecipient({
+  tx,
+  recipientId,
+  targetUserId,
+  organizationId,
+}: {
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  recipientId: User["id"];
+  targetUserId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<void> {
+  const refuse = (message: string) =>
+    new ShelfError({
+      cause: null,
+      title: "Invalid transfer recipient",
+      message,
+      additionalData: { recipientId, targetUserId, organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+
+  if (recipientId === targetUserId) {
+    throw refuse(
+      "The member whose role is changing cannot receive their own items."
+    );
+  }
+
+  const recipient = await tx.userOrganization.findUnique({
+    where: { userId_organizationId: { userId: recipientId, organizationId } },
+    select: { roles: true },
   });
 
-  /** Update kits */
-  await tx.kit.updateMany({
-    where: {
-      createdById: id,
-      organizationId: organizationId,
-    },
-    data: {
-      createdById: newOwnerId,
-    },
-  });
+  if (!recipient) {
+    throw refuse("Transfer recipient is not a member of this organization");
+  }
 
-  /** Update asset reminders */
-  await tx.assetReminder.updateMany({
-    where: {
-      createdById: id,
-      organizationId: organizationId,
-    },
-    data: {
-      createdById: newOwnerId,
-    },
+  if (
+    !holdsRoleWhere(recipient.roles, (p) => p.membership.canReceiveTransfers)
+  ) {
+    const eligible = rolesWhere((p) => p.membership.canReceiveTransfers)
+      .map((role) => ROLE_LABELS[role])
+      .join(" or ");
+    throw refuse(`Transfer recipient must be an ${eligible}.`);
+  }
+}
+
+/**
+ * Moves a member's entities for a role change, when the change moves any:
+ * ownership columns when the ownership tier drops, bookings created for other
+ * registered custodians when writing every booking becomes writing their own.
+ * Bookings whose custodian is a non-registered member (null `custodianUserId`)
+ * stay with the member.
+ *
+ * Every role-change path calls this inside its transaction, after taking the
+ * membership lock ({@link lockMembership}) and before writing the new role.
+ *
+ * @param args.tx - The role-change transaction
+ * @param args.targetUserId - The member whose role changes
+ * @param args.organizationId - The workspace
+ * @param args.fromRoles - Every role the member holds now, read under the lock
+ * @param args.toRole - The single role they will hold
+ * @param args.recipientId - Who receives what moves
+ * @returns What moved (both `false` when nothing did; then no read or write
+ *   happens)
+ * @throws {ShelfError} 400 from {@link assertTransferRecipient}
+ */
+export async function transferOnRoleChange({
+  tx,
+  targetUserId,
+  organizationId,
+  fromRoles,
+  toRole,
+  recipientId,
+}: {
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>;
+  targetUserId: User["id"];
+  organizationId: Organization["id"];
+  fromRoles: OrganizationRoles[];
+  toRole: OrganizationRoles;
+  recipientId: User["id"];
+}): Promise<RoleChangeTransfers> {
+  const moves = roleChangeTransfers({ fromRoles, to: toRole });
+  if (!moves.ownership && !moves.bookingsCreatedForOthers) return moves;
+
+  await assertTransferRecipient({
+    tx,
+    recipientId,
+    targetUserId,
+    organizationId,
   });
+  await transferEntitiesToNewOwner({
+    tx,
+    id: targetUserId,
+    newOwnerId: recipientId,
+    organizationId,
+    reason: "demotion",
+    moves,
+  });
+  return moves;
 }
 
 /**

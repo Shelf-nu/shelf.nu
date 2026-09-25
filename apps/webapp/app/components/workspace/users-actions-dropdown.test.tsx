@@ -101,6 +101,7 @@ function renderMenu({
       isSSO={false}
       role={ROLE_LABELS[target]}
       roleEnum={target}
+      roles={[target]}
     />
   );
 }

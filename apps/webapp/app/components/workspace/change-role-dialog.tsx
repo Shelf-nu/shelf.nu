@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from "react";
 import type { User } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
 import {
   Popover,
   PopoverContent,
@@ -9,10 +9,11 @@ import {
 } from "@radix-ui/react-popover";
 import { useFetcher } from "react-router";
 import { ChevronRight, SuccessIcon } from "~/components/icons/library";
-import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
-import { isDemotion } from "~/utils/roles";
+import { roleChangeTransfers } from "~/utils/permissions/membership-access";
+import type { OrganizationRole } from "~/utils/permissions/role-access";
+import { INVITABLE_ROLES, ROLE_LABELS } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";
 import {
@@ -24,12 +25,6 @@ import {
   AlertDialogTitle,
 } from "../shared/modal";
 
-const roleOptions: Record<string, UserFriendlyRoles> = {
-  [OrganizationRoles.ADMIN]: "Administrator",
-  [OrganizationRoles.BASE]: "Base",
-  [OrganizationRoles.SELF_SERVICE]: "Self service",
-};
-
 interface EntityCounts {
   assets: number;
   categories: number;
@@ -39,9 +34,11 @@ interface EntityCounts {
   kits: number;
   assetReminders: number;
   images: number;
-  /** Bookings the user created for a different custodian — reassigned on demotion. */
+  /** Bookings the user created for a different custodian, reassigned by the change. */
   bookings: number;
   total: number;
+  /** What the proposed change moves; the dialog shows the transfer step only when something does. */
+  transfers: { ownership: boolean; bookingsCreatedForOthers: boolean };
 }
 
 interface TransferRecipient {
@@ -114,14 +111,27 @@ function dialogReducer(state: DialogState, action: DialogAction): DialogState {
   }
 }
 
+/**
+ * Dialog for changing a member's role. When the chosen role moves any of the
+ * member's entities, it previews how many move and asks who receives them.
+ *
+ * @param props.userId - The member whose role changes
+ * @param props.currentRoleEnum - The member's effective role, the initial selection
+ * @param props.currentRoles - Every role the member holds, for the transfer preview
+ * @param props.open - Whether the dialog is open
+ * @param props.onOpenChange - Open state setter
+ */
 export function ChangeRoleDialog({
   userId,
   currentRoleEnum,
+  currentRoles,
   open,
   onOpenChange,
 }: {
   userId: User["id"];
   currentRoleEnum: OrganizationRoles;
+  /** The member's full membership, for the transfer preview. */
+  currentRoles: OrganizationRoles[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -146,20 +156,27 @@ export function ChangeRoleDialog({
   } = state;
 
   const isSameRole = selectedRole === currentRoleEnum;
+  // Whether the change moves anything: the same function the server and the
+  // count preview use, so the dialog asks for a recipient exactly when needed.
+  const preview = roleChangeTransfers({
+    fromRoles: currentRoles,
+    to: selectedRole as OrganizationRole,
+  });
   const showDemotion =
-    !isSameRole &&
-    isDemotion(currentRoleEnum, selectedRole as OrganizationRoles);
+    !isSameRole && (preview.ownership || preview.bookingsCreatedForOthers);
 
-  /** Load entity counts and recipients when demotion is detected */
+  /** Load entity counts and recipients when the change moves entities */
   useEffect(() => {
     if (open && showDemotion) {
-      void countsFetcher.load(`/api/user/entity-counts?userId=${userId}`);
+      void countsFetcher.load(
+        `/api/user/entity-counts?userId=${userId}&role=${selectedRole}`
+      );
       void recipientsFetcher.load(
         `/api/user/transfer-recipients?excludeUserId=${userId}`
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, showDemotion, userId]);
+  }, [open, showDemotion, userId, selectedRole]);
 
   /** Pre-select the owner as default transfer recipient */
   useEffect(() => {
@@ -263,7 +280,8 @@ export function ChangeRoleDialog({
                     >
                       <ChevronRight className="ml-[2px] inline-block rotate-90" />
                       <span className="ml-2">
-                        {roleOptions[selectedRole] || "Select role"}
+                        {ROLE_LABELS[selectedRole as OrganizationRole] ??
+                          "Select role"}
                       </span>
                     </Button>
                   </PopoverTrigger>
@@ -274,7 +292,7 @@ export function ChangeRoleDialog({
                         "z-[999999] mt-2 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-gray-200 bg-white"
                       )}
                     >
-                      {Object.entries(roleOptions).map(([k, v]) => (
+                      {INVITABLE_ROLES.map((k) => (
                         <div
                           key={k}
                           role="option"
@@ -291,7 +309,7 @@ export function ChangeRoleDialog({
                             dispatch({ type: "selectRole", role: k })
                           )}
                         >
-                          {v}
+                          {ROLE_LABELS[k]}
                         </div>
                       ))}
                     </PopoverContent>

@@ -199,6 +199,7 @@ export default function UserPage() {
             )}
             role={userOrgRole}
             roleEnum={userOrgRoleEnum}
+            roles={membershipRoles}
           />
         </AbsolutePositionedHeaderActions>
       </When>

@@ -45,6 +45,9 @@ vi.mock("~/database/db.server", () => {
     },
     userOrganization: {
       findFirst: dbMocks.userOrganizationFindFirst,
+      // The revocation re-reads the membership under its row lock; it answers
+      // from the same mock as the pre-read, so each case sets the roles once.
+      findUnique: dbMocks.userOrganizationFindFirst,
       deleteMany: dbMocks.userOrganizationDeleteMany,
       update: dbMocks.userOrganizationUpdate,
       upsert: dbMocks.userOrganizationUpsert,

@@ -26,6 +26,8 @@ export interface TeamMembersWithUserOrInvite {
   role: string;
   /** The member's effective (highest-rank) role. */
   roleEnum: OrganizationRoles;
+  /** Every role the membership (or invite) holds, for the change-role preview. */
+  roles: OrganizationRoles[];
   userId: string | null;
   sso: boolean;
   custodies?: number;
@@ -119,6 +121,7 @@ export async function getPaginatedAndFilterableSettingUsers({
           status: "ACCEPTED",
           role: ROLE_LABELS[roleEnum],
           roleEnum,
+          roles: um.roles,
           userId: um.user.id,
           sso: um.user.sso,
           custodies: um?.user?.teamMembers?.[0]?._count?.custodies || 0,

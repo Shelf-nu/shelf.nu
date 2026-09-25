@@ -45,6 +45,7 @@ import { Spinner } from "../shared/spinner";
  * @param props.inviteStatus - Status of the member's invite
  * @param props.role - The member's effective role label, resubmitted on resend
  * @param props.roleEnum - The member's effective role
+ * @param props.roles - The member's full membership, for the change-role preview
  * @param props.customTrigger - Replaces the default dots trigger
  */
 export function TeamUsersActionsDropdown({
@@ -57,6 +58,7 @@ export function TeamUsersActionsDropdown({
   customTrigger,
   role,
   roleEnum,
+  roles,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
@@ -69,6 +71,8 @@ export function TeamUsersActionsDropdown({
   role: string;
   /** The member's effective role. */
   roleEnum: OrganizationRoles;
+  /** The member's full membership, for the change-role preview. */
+  roles: OrganizationRoles[];
 }) {
   const fetcher = useFetcher();
   const disabled = useDisabled(fetcher);
@@ -243,6 +247,7 @@ export function TeamUsersActionsDropdown({
         <ChangeRoleDialog
           userId={userId}
           currentRoleEnum={roleEnum}
+          currentRoles={roles}
           open={changeRoleOpen}
           onOpenChange={setChangeRoleOpen}
         />

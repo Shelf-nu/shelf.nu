@@ -3,6 +3,10 @@ import { OrganizationRoles } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { describe, expect, it, vi } from "vitest";
+import {
+  applyUpdateMany,
+  type FakeBookingRow,
+} from "@helpers/in-memory-booking-rows";
 import { accessFor } from "@helpers/role-access";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
@@ -25,66 +29,8 @@ const PAUL_ID = "paul";
 const PAUL_TM = "paul-team-member";
 const RECIPIENT_ID = "recipient";
 const ORG = "org-1";
-
-/** Shape of the in-memory rows this suite drives the real predicates over. */
-interface FakeBookingRow {
-  id: string;
-  status: "RESERVED" | "DRAFT";
-  organizationId: string;
-  creatorId: string | null;
-  custodianUserId: string | null;
-  custodianTeamMemberId: string | null;
-}
-
-/**
- * Evaluates a booking `where` against one in-memory row, modelling the subset
- * of Prisma operators `transferEntitiesToNewOwner` actually emits: scalar
- * equality, an `AND` array of sub-clauses, and `{ not: value }` (including
- * `{ not: null }`).
- *
- * The combined `AND: [{ not: null }, { not: id }]` reproduces SQL's
- * `IS NOT NULL AND <> id`: a null value fails the `not: null` branch, so
- * null-custodian rows never match — which is the property that keeps a demoted
- * user's own drafts with them.
- */
-function whereMatches(
-  row: FakeBookingRow,
-  where: Record<string, unknown>
-): boolean {
-  return Object.entries(where).every(([key, value]) => {
-    if (key === "AND") {
-      const clauses = (Array.isArray(value) ? value : [value]) as Record<
-        string,
-        unknown
-      >[];
-      return clauses.every((clause) => whereMatches(row, clause));
-    }
-    if (value !== null && typeof value === "object" && "not" in value) {
-      return (
-        (row as unknown as Record<string, unknown>)[key] !==
-        (value as { not: unknown }).not
-      );
-    }
-    return (row as unknown as Record<string, unknown>)[key] === value;
-  });
-}
-
-/**
- * Applies a Prisma-style `updateMany({ where, data })` call to an in-memory
- * row array — the minimal stand-in for what Postgres would do. A row only
- * gets `data` merged in when {@link whereMatches}; calls issued for other
- * models (e.g. `Asset.userId`) simply never match a booking row shape.
- */
-function applyUpdateMany(
-  rows: FakeBookingRow[],
-  call: { where: Record<string, unknown>; data: Record<string, unknown> }
-) {
-  for (const row of rows) {
-    if (whereMatches(row, call.where)) {
-      Object.assign(row, call.data);
-    }
-  }
-}
+/** A role change that moves both ownership and bookings created for others. */
+const BOTH = { ownership: true, bookingsCreatedForOthers: true };
 
 /** Two fresh in-memory booking rows, both owned end-to-end by Paul. */
 function makeRows(): FakeBookingRow[] {
@@ -150,7 +96,7 @@ async function transferAndApply(
     id: PAUL_ID,
     newOwnerId: RECIPIENT_ID,
     organizationId: ORG,
-    reason,
+    ...(reason === "demotion" ? { reason, moves: BOTH } : { reason }),
   });
 
   for (const model of Object.values(tx)) {

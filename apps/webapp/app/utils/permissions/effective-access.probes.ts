@@ -34,12 +34,16 @@ import {
   mayRemoveBookingItems,
 } from "~/utils/bookings";
 import { SSO_ASSIGNABLE_ROLE_PRECEDENCE } from "~/utils/role-precedence";
-import { isDemotion } from "~/utils/roles";
 import { isOrganizationOwner } from "~/utils/roles.server";
 import type { AdminArea } from "./admin-areas";
 import { canSeeAdminArea } from "./admin-areas";
 import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
-import { holdsRoleWhere, roleChangeRequiresOwner } from "./membership-access";
+import {
+  canAssignRole,
+  holdsRoleWhere,
+  roleChangeRequiresOwner,
+  roleChangeTransfers,
+} from "./membership-access";
 import { PermissionAction, PermissionEntity } from "./permission.data";
 import { userHasPermission } from "./permission.validator.client";
 import {
@@ -52,6 +56,7 @@ import {
   isWorkspaceOwner,
   resolveRole,
   resolveRoleAccess,
+  transfersOwnershipOnRoleChange,
 } from "./role-access";
 import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
 
@@ -410,7 +415,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     SINGLE_ROLES.flatMap((from) =>
       SINGLE_ROLES.filter((to) => to !== from).map((to) => [
         `${from}->${to}`,
-        isDemotion(from, to),
+        transfersOwnershipOnRoleChange({ from, to }),
       ])
     )
   );
@@ -1395,25 +1400,30 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // B9:D-07: changeUserRole guards on the member's roles[0]
-  // (modules/user/service.server.ts:1849-1930), changing them to BASE.
+  // B9:D-07: changeUserRole guards (modules/user/service.server.ts), changing
+  // the member to BASE: a membership holding OWNER is refused; otherwise the
+  // new role and the member's effective role must not need the owner unless
+  // the caller owns the workspace.
   snapshot["B9:D-07:change-role-guard"] = perRoleSet((target) =>
     perCase(CALLER_ROLES, (caller) => {
-      const currentRole = target[0];
+      const actorOwnsWorkspace = isWorkspaceOwner([caller]);
       const refused =
-        currentRole === R.OWNER ||
-        (currentRole === R.ADMIN && caller !== R.OWNER);
+        isWorkspaceOwner(target) ||
+        !canAssignRole({ actorOwnsWorkspace, role: R.BASE }) ||
+        (!actorOwnsWorkspace && roleChangeRequiresOwner(resolveRole(target)));
       return refused ? "refused" : "allowed";
     })
   );
 
   // B9:D-02/D-03: does a manual role change transfer the member's entities?
-  // server modules/user/utils.server.ts:385-388 `isDemotion(roles[0], newRole)`;
-  // dialog components/workspace/change-role-dialog.tsx:148-151, whose
-  // currentRoleEnum is the team list's roles[0].
+  // Server: modules/user/service.server.ts transferOnRoleChange, from the roles
+  // read under the membership lock; dialog:
+  // components/workspace/change-role-dialog.tsx, from the member's full
+  // membership. Both ask roleChangeTransfers; true when anything moves.
   snapshot["B9:D-02/D-03:role-change-transfers"] = perRoleSet((roles) =>
     perCase([R.ADMIN, R.SELF_SERVICE, R.BASE] as const, (to) => {
-      const transfers = isDemotion(roles[0] as OrganizationRoles, to);
+      const moves = roleChangeTransfers({ fromRoles: roles, to });
+      const transfers = moves.ownership || moves.bookingsCreatedForOthers;
       return { server: transfers, dialog: transfers };
     })
   );
@@ -1458,14 +1468,18 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // B9:D-06/D-08/D-09: "held anywhere" membership reads: owner
   // (utils/roles.server.ts:299-314), new-owner eligibility
   // (modules/organization/service.server.ts:958), transfer recipients
-  // (routes/api+/user.transfer-recipients.ts:34-40, hasSome OWNER/ADMIN).
+  // (routes/api+/user.transfer-recipients.ts and assertTransferRecipient in
+  // modules/user/service.server.ts: any role whose policy may receive transfers).
   snapshot["B9:D-06/D-08/D-09:owner-and-recipients"] = perRoleSet((roles) => ({
     ownsWorkspace: isOrganizationOwner({
       userOrganizations: [{ organization: { id: "org" }, roles }],
       organizationId: "org",
     }),
     eligibleAsNewOwner: roles.includes(R.ADMIN),
-    receivesTransfers: holdsAny(roles, [R.OWNER, R.ADMIN]),
+    receivesTransfers: holdsRoleWhere(
+      roles,
+      (p) => p.membership.canReceiveTransfers
+    ),
   }));
 
   // ===================== Notifications: Task 9 =====================

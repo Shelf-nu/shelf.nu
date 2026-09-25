@@ -16497,7 +16497,7 @@
       "ADMIN": "refused"
     },
     "ADMIN+OWNER": {
-      "OWNER": "allowed",
+      "OWNER": "refused",
       "ADMIN": "refused"
     },
     "ADMIN+SELF_SERVICE": {
@@ -16509,24 +16509,24 @@
       "ADMIN": "refused"
     },
     "SELF_SERVICE+OWNER": {
-      "OWNER": "allowed",
-      "ADMIN": "allowed"
+      "OWNER": "refused",
+      "ADMIN": "refused"
     },
     "SELF_SERVICE+ADMIN": {
       "OWNER": "allowed",
-      "ADMIN": "allowed"
+      "ADMIN": "refused"
     },
     "SELF_SERVICE+BASE": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
     "BASE+OWNER": {
-      "OWNER": "allowed",
-      "ADMIN": "allowed"
+      "OWNER": "refused",
+      "ADMIN": "refused"
     },
     "BASE+ADMIN": {
       "OWNER": "allowed",
-      "ADMIN": "allowed"
+      "ADMIN": "refused"
     },
     "BASE+SELF_SERVICE": {
       "OWNER": "allowed",
@@ -16642,8 +16642,8 @@
     },
     "ADMIN+OWNER": {
       "ADMIN": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "SELF_SERVICE": {
         "server": true,
@@ -16684,16 +16684,16 @@
     },
     "SELF_SERVICE+OWNER": {
       "ADMIN": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "SELF_SERVICE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "BASE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       }
     },
     "SELF_SERVICE+ADMIN": {
@@ -16702,12 +16702,12 @@
         "dialog": false
       },
       "SELF_SERVICE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "BASE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       }
     },
     "SELF_SERVICE+BASE": {
@@ -16726,16 +16726,16 @@
     },
     "BASE+OWNER": {
       "ADMIN": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "SELF_SERVICE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "BASE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       }
     },
     "BASE+ADMIN": {
@@ -16744,12 +16744,12 @@
         "dialog": false
       },
       "SELF_SERVICE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       },
       "BASE": {
-        "server": false,
-        "dialog": false
+        "server": true,
+        "dialog": true
       }
     },
     "BASE+SELF_SERVICE": {
