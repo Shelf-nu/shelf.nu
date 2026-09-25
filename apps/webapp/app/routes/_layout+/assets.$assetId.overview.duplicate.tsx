@@ -85,6 +85,13 @@ const DuplicateAssetSchema = z.object({
     }),
 });
 
+/**
+ * Creates `amountOfDuplicates` copies of the asset through `duplicateAsset`.
+ *
+ * Redirects to the new asset for a single copy and to the assets index for
+ * several. A client error from the service (for example a quantity-tracked
+ * asset with no units in stock) is returned to the dialog as written.
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
