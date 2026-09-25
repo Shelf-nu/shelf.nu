@@ -1,6 +1,16 @@
+/**
+ * Invite User API
+ *
+ * Handles the "Invite a user" dialog on the team settings page: sends one
+ * invite to one email address.
+ *
+ * @see {@link file://./../../components/settings/invite-user-dialog.tsx}
+ * @see {@link file://./../../modules/invite/service.server.ts}
+ */
 import { data, type ActionFunctionArgs } from "react-router";
 import { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
+import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { createInvite } from "~/modules/invite/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -12,6 +22,16 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
+/**
+ * Sends a workspace invite to one email address.
+ *
+ * Refuses when the person already has a pending invite in this workspace,
+ * whatever the letter case of the stored address.
+ *
+ * @returns `{ success: true }` when an invite was sent, `null` payload when
+ *   `createInvite` declined it (it notifies the sender why), or an error
+ *   payload with its status
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -55,7 +75,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const existingInvites = await db.invite.findMany({
       where: {
         status: "PENDING",
-        inviteeEmail: email,
+        inviteeEmail: caseInsensitiveEmailFilter(email),
         organizationId,
       },
     });

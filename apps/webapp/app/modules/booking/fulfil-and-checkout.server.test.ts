@@ -4,13 +4,15 @@
  *
  * @see {@link file://./fulfil-and-checkout.server.ts}
  */
-import { BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import { db } from "~/database/db.server";
 import {
   addScannedAssetsToBooking,
+  buildKitSlicesForBooking,
+  computeBookingAssetSliceRemainingToCheckOut,
   fulfilModelRequestsAndCheckout,
   partialCheckoutBooking,
 } from "~/modules/booking/service.server";
@@ -19,13 +21,17 @@ import { fulfilAndCheckOut } from "./fulfil-and-checkout.server";
 
 // @vitest-environment node
 
-// why: the orchestrator reads the booking's status, the scanned assets already
-// on the booking, and its model requests; the database is the boundary, and
-// each case sets the rows it needs.
+// why: the orchestrator reads the booking's status and the scanned assets
+// already on the booking; the database is the boundary, and each case sets the
+// rows it needs. `bookingModelRequest` is mocked so a case can stage open
+// reservations and prove the orchestrator never consults them.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     bookingAsset: { findMany: vi.fn() },
+    // why: the kit-member guard asks which loose scans belong to a kit. Default
+    // to none so only the cases about that rule have to stage memberships.
+    asset: { findMany: vi.fn() },
     bookingModelRequest: { findMany: vi.fn() },
   },
 }));
@@ -37,6 +43,14 @@ vi.mock("~/modules/booking/service.server", () => ({
   fulfilModelRequestsAndCheckout: vi.fn(),
   addScannedAssetsToBooking: vi.fn(),
   partialCheckoutBooking: vi.fn(),
+  // why: kit membership resolution is org-scoped database work owned by
+  // `buildKitSlicesForBooking`'s own suite; here only the shape it returns
+  // matters, so each case stages the memberships it needs.
+  buildKitSlicesForBooking: vi.fn(),
+  // why: per-slice remaining is derived from ConsumptionLog and partial
+  // checkout sessions and is covered where that math lives; this module only
+  // has to ask for it per kit-driven row and pass the answer through.
+  computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
 }));
 
 const hints = { timeZone: "Europe/Sofia", locale: "en-US" } as never;
@@ -54,24 +68,92 @@ beforeEach(() => {
   vi.clearAllMocks();
   // No scanned asset is on the booking yet unless a case says otherwise.
   vi.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+  // `clearAllMocks` clears calls, not implementations, so the default has to
+  // be restored here or a case that stages kits leaks into the next one.
+  vi.mocked(buildKitSlicesForBooking).mockResolvedValue([]);
+  // why: default to a slice that owes nothing, so only the cases about
+  // quantity-tracked members have to state a figure.
+  vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
+  vi.mocked(db.asset.findMany).mockResolvedValue([]);
 });
 
+/** One `AssetKit` membership, in the shape `buildKitSlicesForBooking` returns. */
+function slice(assetKitId: string, assetId: string) {
+  return { assetId, assetKitId, kitId: "kit-1", quantity: 1 };
+}
+
 /**
- * Sets the reads of a RESERVED booking whose reservations are all assigned
- * after the scan, and a progressive check-out that leaves two assets booked.
+ * Stages a scanned kit holding `dell-2` and `dell-3`.
+ *
+ * The three `bookingAsset.findMany` reads in this flow are told apart by their
+ * `where`, not by call order — ordering broke silently the moment a read was
+ * added between them.
+ *
+ * @param options.bookedAssetKitIds - Memberships this booking already carries.
+ * @param options.memberTypes - Each member's asset type; INDIVIDUAL unless a
+ *   case says otherwise.
+ */
+function primeScannedKit(
+  options: {
+    bookedAssetKitIds?: string[];
+    memberTypes?: Record<string, AssetType>;
+    returnedAssetIds?: string[];
+  } = {}
+) {
+  const {
+    bookedAssetKitIds = [],
+    memberTypes = {},
+    returnedAssetIds = [],
+  } = options;
+  vi.mocked(buildKitSlicesForBooking).mockResolvedValue([
+    slice("ak-1", "dell-2"),
+    slice("ak-2", "dell-3"),
+  ]);
+
+  const kitRows = [
+    { id: "ba-ak-1", assetId: "dell-2", assetKitId: "ak-1" },
+    { id: "ba-ak-2", assetId: "dell-3", assetKitId: "ak-2" },
+  ].map((row) => ({
+    ...row,
+    checkedInAt: returnedAssetIds.includes(row.assetId) ? new Date() : null,
+    asset: { type: memberTypes[row.assetId] ?? AssetType.INDIVIDUAL },
+  }));
+
+  // The Prisma mock's generic signature does not accept a plain resolver, so
+  // reach it through the bare mock type — the same idiom the booking service
+  // suite uses for these reads.
+  (
+    db.bookingAsset.findMany as unknown as ReturnType<typeof vi.fn>
+  ).mockImplementation((args?: unknown) => {
+    const where =
+      (args as { where?: Record<string, unknown> } | undefined)?.where ?? {};
+    const assetKitId = where.assetKitId as
+      | { not?: null; in?: string[] }
+      | null
+      | undefined;
+    // The memberships already on the booking.
+    if (assetKitId && "not" in assetKitId) {
+      return Promise.resolve(
+        bookedAssetKitIds.map((id) => ({ assetKitId: id })) as never
+      );
+    }
+    // The kit-driven rows this scan is responsible for.
+    if (assetKitId && "in" in assetKitId) {
+      return Promise.resolve(kitRows as never);
+    }
+    // The loose scans already assigned (`assetKitId: null`).
+    return Promise.resolve([] as never);
+  });
+}
+
+/**
+ * Sets the reads of a RESERVED booking and a progressive check-out that leaves
+ * two assets booked.
  */
 function primeRulePath() {
   vi.mocked(db.booking.findFirst).mockResolvedValue({
     status: BookingStatus.RESERVED,
   } as never);
-  vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
-    {
-      quantity: 1,
-      fulfilledQuantity: 1,
-      fulfilledAt: new Date(),
-      assetModel: { name: "Dell" },
-    },
-  ] as never);
   vi.mocked(partialCheckoutBooking).mockResolvedValue({
     booking: {
       id: "booking-1",
@@ -86,6 +168,9 @@ function primeRulePath() {
 
 describe("fulfilAndCheckOut", () => {
   it("runs the full fulfil-and-check-out when the rule does not apply", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+    } as never);
     vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
       id: "booking-1",
       name: "Load-in",
@@ -97,7 +182,10 @@ describe("fulfilAndCheckOut", () => {
       requireExplicitCheckout: false,
     });
 
-    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(baseArgs);
+    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith({
+      ...baseArgs,
+      kitSlices: [],
+    });
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
     expect(partialCheckoutBooking).not.toHaveBeenCalled();
     expect(result).toEqual({
@@ -110,6 +198,22 @@ describe("fulfilAndCheckOut", () => {
     });
   });
 
+  it("checks out only the scanned units on a booking that is already out, even without the rule", async () => {
+    // A booking some of whose items already left: sending the whole booking
+    // out again would re-stamp every item. Only what was scanned goes.
+    primeRulePath();
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: false });
+
+    expect(fulfilModelRequestsAndCheckout).not.toHaveBeenCalled();
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
   it("assigns the scanned units, then checks out only those, under the rule", async () => {
     primeRulePath();
 
@@ -120,6 +224,8 @@ describe("fulfilAndCheckOut", () => {
 
     expect(addScannedAssetsToBooking).toHaveBeenCalledWith({
       assetIds: ["dell-1"],
+      kitIds: [],
+      kitSlices: [],
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
@@ -170,10 +276,10 @@ describe("fulfilAndCheckOut", () => {
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
   });
 
-  it("does not check out while a reservation is still unassigned after the scan", async () => {
-    vi.mocked(db.booking.findFirst).mockResolvedValue({
-      status: BookingStatus.RESERVED,
-    } as never);
+  it("checks out the scanned units while a reservation is still unassigned", async () => {
+    primeRulePath();
+    // why: the booking reserved 2 Dells and only 1 was scanned. The second
+    // unit stays open on the booking instead of holding the check-out back.
     vi.mocked(db.bookingModelRequest.findMany).mockResolvedValue([
       {
         quantity: 2,
@@ -183,14 +289,37 @@ describe("fulfilAndCheckOut", () => {
       },
     ] as never);
 
-    const refused = fulfilAndCheckOut({
+    const result = await fulfilAndCheckOut({
       ...baseArgs,
       requireExplicitCheckout: true,
     });
 
-    await expect(refused).rejects.toMatchObject({ status: 400 });
-    await expect(refused).rejects.toThrow(/1 × Dell still unassigned/);
-    expect(addScannedAssetsToBooking).toHaveBeenCalledTimes(1);
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+    // Reservations are not a check-out input at all: nothing reads them.
+    expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
+    expect(result.booking.status).toBe(BookingStatus.ONGOING);
+  });
+
+  it("refuses when nothing was scanned, before reading or assigning anything", async () => {
+    primeRulePath();
+
+    const refused = fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: [],
+      requireExplicitCheckout: true,
+    });
+
+    await expect(refused).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+    });
+    await expect(refused).rejects.toThrow(
+      "Scan at least one item to check out."
+    );
+    expect(db.booking.findFirst).not.toHaveBeenCalled();
+    expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
     expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
@@ -198,7 +327,7 @@ describe("fulfilAndCheckOut", () => {
     primeRulePath();
     // The first attempt assigned the unit, then its check-out was refused.
     vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
-      { assetId: "dell-1" },
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
     ] as never);
 
     await fulfilAndCheckOut({ ...baseArgs, requireExplicitCheckout: true });
@@ -212,7 +341,7 @@ describe("fulfilAndCheckOut", () => {
   it("assigns only the scanned units not already on the booking, and checks out all of them", async () => {
     primeRulePath();
     vi.mocked(db.bookingAsset.findMany).mockResolvedValue([
-      { assetId: "dell-1" },
+      { assetId: "dell-1", assetKitId: null, asset: { type: "INDIVIDUAL" } },
     ] as never);
 
     await fulfilAndCheckOut({
@@ -229,10 +358,259 @@ describe("fulfilAndCheckOut", () => {
     );
   });
 
-  it("refuses a kit scan under the rule before reading, assigning or checking out anything", async () => {
-    const refused = fulfilAndCheckOut({
+  it("adds a scanned kit's memberships and checks out every member, under the rule", async () => {
+    primeRulePath();
+    primeScannedKit();
+
+    await fulfilAndCheckOut({
       ...baseArgs,
       kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["dell-1"],
+        kitIds: ["kit-1"],
+        kitSlices: [slice("ak-1", "dell-2"), slice("ak-2", "dell-3")],
+      })
+    );
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["dell-1", "dell-2", "dell-3"],
+        // Every member is INDIVIDUAL here, so each holds exactly one row and
+        // naming the asset is already exact.
+        checkouts: undefined,
+      })
+    );
+  });
+
+  it("skips a membership the booking already holds, and still checks its asset out", async () => {
+    primeRulePath();
+    primeScannedKit({ bookedAssetKitIds: ["ak-1"] });
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // `ak-1` is already a row on this booking, so re-adding it would collide
+    // with `BookingAsset_kit_unique` and deliver nothing.
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ kitSlices: [slice("ak-2", "dell-3")] })
+    );
+    // Scanning a kit already on the booking is how an operator sends it out,
+    // so its members leave whether this scan put them there or an earlier one.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1", "dell-2", "dell-3"] })
+    );
+  });
+
+  it("adds an asset scanned both loose and inside a kit exactly once", async () => {
+    primeRulePath();
+    primeScannedKit();
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      // `dell-2` is a member of the scanned kit and was also scanned on its
+      // own — one physical unit, named twice.
+      assetIds: ["dell-1", "dell-2"],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // The kit slice owns the member. Inserting the loose row as well would
+    // book the unit twice: the two partial unique indexes let a standalone row
+    // and a kit-driven row coexist, so nothing at the database level refuses
+    // it and every count on the booking doubles.
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+    // It still leaves with the booking — being dropped from the add is about
+    // which row carries it, not whether it goes out.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1", "dell-2", "dell-3"] })
+    );
+  });
+
+  it("adds a kit-only scan even though no loose asset needs assigning", async () => {
+    primeRulePath();
+    primeScannedKit();
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: [],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: [], kitIds: ["kit-1"] })
+    );
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-2", "dell-3"] })
+    );
+  });
+
+  it("does not re-assign an INDIVIDUAL asset the booking holds only through a kit", async () => {
+    expect.assertions(2);
+    primeRulePath();
+    // why: the scan names `dell-1` directly, and the booking already holds it
+    // as a kit-driven row — no standalone row, so no unique index objects.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        assetId: "dell-1",
+        assetKitId: "ak-9",
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    // One physical unit already on the booking. A loose row would book it
+    // twice, and nothing at the database level would refuse it.
+    expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+    // It still goes out — being refused a second row is not being left behind.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("still assigns a quantity-tracked scan the booking holds through a kit", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    // why: a quantity-tracked asset's free-pool units legitimately coexist
+    // with the units committed to a kit, so a loose scan is a real addition.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue([
+      {
+        assetId: "dell-1",
+        assetKitId: "ak-9",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("checks a quantity-tracked kit member out by its own slice, not asset-wide", async () => {
+    expect.assertions(2);
+    primeRulePath();
+    primeScannedKit({ memberTypes: { "dell-3": AssetType.QUANTITY_TRACKED } });
+    // why: the slice owes 4 units; the assertion below pins that the claim
+    // carries the slice's own figure rather than the asset-wide one.
+    vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(4);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: [],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // A bare asset id claims the asset's WHOLE remaining across every slice it
+    // holds. `dell-3` can also sit in the free pool and in other kits, so
+    // naming it asset-wide would send out units this scan never covered and
+    // stamp `checkedOutAt` on slices that never left.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["dell-2"],
+        checkouts: [
+          { assetId: "dell-3", bookingAssetId: "ba-ak-2", quantity: 4 },
+        ],
+      })
+    );
+    // Remaining, not booked: a slice already partly out would over-claim and
+    // trip the per-asset cap.
+    expect(computeBookingAssetSliceRemainingToCheckOut).toHaveBeenCalledWith(
+      db,
+      "booking-1",
+      "ba-ak-2"
+    );
+  });
+
+  it("leaves out a quantity-tracked slice that owes nothing", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    primeScannedKit({ memberTypes: { "dell-3": AssetType.QUANTITY_TRACKED } });
+    // why: a slice that owes nothing must produce no disposition at all.
+    vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(0);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      assetIds: [],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // Claiming zero units is not a claim; an empty list would also make the
+    // caller look like it asked for something.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-2"], checkouts: undefined })
+    );
+  });
+
+  it("does not also claim a quantity-tracked member asset-wide when it was scanned loose too", async () => {
+    expect.assertions(2);
+    primeRulePath();
+    primeScannedKit({ memberTypes: { "dell-2": AssetType.QUANTITY_TRACKED } });
+    // why: the slice owes 3 of its booked units, so that is what the
+    // check-out must claim for it — not the asset's remaining everywhere.
+    vi.mocked(computeBookingAssetSliceRemainingToCheckOut).mockResolvedValue(3);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      // `dell-2` is a member of the scanned kit and was also scanned loose.
+      assetIds: ["dell-1", "dell-2"],
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // Naming it asset-wide on top of its slice claim would take the asset's
+    // whole remaining across every slice it holds — its free pool and any
+    // other kit — which is what the per-slice disposition exists to avoid.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["dell-1", "dell-3"],
+        checkouts: [
+          { assetId: "dell-2", bookingAssetId: "ba-ak-1", quantity: 3 },
+        ],
+      })
+    );
+    // And it is not assigned a loose row either — the kit slice owns it.
+    expect(addScannedAssetsToBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1"] })
+    );
+  });
+
+  it("refuses a loose scan of a unit that belongs to a kit", async () => {
+    expect.assertions(3);
+    // why: `dell-1` is a member of `kit-9`, which this scan does not name, and
+    // it has no row on the booking yet — so the scan would take it out alone.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-9" }],
+        bookingAssets: [],
+      },
+    ] as never);
+
+    const refused = fulfilAndCheckOut({
+      ...baseArgs,
       requireExplicitCheckout: true,
     });
 
@@ -240,14 +618,115 @@ describe("fulfilAndCheckOut", () => {
       status: 400,
       shouldBeCaptured: false,
     });
-    await expect(refused).rejects.toThrow(
-      "Kits can't be checked out from the reservation scanner. Use Scan to check out for kits."
-    );
-    expect(db.booking.findFirst).not.toHaveBeenCalled();
-    expect(db.bookingAsset.findMany).not.toHaveBeenCalled();
-    expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
+    await expect(refused).rejects.toThrow(/belongs to a kit/i);
+    // Refused before anything is written: sending one member out would answer
+    // the reservation and check the booking out with the kit left split.
     expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
-    expect(partialCheckoutBooking).not.toHaveBeenCalled();
+  });
+
+  it("allows the member when its kit is scanned in the same breath", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    primeScannedKit();
+    // why: same membership as above, but `kit-1` IS named by this scan, which
+    // is the supported way to send a kit member out.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-1" }],
+        bookingAssets: [],
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    expect(partialCheckoutBooking).toHaveBeenCalled();
+  });
+
+  it("allows the member when it is already on this booking", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    // why: a member already committed through its kit row is not being taken
+    // anywhere new by the scan, so refusing it would be noise.
+    vi.mocked(db.asset.findMany).mockResolvedValue([
+      {
+        title: "Camera A",
+        assetKits: [{ kitId: "kit-9" }],
+        bookingAssets: [{ id: "ba-1" }],
+      },
+    ] as never);
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: true,
+    });
+
+    expect(partialCheckoutBooking).toHaveBeenCalled();
+  });
+
+  it("leaves out a kit member already returned on this booking", async () => {
+    expect.assertions(1);
+    primeRulePath();
+    primeScannedKit({ returnedAssetIds: ["dell-2"] });
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // Naming a returned asset refuses the whole check-out, taking the loose
+    // scans down with it. A kit holding one returned member and one still to
+    // go is ordinary on an ongoing booking.
+    expect(partialCheckoutBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ assetIds: ["dell-1", "dell-3"] })
+    );
+  });
+
+  it("resolves kit memberships in the caller's workspace", async () => {
+    primeRulePath();
+    primeScannedKit();
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: true,
+    });
+
+    // The kit id arrives from the scanner, so the membership lookup carries
+    // the org scope rather than trusting it.
+    expect(buildKitSlicesForBooking).toHaveBeenCalledWith({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+    });
+  });
+
+  it("hands the resolved slices to the full fulfil-and-check-out", async () => {
+    vi.mocked(db.booking.findFirst).mockResolvedValue({
+      status: BookingStatus.RESERVED,
+    } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+    primeScannedKit();
+
+    await fulfilAndCheckOut({
+      ...baseArgs,
+      kitIds: ["kit-1"],
+      requireExplicitCheckout: false,
+    });
+
+    expect(fulfilModelRequestsAndCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kitSlices: [slice("ak-1", "dell-2"), slice("ak-2", "dell-3")],
+      })
+    );
   });
 
   it("hands the early check-out choice to the progressive check-out", async () => {
@@ -282,13 +761,7 @@ describe("fulfilAndCheckOut", () => {
           bookingId: "booking-1",
           booking: { organizationId: "org-1" },
           assetId: { in: ["dell-1"] },
-          assetKitId: null,
         },
-      })
-    );
-    expect(db.bookingModelRequest.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { bookingId: "booking-1", booking: { organizationId: "org-1" } },
       })
     );
   });

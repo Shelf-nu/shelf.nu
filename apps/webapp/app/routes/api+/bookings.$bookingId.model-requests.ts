@@ -72,9 +72,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     /**
      * Both verbs share the same permission guard — only users who can
-     * UPDATE a booking may edit its model-level reservations. The
-     * service layer enforces the additional constraint that only
-     * DRAFT / RESERVED bookings accept edits.
+     * UPDATE a booking may edit its model-level reservations. The service
+     * layer adds the rest: reservations stay editable while the booking is
+     * live, never drop below the units already assigned, and are reduced
+     * rather than cancelled once units are on the booking.
      */
     const { organizationId, role, isSelfServiceOrBase } =
       await requirePermission({

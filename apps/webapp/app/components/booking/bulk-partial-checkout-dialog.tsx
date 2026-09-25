@@ -15,8 +15,10 @@
  * If the submitted set equals ALL still-Booked assets in the booking, this is
  * a "final" checkout; combined with `isBookingEarlyCheckout(booking.from)` it
  * becomes an early checkout and we delegate to `CheckoutDialog` so the user
- * can choose whether to adjust the start date. Otherwise a plain
- * `partial-checkout` submit is used.
+ * can choose whether to adjust the start date. A batch that takes a RESERVED
+ * booking out while model reservations are still unassigned also goes through
+ * `CheckoutDialog`, which names those units for the user to confirm; they stay
+ * open on the booking. Otherwise a plain `partial-checkout` submit is used.
  *
  * @see {@link file://./bulk-partial-checkin-dialog.tsx} — the mirror source
  * @see {@link file://./checkout-dialog.tsx} — early-checkout confirmation
@@ -42,6 +44,7 @@ import type {
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { AssetWithStatus } from "~/utils/booking-assets";
 import { flattenSelectedBookingItems } from "~/utils/booking-assets";
+import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
@@ -316,6 +319,18 @@ export default function BulkPartialCheckoutDialog({
   const isEarlyCheckout = Boolean(
     isFinalCheckout && shouldPromptEarlyCheckout(booking.status, booking.from)
   );
+
+  // Reserved model units still unassigned. The batch that takes a RESERVED
+  // booking out leaves them open on it, so that batch asks first; once the
+  // booking is underway it already went out with them open.
+  const unassignedUnits =
+    booking.status === "RESERVED"
+      ? getOutstandingModelRequests(booking.modelRequests).map((request) => ({
+          name: request.assetModel.name,
+          count: request.quantity - request.fulfilledQuantity,
+        }))
+      : [];
+  const needsConfirmation = isEarlyCheckout || unassignedUnits.length > 0;
 
   function handleCloseDialog() {
     setOpen(false);
@@ -764,14 +779,16 @@ export default function BulkPartialCheckoutDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-out. The
-                CheckoutDialog submits this same form (carrying the hidden
-                assetIds + returnJson). We pass intent="partial-checkout" so the
-                overview action routes to checkoutAssets/partialCheckoutBooking
-                (which records the batch + applies the date choice) rather than
-                the whole-booking checkoutBooking that the default intent would
-                trigger on this intent-routed page. */}
-            {isEarlyCheckout ? (
+            {/* Submit button - a confirming CheckoutDialog for an early
+                check-out or one that leaves reserved units unassigned, a
+                plain submit otherwise. The CheckoutDialog submits this same
+                form (carrying the hidden assetIds + returnJson). We pass
+                intent="partial-checkout" so the overview action routes to
+                checkoutAssets/partialCheckoutBooking (which records the batch
+                + applies the date choice) rather than the whole-booking
+                checkoutBooking that the default intent would trigger on this
+                intent-routed page. */}
+            {needsConfirmation ? (
               <CheckoutDialog
                 booking={{
                   id: booking.id,
@@ -779,10 +796,13 @@ export default function BulkPartialCheckoutDialog({
                   from: booking.from,
                 }}
                 intent="partial-checkout"
+                label={isEarlyCheckout ? undefined : "Check out items"}
                 disabled={disabled || noAssetsToCheckOut}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkout-form"
                 fullWidth
+                unassignedUnits={unassignedUnits}
+                suppressEarlyCheckoutPrompt={!isEarlyCheckout}
               />
             ) : (
               <Button

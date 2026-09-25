@@ -155,6 +155,7 @@ export async function action({ request }: ActionFunctionArgs) {
       quantity,
       userId: user.id,
       organizationId,
+      role,
       note,
     });
 

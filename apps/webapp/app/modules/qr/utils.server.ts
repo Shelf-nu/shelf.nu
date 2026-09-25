@@ -3,6 +3,7 @@ import QRCode, {
   type TypeNumber,
   type ErrorCorrectionLevel,
 } from "qrcode-generator";
+import { db } from "~/database/db.server";
 import { SERVER_URL, URL_SHORTENER } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -62,16 +63,28 @@ export async function generateCode({
   }
 }
 
+/**
+ * Resolves the QR code for an asset or kit and renders it, creating the code on
+ * first use.
+ *
+ * @param args.existingQr - The code, when the caller has already read it. Pass
+ *   `null` to say "I looked and there is none" — a batch caller reads every row
+ *   in one query, and re-reading per item is the N+1 this avoids. Leave it out
+ *   to have the lookup done here.
+ * @returns The rendered code, its sizes, and the sidebar flag the callers read.
+ */
 export async function generateQrObj({
   kitId,
   assetId,
   userId,
   organizationId,
+  existingQr,
 }: {
   kitId?: Qr["kitId"];
   assetId?: Qr["assetId"];
   userId: User["id"];
   organizationId: Organization["id"];
+  existingQr?: Qr | null;
 }) {
   try {
     if (!kitId && !assetId) {
@@ -82,21 +95,56 @@ export async function generateQrObj({
       });
     }
 
-    let qr: Qr | null = null;
+    // `undefined` means the caller did not look; `null` means it looked and
+    // found nothing, which skips straight to the create below.
+    let qr: Qr | null = existingQr ?? null;
 
-    if (assetId) {
-      qr = await getQrByAssetId({ assetId });
-    } else if (kitId) {
-      qr = await getQrByKitId({ kitId });
+    if (existingQr === undefined) {
+      if (assetId) {
+        qr = await getQrByAssetId({ assetId });
+      } else if (kitId) {
+        qr = await getQrByKitId({ kitId });
+      }
     }
 
-    /** If for some reason there is no QR, we create one and return it */
+    /**
+     * No code yet — a kit or asset created by a content import has none until
+     * something asks for one.
+     *
+     * Nothing in the schema holds this invariant, so the lock is what does.
+     * `Qr.assetId` and `Qr.kitId` are nullable and non-unique because an
+     * unclaimed printed code has neither and there are many at once, which
+     * rules out a plain unique constraint. Take a lock on the owning row,
+     * re-read under it, and only then create: without that, two callers
+     * arriving together — a preview and a download, two tabs — both see nothing
+     * and both create one, and the kit ends up with two codes at two URLs whose
+     * scan histories diverge. Two rows like that reached production before this
+     * lock existed.
+     */
     if (!qr) {
-      qr = await createQr({
-        assetId: assetId || undefined,
-        kitId: kitId || undefined,
-        userId,
-        organizationId,
+      qr = await db.$transaction(async (tx) => {
+        if (assetId) {
+          await tx.$queryRaw`SELECT id FROM "Asset" WHERE id = ${assetId} FOR UPDATE`;
+        } else {
+          await tx.$queryRaw`SELECT id FROM "Kit" WHERE id = ${kitId} FOR UPDATE`;
+        }
+
+        const existing = await tx.qr.findFirst({
+          where: assetId ? { assetId } : { kitId },
+        });
+        if (existing) {
+          return existing;
+        }
+
+        return createQr(
+          {
+            assetId: assetId || undefined,
+            kitId: kitId || undefined,
+            userId,
+            organizationId,
+          },
+          tx
+        );
       });
     }
 
