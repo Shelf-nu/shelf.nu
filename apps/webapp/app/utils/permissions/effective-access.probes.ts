@@ -1136,14 +1136,13 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Custody & assets: Task 5c =====================
 
-  // B9:D-29/D-30: mobile custody routes judge "self only" by the positional
-  // role, after an asset:custody (kit:custody) gate:
-  // custody.assign.ts:38-42,72,74 · custody.release.ts:32-36,41 ·
-  // custody.assign-quantity.ts:83-87,93,136 (+ note wording, D-30) ·
-  // custody.release-quantity.ts:109-113,119,167 · bulk-assign-custody.ts:40-44,74,76 ·
-  // bulk-release-custody.ts:38-42,70,72 · kits.bulk-actions.ts:93-98,100-101,119,158.
+  // B9:D-29/D-30: mobile custody routes judge "self only" by the membership's
+  // custody scope (`access.custody.assign`, effective role), after an
+  // asset:custody (kit:custody) gate: custody.assign.ts, custody.release.ts,
+  // custody.assign-quantity.ts (+ note wording, D-30), custody.release-quantity.ts,
+  // bulk-assign-custody.ts, bulk-release-custody.ts, kits.bulk-actions.ts.
   snapshot["B9:D-29:mobile-custody"] = perRoleSet((roles) => {
-    const selfOnly = mobilePositionalRole(roles) === R.SELF_SERVICE;
+    const selfOnly = accessFor(roles).custody.assign === "self";
     const scope = (entity: PermissionEntity) =>
       !can(roles, entity, A.custody)
         ? "denied:gate"
@@ -1162,13 +1161,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // B9:D-33: mobile routes pass the positional role to getAssetIndexSettings:
-  // custody.assign.ts:74, bulk-assign-custody.ts:76, bulk-release-custody.ts:72
-  // (asset:custody gate), bulk-update-location.ts:32-36,64,69 (asset:update gate).
+  // B9:D-33: mobile routes pass the effective role (`access.role`) to
+  // getAssetIndexSettings: custody.assign.ts, bulk-assign-custody.ts,
+  // bulk-release-custody.ts (asset:custody gate), bulk-update-location.ts
+  // (asset:update gate).
   snapshot["B9:D-33:mobile-index-mode"] = perRoleSet((roles) => {
     const mode = (action: PermissionAction) =>
       can(roles, E.asset, action)
-        ? getDefaultModeForRole(mobilePositionalRole(roles))
+        ? getDefaultModeForRole(accessFor(roles).role)
         : "denied:gate";
     return {
       "custody.assign": mode(A.custody),
@@ -1178,16 +1178,17 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // B9:D-29/D-30: web custody UI "self only" / "Take" wording = `isSelfService`
-  // (SELF_SERVICE held anywhere): components/assets/actions-dropdown.tsx:59,79,194,227;
-  // components/assets/bulk-actions-dropdown.tsx:87; components/assets/bulk-assign-custody-dialog.tsx:25;
-  // components/kits/actions-dropdown.tsx:76; components/kits/bulk-actions-dropdown.tsx:69;
-  // components/kits/bulk-assign-custody-dialog.tsx:21; components/scanner/drawer/uses/assign-custody-drawer.tsx:320;
-  // routes/_layout+/assets.$assetId.overview.assign-custody.tsx:432;
-  // assets.$assetId.overview.release-custody.tsx:257; kits.$kitId.assets.assign-custody.tsx:444;
-  // kits.$kitId.assets.release-custody.tsx:148; assets.$assetId.overview.tsx:815.
+  // B9:D-29/D-30: web custody UI "self only" / "Take" wording =
+  // `useRoleAccess().custody.assign === "self"` (effective role):
+  // components/assets/actions-dropdown.tsx; components/assets/bulk-actions-dropdown.tsx;
+  // components/assets/bulk-assign-custody-dialog.tsx; components/kits/actions-dropdown.tsx;
+  // components/kits/bulk-actions-dropdown.tsx; components/kits/bulk-assign-custody-dialog.tsx;
+  // components/scanner/drawer/uses/assign-custody-drawer.tsx;
+  // routes/_layout+/assets.$assetId.overview.assign-custody.tsx;
+  // assets.$assetId.overview.release-custody.tsx; kits.$kitId.assets.assign-custody.tsx;
+  // kits.$kitId.assets.release-custody.tsx; assets.$assetId.overview.tsx.
   snapshot["B9:D-29:web-client-self-only"] = perRoleSet(
-    (roles) => hookFlags(roles).isSelfService
+    (roles) => accessFor(roles).custody.assign === "self"
   );
 
   // ===================== Assets: Task 5d =====================

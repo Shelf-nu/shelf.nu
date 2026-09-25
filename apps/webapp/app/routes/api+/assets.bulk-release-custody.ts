@@ -1,4 +1,4 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
@@ -48,14 +48,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     /**
-     * Phase 2 widened Custody from 1:1 to 1:many to support multi-custodian
-     * QUANTITY_TRACKED assets. SELF_SERVICE users may only release custody
-     * on rows assigned to their own user — guard before delegating to the
-     * bulk service so we fail fast and don't leak counts via partial work.
-     * Symmetric with the SELF_SERVICE assign-side guard centralised inside
-     * `bulkCheckOutAssets` (see asset/service.server.ts).
+     * A caller whose scope is `self` may release only custody assigned to
+     * them; checked here before delegating so a refused request does no
+     * partial work. Custody is 1:many (several custodians on a
+     * QUANTITY_TRACKED asset), so every row is checked.
      */
-    if (role === OrganizationRoles.SELF_SERVICE) {
+    if (access.custody.assign === "self") {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
@@ -65,9 +63,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
             // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
             // released individually, with a quantity — and it reports the count
             // it skipped. Judging them here refuses the whole request over
-            // custody nobody was going to release: a self-service user
+            // custody nobody was going to release: a `self`-scoped caller
             // selecting their own individual asset alongside a qty-tracked one
-            // that a colleague holds units of got a 403 for the lot.
+            // that a colleague holds units of would get a 403 for the lot.
             type: { not: AssetType.QUANTITY_TRACKED },
           },
         },
@@ -98,7 +96,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds,
       organizationId,
       currentSearchParams,

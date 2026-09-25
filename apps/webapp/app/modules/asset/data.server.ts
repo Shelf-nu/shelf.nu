@@ -73,7 +73,10 @@ interface Props {
    * field would let a caller skip that silently.
    */
   canSeeAllCustody: boolean;
-  /** The viewer's access, for the booking form's custodian seed. */
+  /**
+   * The caller's resolved access: the booking form's custodian seed and the
+   * custody scope that decides the self-assign team member.
+   */
   access: RoleAccess;
 }
 
@@ -168,6 +171,7 @@ export async function simpleModeLoader({
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const assignsSelfOnly = access.custody.assign === "self";
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
   // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
@@ -330,7 +334,7 @@ export async function simpleModeLoader({
     }),
   ]);
 
-  const currentUserTeamMember = isSelfService
+  const currentUserTeamMember = assignsSelfOnly
     ? teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 
@@ -498,7 +502,7 @@ export async function advancedModeLoader({
   access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+  const assignsSelfOnly = access.custody.assign === "self";
 
   /** Parse filters */
   const {
@@ -690,7 +694,7 @@ export async function advancedModeLoader({
     }),
   ]);
 
-  const currentUserTeamMember = isSelfService
+  const currentUserTeamMember = assignsSelfOnly
     ? teamMembersData.teamMembers.find((tm) => tm.userId === userId) ?? null
     : null;
 

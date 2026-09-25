@@ -1366,7 +1366,7 @@ describe("bulkReleaseKitCustody", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -1392,7 +1392,7 @@ describe("bulkReleaseKitCustody", () => {
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "ADMIN" as const,
+        custodyAssign: "anyone" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         userId: "user-1",
@@ -1430,7 +1430,7 @@ describe("bulkReleaseKitCustody", () => {
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "SELF_SERVICE" as const,
+        custodyAssign: "self" as const,
         kitIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
         userId: "user-1",
@@ -1465,7 +1465,7 @@ describe("bulkReleaseKitCustody", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "SELF_SERVICE" as const,
+      custodyAssign: "self" as const,
       kitIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       userId: "user-1",
@@ -1485,7 +1485,7 @@ describe("bulkReleaseKitCustody", () => {
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "ADMIN" as const,
+        custodyAssign: "anyone" as const,
         kitIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
         userId: "user-1",
@@ -2998,7 +2998,7 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -3116,7 +3116,7 @@ describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1", "kit-2"],
       organizationId: "org-1",
       userId: "user-1",
@@ -3219,7 +3219,7 @@ describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1", "kit-2"],
       organizationId: "org-1",
       userId: "user-1",

@@ -50,6 +50,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
 import { usePosition } from "~/hooks/use-position";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
@@ -807,7 +808,8 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles, isSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
@@ -1831,7 +1833,7 @@ export default function AssetOverview() {
               unitOfMeasure={asset.unitOfMeasure}
               consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
-              isSelfService={isSelfService}
+              ownRowsOnly={assignsSelfOnly}
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}

@@ -21,7 +21,6 @@ import {
   ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
-  OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -144,6 +143,7 @@ import {
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   createSignedUrl,
   parseFileFormData,
@@ -6097,7 +6097,7 @@ export async function bulkDeleteAssets({
  */
 export async function bulkCheckOutAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   custodianId,
   custodianName,
@@ -6109,13 +6109,11 @@ export async function bulkCheckOutAssets({
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route. When
-   * `SELF_SERVICE` the service rejects assignments to anyone other than the
-   * calling user — symmetric counterpart on the release side lives in the
-   * route today (see `routes/api+/assets.bulk-release-custody.ts`).
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
@@ -6187,15 +6185,10 @@ export async function bulkCheckOutAssets({
     ]);
 
     /**
-     * SELF_SERVICE guard: a self-service user can only assign custody to
-     * themselves. Centralised in the service so every caller (web + mobile)
-     * is covered — previously this lived only in the web route and the mobile
-     * routes bypassed it. Both routes just pass `role` through.
+     * A caller whose scope is `self` may assign only to themselves. Enforced
+     * here so every caller, web and mobile, gets it.
      */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      custodianTeamMember?.user?.id !== userId
-    ) {
+    if (custodyAssign === "self" && custodianTeamMember?.user?.id !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -6398,7 +6391,7 @@ export async function bulkCheckOutAssets({
  */
 export async function bulkCheckInAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   organizationId,
   currentSearchParams,
@@ -6408,12 +6401,11 @@ export async function bulkCheckInAssets({
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route — when
-   * `SELF_SERVICE` the service rejects release of custody assigned to anyone
-   * other than the calling user.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
@@ -6508,13 +6500,12 @@ export async function bulkCheckInAssets({
       });
     }
 
-    // Self-service users may only release custody of assets assigned to them.
-    // `Asset.custody` is a `Custody[]` post Phase 2 widening (multi-custodian
-    // for QUANTITY_TRACKED). For INDIVIDUAL there's exactly one row; for
-    // qty-tracked we'd reject if ANY row belongs to someone else — but
-    // qty-tracked rows are filtered out above anyway.
+    // A caller whose scope is `self` may release only custody assigned to
+    // them. `Asset.custody` is a `Custody[]` (several custodians for
+    // QUANTITY_TRACKED); the check rejects if ANY row belongs to someone else,
+    // though quantity-tracked assets are filtered out above.
     if (
-      role === OrganizationRoles.SELF_SERVICE &&
+      custodyAssign === "self" &&
       assets.some((asset) =>
         (asset.custody ?? []).some((c) => c.custodian?.userId !== userId)
       )

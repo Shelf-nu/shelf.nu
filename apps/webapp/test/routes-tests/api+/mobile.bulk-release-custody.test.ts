@@ -136,7 +136,7 @@ describe("POST /api/mobile/bulk-release-custody", () => {
         assetIds: ["asset-1", "asset-2"],
         organizationId: "org-1",
         currentSearchParams: "",
-        role: "ADMIN",
+        custodyAssign: "anyone",
       })
     );
   });
@@ -161,11 +161,9 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     expect(body.skippedQuantityTracked).toBe(2);
   });
 
-  it("forwards SELF_SERVICE role so the service-level guard fires (hex r3202161632)", async () => {
-    // Pre-fix the mobile route resolved `role` but never passed it to
-    // `bulkCheckInAssets`; the service's "self-service can only release
-    // their own custody" guard never ran. This regression guard asserts
-    // the route now plumbs `role` through.
+  it("forwards a SELF_SERVICE caller's `self` custody scope so the service-level guard fires", async () => {
+    // `bulkCheckInAssets` refuses to release custody held by anyone but the
+    // caller when the scope is `self`; the route must forward the scope.
     (getMobileUserContext as any).mockResolvedValue({
       role: "SELF_SERVICE",
       access: accessFor(["SELF_SERVICE"]),
@@ -179,7 +177,7 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     await action(createActionArgs({ request }));
 
     expect(bulkCheckInAssets).toHaveBeenCalledWith(
-      expect.objectContaining({ role: "SELF_SERVICE" })
+      expect.objectContaining({ custodyAssign: "self" })
     );
   });
 

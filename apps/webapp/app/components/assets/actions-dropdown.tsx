@@ -10,6 +10,7 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
@@ -56,7 +57,8 @@ const ConditionalActionsDropdown = () => {
     : 0;
   const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
-  const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
+  const { roles, isAdministratorOrOwner } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
@@ -76,7 +78,7 @@ const ConditionalActionsDropdown = () => {
   }
 
   const disableReleaseForSelfService =
-    isSelfService &&
+    assignsSelfOnly &&
     getPrimaryCustody(asset.custody)?.custodian?.userId !== user?.id;
 
   return (
@@ -191,7 +193,7 @@ const ConditionalActionsDropdown = () => {
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   ) : assetCanBeReleased ? (
@@ -224,7 +226,7 @@ const ConditionalActionsDropdown = () => {
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   )}

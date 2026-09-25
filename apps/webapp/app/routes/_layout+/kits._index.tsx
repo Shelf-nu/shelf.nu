@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -76,13 +76,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, access, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const searchParams = getCurrentSearchParams(request);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
@@ -246,7 +246,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    const currentUserTeamMember = isSelfService
+    const currentUserTeamMember = assignsSelfOnly
       ? teamMembers.find((tm) => tm.userId === userId) ?? null
       : null;
 

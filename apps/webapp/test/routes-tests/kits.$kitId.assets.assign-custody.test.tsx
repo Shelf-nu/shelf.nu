@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { action } from "~/routes/_layout+/kits.$kitId.assets.assign-custody";
 import { requirePermission } from "~/utils/roles.server";
 import { getUserByID } from "~/modules/user/service.server";
+import { accessFor } from "@helpers/role-access";
 
 const dbMocks = vi.hoisted(() => {
   return {
@@ -168,6 +169,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Custodian not found due to org filter
@@ -219,6 +221,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Valid team member from same org
@@ -286,6 +289,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     } as any);
 
     // Valid team member from same org, but different user
@@ -328,6 +332,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
     } as any);
 
     // Valid team member from same org, same user
@@ -377,6 +382,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     mockGetTeamMember.mockResolvedValue({
@@ -472,6 +478,7 @@ describe("kits/$kitId/assets/assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     mockGetTeamMember.mockResolvedValue({

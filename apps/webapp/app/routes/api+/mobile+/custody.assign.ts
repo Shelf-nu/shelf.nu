@@ -67,8 +67,8 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetId, custodianId } = parsed.data;
 
-    // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, access } = await getMobileUserContext(
+    // Caller's access (effective role, custody scope) and barcode access
+    const { canUseBarcodes, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -77,7 +77,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Validate custodian belongs to the organization
@@ -98,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await bulkCheckOutAssets({
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds: [assetId],
       custodianId,
       custodianName: teamMember.name,

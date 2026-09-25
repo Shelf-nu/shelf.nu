@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
 import { releaseCustody } from "./service.server";
@@ -49,7 +48,7 @@ describe("releaseCustody SELF_SERVICE self-restriction", () => {
         assetId: "asset-1",
         organizationId: "org-1",
         userId: "me",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
       })
     ).rejects.toThrow(
       "Self service user can only release custody of assets assigned to their user"
@@ -92,7 +91,7 @@ describe("releaseCustody status write", () => {
       assetId: "asset-1",
       organizationId: "org-1",
       userId: "me",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     const call = (db.asset.updateMany as ReturnType<typeof vitest.fn>).mock
@@ -121,7 +120,7 @@ describe("releaseCustody status write", () => {
         assetId: "asset-1",
         organizationId: "org-1",
         userId: "me",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       })
     ).resolves.toBeDefined();
 
@@ -173,7 +172,7 @@ describe("releaseCustody kit-derived custody guard", () => {
         assetId: "asset-1",
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow(/release the kit/i);
 
@@ -200,7 +199,7 @@ describe("releaseCustody kit-derived custody guard", () => {
       assetId: "asset-1",
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(db.custody.deleteMany).toHaveBeenCalledWith({

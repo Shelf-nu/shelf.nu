@@ -5,6 +5,7 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { StartAuditFromContextDialog } from "~/components/audit/start-audit-from-context-dialog";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
@@ -73,7 +74,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
       ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
   );
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   const {
@@ -88,7 +90,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
   const [isStartAuditOpen, setIsStartAuditOpen] = useState(false);
 
   const disableReleaseForSelfService =
-    isSelfService && kitCustody?.custodian?.userId !== user?.id;
+    assignsSelfOnly && kitCustody?.custodian?.userId !== user?.id;
 
   return (
     <>
@@ -185,7 +187,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="assign-custody" />{" "}
-                      {isSelfService ? "Take" : "Assign"} custody
+                      {assignsSelfOnly ? "Take" : "Assign"} custody
                     </span>
                   </Button>
                 )}
@@ -284,7 +286,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
               </DropdownMenuItem>
             </When>
 
-            <When truthy={!isSelfService}>
+            <When truthy={!assignsSelfOnly}>
               {kitIsCheckedOut || someAssetIsNotAvailable ? (
                 <div className=" border-t p-2 text-left text-xs">
                   Some actions are disabled due to asset(s) not being Available.

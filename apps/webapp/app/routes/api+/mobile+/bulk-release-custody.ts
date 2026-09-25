@@ -66,7 +66,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetIds } = parsed.data;
 
-    const { role, canUseBarcodes, access } = await getMobileUserContext(
+    const { canUseBarcodes, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -75,17 +75,13 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
-    /**
-     * Pass `role` so the service-level SELF_SERVICE guard fires.
-     * Without it, a SELF_SERVICE user could release custody on any
-     * team member's asset (hex-security r3202161632).
-     */
+    /** The service enforces the caller's custody scope. */
     const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds,
       organizationId,
       currentSearchParams: "",

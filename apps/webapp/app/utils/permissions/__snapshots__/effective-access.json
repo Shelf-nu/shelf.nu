@@ -14341,24 +14341,24 @@
       "kits.bulk-actions": "anyone"
     },
     "SELF_SERVICE+OWNER": {
-      "custody.assign": "self",
-      "custody.release": "self",
-      "custody.assign-quantity": "self",
-      "custody.assign-quantity:note": "self",
-      "custody.release-quantity": "self",
-      "bulk-assign-custody": "self",
-      "bulk-release-custody": "self",
-      "kits.bulk-actions": "self"
+      "custody.assign": "anyone",
+      "custody.release": "anyone",
+      "custody.assign-quantity": "anyone",
+      "custody.assign-quantity:note": "anyone",
+      "custody.release-quantity": "anyone",
+      "bulk-assign-custody": "anyone",
+      "bulk-release-custody": "anyone",
+      "kits.bulk-actions": "anyone"
     },
     "SELF_SERVICE+ADMIN": {
-      "custody.assign": "self",
-      "custody.release": "self",
-      "custody.assign-quantity": "self",
-      "custody.assign-quantity:note": "self",
-      "custody.release-quantity": "self",
-      "bulk-assign-custody": "self",
-      "bulk-release-custody": "self",
-      "kits.bulk-actions": "self"
+      "custody.assign": "anyone",
+      "custody.release": "anyone",
+      "custody.assign-quantity": "anyone",
+      "custody.assign-quantity:note": "anyone",
+      "custody.release-quantity": "anyone",
+      "bulk-assign-custody": "anyone",
+      "bulk-release-custody": "anyone",
+      "kits.bulk-actions": "anyone"
     },
     "SELF_SERVICE+BASE": {
       "custody.assign": "self",
@@ -14391,14 +14391,14 @@
       "kits.bulk-actions": "anyone"
     },
     "BASE+SELF_SERVICE": {
-      "custody.assign": "anyone",
-      "custody.release": "anyone",
-      "custody.assign-quantity": "anyone",
-      "custody.assign-quantity:note": "anyone",
-      "custody.release-quantity": "anyone",
-      "bulk-assign-custody": "anyone",
-      "bulk-release-custody": "anyone",
-      "kits.bulk-actions": "anyone"
+      "custody.assign": "self",
+      "custody.release": "self",
+      "custody.assign-quantity": "self",
+      "custody.assign-quantity:note": "self",
+      "custody.release-quantity": "self",
+      "bulk-assign-custody": "self",
+      "bulk-release-custody": "self",
+      "kits.bulk-actions": "self"
     },
     "(none)": {
       "custody.assign": "denied:gate",
@@ -14483,16 +14483,16 @@
       "bulk-update-location": "ADVANCED"
     },
     "SELF_SERVICE+OWNER": {
-      "custody.assign": "SIMPLE",
-      "bulk-assign-custody": "SIMPLE",
-      "bulk-release-custody": "SIMPLE",
-      "bulk-update-location": "SIMPLE"
+      "custody.assign": "ADVANCED",
+      "bulk-assign-custody": "ADVANCED",
+      "bulk-release-custody": "ADVANCED",
+      "bulk-update-location": "ADVANCED"
     },
     "SELF_SERVICE+ADMIN": {
-      "custody.assign": "SIMPLE",
-      "bulk-assign-custody": "SIMPLE",
-      "bulk-release-custody": "SIMPLE",
-      "bulk-update-location": "SIMPLE"
+      "custody.assign": "ADVANCED",
+      "bulk-assign-custody": "ADVANCED",
+      "bulk-release-custody": "ADVANCED",
+      "bulk-update-location": "ADVANCED"
     },
     "SELF_SERVICE+BASE": {
       "custody.assign": "SIMPLE",
@@ -14501,16 +14501,16 @@
       "bulk-update-location": "denied:gate"
     },
     "BASE+OWNER": {
-      "custody.assign": "SIMPLE",
-      "bulk-assign-custody": "SIMPLE",
-      "bulk-release-custody": "SIMPLE",
-      "bulk-update-location": "SIMPLE"
+      "custody.assign": "ADVANCED",
+      "bulk-assign-custody": "ADVANCED",
+      "bulk-release-custody": "ADVANCED",
+      "bulk-update-location": "ADVANCED"
     },
     "BASE+ADMIN": {
-      "custody.assign": "SIMPLE",
-      "bulk-assign-custody": "SIMPLE",
-      "bulk-release-custody": "SIMPLE",
-      "bulk-update-location": "SIMPLE"
+      "custody.assign": "ADVANCED",
+      "bulk-assign-custody": "ADVANCED",
+      "bulk-release-custody": "ADVANCED",
+      "bulk-update-location": "ADVANCED"
     },
     "BASE+SELF_SERVICE": {
       "custody.assign": "SIMPLE",
@@ -14537,13 +14537,13 @@
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": false,
-    "OWNER+SELF_SERVICE": true,
+    "OWNER+SELF_SERVICE": false,
     "OWNER+BASE": false,
     "ADMIN+OWNER": false,
-    "ADMIN+SELF_SERVICE": true,
+    "ADMIN+SELF_SERVICE": false,
     "ADMIN+BASE": false,
-    "SELF_SERVICE+OWNER": true,
-    "SELF_SERVICE+ADMIN": true,
+    "SELF_SERVICE+OWNER": false,
+    "SELF_SERVICE+ADMIN": false,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": false,
     "BASE+ADMIN": false,

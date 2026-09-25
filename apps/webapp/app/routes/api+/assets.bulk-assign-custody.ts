@@ -55,9 +55,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * Validate the custodian belongs to the same organization (early 404).
-     * We don't keep the result around any more — the SELF_SERVICE
-     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
-     * share one implementation). The lookup here is still needed: it 404s
+     * The result is not kept: the "assign only to yourself" guard lives in
+     * `bulkCheckOutAssets`, shared by web and mobile. The lookup still 404s
      * the request if the requested custodianId is from another org or
      * doesn't exist.
      */
@@ -82,11 +81,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    /**
-     * The SELF_SERVICE "assign-to-self" guard now lives inside
-     * `bulkCheckOutAssets` itself (centralised so web + mobile share
-     * one source of truth). We just pass `role` through.
-     */
+    /** `bulkCheckOutAssets` enforces the caller's custody scope. */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
     // the user's tz (avoids an off-by-one for non-UTC users).
@@ -97,7 +92,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds,
       custodianId: custodian.id,
       custodianName: custodian.name,
