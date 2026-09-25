@@ -316,15 +316,20 @@ describe("recordCheckoutSourceLocations", () => {
     expect(slice.sourceLocationId).toBe("loc-studio");
   });
 
-  it("records nothing for an explicit Unplaced", async () => {
-    const { slice, tx } = scenario({ sourceLocationId: null });
+  it("refuses Unplaced for a pool whose units are all placed, and writes nothing", async () => {
+    const { slice, tx } = scenario();
 
-    await recordCheckoutSourceLocations(tx as never, {
+    const attempt = recordCheckoutSourceLocations(tx as never, {
       organizationId: ORG,
       sliceIds: [slice.id],
       submission: sourceSubmissionFromRecord({ "ba-1": null }),
     });
 
+    await expect(attempt).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining("has no unplaced units"),
+    });
+    expect(tx.bookingAsset.updateMany).not.toHaveBeenCalled();
     expect(slice.sourceLocationId).toBeNull();
   });
 

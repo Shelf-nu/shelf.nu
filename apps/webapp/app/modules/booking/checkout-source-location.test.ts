@@ -159,12 +159,22 @@ describe("resolveSliceSource", () => {
     });
   });
 
-  it("records an explicit Unplaced as nothing", () => {
+  it("records an explicit Unplaced as nothing while the pool has unplaced units", () => {
     expect(
-      resolveSliceSource(input({ submitted: { locationId: null } }))
+      resolveSliceSource(
+        input({
+          submitted: { locationId: null },
+          snapshot: snapshot([cameraRoom, studio], 12),
+        })
+      )
     ).toEqual({ action: "record", locationId: null, reason: "unplaced" });
   });
 
+  it("flags Unplaced for a pool with no unplaced units", () => {
+    expect(
+      resolveSliceSource(input({ submitted: { locationId: null } }))
+    ).toEqual({ action: "invalid", locationId: null });
+  });
   it("flags a submitted location the pool is not placed at", () => {
     expect(
       resolveSliceSource(input({ submitted: { locationId: "loc-elsewhere" } }))

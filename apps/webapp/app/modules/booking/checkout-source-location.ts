@@ -13,7 +13,7 @@
  *   2. A kit-driven slice takes its kit's location. Its units belong to the
  *      kit, never to a manual placement, so nothing is asked.
  *   3. A submitted answer wins. It must name a manual placement of the pool,
- *      or be "Unplaced" (`null`).
+ *      or be "Unplaced" (`null`) while the pool has unplaced units.
  *   4. Otherwise the default: no placements, or one placement next to
  *      unplaced units, record nothing (`null`: the unplaced units absorb any
  *      drop, which is also what a slice with no recorded source does); one placement and no unplaced units record
@@ -268,8 +268,11 @@ export type SliceSourceDecision =
       locationId: string | null;
       reason: SliceSourceReason;
     }
-  /** The submitted location is not a manual placement of this pool. */
-  | { action: "invalid"; locationId: string };
+  /**
+   * The submitted answer names nothing this pool has: a location it is not
+   * placed at, or Unplaced (`null`) when none of its units are unplaced.
+   */
+  | { action: "invalid"; locationId: string | null };
 
 /**
  * Decide the source of one slice at the moment it is checked out.
@@ -291,7 +294,11 @@ export function resolveSliceSource(
   const { submitted, snapshot } = input;
   if (submitted) {
     if (submitted.locationId === null) {
-      return { action: "record", locationId: null, reason: "unplaced" };
+      // Unplaced is a choice only while the pool has unplaced units, the same
+      // options the dialog offers.
+      return snapshot.unplaced > 0
+        ? { action: "record", locationId: null, reason: "unplaced" }
+        : { action: "invalid", locationId: null };
     }
     const placed = snapshot.placements.some(
       (placement) => placement.locationId === submitted.locationId

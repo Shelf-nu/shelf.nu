@@ -278,9 +278,15 @@ export async function recordCheckoutSourceLocations(
         status: 400,
         shouldBeCaptured: false,
         title: "Pick where the units come from",
-        message: names
-          ? `"${title}" is not placed at the location you picked. Pick one of: ${names}. Then check out again.`
-          : `"${title}" is not placed at the location you picked. Check out again without picking a location.`,
+        message: `"${title}" ${
+          decision.locationId === null
+            ? "has no unplaced units"
+            : "is not placed at the location you picked"
+        }. ${
+          names
+            ? `Pick one of: ${names}. Then check out again.`
+            : "Check out again without picking a location."
+        }`,
         additionalData: {
           organizationId,
           bookingAssetId: slice.id,
