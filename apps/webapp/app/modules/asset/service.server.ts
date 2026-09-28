@@ -8349,10 +8349,7 @@ export async function checkOutQuantity({
         });
       }
 
-      if (
-        custodyAssign === "self" &&
-        custodianTeamMember.user?.id !== userId
-      ) {
+      if (custodyAssign === "self" && custodianTeamMember.user?.id !== userId) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
