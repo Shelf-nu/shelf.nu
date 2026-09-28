@@ -41,6 +41,10 @@ import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "~/utils/zod-numeric";
 import { AssetImage } from "./asset-image";
 import { AssetModelFormRow } from "./asset-model-form-row";
 import {
@@ -115,10 +119,7 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val && val.length > 0 ? val : null)),
-  valuation: z
-    .string()
-    .optional()
-    .transform((val) => (val ? +val : null)),
+  valuation: optionalNumberFromString({ blank: null }),
   addAnother: z
     .string()
     .optional()
@@ -127,9 +128,19 @@ export const NewAssetFormSchema = z.object({
 
   // Tracking method & quantity fields
   type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
+  /**
+   * Deliberately NOT on `optionalNumberFromString`.
+   *
+   * This field needs absent and present-but-blank to differ: the input is not
+   * rendered for an INDIVIDUAL asset, so an absent key must pass, while a blank
+   * one on a QUANTITY_TRACKED asset must not. The shared builders map both to the
+   * same value and cannot express that, so the coercion stays local, and the `0`
+   * a blank produces is load-bearing: `.positive()` below is what rejects it.
+   */
   quantity: z
     .string()
     .optional()
+    // eslint-disable-next-line local-rules/no-hand-coerced-numeric-transform -- see the note above
     .transform((val) => (val === "" || val === undefined ? undefined : +val))
     .pipe(
       z
@@ -141,25 +152,15 @@ export const NewAssetFormSchema = z.object({
   // Zero is a real threshold, not a missing one: it means "alert when nothing is
   // left". `low-stock.server.ts` documents that semantics and tests
   // `minQuantity != null` rather than truthiness, and the CSV importer accepts
-  // any non-negative whole number, so the bound here is non-negative, and
-  // "no threshold" is carried by the null the transform produces for an empty
-  // input.
-  minQuantity: z
-    .string()
-    .optional()
-    // Trimmed first: `+"   "` is 0, so blank-looking input would otherwise be
-    // stored as a real threshold of zero the operator never chose.
-    .transform((val) => {
-      const trimmed = val?.trim();
-      return trimmed ? +trimmed : null;
-    })
-    .pipe(
-      z
-        .number({ invalid_type_error: "Min quantity must be a number" })
-        .int("Min quantity must be a whole number")
-        .nonnegative("Min quantity cannot be negative")
-        .nullable()
-    ),
+  // any non-negative whole number, so the bound here is non-negative while
+  // "no threshold" is carried by the null a blank input becomes.
+  minQuantity: optionalNumberFromString({ blank: null }).pipe(
+    z
+      .number({ invalid_type_error: "Min quantity must be a number" })
+      .int("Min quantity must be a whole number")
+      .nonnegative("Min quantity cannot be negative")
+      .nullable()
+  ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
       errorMap: () => ({ message: "Please select a consumption type" }),
@@ -196,18 +197,13 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
     .string()
     .min(1, "Name template is required")
     .transform((val) => val.trim()),
-  count: z
-    .string()
-    .transform((val) =>
-      val === "" || val === undefined ? Number.NaN : Number(val)
-    )
-    .pipe(
-      z
-        .number({ invalid_type_error: "Count must be a number" })
-        .int("Count must be a whole number")
-        .min(2, "Count must be at least 2")
-        .max(100, "Count must be at most 100")
-    ),
+  count: requiredNumberFromString({ fieldName: "Count" }).pipe(
+    z
+      .number({ invalid_type_error: "Count must be a number" })
+      .int("Count must be a whole number")
+      .min(2, "Count must be at least 2")
+      .max(100, "Count must be at most 100")
+  ),
 });
 
 /** Pass props of the values to be used as default for the form fields */

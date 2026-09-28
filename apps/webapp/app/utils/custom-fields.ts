@@ -11,46 +11,10 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
-/**
- * Schema for a REQUIRED numeric custom field (AMOUNT or NUMBER).
- *
- * The bound is "a value was entered", not "the value is non-zero". Zero is an
- * ordinary answer (none left, nothing owed), so a required field that refuses
- * it has no valid input for an operator whose answer is 0.
- *
- * Emptiness therefore has to be rejected BEFORE coercion: `Number("")` is `0`,
- * so once the value is a number, an omitted field and a deliberate zero are the
- * same value and no predicate can separate them.
- */
-const requiredNumber = (field_name?: string) =>
-  z
-    // `undefined` is admitted so the missing case reaches the check below and
-    // gets the named message. Leaving it to the union would answer "Expected
-    // string, received undefined", which is true and tells the operator nothing.
-    .union([z.string(), z.number(), z.undefined()])
-    .superRefine((value, ctx) => {
-      const isMissing =
-        value === undefined ||
-        (typeof value === "string" && value.trim() === "");
-
-      if (isMissing) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: field_name
-            ? `${field_name} is required`
-            : `This field is required`,
-        });
-      }
-    })
-    .pipe(z.coerce.number());
-
-/** Schema for an OPTIONAL numeric custom field; blank stays blank. */
-const optionalNumber = (params: {
-  invalid_type_error?: string | undefined;
-  required_error?: string | undefined;
-  description?: string | undefined;
-}) => z.coerce.number(params).optional().nullable();
-
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "./zod-numeric";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -105,8 +69,16 @@ const getSchema = ({
       }
       return v;
     }),
-    amount: required ? requiredNumber(field_name) : optionalNumber(params),
-    number: required ? requiredNumber(field_name) : optionalNumber(params),
+    // Blank must stay blank rather than coerce to 0: `z.coerce.number()` reads
+    // `""` as zero, which stored a real zero for every optional numeric field the
+    // operator left empty (the downstream blank guard cannot catch it, because by
+    // then the value is the number 0, not an empty string).
+    amount: required
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
+    number: required
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 

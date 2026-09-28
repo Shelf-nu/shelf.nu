@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NewAssetFormSchema } from "./form";
+import { NewAssetBulkFormSchema, NewAssetFormSchema } from "./form";
 
 describe("NewAssetFormSchema", () => {
   const baseValidData = {
@@ -202,6 +202,111 @@ describe("NewAssetFormSchema", () => {
     if (result.success) {
       expect(result.data.quantity).toBeUndefined();
       expect(result.data.consumptionType).toBeUndefined();
+    }
+  });
+});
+
+/**
+ * Valuation is money, and it had no coverage at all. A blank field must clear it
+ * rather than record a price of zero, which is a plausible-looking number that
+ * nothing downstream would question.
+ */
+describe("NewAssetFormSchema - valuation", () => {
+  const baseValidData = {
+    title: "Test Asset",
+    description: "A description",
+    category: "cat-123",
+  };
+
+  it.each([
+    ["an empty string", ""],
+    ["spaces only", "   "],
+  ])("treats %s as no valuation", (_label, input) => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      valuation: input,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.valuation).toBeNull();
+    }
+  });
+
+  it("keeps a deliberate zero valuation", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      valuation: "0",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.valuation).toBe(0);
+    }
+  });
+
+  it("reads a decimal valuation", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      valuation: "1234.56",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.valuation).toBe(1234.56);
+    }
+  });
+
+  it("rejects a valuation that is not a number rather than storing NaN", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      valuation: "abc",
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+/** The bulk-create count, which had no schema coverage either. */
+describe("NewAssetBulkFormSchema - count", () => {
+  const baseBulkData = {
+    title: "Test Asset",
+    description: "A description",
+    category: "cat-123",
+    assetModelId: "model-1",
+    nameTemplate: "Asset {n}",
+  };
+
+  it.each([
+    ["an empty string", ""],
+    ["spaces only", "   "],
+  ])("rejects %s, because count is required", (_label, input) => {
+    const result = NewAssetBulkFormSchema.safeParse({
+      ...baseBulkData,
+      count: input,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("keeps the existing lower bound of 2", () => {
+    const result = NewAssetBulkFormSchema.safeParse({
+      ...baseBulkData,
+      count: "1",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a count inside the bounds", () => {
+    const result = NewAssetBulkFormSchema.safeParse({
+      ...baseBulkData,
+      count: "5",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.count).toBe(5);
     }
   });
 });

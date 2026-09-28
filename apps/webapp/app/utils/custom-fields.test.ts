@@ -290,3 +290,65 @@ describe("mergedSchema: required numeric fields accept zero", () => {
     expect(result.success).toBe(false);
   });
 });
+
+/**
+ * Optional numeric custom fields.
+ *
+ * A blank one must stay blank. `z.coerce.number()` reads `""` as `0`, and the
+ * downstream blank guard in `buildCustomFieldValue` cannot undo that: it drops an
+ * undefined, null or whitespace RAW value, and by the time it runs the value is
+ * the number `0`. So an operator who left a numeric field empty had a zero
+ * recorded for it.
+ */
+describe("mergedSchema: optional numeric fields keep blank blank", () => {
+  function schemaFor(type: "number" | "amount") {
+    return mergedSchema({
+      baseSchema: z.object({}),
+      customFields: [
+        {
+          id: "cf1",
+          name: "Shelf count",
+          type,
+          helpText: "",
+          required: false,
+        } satisfies CustomFieldZodSchema,
+      ],
+    });
+  }
+
+  it.each(["number", "amount"] as const)(
+    "reads a blank optional %s field as absent, not zero",
+    (type) => {
+      const result = schemaFor(type).safeParse({ "cf-cf1": "" });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const parsed = result.data as Record<string, unknown>;
+        expect(parsed["cf-cf1"]).toBeNull();
+      }
+    }
+  );
+
+  it.each(["number", "amount"] as const)(
+    "reads a whitespace-only optional %s field as absent",
+    (type) => {
+      const result = schemaFor(type).safeParse({ "cf-cf1": "   " });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        const parsed = result.data as Record<string, unknown>;
+        expect(parsed["cf-cf1"]).toBeNull();
+      }
+    }
+  );
+
+  it("still keeps a deliberate zero on an optional field", () => {
+    const result = schemaFor("number").safeParse({ "cf-cf1": "0" });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      const parsed = result.data as Record<string, unknown>;
+      expect(parsed["cf-cf1"]).toBe(0);
+    }
+  });
+});
