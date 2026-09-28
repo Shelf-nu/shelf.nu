@@ -92,10 +92,10 @@ function ConditionalDropdown() {
   const archiveDisabled = !allBookingsArchivable || !canArchiveBooking;
 
   // Members held to drafts may bulk-delete only a selection of drafts; the
-  // server refuses anything else.
+  // server refuses anything else. Loading is handled by the trigger's own
+  // fallback, so this flag carries only the drafts-only reason.
   const deleteDisabled =
-    (roleAccess.policy.bookings.deleteOnlyDrafts && !everyBookingInDraft) ||
-    isLoading;
+    roleAccess.policy.bookings.deleteOnlyDrafts && !everyBookingInDraft;
 
   const {
     ref: dropdownRef,

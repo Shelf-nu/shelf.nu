@@ -170,6 +170,12 @@ export default function NrmSettings() {
       action,
     });
   const rowPermissions: TeamMemberRowPermissions = {
+    // Inviting creates a registered team member, a different grant.
+    canInvite: userHasPermission({
+      roles,
+      entity: PermissionEntity.teamMember,
+      action: PermissionAction.create,
+    }),
     canEdit: can(PermissionAction.update),
     canDelete: can(PermissionAction.delete),
   };
@@ -233,6 +239,8 @@ export default function NrmSettings() {
 
 /** Which row actions the caller may use, computed once for the whole list. */
 type TeamMemberRowPermissions = {
+  /** Holds `teamMember:create`: shows the Invite user item. */
+  canInvite: boolean;
   /** Holds `nonRegisteredMember:update`: shows the Edit item. */
   canEdit: boolean;
   /** Holds `nonRegisteredMember:delete`: shows the Delete item. */
@@ -273,6 +281,7 @@ function TeamMemberRow({
       <Td className="text-right">
         <TeamMembersActionsDropdown
           teamMember={item}
+          canInvite={extraProps.canInvite}
           canEdit={extraProps.canEdit}
           canDelete={extraProps.canDelete}
         />

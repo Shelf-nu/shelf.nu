@@ -18,19 +18,24 @@ import { Button } from "../shared/button";
 /**
  * Row actions for a non-registered member: invite, edit and delete.
  *
- * Edit and delete show with the caller's `nonRegisteredMember` grants; the
- * routes behind them keep their own gates. With neither grant the menu is not
- * rendered.
+ * Each item shows with the grant of the route behind it: Invite on
+ * `teamMember:create`, Edit on `nonRegisteredMember:update`, Delete on
+ * `nonRegisteredMember:delete`. The routes keep their own gates. With none of
+ * the three the menu is not rendered.
  *
  * @param props.teamMember - The member the actions apply to
+ * @param props.canInvite - Whether the caller holds `teamMember:create`
  * @param props.canEdit - Whether the caller holds `nonRegisteredMember:update`
  * @param props.canDelete - Whether the caller holds `nonRegisteredMember:delete`
  */
 export function TeamMembersActionsDropdown({
   teamMember,
+  canInvite,
   canEdit,
   canDelete,
 }: {
+  /** Whether the caller holds `teamMember:create`: shows Invite user. */
+  canInvite: boolean;
   /** Whether the caller holds `nonRegisteredMember:update`: shows Edit. */
   canEdit: boolean;
   /** Whether the caller holds `nonRegisteredMember:delete`: shows Delete. */
@@ -50,7 +55,7 @@ export function TeamMembersActionsDropdown({
   const { isPersonalOrg } = useLoaderData<typeof loader>();
   const { ref, open, setOpen } = useControlledDropdownMenu();
 
-  if (!canEdit && !canDelete) {
+  if (!canInvite && !canEdit && !canDelete) {
     return null;
   }
 
@@ -74,31 +79,33 @@ export function TeamMembersActionsDropdown({
           className="order w-[180px] rounded-md bg-white p-[6px] text-right "
           ref={ref}
         >
-          <DropdownMenuItem
-            className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-            onSelect={(e) => e.preventDefault()}
-          >
-            <Button
-              type="button"
-              icon="send"
-              variant="link"
-              className="!hover:text-gray-700 justify-start p-4 !text-gray-700"
-              onClick={() => {
-                setIsInviteOpen(true);
-                setOpen(false);
-              }}
-              disabled={
-                isPersonalOrg
-                  ? {
-                      reason:
-                        "You are not able to invite users to a personal workspace. ",
-                    }
-                  : false
-              }
+          {canInvite ? (
+            <DropdownMenuItem
+              className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+              onSelect={(e) => e.preventDefault()}
             >
-              Invite user
-            </Button>
-          </DropdownMenuItem>
+              <Button
+                type="button"
+                icon="send"
+                variant="link"
+                className="!hover:text-gray-700 justify-start p-4 !text-gray-700"
+                onClick={() => {
+                  setIsInviteOpen(true);
+                  setOpen(false);
+                }}
+                disabled={
+                  isPersonalOrg
+                    ? {
+                        reason:
+                          "You are not able to invite users to a personal workspace. ",
+                      }
+                    : false
+                }
+              >
+                Invite user
+              </Button>
+            </DropdownMenuItem>
+          ) : null}
 
           {canEdit ? (
             <DropdownMenuItem className="p-0 text-gray-700 hover:bg-slate-100 hover:text-gray-700">
@@ -120,13 +127,15 @@ export function TeamMembersActionsDropdown({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <InviteUserDialog
-        teamMemberId={teamMember.id}
-        open={isInviteOpen}
-        onClose={() => {
-          setIsInviteOpen(false);
-        }}
-      />
+      {canInvite ? (
+        <InviteUserDialog
+          teamMemberId={teamMember.id}
+          open={isInviteOpen}
+          onClose={() => {
+            setIsInviteOpen(false);
+          }}
+        />
+      ) : null}
     </>
   );
 }
