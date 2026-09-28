@@ -1,3 +1,12 @@
+/**
+ * Tests for the email masking applied to every payload sent to Sentry.
+ *
+ * Covers the string masker (plain and percent-encoded addresses, strings that
+ * only look like addresses, and hostile input that must scan in linear time)
+ * and the payload walker (nested values, stack traces, shared references).
+ *
+ * @see {@link file://./sentry-email-mask.ts}
+ */
 import { describe, expect, it } from "vitest";
 
 import {
@@ -33,6 +42,25 @@ describe("maskEmailAddresses", () => {
     "no address here",
   ])("leaves %s unchanged", (text) => {
     expect(maskEmailAddresses(text)).toBe(text);
+  });
+
+  // Each input is about 80,000 characters of address characters with no
+  // address the masker can complete. An unbounded pattern rescans the rest of
+  // the run from every start position and takes seconds to minutes on these;
+  // the bounded one takes milliseconds. The limit is loose on purpose, so a
+  // slow CI runner cannot make it flaky.
+  it.each([
+    ["repeated encoded separators", "a%40".repeat(20_000)],
+    ["a long run ending in @", `${"a".repeat(80_000)}@`],
+    ["a long run ending in %40", `${"a".repeat(80_000)}%40`],
+    ["a long dotted run with no top-level domain", `a@${"a.".repeat(40_000)}1`],
+  ])("scans %s in linear time", (_label, text) => {
+    const started = performance.now();
+    const masked = maskEmailAddresses(text);
+    const elapsed = performance.now() - started;
+
+    expect(masked).toBe(text);
+    expect(elapsed).toBeLessThan(1_000);
   });
 });
 
