@@ -1,0 +1,18 @@
+# Temporary, for this PR only: the refactor touches more files than CodeRabbit
+# reviews at once, so the review runs in batches. Delete this file before merge.
+#
+# Batch 1 of 2: core logic (permissions package, database, webapp modules and
+# utils, companion, docs).
+reviews:
+  path_filters:
+    - "packages/**"
+    - "apps/webapp/app/modules/**"
+    - "apps/webapp/app/utils/**"
+    - "apps/webapp/app/database/**"
+    - "apps/webapp/eslint-local-rules/**"
+    - "apps/webapp/scripts/**"
+    - "apps/companion/**"
+    - "apps/docs/**"
+    - "CLAUDE.md"
+    - ".claude/rules/**"
+    - "!**/__snapshots__/**"
