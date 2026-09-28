@@ -9,4 +9,5 @@ module.exports = {
   "require-complete-404-shape": require("./eslint-local-rules/require-complete-404-shape.cjs"),
   "no-test-files-in-routes": require("./eslint-local-rules/no-test-files-in-routes.cjs"),
   "no-direct-role-checks": require("./eslint-local-rules/no-direct-role-checks.cjs"),
+  "no-hand-coerced-numeric-transform": require("./eslint-local-rules/no-hand-coerced-numeric-transform.cjs"),
 };

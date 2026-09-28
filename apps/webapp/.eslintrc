@@ -140,7 +140,8 @@
     "local-rules/require-org-scope-on-id-queries": "error",
     "local-rules/require-complete-404-shape": "error",
     "local-rules/no-test-files-in-routes": "error",
-    "local-rules/no-direct-role-checks": "error"
+    "local-rules/no-direct-role-checks": "error",
+    "local-rules/no-hand-coerced-numeric-transform": "error"
   },
   "overrides": [
     {

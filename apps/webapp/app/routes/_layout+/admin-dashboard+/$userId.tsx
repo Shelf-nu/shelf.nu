@@ -49,6 +49,7 @@ import {
   getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { requiredNumberFromString } from "~/utils/zod-numeric";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
@@ -296,7 +297,9 @@ export const action = async ({
         const { maxOrganizations, isEnterprise } = parseData(
           await request.formData(),
           z.object({
-            maxOrganizations: z.string().transform((val) => +val),
+            maxOrganizations: requiredNumberFromString({
+              fieldName: "Max organizations",
+            }),
             isEnterprise: z
               .string()
               .optional()
