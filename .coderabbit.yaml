@@ -1,21 +1,12 @@
 # Temporary, for this PR only: the refactor touches more files than CodeRabbit
 # reviews at once, so the review runs in batches. Delete this file before merge.
 #
-# Batch 2 of 2: webapp routes, components, hooks and the remaining app code
-# (tests excluded).
+# Batch 3 of 3: tests (unit, component, route and characterization tests, and
+# the shared test helpers), snapshots excluded.
 reviews:
   path_filters:
-    - "apps/webapp/app/routes/**"
-    - "apps/webapp/app/components/**"
-    - "apps/webapp/app/hooks/**"
-    - "apps/webapp/app/emails/**"
-    - "apps/webapp/app/atoms/**"
-    - "apps/webapp/app/root.tsx"
-    - "apps/webapp/app/entry.server.tsx"
-    - "apps/webapp/server/**"
-    - "apps/webapp/.eslintrc"
-    - "apps/webapp/eslint-local-rules.cjs"
-    - "apps/webapp/package.json"
-    - "!**/*.test.ts"
-    - "!**/*.test.tsx"
+    - "**/*.test.ts"
+    - "**/*.test.tsx"
+    - "**/*.test.cjs"
+    - "apps/webapp/test/**"
     - "!**/__snapshots__/**"
