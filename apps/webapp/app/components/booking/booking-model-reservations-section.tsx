@@ -30,7 +30,13 @@
  * @see {@link file://./unassigned-model-units-pill.tsx} — index row signal
  */
 import type { ReactNode } from "react";
-import { Package as PackageIcon } from "lucide-react";
+import { useState } from "react";
+import {
+  ChevronLeft as ChevronLeftIcon,
+  ChevronRight as ChevronRightIcon,
+  Package as PackageIcon,
+} from "lucide-react";
+import { Button } from "~/components/shared/button";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import {
   countReservedModelUnits,
@@ -127,6 +133,17 @@ function describeOutstanding(
 }
 
 /**
+ * Reservations shown per page.
+ *
+ * The section sits ABOVE the Assets & Kits list, so its height is spent from
+ * the same screen as the list it introduces. A booking reserving dozens of
+ * models would otherwise push that list — and every control below it — past
+ * the bottom of the page. Ten rows state the shape of the outstanding work
+ * without displacing what follows.
+ */
+const RESERVATIONS_PAGE_SIZE = 10;
+
+/**
  * Renders the outstanding reservations for a booking, or `null` when there is
  * no outstanding work (so callers need no guard of their own).
  */
@@ -137,6 +154,8 @@ export function BookingModelReservationsSection({
   canAssign = true,
   className,
 }: BookingModelReservationsSectionProps) {
+  const [page, setPage] = useState(1);
+
   const outstanding = getOutstandingModelRequests(modelRequests);
 
   if (outstanding.length === 0) {
@@ -145,6 +164,21 @@ export function BookingModelReservationsSection({
 
   const units = countUnassignedModelUnits(modelRequests);
   const reserved = countReservedModelUnits(modelRequests);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(outstanding.length / RESERVATIONS_PAGE_SIZE)
+  );
+  // Assigning units removes rows, so the list can shrink underneath a reader
+  // sitting on the last page. Resolving the page on each render — rather than
+  // storing a corrected one — keeps that from rendering an empty table.
+  const currentPage = Math.min(page, totalPages);
+  const firstIndex = (currentPage - 1) * RESERVATIONS_PAGE_SIZE;
+  const visible = outstanding.slice(
+    firstIndex,
+    firstIndex + RESERVATIONS_PAGE_SIZE
+  );
+  const isPaged = outstanding.length > RESERVATIONS_PAGE_SIZE;
 
   return (
     <div className={tw("overflow-hidden rounded border bg-white", className)}>
@@ -168,7 +202,7 @@ export function BookingModelReservationsSection({
 
       <table className="w-full border-collapse">
         <tbody>
-          {outstanding.map((request) => (
+          {visible.map((request) => (
             <tr
               key={`model-reservation-${request.id}`}
               className="border-b border-gray-200 last:border-b-0"
@@ -213,6 +247,45 @@ export function BookingModelReservationsSection({
           ))}
         </tbody>
       </table>
+
+      {/* Pager appears only once the list outgrows a page, so a booking with a
+          handful of reservations reads exactly as it always has. */}
+      {isPaged ? (
+        <div className="flex items-center justify-between gap-3 border-t border-gray-200 p-4 md:px-6">
+          <p className="text-sm text-gray-600">
+            Showing {firstIndex + 1}-{firstIndex + visible.length} of{" "}
+            {outstanding.length} models
+          </p>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to previous page"
+              disabled={currentPage === 1}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeftIcon className="size-4" />
+            </Button>
+
+            <span className="text-sm tabular-nums text-gray-600">
+              {currentPage} / {totalPages}
+            </span>
+
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              aria-label="Go to next page"
+              disabled={currentPage === totalPages}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              <ChevronRightIcon className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -1,3 +1,13 @@
+/**
+ * Team User Actions
+ *
+ * Server handlers for the actions on the team settings pages: delete a user,
+ * revoke access, change a role, and resend or cancel an invite.
+ *
+ * @see {@link file://./../../routes/_layout+/settings.team.users.tsx}
+ * @see {@link file://./../../routes/_layout+/settings.team.invites.tsx}
+ * @see {@link file://./../invite/service.server.ts}
+ */
 import type { OrganizationRoles } from "@prisma/client";
 import {
   InviteStatuses,
@@ -8,10 +18,10 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { organizationRolesMap } from "~/utils/organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -24,7 +34,11 @@ import {
   revokeAccessToOrganization,
   transferEntitiesToNewOwner,
 } from "./service.server";
-import { revokeAccessEmailText, roleChangeEmailText } from "../invite/helpers";
+import {
+  caseInsensitiveEmailFilter,
+  revokeAccessEmailText,
+  roleChangeEmailText,
+} from "../invite/helpers";
 import { isInvitableRole } from "../invite/roles";
 import { createInvite } from "../invite/service.server";
 
@@ -198,7 +212,7 @@ export async function resolveUserAction(
       await db.invite
         .updateMany({
           where: {
-            inviteeEmail,
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
             organizationId,
             status: InviteStatuses.PENDING,
           },
@@ -269,39 +283,42 @@ export async function resolveUserAction(
         });
       }
 
-      /** Invalidate all previous invites for current user for current organization */
+      /**
+       * Invalidate every earlier invite for this person in this organization
+       * before creating the new one. The two steps run in order: the new
+       * invite matches the same email, so an invalidation that finishes later
+       * would close it too, and `createInvite` refuses while another pending
+       * invite for the person exists.
+       */
+      await db.invite
+        .updateMany({
+          where: {
+            inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
+            organizationId,
+          },
+          data: {
+            status: InviteStatuses.INVALIDATED,
+          },
+        })
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to invalidate previous invites",
+            additionalData: { userId, organizationId, inviteeEmail },
+            label: "Team",
+          });
+        });
 
-      const [_invalidatedInvites, invite] = await Promise.all([
-        db.invite
-          .updateMany({
-            where: {
-              inviteeEmail,
-              organizationId,
-            },
-            data: {
-              status: InviteStatuses.INVALIDATED,
-            },
-          })
-          .catch((cause) => {
-            throw new ShelfError({
-              cause,
-              message: "Failed to invalidate previous invites",
-              additionalData: { userId, organizationId, inviteeEmail },
-              label: "Team",
-            });
-          }),
-
-        /** Create a new invite, based on the prev invite's role */
-        createInvite({
-          organizationId,
-          inviteeEmail,
-          teamMemberName,
-          teamMemberId,
-          inviterId: userId,
-          roles: [role],
-          userId,
-        }),
-      ]);
+      /** Create a new invite, based on the prev invite's role */
+      const invite = await createInvite({
+        organizationId,
+        inviteeEmail,
+        teamMemberName,
+        teamMemberId,
+        inviterId: userId,
+        roles: [role],
+        userId,
+      });
 
       if (invite) {
         sendNotification({

@@ -7,6 +7,7 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
+import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -17,6 +18,13 @@ import { WarningBox } from "../shared/warning-box";
 export const BulkAssignCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
   custodian: createCustodianSchema(),
+  /**
+   * Units per quantity-tracked asset, sent only by the scanner, which shows a
+   * quantity input on each scanned row. This dialog selects rows on the assets
+   * index, where there is nowhere to say how many units each hand-over covers,
+   * so it sends nothing and those assets keep being skipped.
+   */
+  quantities: AssetQuantitiesSchema,
 });
 
 export default function BulkAssignCustodyDialog() {

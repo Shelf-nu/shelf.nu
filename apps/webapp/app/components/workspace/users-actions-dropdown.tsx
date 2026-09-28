@@ -19,7 +19,7 @@ import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu"
 import { useDisabled } from "~/hooks/use-disabled";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
+import type { UserFriendlyRoles } from "~/utils/organization-roles";
 import { ChangeRoleDialog } from "./change-role-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";

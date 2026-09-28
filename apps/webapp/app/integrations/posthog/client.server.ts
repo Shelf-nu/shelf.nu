@@ -19,6 +19,7 @@
 
 import { PostHog } from "posthog-node";
 
+import type { SignupIntentEventProperties } from "~/modules/signup-intent/analytics";
 import { POSTHOG_API_KEY, POSTHOG_HOST } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -61,7 +62,10 @@ function getPostHogClient(): PostHog | null {
 export type ServerFunnelEvent =
   | {
       event: "signup_completed";
-      properties: { created_with_invite: boolean; is_sso: boolean };
+      properties: {
+        created_with_invite: boolean;
+        is_sso: boolean;
+      } & SignupIntentEventProperties;
     }
   | {
       event: "upgrade_completed";
@@ -83,13 +87,16 @@ export type ServerFunnelEvent =
  * is always safe to call from inside signup or a webhook handler.
  *
  * @param args - The event name + its typed properties, plus `distinctId`
- *   (use the Shelf user id so events stitch to one person) and optional
- *   `groups` for org-level group analytics.
+ *   (use the Shelf user id so events stitch to one person), optional
+ *   `groups` for org-level group analytics, and optional `setOnce`: person
+ *   properties written only if the person does not have them yet (PostHog's
+ *   `$set_once`), for facts about how someone first arrived.
  */
 export function captureServerEvent(
   args: ServerFunnelEvent & {
     distinctId: string;
     groups?: Record<string, string>;
+    setOnce?: Record<string, string | number | boolean>;
   }
 ): void {
   try {
@@ -100,7 +107,9 @@ export function captureServerEvent(
     posthog.capture({
       distinctId: args.distinctId,
       event: args.event,
-      properties: args.properties,
+      properties: args.setOnce
+        ? { ...args.properties, $set_once: args.setOnce }
+        : args.properties,
       groups: args.groups,
     });
   } catch (cause) {

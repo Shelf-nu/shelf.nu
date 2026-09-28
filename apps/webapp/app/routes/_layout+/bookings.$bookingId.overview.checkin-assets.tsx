@@ -46,6 +46,70 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
+/**
+ * Check-in eligibility guard shared by the loader and the action.
+ *
+ * Self-service users may check in only a booking they are the CUSTODIAN of, and
+ * only while it is ongoing or overdue; everyone else is gated by
+ * `canUserManageBookingAssets`. It MUST run in the action as well as the
+ * loader: an action can be POSTed directly, and `PermissionAction.checkin`
+ * alone is granted to SELF_SERVICE, while `checkinAssets` never checks the
+ * caller's relationship to the booking.
+ *
+ * @throws {ShelfError} 403 when the caller may not check in this booking
+ * @returns the loaded booking, so the loader can reuse it
+ */
+async function assertUserCanCheckinBooking({
+  bookingId,
+  organizationId,
+  userId,
+  role,
+  userOrganizations,
+  request,
+}: {
+  bookingId: string;
+  organizationId: string;
+  userId: string;
+  role: OrganizationRoles;
+  userOrganizations: Awaited<
+    ReturnType<typeof requirePermission>
+  >["userOrganizations"];
+  request: Request;
+}) {
+  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+
+  const booking = await getBooking({
+    id: bookingId,
+    organizationId,
+    userOrganizations,
+    request,
+  });
+
+  // Self-service users may check in their own live booking. The generic
+  // canUserManageBookingAssets blocks self-service on non-draft bookings, but
+  // that restriction is for adding/removing assets, not for checking in.
+  const isCheckinEligible =
+    booking.status === "ONGOING" || booking.status === "OVERDUE";
+  const isCustodian = booking.custodianUserId === userId;
+  const canCheckin =
+    isSelfService && isCheckinEligible && isCustodian
+      ? true
+      : canUserManageBookingAssets(booking, isSelfService);
+
+  if (!canCheckin) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
+      label: "Booking",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+
+  return booking;
+}
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -64,37 +128,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     );
 
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
-    const booking = await getBooking({
-      id: bookingId,
+    const booking = await assertUserCanCheckinBooking({
+      bookingId,
       organizationId,
+      userId,
+      role,
       userOrganizations,
       request,
     });
-
-    // For check-in, self-service users are allowed when the booking is
-    // ongoing or overdue (check-in eligible states) AND they are the
-    // custodian. The generic canUserManageBookingAssets blocks self-service
-    // on non-draft bookings, but that restriction is for adding/removing
-    // assets, not for checking in.
-    const isCheckinEligible =
-      booking.status === "ONGOING" || booking.status === "OVERDUE";
-    const isCustodian = booking.custodianUserId === userId;
-    const canCheckin =
-      isSelfService && isCheckinEligible && isCustodian
-        ? true
-        : canUserManageBookingAssets(booking, isSelfService);
-
-    if (!canCheckin) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "You cannot check in assets for this booking at the moment. The booking may not be ongoing or you may not have permission to manage its assets.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
 
     // Always fetch partial check-in data for scanner validation
     // We need this data to detect blockers for already checked-in assets/kits
@@ -417,11 +458,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, role, userOrganizations } = await requirePermission(
+      {
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.checkin,
+      }
+    );
+
+    // The action is directly POST-able, so it re-applies the loader's guard.
+    await assertUserCanCheckinBooking({
+      bookingId,
+      organizationId,
       userId,
+      role,
+      userOrganizations,
       request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.checkin,
     });
 
     const formData = await request.formData();

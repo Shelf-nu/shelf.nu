@@ -1,4 +1,18 @@
 // @vitest-environment node
+/**
+ * Tests for the calendar-subscription service
+ * (`~/modules/calendar-subscription/service.server`).
+ *
+ * Two things live here. `resolveCalendarVisibility` decides how much of a
+ * workspace's bookings and custody a role may see in the feed, which is the
+ * only place that policy is expressed. And the feed token: a per-membership
+ * secret that anyone holding the URL can read with, so the cases below cover
+ * how it is first set, rotated and revoked — including two callers setting it at
+ * once, where the loser must report the token that persisted rather than the one
+ * it generated.
+ *
+ * @see {@link file://./service.server.ts}
+ */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
@@ -24,6 +38,10 @@ vi.mock("~/database/db.server", () => ({
     userOrganization: {
       findUnique: vi.fn(),
       update: vi.fn(),
+      // why: the first-set is conditional — it writes only while the token is
+      // still null — so the get-or-create path goes through updateMany, whose
+      // count says whether this caller or a concurrent one won.
+      updateMany: vi.fn(),
     },
     user: { findUnique: vi.fn() },
   },
@@ -42,6 +60,8 @@ const ORG_ID = "org-1";
 const WHERE = {
   userId_organizationId: { userId: USER_ID, organizationId: ORG_ID },
 };
+/** `updateMany` takes plain columns, not the compound-unique wrapper. */
+const WHERE_FLAT = { userId: USER_ID, organizationId: ORG_ID };
 
 const allVisible = {
   selfServiceCanSeeBookings: true,
@@ -133,10 +153,16 @@ describe("calendar feed tokens", () => {
   });
 
   it("generates and persists a token on first use", async () => {
+    // why: a membership that exists with no token yet — the state a first use
+    // starts from.
     vi.mocked(db.userOrganization.findUnique).mockResolvedValue({
       calendarTokenId: null,
     } as never);
-    vi.mocked(db.userOrganization.update).mockResolvedValue({} as never);
+    // why: count 1 = this caller's conditional write landed, so the token it
+    // generated is the one the row now holds.
+    vi.mocked(db.userOrganization.updateMany).mockResolvedValue({
+      count: 1,
+    } as never);
 
     const token = await getOrCreateCalendarToken({
       userId: USER_ID,
@@ -145,10 +171,36 @@ describe("calendar feed tokens", () => {
 
     expect(typeof token).toBe("string");
     expect(token.length).toBeGreaterThan(20); // unguessable, not a short id
-    expect(db.userOrganization.update).toHaveBeenCalledWith({
-      where: WHERE,
+    // The predicate is the guard: writing only while the token is null is what
+    // makes two simultaneous first uses resolve to one token.
+    expect(db.userOrganization.updateMany).toHaveBeenCalledWith({
+      where: { ...WHERE_FLAT, calendarTokenId: null },
       data: { calendarTokenId: token },
     });
+  });
+
+  it("returns the token that persisted when a concurrent caller set one first", async () => {
+    // Two callers reach the first-use path together — a double-click, two tabs,
+    // a retried request. Only one write can land, and the other must report the
+    // token the row actually holds rather than the one it generated, which
+    // would hand the subscriber a URL that resolves to nothing.
+    // why: two reads with different answers is the race itself — null first,
+    // then another caller's token — which only a queued mock can express.
+    vi.mocked(db.userOrganization.findUnique)
+      .mockResolvedValueOnce({ calendarTokenId: null } as never)
+      .mockResolvedValueOnce({ calendarTokenId: "winner-token" } as never);
+    // why: count 0 = the row was no longer null when the write ran, which is
+    // how this caller learns it lost.
+    vi.mocked(db.userOrganization.updateMany).mockResolvedValue({
+      count: 0,
+    } as never);
+
+    const token = await getOrCreateCalendarToken({
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(token).toBe("winner-token");
   });
 
   it("throws when the user is not a member of the workspace", async () => {

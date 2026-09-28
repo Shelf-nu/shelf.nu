@@ -17,6 +17,10 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import {
+  readSignupIntent,
+  signupIntentHeaders,
+} from "~/modules/signup-intent/cookie.server";
 import { createUser, findUserByEmail } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -88,7 +92,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         const authSession = await verifyOtpAndSignin(email, otp);
-        const userExists = Boolean(await findUserByEmail(email));
+        const existingUser = await findUserByEmail(email);
+        const userExists = Boolean(existingUser);
+
+        // What the signup link asked for, carried by cookie. A new account
+        // records it on its signup event; the cookie then travels on for
+        // onboarding to store and act on. A login is not a signup: the form
+        // posts back to this page's URL, so `mode` is on the request, and a
+        // login ignores whatever intent an earlier `/join` visit left behind.
+        const isLogin =
+          new URL(request.url).searchParams.get("mode") === "login";
+        const signupIntent = isLogin ? null : await readSignupIntent(request);
 
         if (!userExists) {
           try {
@@ -104,6 +118,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
               ...authSession,
               username,
               formatPrefs,
+              signupIntent,
             });
           } catch (createError) {
             // Handle race condition: if a concurrent request already
@@ -125,9 +140,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        return redirect(safeRedirect("/assets"), {
+        // The link's `redirectTo` is followed only by an account that has
+        // already onboarded. Everyone else lands on `/assets`, whose layout
+        // sends them to onboarding: `redirectTo` can name a page outside that
+        // layout (the QR pages have no onboarding check), and following it
+        // would skip onboarding altogether.
+        const landing = existingUser?.onboarded
+          ? safeRedirect(signupIntent?.redirectTo, "/assets")
+          : "/assets";
+
+        return redirect(landing, {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
+            ...(await signupIntentHeaders(signupIntent)),
           ],
         });
       }

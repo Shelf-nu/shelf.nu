@@ -152,7 +152,10 @@ function createTxMock({
       findUnique: vitest.fn().mockResolvedValue({ quantity: currentQuantity }),
       update: vitest.fn().mockResolvedValue({}),
     },
-    consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+    consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
   };
 }
 

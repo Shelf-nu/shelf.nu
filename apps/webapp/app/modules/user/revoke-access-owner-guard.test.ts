@@ -29,7 +29,7 @@ import { revokeAccessToOrganization } from "./service.server";
 const dbMock = vi.hoisted(() => {
   const client = {
     userOrganization: { findFirst: vi.fn(), deleteMany: vi.fn() },
-    teamMember: { findFirst: vi.fn() },
+    teamMember: { findMany: vi.fn() },
     user: { update: vi.fn() },
     $executeRaw: vi.fn(),
     $transaction: vi.fn(),
@@ -50,7 +50,7 @@ describe("revokeAccessToOrganization — owner protection", () => {
     dbMock.$transaction.mockImplementation(
       (callback: (tx: unknown) => unknown) => callback(dbMock)
     );
-    dbMock.teamMember.findFirst.mockResolvedValue({ id: "tm-1" });
+    dbMock.teamMember.findMany.mockResolvedValue([{ id: "tm-1" }]);
     dbMock.user.update.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",

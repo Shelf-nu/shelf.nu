@@ -1,3 +1,12 @@
+/**
+ * Custom Fields settings — the workspace's list of custom field definitions.
+ *
+ * Lists every definition with its type, categories and active state, and offers
+ * creation until the workspace reaches its plan's active-field limit.
+ *
+ * @see {@link file://./settings.custom-fields.new.tsx} creating a definition
+ * @see {@link file://../../modules/custom-field/service.server.ts}
+ */
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
@@ -35,10 +44,18 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { canCreateMoreCustomFields } from "~/utils/subscription.server";
 
+/** Browser tab title for the list. */
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
+/**
+ * Loads one page of custom field definitions for the current search, and
+ * whether the plan allows another active field.
+ *
+ * @returns The page of definitions, pagination, and `canCreateMoreCustomFields`
+ * @throws {ShelfError} 403 when the caller lacks `customField: read`
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -69,7 +86,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       organizations,
     });
 
-    const totalPages = Math.ceil(totalCustomFields / perPageParam);
+    // Divide by the resolved page size. The raw `per_page` param is 0 whenever
+    // the URL carries none.
+    const totalPages = Math.ceil(totalCustomFields / perPage);
 
     const header: HeaderData = {
       title: "Custom Fields",
@@ -104,6 +123,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/** The custom fields list, with its create button and bulk actions. */
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
   const { isBaseOrSelfService } = useUserRoleHelper();

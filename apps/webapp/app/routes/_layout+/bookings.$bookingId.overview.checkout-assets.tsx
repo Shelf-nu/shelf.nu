@@ -57,7 +57,7 @@ export const links: LinksFunction = () => [
  * self-service user could check out assets in another user's booking in the
  * same organization.
  *
- * @throws {ShelfError} when the caller may not check out this booking
+ * @throws {ShelfError} 403 when the caller may not check out this booking
  * @returns the loaded booking (so the loader can reuse it without re-fetching)
  */
 async function assertUserCanCheckoutBooking({
@@ -106,6 +106,7 @@ async function assertUserCanCheckoutBooking({
       message:
         "You cannot check out assets for this booking at the moment. The booking may not be reservable/ongoing or you may not have permission to manage its assets.",
       label: "Booking",
+      status: 403,
       shouldBeCaptured: false,
     });
   }

@@ -2,15 +2,14 @@
  * Redaction of log-bound values.
  *
  * `parseData` puts the whole submitted payload into `ShelfError.additionalData`
- * on a validation failure, and the logger emits `additionalData` verbatim. On
- * the password-reset form that payload is `{ email, otp, password,
- * confirmPassword }` — so mistyping the confirmation logged a valid OTP and the
- * user's chosen password in plaintext.
- *
- * detail.dev finding D042 (reported for one `additionalData` site; `parseData`
- * is the generic sink behind it).
+ * on a validation failure, and the logger emits `additionalData` verbatim, so
+ * every submitted field reaches the log line unless its key is redacted. The
+ * password-reset form is the sharpest case: it submits `{ email, otp, password,
+ * confirmPassword }`, and a mistyped confirmation is an ordinary validation
+ * failure.
  *
  * @see {@link file://./redact.ts}
+ * @see {@link file://./http.server.ts} `parseData`
  */
 
 import { describe, expect, it } from "vitest";
@@ -20,7 +19,7 @@ import { REDACTED, TRUNCATED, redactSensitive } from "./redact";
 // @vitest-environment node
 
 describe("redactSensitive", () => {
-  it("redacts the password-reset payload that caused this", () => {
+  it("redacts the OTP and passwords in a password-reset payload but keeps the email", () => {
     expect(
       redactSensitive({
         email: "user@example.com",
@@ -63,6 +62,20 @@ describe("redactSensitive", () => {
   ])("redacts %s", (key) => {
     expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
   });
+
+  it.each(["x-api-key", "user.token", "2fa-secret"])(
+    "redacts %s, where a separator bounds the sensitive word",
+    (key) => {
+      expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
+    }
+  );
+
+  it.each(["token1", "password1", "my password", "user/token", "auth:token"])(
+    "keeps %s, where the sensitive word is not bounded by a separator or a letter",
+    (key) => {
+      expect(redactSensitive({ [key]: "kept" })[key]).toBe("kept");
+    }
+  );
 
   it("does not mutate the input — callers still need the real values", () => {
     // A validation failure still has to tell the user which field was wrong.

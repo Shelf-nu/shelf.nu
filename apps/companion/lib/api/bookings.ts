@@ -3,6 +3,7 @@ import type {
   BookingsResponse,
   BookingDetailResponse,
   BookingActionResponse,
+  FulfilAndCheckoutResponse,
   CheckinDisposition,
   CheckoutDisposition,
   PartialCheckinResponse,
@@ -95,11 +96,17 @@ export const bookingsApi = {
     ),
 
   /**
-   * Fulfil outstanding book-by-model reservations by scanning concrete units,
-   * then check the booking out (RESERVED -> ONGOING) in one atomic step.
+   * Fulfil outstanding book-by-model reservations by scanning concrete units.
+   * The server assigns the scanned units and checks out either the whole
+   * booking or, under the workspace's explicit check-out requirement, only the
+   * scanned units (`remainingCount` says how many booked assets are left).
    * Mirrors the web `fulfil-and-checkout` scanner: each scanned asset is
-   * matched against an outstanding `BookingModelRequest` (materialising it);
-   * the server rejects the submit if any reservation is still unassigned.
+   * matched against an outstanding `BookingModelRequest` (materialising it).
+   *
+   * Reserved units the scan does not cover stay open on the booking. The
+   * server refuses only a check-out that sends nothing out: without the
+   * explicit requirement it needs a scanned unit or an asset already on the
+   * booking, and under it a scanned unit.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
@@ -108,7 +115,7 @@ export const bookingsApi = {
     kitIds: string[] = [],
     timeZone?: string
   ) =>
-    apiFetch<BookingActionResponse>(
+    apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
@@ -139,6 +146,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        // why: non-idempotent — per-unit dispositions carry no request key, so
+        // a timed-out-but-landed request re-sent would return the units twice.
+        retry: false,
       }
     ),
 
@@ -160,6 +170,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        // why: non-idempotent — per-unit quantities carry no request key, so a
+        // timed-out-but-landed request re-sent would check the units out twice.
+        retry: false,
       }
     ),
 

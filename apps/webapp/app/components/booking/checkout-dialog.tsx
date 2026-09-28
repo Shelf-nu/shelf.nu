@@ -1,6 +1,8 @@
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
+import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
+import { summarizeUnassignedUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
@@ -64,7 +66,20 @@ type CheckoutDialogProps = {
   suppressEarlyCheckoutPrompt?: boolean;
   /** Render the trigger button full-width to match a sibling full-width button. */
   fullWidth?: boolean;
+  /**
+   * Reserved model units no asset has been assigned to yet. When any are
+   * listed, the trigger opens a confirmation naming them before the check-out
+   * submits: they stay open on the booking, and the operator should know that
+   * before the booking goes out without them.
+   */
+  unassignedUnits?: UnassignedModelUnits[];
 };
+
+/**
+ * Stable empty list for the default below: a fresh `[]` per render would be a
+ * new prop value every time for a caller that passes nothing.
+ */
+const NO_UNASSIGNED_UNITS: UnassignedModelUnits[] = [];
 
 export default function CheckoutDialog({
   disabled,
@@ -77,9 +92,15 @@ export default function CheckoutDialog({
   variant = "default",
   suppressEarlyCheckoutPrompt = false,
   fullWidth = false,
+  unassignedUnits = NO_UNASSIGNED_UNITS,
 }: CheckoutDialogProps) {
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
+  const unassignedSummary = summarizeUnassignedUnits(unassignedUnits);
+  const unassignedUnitCount = unassignedUnits.reduce(
+    (sum, unit) => sum + Math.max(0, unit.count),
+    0
+  );
 
   /** Shared trigger styling so the dropdown row matches the check-in dropdown */
   const isDropdown = variant === "dropdown";
@@ -104,7 +125,7 @@ export default function CheckoutDialog({
     label
   );
 
-  if (!isEarlyCheckout) {
+  if (!isEarlyCheckout && !unassignedSummary) {
     return (
       <Button
         disabled={disabled}
@@ -139,17 +160,36 @@ export default function CheckoutDialog({
 
       <AlertDialogContent portalProps={{ container: portalContainer }}>
         <AlertDialogHeader>
-          <AlertDialogTitle>Early Check-Out Warning</AlertDialogTitle>
-          <AlertDialogDescription>
-            You are checking out the booking more than 15 minutes before the
-            start date. If you proceed, the start date will be adjusted to now:{" "}
-            <span className="font-bold text-gray-700">
-              <DateS date={new Date()} includeTime />
-            </span>
-            .
-            <br />
-            <br />
-            Do you want to adjust the start date or keep the original date?
+          <AlertDialogTitle>
+            {unassignedSummary
+              ? "Some reserved units aren't assigned"
+              : "Early Check-Out Warning"}
+          </AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="flex flex-col gap-3">
+              {unassignedSummary ? (
+                <p>
+                  <span className="font-bold text-gray-700">
+                    {unassignedSummary}
+                  </span>{" "}
+                  {unassignedUnitCount === 1
+                    ? "is not assigned yet. It stays on the booking so you can scan it later or release it."
+                    : "are not assigned yet. They stay on the booking so you can scan them later or release them."}
+                </p>
+              ) : null}
+              {isEarlyCheckout ? (
+                <p>
+                  You are checking out the booking more than 15 minutes before
+                  the start date. If you proceed, the start date will be
+                  adjusted to now:{" "}
+                  <span className="font-bold text-gray-700">
+                    <DateS date={new Date()} includeTime />
+                  </span>
+                  . Do you want to adjust the start date or keep the original
+                  date?
+                </p>
+              ) : null}
+            </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -160,29 +200,44 @@ export default function CheckoutDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value={intent} form={formId} />
-          <Button
-            disabled={disabled}
-            className="flex-1"
-            type="submit"
-            variant="secondary"
-            name="checkoutIntentChoice"
-            value={CheckoutIntentEnum["without-adjusted-date"]}
-            form={formId}
-          >
-            Don't Adjust Date
-          </Button>
+          {isEarlyCheckout ? (
+            <>
+              <input type="hidden" name="intent" value={intent} form={formId} />
+              <Button
+                disabled={disabled}
+                className="flex-1"
+                type="submit"
+                variant="secondary"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["without-adjusted-date"]}
+                form={formId}
+              >
+                Don't Adjust Date
+              </Button>
 
-          <Button
-            disabled={disabled}
-            className="flex-1"
-            type="submit"
-            name="checkoutIntentChoice"
-            value={CheckoutIntentEnum["with-adjusted-date"]}
-            form={formId}
-          >
-            Adjust Date
-          </Button>
+              <Button
+                disabled={disabled}
+                className="flex-1"
+                type="submit"
+                name="checkoutIntentChoice"
+                value={CheckoutIntentEnum["with-adjusted-date"]}
+                form={formId}
+              >
+                Adjust Date
+              </Button>
+            </>
+          ) : (
+            <Button
+              disabled={disabled}
+              className="flex-1"
+              type="submit"
+              name="intent"
+              value={intent}
+              form={formId}
+            >
+              Check out anyway
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

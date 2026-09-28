@@ -79,6 +79,32 @@ export function resolveUserGreetingName(
 }
 
 /**
+ * Resolves the name of whoever holds a booking.
+ *
+ * A booking records its holder on two links. The team-member link wins when
+ * both are set, matching the web bookings list: `TeamMember.name` tracks
+ * `User.displayName`, so the two normally agree, and when they do not, every
+ * surface must still give the same answer. The user link names a booking that
+ * has no team member.
+ *
+ * Deliberately not {@link resolveTeamMemberName}, which prefers the user
+ * account: the booking's own team-member row is the name the booking lists.
+ *
+ * @param booking - The booking's two custody links, as selected
+ * @returns The holder's name, or `null` when the booking names no one
+ */
+export function resolveBookingHolderName(booking: {
+  custodianTeamMember?: { name: string } | null;
+  custodianUser?: UserNameFields | null;
+}): string | null {
+  return (
+    booking.custodianTeamMember?.name ||
+    resolveUserDisplayName(booking.custodianUser) ||
+    null
+  );
+}
+
+/**
  * Resolves the name to show for a team member.
  *
  * A registered member is named by their user account, so a display name wins
