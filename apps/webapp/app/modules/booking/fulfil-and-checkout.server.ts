@@ -48,6 +48,8 @@ import type {
   CheckoutDispositionInput,
   KitSliceSpec,
 } from "~/modules/booking/service.server";
+import { lockBookingForStatusCheck } from "~/modules/booking/utils.server";
+import { claimUnstampedBookingRows } from "~/modules/booking-model-request/service.server";
 import { ShelfError } from "~/utils/error";
 
 const label = "Booking";
@@ -394,6 +396,45 @@ async function checkOutScannedUnits(
       bookingId,
       organizationId,
       userId,
+    });
+  }
+
+  /**
+   * The scans that were NOT assigned above still get to answer a reservation.
+   *
+   * Their rows exist but may carry no stamp, which is what a unit added before
+   * the reservation existed looks like. `addScannedAssetsToBooking` stamps only
+   * the rows it inserts, and the branch above does not even run when the whole
+   * scan is already on the booking, so this is the only thing that reaches
+   * them. Assets whose row is already stamped, or which match nothing, are
+   * filtered out inside the claim.
+   *
+   * Its own transaction: the decrement and the stamp have to commit together,
+   * and the assign above manages its own.
+   *
+   * It opens on the booking row, which every path reaching the claim holds
+   * first: the scan-to-add path takes it in `lockBookingForStatusCheck` before
+   * locking any reservation row, so a claim that took `BookingAsset` first
+   * would invert that order and deadlock the two against each other. Booking
+   * outermost keeps the order the same everywhere, and rows for different
+   * bookings never overlap.
+   */
+  const assetIdsAlreadyOnBooking = scannedKits.looseAssetIds.filter((id) =>
+    alreadyAssignedIds.has(id)
+  );
+
+  if (assetIdsAlreadyOnBooking.length > 0) {
+    await db.$transaction(async (tx) => {
+      await lockBookingForStatusCheck(tx, bookingId, organizationId);
+      await claimUnstampedBookingRows(
+        {
+          bookingId,
+          assetIds: assetIdsAlreadyOnBooking,
+          organizationId,
+          userId,
+        },
+        tx
+      );
     });
   }
 
