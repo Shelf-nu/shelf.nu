@@ -14,7 +14,10 @@ import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
-import { getUserOrganizations } from "~/modules/organization/service.server";
+import {
+  getUserOrganizations,
+  isSsoUser,
+} from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
@@ -149,7 +152,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         const userOrgs = await getUserOrganizations({
           userId: authSession.userId,
         });
-        const isSSO = userOrgs[0]?.user?.sso === true;
+        const isSSO = await isSsoUser({
+          userId: authSession.userId,
+          userOrganizations: userOrgs,
+        });
         const hasTeamOrgs = userOrgs.some(
           (uo) => uo.organization.type !== "PERSONAL"
         );

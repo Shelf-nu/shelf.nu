@@ -158,7 +158,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         user.customerId
       )) as CustomerWithSubscriptions;
       subscription = getCustomerActiveSubscription({ customer });
-      await validateSubscriptionIsActive({ user, subscription });
+      await validateSubscriptionIsActive({ user, customer });
     }
 
     if (!user.onboarded) {

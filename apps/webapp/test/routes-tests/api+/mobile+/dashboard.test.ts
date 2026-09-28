@@ -38,6 +38,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 
 import { loader } from "~/routes/api+/mobile+/dashboard";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // why: the dashboard runs the REAL `getBookings`, whose `where` is the subject
 // under test. Mocking the Prisma client is what lets us capture that argument;
@@ -56,7 +57,14 @@ vi.mock("~/database/db.server", () => ({
     },
     category: { count: vi.fn().mockResolvedValue(0) },
     location: { count: vi.fn().mockResolvedValue(0) },
-    teamMember: { count: vi.fn().mockResolvedValue(0) },
+    teamMember: {
+      count: vi.fn().mockResolvedValue(0),
+      // why: `resolveCustodianScope` reads this to find the caller's
+      // team-member rows. Without it the scope resolution throws and the
+      // loader bails before any booking query runs — which every assertion
+      // below would read as "nothing leaked" rather than "nothing ran".
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     auditSession: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
@@ -92,7 +100,10 @@ const ORG_ID = "org-1";
  *
  * @param role - The caller's role in `ORG_ID`
  */
-function actAs(role: OrganizationRoles) {
+function actAs(
+  role: OrganizationRoles,
+  overrides: { canSeeAllBookings?: boolean } = {}
+) {
   requireMobileAuthMock.mockResolvedValue({
     user: {
       id: CALLER_USER_ID,
@@ -104,14 +115,14 @@ function actAs(role: OrganizationRoles) {
     },
   } as unknown as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue(ORG_ID);
-  getMobileUserContextMock.mockResolvedValue({
-    role,
+  getMobileUserContextMock.mockResolvedValue(
     // The guard reads the full array, not roles[0].
-    roles: [role],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
-  });
+    mobileUserContext({
+      roles: [role],
+      canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
+      ...overrides,
+    })
+  );
 }
 
 /**
@@ -169,6 +180,49 @@ describe("GET /api/mobile/dashboard — booking visibility", () => {
           custodianUserId: CALLER_USER_ID,
         });
       }
+    }
+  );
+
+  it("matches the caller's team-member custody links, not just the user link", async () => {
+    actAs(OrganizationRoles.BASE);
+    // Custody can sit on a team-member row with no user attached, which is
+    // how most custodians are picked. A bare `{ userId }` filter would hide a
+    // restricted user's own booking from their Home tab.
+    (db.teamMember.findMany as any).mockResolvedValue([
+      { id: "tm-1" },
+      { id: "tm-2" },
+    ]);
+
+    const wheres = await captureBookingWheres();
+
+    expect(wheres).toHaveLength(3);
+    for (const where of wheres) {
+      expect(andClausesOf(where)).toContainEqual({
+        OR: [
+          { custodianUserId: CALLER_USER_ID },
+          { custodianTeamMemberId: { in: ["tm-1", "tm-2"] } },
+        ],
+      });
+    }
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "drops the restriction for %s when the workspace override is on",
+    async (role) => {
+      // Home is the third lens on these rows and honours the override the
+      // same way the list and calendar do.
+      actAs(role, { canSeeAllBookings: true });
+
+      const wheres = await captureBookingWheres();
+
+      expect(wheres).toHaveLength(3);
+      for (const where of wheres) {
+        expect(andClausesOf(where)).not.toContainEqual({
+          custodianUserId: CALLER_USER_ID,
+        });
+      }
+      // The scope is not merely widened, it is never resolved.
+      expect(db.teamMember.findMany).not.toHaveBeenCalled();
     }
   );
 

@@ -1,0 +1,481 @@
+/**
+ * Check-in Receipt Data
+ *
+ * Reads everything the printed check-in receipt states about a booking: the
+ * printable per-slice rows, what happened to each slice's units, when the
+ * booking was sent out and returned, who received it, and how late that was.
+ *
+ * The row list, the sort, the kit resolution, the printed asset codes and the
+ * custodian-aware ownership check are all reused from the booking checklist's
+ * `fetchAllPdfRelatedData`, so the two sheets can never disagree about what was
+ * booked. This module adds only what the checklist has no reason to read: the
+ * slice check-out / check-in markers, the disposition units attributed to each
+ * slice, the completion event, and the users behind the markers.
+ *
+ * @see {@link file://./checkin-receipt.ts} — the reconciliation rules
+ * @see {@link file://./pdf-helpers.ts} — the shared row list
+ * @see {@link file://./../../routes/api+/bookings.$bookingId.generate-checkin-receipt.tsx}
+ */
+
+import type { OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
+import { db } from "~/database/db.server";
+import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
+import { USER_NAME_SELECT } from "~/modules/user/fields";
+import { ShelfError } from "~/utils/error";
+import { resolveUserDisplayName } from "~/utils/user";
+import type {
+  CheckinLatenessNote,
+  CheckinReceiptRow,
+  CheckinReceiptRowAsset,
+  CheckinReceiptTotals,
+} from "./checkin-receipt";
+import {
+  buildCheckinReceipt,
+  formatLatenessNote,
+  resolveSentUnits,
+} from "./checkin-receipt";
+import {
+  getLatenessMs,
+  resolvePlannedEnd,
+  resolvePlannedStart,
+} from "./lateness";
+import type { PdfDbResult, SortParams } from "./pdf-helpers";
+import { fetchAllPdfRelatedData } from "./pdf-helpers";
+import { attributeCategorizedDispositionsByBookingAsset } from "./service.server";
+
+/**
+ * The four dispositions that account for a unit coming off a booking.
+ *
+ * `ConsumptionCategory` also holds CHECKOUT, RESTOCK and ADJUSTMENT, which
+ * describe units moving the other way or not moving at all; the attributor
+ * accepts only these four.
+ */
+const CHECKIN_DISPOSITION_CATEGORIES = [
+  "RETURN",
+  "CONSUME",
+  "LOSS",
+  "DAMAGE",
+] as const;
+
+/**
+ * One printed line of the receipt's items table, with its moments still as
+ * `Date`s — the API loader formats them.
+ */
+export type CheckinReceiptDbRow = CheckinReceiptRow & CheckinReceiptRowAsset;
+
+/** Everything the check-in receipt renders, with dates still unformatted. */
+export type CheckinReceiptDbResult = {
+  booking: PdfDbResult["booking"];
+  organization: PdfDbResult["organization"];
+  /** One row per booked slice, in the checklist's sort order. */
+  rows: CheckinReceiptDbRow[];
+  totals: CheckinReceiptTotals;
+  /** The completeness line printed in the header's stamp box. */
+  stamp: string;
+  /** The period the booking was agreed for, never the live one. */
+  plannedFrom: Date | null;
+  plannedTo: Date | null;
+  /**
+   * The earliest departure the slice markers still record, and who made it.
+   *
+   * `BookingAsset.checkedOutAt` holds a slice's CURRENT departure — sending a
+   * returned slice out again overwrites it — so on a re-dispatched booking this
+   * is the earliest departure still on record, not the first one that ever
+   * happened. The sheet labels it "Checked out" for that reason.
+   */
+  checkedOutAt: Date | null;
+  /** Who sent that first slice out; `""` when the marker records none. */
+  checkedOutByName: string;
+  /** The recorded return moment; `null` when nothing recorded one. */
+  returnedAt: Date | null;
+  /**
+   * How the closing moment compares to the planned end — "on time", "early", or
+   * "N days M hours after the planned end". Carries no verb, because the row it
+   * sits on is a return only when units came back. `null` when the booking has
+   * not finished or nothing recorded a moment.
+   */
+  latenessNote: CheckinLatenessNote | null;
+  /** Distinct receiving users, ordered by their first check-in. */
+  checkedInByNames: string[];
+};
+
+/**
+ * Reads a booking's check-in receipt.
+ *
+ * @param bookingId - The booking to print.
+ * @param organizationId - The caller's active workspace; every lookup is scoped
+ *   to it.
+ * @param userId - The acting user, for the custodian-aware ownership check.
+ * @param role - The acting user's role in the workspace.
+ * @param request - The incoming request, for the client hint the shared helper
+ *   reads.
+ * @param sortParams - The booking page's active sort. The search term is
+ *   deliberately not honoured: a receipt lists every booked row.
+ * @returns The receipt's rows, totals, stamp and booking-level moments.
+ * @throws {ShelfError} If the booking cannot be read or the caller may not see
+ *   it.
+ */
+export async function fetchCheckinReceiptData(
+  bookingId: string,
+  organizationId: string,
+  userId: string,
+  role: OrganizationRoles | undefined,
+  request: Request,
+  sortParams?: Pick<SortParams, "orderBy" | "orderDirection">
+): Promise<CheckinReceiptDbResult> {
+  try {
+    const pdfMeta = await fetchAllPdfRelatedData(
+      bookingId,
+      organizationId,
+      userId,
+      role,
+      request,
+      {
+        orderBy: sortParams?.orderBy,
+        orderDirection: sortParams?.orderDirection,
+        // A receipt is a record of the whole booking, so the page's active
+        // search must not narrow it.
+        search: undefined,
+      },
+      // The sheet prints the text code only; there is no QR column to fill.
+      { includeQrImages: false }
+    );
+
+    const { booking, organization, assets, assetIdToDisplayCodeMap } = pdfMeta;
+
+    // `fetchAllPdfRelatedData` strips `bookingAssets` from the booking it
+    // returns, and the slice projection behind its rows keeps only the columns
+    // the checklist prints — so the markers this sheet is built on need their
+    // own read.
+    const [slices, dispositionLogs, checkInTimes, checkinSessions] =
+      await Promise.all([
+        db.bookingAsset.findMany({
+          where: { bookingId, booking: { organizationId } },
+          select: {
+            id: true,
+            assetId: true,
+            quantity: true,
+            assetKitId: true,
+            checkedOutAt: true,
+            checkedOutById: true,
+            checkedOutQuantity: true,
+            checkedInAt: true,
+            checkedInById: true,
+            asset: { select: { type: true } },
+          },
+        }),
+        db.consumptionLog.findMany({
+          where: {
+            bookingId,
+            booking: { organizationId },
+            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+          },
+          select: {
+            assetId: true,
+            bookingAssetId: true,
+            category: true,
+            quantity: true,
+            // A quantity slice returned in part never gets a check-in marker,
+            // so its log is the only record of when those units came back and
+            // who took them.
+            createdAt: true,
+            userId: true,
+          },
+        }),
+        resolveCheckInTimes([bookingId]),
+        // Progressive check-in sessions, for slices reconciled before the
+        // per-slice markers existed. The completion gate accepts a session at or
+        // after a slice's departure as proof an INDIVIDUAL asset came back, so
+        // the receipt reads them too — otherwise a booking the gate closed prints
+        // as still out.
+        db.partialBookingCheckin.findMany({
+          where: { bookingId, booking: { organizationId } },
+          select: {
+            assetIds: true,
+            checkinTimestamp: true,
+            checkedInById: true,
+          },
+        }),
+      ]);
+
+    // The most recent session naming each asset. Kept as a moment rather than a
+    // flag: a slice that departed twice has a session for the first trip whose
+    // asset id never leaves the list, and a bare set would let it reconcile the
+    // second departure too.
+    const latestSessionByAsset = new Map<
+      string,
+      { at: Date; byId: string | null }
+    >();
+    for (const session of checkinSessions) {
+      if (!session.checkinTimestamp) continue;
+      for (const assetId of session.assetIds) {
+        const seen = latestSessionByAsset.get(assetId);
+        if (!seen || session.checkinTimestamp > seen.at) {
+          latestSessionByAsset.set(assetId, {
+            at: session.checkinTimestamp,
+            byId: session.checkedInById ?? null,
+          });
+        }
+      }
+    }
+
+    // Attribution runs once per ASSET with all four categories together:
+    // capacity is shared between them, so a per-category pass would refill each
+    // slice for every category and attribute far more than was booked. One
+    // asset's rows per call — never two assets' rows in the same call.
+    const slicesByAsset = new Map<string, typeof slices>();
+    for (const slice of slices) {
+      const forAsset = slicesByAsset.get(slice.assetId) ?? [];
+      forAsset.push(slice);
+      slicesByAsset.set(slice.assetId, forAsset);
+    }
+
+    const logsByAsset = new Map<
+      string,
+      Array<{
+        bookingAssetId: string | null;
+        category: (typeof CHECKIN_DISPOSITION_CATEGORIES)[number];
+        quantity: number;
+      }>
+    >();
+    for (const log of dispositionLogs) {
+      const forAsset = logsByAsset.get(log.assetId) ?? [];
+      forAsset.push({
+        bookingAssetId: log.bookingAssetId ?? null,
+        category:
+          log.category as (typeof CHECKIN_DISPOSITION_CATEGORIES)[number],
+        quantity: log.quantity,
+      });
+      logsByAsset.set(log.assetId, forAsset);
+    }
+
+    const breakdownByBookingAsset = new Map<
+      string,
+      { returned: number; consumed: number; lost: number; damaged: number }
+    >();
+    for (const [assetId, assetSlices] of slicesByAsset) {
+      const attributed = attributeCategorizedDispositionsByBookingAsset({
+        // Capacity is what each slice actually SENT, from the same rule the
+        // printed row is measured against — never the booked quantity. Booked
+        // quantity is wrong in both directions: it strands a re-dispatched
+        // slice's second trip, whose cumulative counter runs above it, and it
+        // hands capacity to a slice that never left, so an untagged log lands
+        // as a return on a row the sheet calls never checked out.
+        bookingAssetRows: assetSlices.map((slice) => ({
+          id: slice.id,
+          quantity: resolveSentUnits(slice),
+          assetKitId: slice.assetKitId,
+        })),
+        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      });
+      for (const [sliceId, breakdown] of attributed) {
+        breakdownByBookingAsset.set(sliceId, breakdown);
+      }
+    }
+
+    // Moments and people for the rows the markers cannot date.
+    //
+    // RETURN logs only. The other three categories record a write-off, not a
+    // hand-over: whoever logged a loss received nothing, so they are not a
+    // receiver, and on a slice carrying both a later write-off must not date
+    // the row after the moment the units actually came back.
+    //
+    // A log names its slice, or names an asset that has only one. The phone
+    // sends quantity dispositions without a slice id, so untagged logs are
+    // ordinary current data rather than legacy residue, and refusing them all
+    // would leave every mobile partial return with no moment and no receiver.
+    // Where the asset has exactly one slice on the booking there is nothing to
+    // decide — the log can only describe that slice. Where it has several, the
+    // greedy pass that splits the units carries no times, so choosing one would
+    // be a guess and the row stays blank.
+    const returnRecordsBySlice = new Map<
+      string,
+      Array<{ at: Date; byId: string }>
+    >();
+    for (const log of dispositionLogs) {
+      if (log.category !== "RETURN") continue;
+
+      const assetSlices = slicesByAsset.get(log.assetId) ?? [];
+      const sliceId =
+        log.bookingAssetId ??
+        (assetSlices.length === 1 ? assetSlices[0].id : null);
+      if (!sliceId) continue;
+
+      const forSlice = returnRecordsBySlice.get(sliceId) ?? [];
+      forSlice.push({ at: log.createdAt, byId: log.userId });
+      returnRecordsBySlice.set(sliceId, forSlice);
+    }
+
+    // Reconcile exactly the slices the sheet prints, in the order it prints
+    // them, so the totals can never describe a different set of rows from the
+    // table above them. Attribution above deliberately spans every slice: one
+    // missing from the print list still holds capacity that untagged logs are
+    // attributed against.
+    const markersByBookingAssetId = new Map(
+      slices.map((slice) => [slice.id, slice])
+    );
+    const printedSlices = assets.flatMap((asset) => {
+      const marker = markersByBookingAssetId.get(asset.bookingAssetId);
+      return marker
+        ? [
+            {
+              bookingAssetId: marker.id,
+              assetId: marker.assetId,
+              assetType: marker.asset.type,
+              quantity: marker.quantity,
+              checkedOutAt: marker.checkedOutAt,
+              checkedOutQuantity: marker.checkedOutQuantity,
+              checkedInAt: marker.checkedInAt,
+              checkedInById: marker.checkedInById,
+              sessionCheckedInAt:
+                latestSessionByAsset.get(marker.assetId)?.at ?? null,
+              sessionCheckedInById:
+                latestSessionByAsset.get(marker.assetId)?.byId ?? null,
+              returnRecords: returnRecordsBySlice.get(marker.id),
+            },
+          ]
+        : [];
+    });
+
+    const isFinished =
+      booking.status === BookingStatus.COMPLETE ||
+      booking.status === BookingStatus.ARCHIVED;
+
+    const receipt = buildCheckinReceipt({
+      slices: printedSlices,
+      breakdownByBookingAsset,
+      isBookingFinished: isFinished,
+    });
+
+    // The earliest departure still on record, and the person who made it. Both
+    // come from the same slice: a booking checked out in several passes has
+    // several dispatchers, and naming one against another's moment would be a
+    // claim nothing recorded.
+    const earliestCheckedOutSlice = slices
+      .filter((slice) => slice.checkedOutAt !== null)
+      .sort(
+        (a, b) =>
+          (a.checkedOutAt as Date).getTime() -
+          (b.checkedOutAt as Date).getTime()
+      )[0];
+
+    // Distinct receivers in the order they first received something, taken
+    // from the reconciled rows rather than the raw markers so the summary names
+    // exactly the people the rows below it name.
+    const checkedInUserIdsInOrder = [
+      ...new Set(
+        receipt.rows
+          .filter((row) => row.checkedInAt !== null)
+          .sort(
+            (a, b) =>
+              (a.checkedInAt as Date).getTime() -
+              (b.checkedInAt as Date).getTime()
+          )
+          .flatMap((row) => row.checkedInByIds)
+      ),
+    ];
+
+    // Ids read off the booking's own rows, not supplied by the caller.
+    const markerUserIds = [
+      ...new Set(
+        [
+          earliestCheckedOutSlice?.checkedOutById ?? null,
+          ...slices.map((slice) => slice.checkedInById),
+          ...[...latestSessionByAsset.values()].map((s) => s.byId),
+          ...dispositionLogs.map((log) => log.userId),
+        ].filter((id): id is string => id !== null)
+      ),
+    ];
+    const markerUsers =
+      markerUserIds.length > 0
+        ? await db.user.findMany({
+            where: { id: { in: markerUserIds } },
+            select: { id: true, ...USER_NAME_SELECT },
+          })
+        : [];
+    const nameByUserId = new Map(
+      markerUsers.map((user) => [user.id, resolveUserDisplayName(user)])
+    );
+
+    const printableAssetsById = new Map(
+      assets.map((asset) => [asset.bookingAssetId, asset])
+    );
+    const rows: CheckinReceiptDbRow[] = receipt.rows.flatMap((row) => {
+      const asset = printableAssetsById.get(row.bookingAssetId);
+      if (!asset) return [];
+      return [
+        {
+          ...row,
+          title: asset.title,
+          quantity: asset.quantity,
+          kitName: asset.kit?.name ?? null,
+          isRemovedFromKit: asset.isRemovedFromKit,
+          displayCode: assetIdToDisplayCodeMap[asset.id],
+          // A slice returned across several sessions by different people names
+          // each of them, in the order they first received something.
+          checkedInByName: row.checkedInByIds
+            .map((id) => nameByUserId.get(id) ?? "")
+            .filter((name) => name !== "")
+            .join(", "),
+        },
+      ];
+    });
+
+    // The recorded return: the status transition into COMPLETE. When no event
+    // was written, the latest moment the printed rows carry is the closest
+    // record there is. `Booking.updatedAt` is never a fallback — any later edit
+    // moves it.
+    //
+    // Read from the reconciled rows rather than the raw markers, so the summary
+    // can never be blank above rows that show a time. A legacy booking whose
+    // return survives only as a progressive session has no marker to find and
+    // no event either, and the rows resolve that session where the summary
+    // could not see it.
+    const latestRowCheckIn = receipt.rows.reduce<Date | null>((latest, row) => {
+      if (!row.checkedInAt) return latest;
+      return !latest || row.checkedInAt > latest ? row.checkedInAt : latest;
+    }, null);
+    const returnedAt = checkInTimes.get(bookingId) ?? latestRowCheckIn;
+
+    const plannedTo = resolvePlannedEnd(booking);
+
+    // Lateness is only meaningful once the booking has finished. An OVERDUE
+    // booking with a partial check-in still measures against "now", which is
+    // not a statement a printed record may make.
+    const latenessMs = isFinished
+      ? getLatenessMs({
+          status: booking.status,
+          scheduledEnd: plannedTo,
+          checkInAt: returnedAt,
+        })
+      : null;
+
+    return {
+      booking,
+      organization,
+      rows,
+      totals: receipt.totals,
+      stamp: receipt.stamp,
+      plannedFrom: resolvePlannedStart(booking),
+      plannedTo,
+      checkedOutAt: earliestCheckedOutSlice?.checkedOutAt ?? null,
+      checkedOutByName: earliestCheckedOutSlice?.checkedOutById
+        ? nameByUserId.get(earliestCheckedOutSlice.checkedOutById) ?? ""
+        : "",
+      returnedAt,
+      latenessNote: formatLatenessNote(latenessMs),
+      checkedInByNames: checkedInUserIdsInOrder
+        .map((id) => nameByUserId.get(id) ?? "")
+        .filter((name) => name !== ""),
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Error fetching booking data for the check-in receipt",
+      status: 500,
+      label: "Booking",
+      additionalData: { bookingId, userId },
+    });
+  }
+}

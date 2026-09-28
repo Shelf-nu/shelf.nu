@@ -20,8 +20,11 @@ import { describe, expect, it } from "vitest";
 import {
   bookingWriteScopeClause,
   canSeeBooking,
+  canSeeBookingCustodian,
+  resolveBookingCustodianName,
   resolveMostPrivilegedRole,
   validateBookingOwnership,
+  WITHHELD_CUSTODIAN_NAME,
 } from "./booking-authorization.server";
 import {
   ROLE_PRECEDENCE,
@@ -343,5 +346,148 @@ describe("resolveMostPrivilegedRole", () => {
     expect([...SSO_ASSIGNABLE_ROLE_PRECEDENCE]).toEqual(
       ROLE_PRECEDENCE.filter((r) => r !== OrganizationRoles.OWNER)
     );
+  });
+});
+
+/**
+ * Naming a booking's holder.
+ *
+ * Three surfaces ask this question of the same rows — the mobile bookings
+ * list, the calendar lens on that same screen, and Home. They resolve it here
+ * so they cannot answer it differently for one booking.
+ *
+ * The three-way answer is the part that matters: a name, `null` for a booking
+ * nobody holds, and the withheld sentinel for one held by someone this viewer
+ * may not see. Collapsing the last two reports an unassigned booking as a
+ * withheld one, which reads as "someone has this and you may not know who".
+ */
+describe("resolveBookingCustodianName", () => {
+  const NAMED_USER = {
+    id: SOMEONE_ELSE,
+    displayName: "Ada Lovelace",
+    firstName: "Augusta",
+    lastName: "King",
+  };
+
+  it("returns null when the booking has no custodian at all", () => {
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: true,
+        booking: { custodianUser: null, custodianTeamMember: null },
+        userId: ME,
+      })
+    ).toBeNull();
+  });
+
+  it("withholds another user's name when custody visibility is off", () => {
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: false,
+        booking: { custodianUser: NAMED_USER, custodianTeamMember: null },
+        userId: ME,
+      })
+    ).toBe(WITHHELD_CUSTODIAN_NAME);
+  });
+
+  it("names the custodian when the workspace grants custody visibility", () => {
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: true,
+        booking: { custodianUser: NAMED_USER, custodianTeamMember: null },
+        userId: ME,
+      })
+    ).toBe("Ada Lovelace");
+  });
+
+  it("shows callers their own name through the user link", () => {
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: false,
+        booking: {
+          custodianUser: { ...NAMED_USER, id: ME },
+          custodianTeamMember: null,
+        },
+        userId: ME,
+      })
+    ).toBe("Ada Lovelace");
+  });
+
+  it("shows callers their own name through the team-member link alone", () => {
+    // Custody assigned by picking a TEAM MEMBER leaves `custodianUser` null.
+    // Matching the user link alone hides a booking's holder from the very
+    // person holding it.
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: false,
+        booking: {
+          custodianUser: null,
+          custodianTeamMember: { name: "Ada L.", userId: ME },
+        },
+        userId: ME,
+      })
+    ).toBe("Ada L.");
+  });
+
+  it("prefers the team-member name when both links are set", () => {
+    // Web's bookings list resolves it this way (`list-bookings-content.tsx`).
+    // The two normally agree because `TeamMember.name` tracks
+    // `User.displayName`; when they drift, web's answer is the one every
+    // surface has to give.
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: true,
+        booking: {
+          custodianUser: NAMED_USER,
+          custodianTeamMember: { name: "Ada from Ops", userId: SOMEONE_ELSE },
+        },
+        userId: ME,
+      })
+    ).toBe("Ada from Ops");
+  });
+
+  it("withholds a team-member custodian who is not the caller", () => {
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: false,
+        booking: {
+          custodianUser: null,
+          custodianTeamMember: { name: "Ada L.", userId: SOMEONE_ELSE },
+        },
+        userId: ME,
+      })
+    ).toBe(WITHHELD_CUSTODIAN_NAME);
+  });
+
+  it("withholds a non-user team member from a restricted viewer", () => {
+    // A team member with no account behind it belongs to nobody, so it can
+    // never be the caller.
+    expect(
+      resolveBookingCustodianName({
+        canSeeAllCustody: false,
+        booking: {
+          custodianUser: null,
+          custodianTeamMember: { name: "Loading Bay", userId: null },
+        },
+        userId: ME,
+      })
+    ).toBe(WITHHELD_CUSTODIAN_NAME);
+  });
+});
+
+describe("canSeeBookingCustodian", () => {
+  it("gates the custodian's face the same way as their name", () => {
+    // The list serves a profile picture beside the name. A face identifies as
+    // well as a name does, so the two must never come apart.
+    const booking = {
+      custodianUser: { id: SOMEONE_ELSE, displayName: "Ada Lovelace" },
+      custodianTeamMember: null,
+    };
+
+    expect(
+      canSeeBookingCustodian({ canSeeAllCustody: false, booking, userId: ME })
+    ).toBe(false);
+    expect(
+      canSeeBookingCustodian({ canSeeAllCustody: true, booking, userId: ME })
+    ).toBe(true);
   });
 });

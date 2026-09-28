@@ -1,24 +1,29 @@
 import { useMemo, useState } from "react";
 import type { Currency, Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
-import { useLoaderData, useNavigation } from "react-router";
+import { useLoaderData } from "react-router";
 import { Form } from "~/components/custom-form";
 import { ShelfSymbolLogo } from "~/components/marketing/logos";
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag } from "~/components/shared/tag";
+import {
+  PersonalWorkspaceEscapeLink,
+  SelectPlanSubmitButtons,
+  selectPlanTrialCopy,
+} from "~/components/welcome/select-plan-intent";
 import { AUDIT_ADDON, BARCODE_ADDON } from "~/config/addon-copy";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { getAuditAddonPrices } from "~/modules/audit/addon.server";
 import { getBarcodeAddonPrices } from "~/modules/barcode/addon.server";
+import { parsePlanIntentFromSearchParams } from "~/modules/signup-intent/schema";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
-import { isFormProcessing } from "~/utils/form";
-import { payload, error } from "~/utils/http.server";
+import { payload, error, getCurrentSearchParams } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -65,6 +70,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getBarcodeAddonPrices(),
     ]);
 
+    // Onboarding hands a Team intent here as `?plan=team&trial=…`, the same
+    // vocabulary as the website's signup link. It orders the calls to action
+    // and offers the way back to a Personal workspace; nothing else reads it.
+    const planIntent = parsePlanIntentFromSearchParams(
+      getCurrentSearchParams(request)
+    );
+
     return data(
       payload({
         title: "Subscription",
@@ -74,6 +86,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         customer,
         auditPrices,
         barcodePrices,
+        planIntent,
       })
     );
   } catch (cause) {
@@ -84,8 +97,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 export default function SelectPlan() {
-  const { prices, auditPrices, barcodePrices } = useLoaderData<typeof loader>();
+  const { prices, auditPrices, barcodePrices, planIntent } =
+    useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
+  // Someone sent here by their signup link never saw the Personal/Team
+  // question, so the page offers the way back and leads with what they asked
+  // for. Without a Team intent there is no escape link and one trial button.
+  const arrivedWithTeamIntent = planIntent?.plan === "team";
+  const leadsWithSubscribe = arrivedWithTeamIntent && !planIntent.trial;
+  const trialCopy = selectPlanTrialCopy({
+    planIntent,
+    freeTrialDays: config.freeTrialDays,
+  });
   type BillingInterval = "month" | "year";
 
   const planPrices = useMemo(() => {
@@ -114,9 +137,7 @@ export default function SelectPlan() {
     () => searchParams.get("withBarcodes") === "true"
   );
 
-  const navigation = useNavigation();
   const activePrice = selectedPlan ? planPrices[selectedPlan] : null;
-  const disabled = isFormProcessing(navigation.state) || !activePrice;
 
   const hasAuditPrices = !!(auditPrices.month || auditPrices.year);
   const hasBarcodePrices = !!(barcodePrices.month || barcodePrices.year);
@@ -188,6 +209,7 @@ export default function SelectPlan() {
           " + "
         )} or change plans.`
       : `You won't be charged during the trial. After ${config.freeTrialDays} days, continue on Team or change plans.`;
+  const subscribeText = `Subscribe to start right away, or try Team free for ${config.freeTrialDays} days first.`;
 
   return (
     <div className="flex flex-col items-center p-4 sm:p-6">
@@ -196,9 +218,7 @@ export default function SelectPlan() {
         <h3 className="text-2xl font-semibold text-gray-900">
           Select your payment plan
         </h3>
-        <p className="mt-3 text-base text-gray-600">
-          No credit card or payment required to start your 7-day trial.{" "}
-        </p>
+        <p className="mt-3 text-base text-gray-600">{trialCopy.subheading}</p>
       </div>
 
       <Form
@@ -265,6 +285,8 @@ export default function SelectPlan() {
           })}
         </fieldset>
 
+        {arrivedWithTeamIntent ? <PersonalWorkspaceEscapeLink /> : null}
+
         <section className="space-y-4">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
@@ -326,9 +348,11 @@ export default function SelectPlan() {
                           <h4 className="text-base font-semibold text-gray-900">
                             {AUDIT_ADDON.label}
                           </h4>
-                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
-                            7-day trial
-                          </Tag>
+                          {trialCopy.addonTrialTag ? (
+                            <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
+                              {trialCopy.addonTrialTag}
+                            </Tag>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -406,9 +430,11 @@ export default function SelectPlan() {
                           <h4 className="text-base font-semibold text-gray-900">
                             {BARCODE_ADDON.label}
                           </h4>
-                          <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
-                            7-day trial
-                          </Tag>
+                          {trialCopy.addonTrialTag ? (
+                            <Tag className="whitespace-nowrap bg-primary-50 text-primary-700">
+                              {trialCopy.addonTrialTag}
+                            </Tag>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -469,7 +495,7 @@ export default function SelectPlan() {
             <h3 className="mb-3 text-sm font-semibold text-gray-700">
               Cost summary{" "}
               <span className="font-normal text-gray-600">
-                (applied after free trial ends)
+                {trialCopy.costSummaryNote}
               </span>
             </h3>
             <div className="space-y-2 text-sm">
@@ -521,7 +547,9 @@ export default function SelectPlan() {
           </section>
         )}
 
-        <p className="text-center text-sm text-gray-600">{trialText}</p>
+        <p className="text-center text-sm text-gray-600">
+          {leadsWithSubscribe ? subscribeText : trialText}
+        </p>
 
         <input type="hidden" name="priceId" value={activePrice?.id ?? ""} />
         <input
@@ -544,16 +572,11 @@ export default function SelectPlan() {
           />
         ) : null}
 
-        <Button
-          width="full"
-          type="submit"
-          name="intent"
-          value="trial"
-          disabled={disabled}
-          data-analytics="cta-start-trial"
-        >
-          Start {config.freeTrialDays}-day free trial
-        </Button>
+        <SelectPlanSubmitButtons
+          planIntent={planIntent}
+          noPriceSelected={!activePrice}
+          freeTrialDays={config.freeTrialDays}
+        />
       </Form>
 
       <Button variant="link" to="/welcome" className="mt-4">

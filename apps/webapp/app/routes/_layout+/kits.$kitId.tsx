@@ -32,6 +32,7 @@ import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
   deleteKit,
   deleteKitImage,
@@ -111,6 +112,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         extraInclude: {
           assetKits: {
             select: {
+              // The membership id is the kit-slice discriminator booked rows
+              // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
+              // needs it to tell a booking that took THIS kit from one that
+              // took the same pooled asset through another kit.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -127,20 +133,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       },
                     },
                     select: {
+                      // Kit provenance of the booked slice: `assetKitId` is
+                      // the live membership row it was booked under,
+                      // `sourceKitId` the kit itself, which outlives a detach.
+                      // Both NULL = a standalone free-pool slice that belongs
+                      // to no kit.
+                      assetKitId: true,
+                      sourceKitId: true,
+                      // Per-slice departure markers — the record of whether
+                      // these units are out right now. A booking stays ONGOING
+                      // while other assets are away, so its status alone does
+                      // not say this kit is still gone.
+                      checkedOutAt: true,
+                      checkedInAt: true,
                       booking: {
                         select: {
                           id: true,
                           name: true,
                           from: true,
                           status: true,
-                          custodianTeamMember: true,
+                          // Only what the custody card and the redaction read:
+                          // the names shown, and the ids that recognise a
+                          // booking the viewer holds.
+                          custodianTeamMember: {
+                            select: { name: true, userId: true },
+                          },
                           custodianUser: {
                             select: {
+                              id: true,
                               firstName: true,
                               lastName: true,
                               displayName: true,
                               profilePicture: true,
-                              email: true,
                             },
                           },
                         },
@@ -198,9 +222,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       roles: userOrganizations.find((o) => o.organization.id === organizationId)
         ?.roles,
     });
+    // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
+    // `email`, and this route is gated on `kit: read` — held by BASE and
+    // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
+    // applies here (assets carry an array). The current booking is derived
+    // from the REDACTED kit: it is returned beside the kit, so reading the raw
+    // one would ship the holders the redaction just emptied.
+    const [redactedKit] = redactCustodianForViewer([kit], {
+      canSeeAllCustody,
+      userId,
+    });
     const currentBooking = getKitCurrentBooking({
-      id: kit.id,
-      assets: kit.assetKits.map((ak) => ak.asset),
+      id: redactedKit.id,
+      assetKits: redactedKit.assetKits,
     });
 
     const header: HeaderData = {
@@ -213,11 +247,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     };
 
     return payload({
-      // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
-      // `email`, and this route is gated on `kit: read` — held by BASE and
-      // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
-      // applies here (assets carry an array).
-      kit: redactCustodianForViewer([kit], { canSeeAllCustody, userId })[0],
+      kit: redactedKit,
       currentBooking,
       header,
       modelName,
@@ -654,7 +684,13 @@ export default function KitDetails() {
               booking={currentBooking || undefined}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: kit?.custody?.custodian?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: kit.custody ? [kit.custody] : null,
+                  booking: currentBooking,
+                  viewerUserId: userId,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}

@@ -1,8 +1,11 @@
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
-import { bulkCheckInAssets } from "~/modules/asset/service.server";
+import {
+  bulkCheckInAssets,
+  releaseQuantity,
+} from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
@@ -42,9 +45,36 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, currentSearchParams } = parseData(
+    const { assetIds, currentSearchParams, quantities } = parseData(
       formData,
       BulkReleaseCustodySchema.and(CurrentSearchParamsSchema)
+    );
+
+    /**
+     * Units per quantity-tracked asset, sent only by the scanner. See the
+     * field's note on `BulkReleaseCustodySchema`. Named assets are released
+     * through `releaseQuantity`, the same primitive the asset page uses, and
+     * never reach the bulk call. An index submission sends none, so its
+     * behaviour is unchanged.
+     */
+    /**
+     * One entry per asset, not per scanned code.
+     *
+     * The scanner keys its rows by CODE, so an asset scanned through both its
+     * QR and its barcode arrives twice under the same id. The per-unit writes
+     * below run once per entry, so a duplicate would hand the quantity over
+     * twice; the bulk path matches on an id set and is unaffected either way.
+     * Duplicates carry no information (`quantities` holds one number per
+     * asset), so collapsing them is lossless, and kinder than refusing a scan
+     * where the operator did nothing wrong.
+     */
+    const uniqueAssetIds = [...new Set(assetIds)];
+
+    const quantityAssetIds = uniqueAssetIds.filter((id) =>
+      Object.prototype.hasOwnProperty.call(quantities, id)
+    );
+    const bulkAssetIds = uniqueAssetIds.filter(
+      (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
     );
 
     /**
@@ -59,7 +89,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       const custodies = await db.custody.findMany({
         where: {
           assetId: { in: assetIds },
-          asset: { organizationId },
+          asset: {
+            organizationId,
+            // Only the assets this release will actually touch.
+            // `bulkCheckInAssets` skips QUANTITY_TRACKED rows — they are
+            // released individually, with a quantity — and it reports the count
+            // it skipped. Judging them here refuses the whole request over
+            // custody nobody was going to release: a self-service user
+            // selecting their own individual asset alongside a qty-tracked one
+            // that a colleague holds units of got a 403 for the lot.
+            type: { not: AssetType.QUANTITY_TRACKED },
+          },
         },
         select: { custodian: { select: { id: true, userId: true } } },
       });
@@ -86,30 +126,133 @@ export async function action({ request, context }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    const { skippedQuantityTracked } = await bulkCheckInAssets({
-      userId,
-      role,
-      assetIds,
-      organizationId,
-      currentSearchParams,
-      settings,
-      timeZone,
-      // `asset: custody` is a SELF_SERVICE permission, so narrow the
-      // select-all custodian filter to the caller's own custody — otherwise a
-      // self-service user could act on exactly the set a colleague holds.
-      allowedTeamMemberIds: await scopeCustodianFilterIds({
-        teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
-          "teamMember"
-        ),
-        canSeeAllCustody,
+    /**
+     * Releasing needs a custodian, and this scanner never asks for one: a
+     * bulk release takes the asset back from whoever holds it. For a
+     * quantity-tracked asset that is only unambiguous while one person holds
+     * it, so the single holder is resolved here and anything else is refused
+     * by name rather than guessed at. Splitting a release across custodians is
+     * what the asset's own custody list is for.
+     *
+     * Only operator-assigned rows are candidates: a `Custody` row carrying a
+     * `kitCustodyId` was inherited from the kit and goes back by releasing the
+     * kit, which cascade-deletes it.
+     *
+     * The whole scan is checked before any of it is released: both that each
+     * asset has exactly one holder AND that the holder has the units asked
+     * for. Each `releaseQuantity` call commits its own transaction, so a
+     * refusal discovered mid-loop would leave earlier assets already released
+     * while the drawer reports the submission failed, and a retry would then
+     * release them a second time. `releaseQuantity` re-checks the quantity
+     * under its own row lock, which is what actually prevents over-release if
+     * custody moves in between; this pass is what makes the refusal arrive
+     * before anything is written.
+     */
+    /** One resolved `{ assetId, teamMemberId }` per quantity-tracked scan. */
+    const resolvedReleases: { assetId: string; teamMemberId: string }[] = [];
+
+    if (quantityAssetIds.length) {
+      const custodyRows = await db.custody.findMany({
+        where: {
+          assetId: { in: quantityAssetIds },
+          kitCustodyId: null,
+          asset: { organizationId },
+        },
+        select: {
+          assetId: true,
+          teamMemberId: true,
+          quantity: true,
+          asset: { select: { title: true } },
+        },
+      });
+
+      for (const assetId of quantityAssetIds) {
+        const holders = custodyRows.filter((row) => row.assetId === assetId);
+
+        if (holders.length !== 1) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Assets",
+            shouldBeCaptured: false,
+            message:
+              holders.length === 0
+                ? "This asset has no units in anyone's custody to release."
+                : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
+            additionalData: { assetId, holders: holders.length },
+          });
+        }
+
+        if (quantities[assetId] > holders[0].quantity) {
+          throw new ShelfError({
+            cause: null,
+            status: 400,
+            label: "Assets",
+            shouldBeCaptured: false,
+            message: `Nothing was released. "${holders[0].asset.title}" has only ${holders[0].quantity} unit(s) in custody.`,
+            additionalData: {
+              assetId,
+              requested: quantities[assetId],
+              held: holders[0].quantity,
+            },
+          });
+        }
+
+        resolvedReleases.push({
+          assetId,
+          teamMemberId: holders[0].teamMemberId,
+        });
+      }
+    }
+
+    const { skippedQuantityTracked } = bulkAssetIds.length
+      ? await bulkCheckInAssets({
+          userId,
+          role,
+          assetIds: bulkAssetIds,
+          organizationId,
+          currentSearchParams,
+          settings,
+          timeZone,
+          // `asset: custody` is a SELF_SERVICE permission, so narrow the
+          // select-all custodian filter to the caller's own custody, otherwise a
+          // self-service user could act on exactly the set a colleague holds.
+          allowedTeamMemberIds: await scopeCustodianFilterIds({
+            teamMemberIds: new URLSearchParams(
+              currentSearchParams ?? ""
+            ).getAll("teamMember"),
+            canSeeAllCustody,
+            userId,
+            organizationId,
+          }),
+        })
+      : { skippedQuantityTracked: 0 };
+
+    /**
+     * The whole-asset path runs first, and the per-unit writes after it.
+     *
+     * Neither service joins the other's transaction (each opens its own), so
+     * a mixed submission cannot be made all-or-nothing without reworking
+     * primitives that four other custody routes depend on, and holding their
+     * row locks across a whole scan. What the order buys is that the operation
+     * which can still refuse mid-flight goes first: every quantity release
+     * below has already been checked against its holder and their units by the
+     * pass above, while `bulkCheckInAssets` validates its own set as it runs.
+     */
+    for (const { assetId, teamMemberId } of resolvedReleases) {
+      await releaseQuantity({
+        assetId,
+        teamMemberId,
+        quantity: quantities[assetId],
         userId,
         organizationId,
-      }),
-    });
+        role,
+      });
+    }
 
     const skippedNote =
       skippedQuantityTracked > 0
-        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped — release custody individually.`
+        ? ` ${skippedQuantityTracked} quantity-tracked asset(s) were skipped. Release custody individually.`
         : "";
 
     sendNotification({

@@ -194,6 +194,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       permissionResult;
 
     const { session, expectedAssets } = await getAuditSessionDetails({
+      // The scan drawer renders the expected-asset photos.
+      refreshExpectedAssetImages: true,
       id: auditId,
       organizationId,
       userOrganizations,

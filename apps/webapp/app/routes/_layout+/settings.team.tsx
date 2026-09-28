@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { data, Outlet, useLoaderData, useParams } from "react-router";
@@ -21,11 +20,6 @@ import { requirePermission } from "~/utils/roles.server";
 import { premiumIsEnabled } from "~/utils/subscription.server";
 import { resolveTeamUpgradeCta } from "~/utils/team-upgrade-cta";
 
-export type UserFriendlyRoles =
-  | "Administrator"
-  | "Owner"
-  | "Base"
-  | "Self service";
 export const meta = () => [{ title: appendToMetaTitle("Team settings") }];
 
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
@@ -93,13 +87,6 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });
   }
-};
-
-export const organizationRolesMap: Record<string, UserFriendlyRoles> = {
-  [OrganizationRoles.ADMIN]: "Administrator",
-  [OrganizationRoles.OWNER]: "Owner",
-  [OrganizationRoles.BASE]: "Base",
-  [OrganizationRoles.SELF_SERVICE]: "Self service",
 };
 
 export default function TeamSettings() {

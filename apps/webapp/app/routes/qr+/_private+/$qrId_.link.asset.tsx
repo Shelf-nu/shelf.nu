@@ -41,7 +41,7 @@ import {
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getPaginatedAndFilterableAssets,
-  updateAssetQrCode,
+  relinkAssetQrCode,
 } from "~/modules/asset/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import css from "~/styles/link-existing-asset.css?url";
@@ -193,10 +193,19 @@ export const action = async ({
       z.object({ assetId: z.string() })
     );
 
-    await updateAssetQrCode({
-      newQrId: qrId,
+    /**
+     * Goes through `relinkAssetQrCode`, the same service the asset detail page
+     * and the mobile link endpoint use, rather than writing the link directly.
+     * The QR id arrives in the URL and nothing upstream vouches for it — this
+     * route tree has no layout loader — so the code's organization, its
+     * existing links, and the check-then-act window all have to be settled
+     * here.
+     */
+    await relinkAssetQrCode({
+      qrId,
       assetId,
       organizationId,
+      userId: authSession.userId,
     });
 
     return redirect(`/qr/${qrId}/successful-link?type=asset`);

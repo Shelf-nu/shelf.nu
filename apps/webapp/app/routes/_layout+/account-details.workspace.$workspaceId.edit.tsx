@@ -1,4 +1,4 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationType } from "@prisma/client";
 import {
   MaxFileSizeExceededError,
   parseFormData,
@@ -47,7 +47,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import {
+  isOrganizationOwner,
+  requirePermissionInOrganization,
+} from "~/utils/roles.server";
 import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
@@ -66,9 +69,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const { organizations } = await requirePermission({
+    // Judged by the role held in the workspace being edited, which need not be
+    // the one selected.
+    const { organizations } = await requirePermissionInOrganization({
       userId,
       request,
+      organizationId: id,
       entity: PermissionEntity.workspace,
       action: PermissionAction.update,
     });
@@ -186,12 +192,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role, organizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.workspace,
-      action: PermissionAction.update,
-    });
+    const { organizations, userOrganizations } =
+      await requirePermissionInOrganization({
+        userId,
+        request,
+        organizationId: id,
+        entity: PermissionEntity.workspace,
+        action: PermissionAction.update,
+      });
 
     /** Because you can access this view even when you have a different currentOrganization than the one you are editing
      * We need to query the org using the orgId from the params
@@ -365,12 +373,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "sso": {
-        if (role !== OrganizationRoles.OWNER) {
+        /**
+         * SSO decides how everyone in the workspace signs in, so it is
+         * owner-only — stricter than `workspace: update`, which an ADMIN holds.
+         * Tested against the workspace being edited, like the permission check
+         * above, since it need not be the one selected.
+         */
+        if (!isOrganizationOwner({ userOrganizations, organizationId: id })) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
             label: "Settings",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -381,6 +397,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             message: "SSO is not enabled for this organization.",
             additionalData: { userId, id },
             label: "Organization",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
 

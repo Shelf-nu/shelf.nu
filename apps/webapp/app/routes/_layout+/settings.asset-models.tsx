@@ -79,6 +79,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         assetModelIds,
         organizationId,
         currentSearchParams,
+        userId,
       });
 
       sendNotification({
@@ -102,7 +103,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       }
     );
 
-    await deleteAssetModel({ id, organizationId });
+    await deleteAssetModel({ id, organizationId, userId });
 
     sendNotification({
       title: "Asset model deleted",

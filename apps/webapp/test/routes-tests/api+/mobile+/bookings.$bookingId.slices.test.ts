@@ -1,18 +1,16 @@
 /**
  * Response-contract test for the mobile booking detail endpoint's per-slice
- * breakdown (Companion QT display parity, Gap 1). The loader collapses every
- * `BookingAsset` row for a quantity-tracked asset into one merged row (summed
- * quantity), which loses which slice is standalone vs. kit-driven and — worse
- * — mislabels the merged row's `kit` from the asset's FIRST kit membership
- * regardless of which slice(s) it actually came from. This test pins:
+ * breakdown. The loader collapses every `BookingAsset` row for a
+ * quantity-tracked asset into one merged row (summed quantity), so the slices
+ * travel alongside it. This test pins:
  *
- * 1. The new additive `slices[]` array: one entry per BookingAsset row, each
+ * 1. The additive `slices[]` array: one entry per BookingAsset row, each
  *    carrying its own `bookingAssetId` / `quantity` / `assetKitId` / `kit`.
- * 2. The merged-kit fix: `kit`/`kitId` reflect the UNANIMOUS membership across
- *    all of an asset's slices, or `null` for standalone/mixed — replacing the
- *    old `assetKits[0].kit` synthesis that mislabelled non-unanimous rows.
- * 3. A regression control: an asset unanimously in ONE kit must still surface
- *    that kit as its merged `kit` (kit-driven rows stay labelled).
+ * 2. The merged kit: `kit`/`kitId` reflect the UNANIMOUS membership across all
+ *    of an asset's slices, or `null` for standalone/mixed, never an arbitrary
+ *    membership such as the asset's first kit.
+ * 3. An asset unanimously in ONE kit surfaces that kit as its merged `kit`
+ *    (kit-driven rows stay labelled).
  *
  * @see {@link file://./bookings.$bookingId.ts} loader under test
  */
@@ -33,22 +31,29 @@ import type * as BookingServiceServer from "~/modules/booking/service.server";
 import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
 // why: db is the integration boundary — the loader reads the booking (with
-// its BookingAsset slices) via `booking.findFirst` and the lifecycle-progress
-// roll-up via `partialBookingCheckout.findMany`. Stub the latter to an empty
-// log (irrelevant to the slices/kit-label contract under test).
+// its BookingAsset slices) via `booking.findFirst`. Every other read below is
+// stubbed empty, being irrelevant to the slices/kit-label contract under test.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     // why: the lifecycle-progress roll-up reads the slice markers
     // (BookingAsset.checkedOutAt/checkedInAt) plus the checkout sessions to
-    // judge dispatched units per asset; stub both to empty — orthogonal to
-    // the slices/merged-kit serialization contract under test.
+    // judge dispatched units per asset, and the asset order counts the
+    // sessions and the quantity-tracked assets' disposition logs per slice;
+    // stub all three to empty — orthogonal to the slices/merged-kit
+    // serialization contract under test.
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     partialBookingCheckout: { findMany: vi.fn().mockResolvedValue([]) },
+    consumptionLog: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: the fixture's kit-driven slices make the loader describe the kits
+    // they belong to. What those kits look like is pinned by the sibling kits
+    // test; here the payload only has to exist.
+    kit: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -84,7 +89,9 @@ vi.mock("~/modules/booking/service.server", async () => {
     ...actual,
     computeBookingAssetRemaining: vi.fn().mockResolvedValue(0),
     computeBookingAssetRemainingToCheckOut: vi.fn().mockResolvedValue(0),
-    getPartiallyCheckedInAssetIds: vi.fn().mockResolvedValue([]),
+    getDetailedPartialCheckinData: vi
+      .fn()
+      .mockResolvedValue({ checkedInAssetIds: [], partialCheckinDetails: {} }),
   };
 });
 
@@ -112,13 +119,9 @@ beforeEach(() => {
     user: { id: "user-1" },
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue("org-1");
-  getMobileUserContextMock.mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    roles: [OrganizationRoles.ADMIN],
-    canUseBarcodes: true,
-    canUseAudits: true,
-    canSeeAllCustody: true,
-  });
+  getMobileUserContextMock.mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
 });
 
 const K1 = { id: "kit-1", name: "Kit One" };
@@ -131,7 +134,7 @@ describe("GET /api/mobile/bookings/:bookingId — per-slice breakdown + merged k
       id: "booking-1",
       name: "Shoot",
       description: null,
-      status: "DRAFT", // DRAFT → skips getPartiallyCheckedInAssetIds
+      status: "DRAFT", // DRAFT → skips getDetailedPartialCheckinData
       from: null,
       to: null,
       createdAt: new Date("2026-01-01T00:00:00.000Z"),

@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { useRouteLoaderData } from "react-router";
 import type { loader } from "~/routes/_layout+/_layout";
+import { resolveMostPrivilegedRole } from "~/utils/role-precedence";
 
 /**
  * This hook helps you to always know the roles of the current user
@@ -21,8 +22,17 @@ export function useUserRoleHelper() {
   /** A lot of actions share the same permissions for base & self service */
   const isBaseOrSelfService = isBase || isSelfService;
 
+  /**
+   * The one role the servers judge this membership by (its most privileged).
+   * Gates that show or hide an action the server may refuse read this, not the
+   * `is*` flags above, which are true for every role the membership holds.
+   * BASE until the layout data loads, so no role-specific rule applies yet.
+   */
+  const effectiveRole = resolveMostPrivilegedRole(roles ?? []);
+
   return {
     roles,
+    effectiveRole,
     isAdministrator,
     isOwner,
     isAdministratorOrOwner,
