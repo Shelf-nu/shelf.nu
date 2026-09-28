@@ -54,7 +54,7 @@ describe("matchScansToModelRequests", () => {
     expect(result.matchedCountByModel.get("model-1")).toBeUndefined();
   });
 
-  // Review Focus 3: an over-scan must not push a strip past its total.
+  // An over-scan must not push a strip past its total.
   it("stops matching once a model's remaining count is used up", () => {
     const result = matchScansToModelRequests(
       input({
@@ -74,7 +74,7 @@ describe("matchScansToModelRequests", () => {
     expect(result.matchedCountByModel.get("model-1")).toBe(2);
   });
 
-  // Review Focus 2: a reserved unit is a whole unit.
+  // A reserved unit is a whole unit.
   it("never counts a quantity-tracked scan", () => {
     const result = matchScansToModelRequests(
       input({
@@ -88,7 +88,7 @@ describe("matchScansToModelRequests", () => {
     expect(result.matchedCountByModel.get("model-1")).toBeUndefined();
   });
 
-  // Review Focus 4: the fetch resolves after the row appears.
+  // The fetch resolves after the row appears.
   it("parks an unresolved scan as unmatched without crashing", () => {
     const result = matchScansToModelRequests(
       input({ items: { "qr-1": { type: "asset" as const, data: undefined } } })

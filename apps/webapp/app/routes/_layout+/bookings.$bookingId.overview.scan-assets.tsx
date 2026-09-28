@@ -16,7 +16,6 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
-import { db } from "~/database/db.server";
 import { useBookingAssignSessionInitialization } from "~/hooks/use-booking-assign-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
@@ -25,10 +24,9 @@ import {
   addScannedAssetsToBooking,
   getBooking,
 } from "~/modules/booking/service.server";
-import { resolveClaimableAssetIds } from "~/modules/booking-model-request/claimable";
+import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -108,62 +106,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Reservation context for the scanner, or null when the booking reserves
      * no models and the drawer should look exactly as it always has.
      *
-     * `getBooking` already returns everything this needs, so there is no
-     * extra query here: `modelRequests` with its model's name, and
-     * `bookingAssets` with every scalar plus the asset's type.
-     *
-     * `getOutstandingModelRequests` is the one definition of "outstanding"
-     * for a `BookingModelRequest`. Both booking scanners (this screen and
-     * Check Out) read it, so a scan can never be worth a different amount
-     * depending which one is open.
+     * `getBooking` already returns everything `deriveBookingScanSession`
+     * needs, so there is no extra query here beyond its own supplementary
+     * asset lookup: `modelRequests` with its model's name, and
+     * `bookingAssets` with every scalar plus the asset's type. The
+     * derivation is shared with the Check Out scanner's loader so a scan can
+     * never be worth a different amount depending which screen is open.
      */
-    const outstanding = getOutstandingModelRequests(booking.modelRequests);
-
-    /**
-     * Model ids for the assets already on the booking.
-     *
-     * A second read rather than a wider booking include:
-     * `BOOKING_WITH_ASSETS_INCLUDE` is shared by many routes and selects
-     * the model's images, not its id.
-     */
-    const assetModelIdByAssetId = new Map<string, string | null>();
-    const alreadyIncludedAssetIds = booking.bookingAssets.map(
-      (row) => row.asset.id
-    );
-    if (alreadyIncludedAssetIds.length > 0) {
-      const rows = await db.asset.findMany({
-        where: { id: { in: alreadyIncludedAssetIds }, organizationId },
-        select: { id: true, assetModelId: true },
+    const { expectedModelRequests, alreadyIncluded } =
+      await deriveBookingScanSession({
+        modelRequests: booking.modelRequests,
+        bookingAssets: booking.bookingAssets,
+        organizationId,
       });
-      for (const row of rows) {
-        assetModelIdByAssetId.set(row.id, row.assetModelId);
-      }
-    }
-
-    const claimableAssetIds = resolveClaimableAssetIds(booking.bookingAssets);
 
     const assignSession =
-      outstanding.length === 0
+      expectedModelRequests.length === 0
         ? null
-        : {
-            expectedModelRequests: outstanding.map((modelRequest) => ({
-              assetModelId: modelRequest.assetModelId,
-              assetModelName: modelRequest.assetModel.name,
-              booked: modelRequest.quantity,
-              remaining: modelRequest.quantity - modelRequest.fulfilledQuantity,
-            })),
-            alreadyIncluded: booking.bookingAssets.map((row) => ({
-              id: row.asset.id,
-              title: row.asset.title,
-              mainImage: row.asset.mainImage,
-              thumbnailImage: row.asset.thumbnailImage,
-              assetModelId: assetModelIdByAssetId.get(row.asset.id) ?? null,
-              claimable: claimableAssetIds.has(row.asset.id),
-              kitId: row.asset.assetKits[0]?.kitId ?? null,
-              bookedQuantity: row.quantity,
-              type: row.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
-            })),
-          };
+        : { expectedModelRequests, alreadyIncluded };
 
     return payload({ title, header, booking, assignSession });
   } catch (cause) {
@@ -338,8 +298,11 @@ export const handle = {
 };
 
 export default function ScanAssetsForBookings() {
-  const { assignSession } = useLoaderData<typeof loader>();
-  useBookingAssignSessionInitialization({ session: assignSession });
+  const { booking, assignSession } = useLoaderData<typeof loader>();
+  useBookingAssignSessionInitialization({
+    session: assignSession,
+    bookingId: booking.id,
+  });
 
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();

@@ -259,10 +259,20 @@ export default function AddAssetsToBookingDrawer({
   const errors = Object.entries(items).filter(([, item]) => !!item?.error);
 
   // Asset blockers
+  //
+  // A CLAIMABLE asset is already on the booking by definition: its row
+  // exists with no reservation stamp yet, and scanning it is how it comes to
+  // answer a reserved unit (the server claims it via
+  // `claimUnstampedBookingRows`). Excluding claimable ids here is what lets
+  // that submit go through instead of being refused as a plain duplicate.
+  // The progress strip and pull list above already move when this happens,
+  // so the operator sees the claim take effect there.
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
-    .filter((asset) =>
-      booking.bookingAssets.some((ba) => ba.assetId === asset.id)
+    .filter(
+      (asset) =>
+        booking.bookingAssets.some((ba) => ba.assetId === asset.id) &&
+        !claimableIncludedIds.has(asset.id)
     )
     .map((a) => !!a && a.id);
 
@@ -555,7 +565,7 @@ function AssignReservationHeader({
           idPrefix="assign"
         />
         {pendingModelRows.length > 0 ? (
-          <ul className="flex flex-col gap-2 border-t border-gray-200 pt-3">
+          <ul className="flex max-h-[176px] flex-col gap-2 overflow-y-auto border-t border-gray-200 pt-3 pr-1">
             {pendingModelRows.map((row) => (
               <PendingModelRowItem
                 key={row.key}

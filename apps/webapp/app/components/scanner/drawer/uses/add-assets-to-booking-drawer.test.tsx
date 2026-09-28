@@ -159,6 +159,10 @@ function kitFixture({
  *   the route's session hook would seed `expectedModelRequestsAtom`.
  * @param options.alreadyIncluded - Assets already on the booking, as the
  *   route would seed `assignAlreadyIncludedAtom`.
+ * @param options.bookingAssets - The booking's own `bookingAssets` rows, as
+ *   the loader would return them. Drives the "already added to the booking"
+ *   blocker, which reads `booking.bookingAssets` directly rather than the
+ *   `alreadyIncluded` atom.
  * @param options.scannedAssets - Resolved asset scans, keyed by their QR id.
  * @param options.scannedKits - Resolved kit scans, keyed by their QR id.
  */
@@ -166,6 +170,7 @@ function renderDrawer(
   options: {
     expectedModelRequests?: ExpectedModelRequest[];
     alreadyIncluded?: AlreadyIncludedRow[];
+    bookingAssets?: Array<{ assetId: string }>;
     scannedAssets?: Record<string, Partial<AssetFromQr>>;
     scannedKits?: Record<string, Partial<KitFromQr>>;
   } = {}
@@ -192,7 +197,7 @@ function renderDrawer(
     booking: {
       id: "booking-1",
       status: "RESERVED",
-      bookingAssets: [],
+      bookingAssets: options.bookingAssets ?? [],
     },
   } as never);
   useRouteLoaderDataMock.mockReturnValue({
@@ -231,7 +236,7 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
     expect(screen.getAllByText("Model One").length).toBe(3);
   });
 
-  // Review Focus 1: the common case is a booking with no models at all.
+  // The common case is a booking with no models at all.
   it("renders no progress chrome when nothing is reserved", () => {
     renderDrawer({ expectedModelRequests: [] });
 
@@ -263,9 +268,8 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
     expect(screen.queryAllByText("0 / 2")).toHaveLength(0);
   });
 
-  // Review Focus 5: a kit's member counts once toward the model it answers,
-  // even when the operator also scans that member's own QR in the same
-  // session.
+  // A kit's member counts once toward the model it answers, even when the
+  // operator also scans that member's own QR in the same session.
   it("counts a scanned kit's member once, and not again for the member's own scan", () => {
     renderDrawer({
       expectedModelRequests: [
@@ -301,5 +305,47 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
 
     expect(screen.getAllByText("1 / 2").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("2 / 2")).toHaveLength(0);
+  });
+
+  // A claimable asset is already on the booking by definition (its row
+  // exists with no reservation stamp yet), so it is both in
+  // `booking.bookingAssets` and marked `claimable` in `alreadyIncluded`.
+  // Scanning it is how it answers the reservation server-side; the
+  // "already added to the booking" blocker must not refuse it.
+  it("does not disable submit for a claimable already-included asset", () => {
+    renderDrawer({
+      expectedModelRequests: [
+        {
+          assetModelId: "model-1",
+          assetModelName: "Model One",
+          booked: 2,
+          remaining: 2,
+        },
+      ],
+      alreadyIncluded: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-1",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+      ],
+      bookingAssets: [{ assetId: "asset-1" }],
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
 });
