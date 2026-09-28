@@ -147,7 +147,12 @@ export const NewAssetFormSchema = z.object({
   minQuantity: z
     .string()
     .optional()
-    .transform((val) => (val === "" || val === undefined ? null : +val))
+    // Trimmed first: `+"   "` is 0, so blank-looking input would otherwise be
+    // stored as a real threshold of zero the operator never chose.
+    .transform((val) => {
+      const trimmed = val?.trim();
+      return trimmed ? +trimmed : null;
+    })
     .pipe(
       z
         .number({ invalid_type_error: "Min quantity must be a number" })

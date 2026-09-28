@@ -97,6 +97,22 @@ describe("NewAssetFormSchema", () => {
     }
   });
 
+  it("treats a whitespace-only minQuantity as no threshold, not zero", () => {
+    // `+"   "` is 0, so a blank-looking input would otherwise be saved as a real
+    // out-of-stock threshold that the operator never chose.
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      minQuantity: "   ",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.minQuantity).toBeNull();
+    }
+  });
+
   it("rejects negative minQuantity", () => {
     const result = NewAssetFormSchema.safeParse({
       ...baseValidData,

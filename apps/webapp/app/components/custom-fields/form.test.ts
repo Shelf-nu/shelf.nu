@@ -40,7 +40,26 @@ describe("CustomFieldSubmissionSchema", () => {
     expect(result.success).toBe(false);
   });
 
-  it("accepts an OPTION field with one real option, trimmed", () => {
+  it("accepts an OPTION field with one real option", () => {
+    const result = CustomFieldSubmissionSchema.safeParse({
+      ...base,
+      type: "OPTION",
+      options: ["Large"],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  /**
+   * The schema validates options, it does not rewrite them. An option is the
+   * exact string an asset stores in `AssetCustomFieldValue`, and
+   * `getSchema` validates a stored value by exact membership
+   * (`options.includes(v)`), so editing a definition must not change the
+   * spelling of an option that assets already point at. Normalising new input is
+   * `OptionBuilder`'s job, where it only ever affects what the operator is
+   * typing now.
+   */
+  it("passes a padded option through unchanged rather than renaming it", () => {
     const result = CustomFieldSubmissionSchema.safeParse({
       ...base,
       type: "OPTION",
@@ -49,20 +68,22 @@ describe("CustomFieldSubmissionSchema", () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.options).toEqual(["Large"]);
+      expect(result.data.options).toEqual([" Large "]);
     }
   });
 
-  it("drops blank options but keeps the real ones", () => {
+  it("counts only selectable options when requiring at least one", () => {
+    // A blank entry cannot be picked, so it does not satisfy the rule, but the
+    // real option beside it does and the array is still stored verbatim.
     const result = CustomFieldSubmissionSchema.safeParse({
       ...base,
       type: "OPTION",
-      options: ["Small", "  ", "Large"],
+      options: ["  ", "Large"],
     });
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.options).toEqual(["Small", "Large"]);
+      expect(result.data.options).toEqual(["  ", "Large"]);
     }
   });
 

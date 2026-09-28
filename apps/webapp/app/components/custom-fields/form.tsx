@@ -30,6 +30,39 @@ import { Button } from "../shared/button";
 import { Card } from "../shared/card";
 import { Spinner } from "../shared/spinner";
 
+/** Shown when an OPTION field would be saved with nothing to choose from. */
+export const MISSING_OPTIONS_MESSAGE =
+  "Please add at least one option for a dropdown field";
+
+/**
+ * The options an operator could actually pick. A blank entry renders a row in
+ * the dropdown that selects nothing and cannot be told apart from its
+ * neighbours, so it does not count towards having options.
+ */
+export function selectableOptions(options?: string[] | null): string[] {
+  return (options ?? []).filter((option) => option.trim() !== "");
+}
+
+/**
+ * Whether saving this type with these options would leave a dropdown nobody can
+ * use. An OPTION field with no selectable options is not merely empty, it is
+ * unusable: the dropdown renders no choices, and a REQUIRED one then demands a
+ * value that cannot be picked, which blocks saving the asset at all.
+ *
+ * Shared by the submission schema and the edit action. The schema can only judge
+ * the SUBMITTED type, while the edit action ignores that value because a field's
+ * type is immutable once it exists, so the action re-checks against the persisted
+ * type. Both call this, so the two cannot answer differently.
+ */
+export function optionFieldIsMissingOptions(
+  type: CustomFieldType,
+  options?: string[] | null
+): boolean {
+  return (
+    type === CustomFieldType.OPTION && selectableOptions(options).length === 0
+  );
+}
+
 export const NewCustomFieldFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   helpText: z
@@ -46,16 +79,12 @@ export const NewCustomFieldFormSchema = z.object({
     .optional()
     .transform((val) => (val === "on" ? true : false)),
   organizationId: z.string(),
-  // Trimmed, with blanks dropped. `OptionBuilder` gates on a truthy string and
-  // never trims, so a whitespace-only entry reaches here; stored as-is it would
-  // render a row in the dropdown that an operator can see but not meaningfully
-  // pick, and padded values would not match the stored value on the asset form.
-  options: z
-    .array(z.string())
-    .optional()
-    .transform(
-      (opts) => opts?.map((opt) => opt.trim()).filter((opt) => opt !== "")
-    ),
+  // Stored verbatim. An option IS the string an asset keeps in
+  // `AssetCustomFieldValue`, and a stored value is validated by exact membership
+  // (`options.includes(v)` in `getSchema`), so rewriting an option here would
+  // orphan every asset already pointing at the old spelling. Normalising what an
+  // operator types is `OptionBuilder`'s job, where it touches only new input.
+  options: z.array(z.string()).optional(),
   categories: z
     .array(z.string().min(1, "Please select a category"))
     .optional()
@@ -76,14 +105,11 @@ export const NewCustomFieldFormSchema = z.object({
  */
 export const CustomFieldSubmissionSchema = NewCustomFieldFormSchema.superRefine(
   (data, ctx) => {
-    // An OPTION field with nothing to choose from is not merely empty, it is
-    // unusable: the dropdown renders no choices, and a REQUIRED one then demands
-    // a value that cannot be picked, which blocks saving the asset entirely.
-    if (data.type === CustomFieldType.OPTION && !data.options?.length) {
+    if (optionFieldIsMissingOptions(data.type, data.options)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["options"],
-        message: "Please add at least one option for a dropdown field",
+        message: MISSING_OPTIONS_MESSAGE,
       });
     }
   }

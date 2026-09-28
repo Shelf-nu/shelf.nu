@@ -270,11 +270,19 @@ describe("mergedSchema: required numeric fields accept zero", () => {
     expect(result.success).toBe(false);
   });
 
-  it("rejects an omitted required number field", () => {
-    const result = schemaFor("number").safeParse({});
+  it.each(["number", "amount"] as const)(
+    "names the field when a required %s field is omitted",
+    (type) => {
+      const result = schemaFor(type).safeParse({});
 
-    expect(result.success).toBe(false);
-  });
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        // A union type error ("Expected string, received undefined") would be
+        // true and useless. The operator has to be told which field to fill in.
+        expect(result.error.issues[0].message).toBe("Shelf count is required");
+      }
+    }
+  );
 
   it("rejects a non-numeric required number field", () => {
     const result = schemaFor("number").safeParse({ "cf-cf1": "abc" });

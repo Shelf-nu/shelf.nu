@@ -24,9 +24,16 @@ import { parseMarkdownToReact } from "./md";
  */
 const requiredNumber = (field_name?: string) =>
   z
-    .union([z.string(), z.number()])
+    // `undefined` is admitted so the missing case reaches the check below and
+    // gets the named message. Leaving it to the union would answer "Expected
+    // string, received undefined", which is true and tells the operator nothing.
+    .union([z.string(), z.number(), z.undefined()])
     .superRefine((value, ctx) => {
-      if (typeof value === "string" && value.trim() === "") {
+      const isMissing =
+        value === undefined ||
+        (typeof value === "string" && value.trim() === "");
+
+      if (isMissing) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: field_name

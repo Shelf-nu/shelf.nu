@@ -10,6 +10,8 @@ import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
   CustomFieldSubmissionSchema,
+  MISSING_OPTIONS_MESSAGE,
+  optionFieldIsMissingOptions,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -21,7 +23,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -110,6 +112,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       parsedData;
 
     const field = await getCustomField({ organizationId, id });
+
+    /**
+     * The submitted `type` is not used below: a field's type is immutable once it
+     * exists. So the schema's version of this rule, which can only see what was
+     * posted, is not enough here. Re-check against the type the field actually
+     * has, or a post claiming a different type would strip an OPTION field's
+     * options and leave a dropdown nobody can pick from.
+     */
+    if (optionFieldIsMissingOptions(field.type, options)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Options required",
+        message: MISSING_OPTIONS_MESSAGE,
+        additionalData: { id, organizationId, userId: authSession.userId },
+        label: "Custom fields",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     /** If they are activating a field, we have to make sure that they are not already at the limit */
     const isActivatingField = !field.active && active !== field.active;
