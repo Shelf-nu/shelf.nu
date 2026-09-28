@@ -7,6 +7,8 @@
  *    existed;
  *  - each outstanding model request reports `remaining` as `quantity`
  *    minus `fulfilledQuantity`, not the raw booked count;
+ *  - a request with `fulfilledAt` set is settled and does not surface as
+ *    outstanding, even when `fulfilledQuantity` is still below `quantity`;
  *  - a standalone `BookingAsset` row with no reservation stamp is
  *    claimable, and one that already answered a reservation is not.
  *
@@ -132,6 +134,29 @@ describe("scan-assets loader assignSession", () => {
         remaining: 2,
       },
     ]);
+  });
+
+  it("treats a request closed early as settled, not outstanding", async () => {
+    // A request can be marked fulfilled while its quantity still exceeds
+    // what was assigned: the remainder was released rather than scanned in.
+    // `fulfilledAt` is what settles the request, so this must NOT surface as
+    // an outstanding reservation even though fulfilledQuantity < quantity.
+    vi.mocked(getBooking).mockResolvedValue(
+      bookingWith({
+        modelRequests: [
+          {
+            id: "req-1",
+            assetModelId: "model-1",
+            quantity: 3,
+            fulfilledQuantity: 1,
+            fulfilledAt: new Date("2026-01-01T09:00:00Z"),
+            assetModel: { id: "model-1", name: "Model One" },
+          },
+        ],
+      }) as unknown as Awaited<ReturnType<typeof getBooking>>
+    );
+
+    expect((await runLoader()).assignSession).toBeNull();
   });
 
   it("marks an unstamped standalone row claimable and a stamped one not", async () => {
