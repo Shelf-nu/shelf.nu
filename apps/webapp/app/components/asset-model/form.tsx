@@ -29,6 +29,7 @@ import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { zodFieldIsRequired } from "~/utils/zod";
+import { optionalNumberFromString } from "~/utils/zod-numeric";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
@@ -51,10 +52,10 @@ export const AssetModelFormSchema = z.object({
   name: z.string().min(2, "Name is required"),
   description: z.string().optional(),
   defaultCategoryId: z.string().optional(),
-  defaultValuation: z
-    .string()
-    .optional()
-    .transform((val) => (val ? +val : null)),
+  defaultValuation: optionalNumberFromString({
+    blank: null,
+    fieldName: "Default valuation",
+  }),
   preventRedirect: z.string().optional(),
 });
 
