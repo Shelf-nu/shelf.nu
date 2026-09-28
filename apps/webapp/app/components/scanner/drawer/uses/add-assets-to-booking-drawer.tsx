@@ -576,7 +576,7 @@ function AssignReservationHeader({
  */
 function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
   return (
-    <li className="flex items-center gap-2">
+    <li className="flex items-center gap-2 border-b border-gray-200 pb-2">
       <div
         aria-hidden="true"
         className="flex size-[40px] shrink-0 items-center justify-center rounded-[2px] border border-gray-200 bg-white"

@@ -16,7 +16,7 @@
  *   `createStore` pattern.
  */
 
-import { AssetStatus, AssetType } from "@prisma/client";
+import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import { Provider } from "jotai";
 import { createStore } from "jotai/vanilla";
@@ -30,7 +30,10 @@ import {
   expectedModelRequestsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 
 import AddAssetsToBookingDrawer from "./add-assets-to-booking-drawer";
 
@@ -112,6 +115,43 @@ function assetFixture(overrides: Partial<AssetFromQr>): AssetFromQr {
   } as AssetFromQr;
 }
 
+/** One member of a scanned kit, as the scanner's kit include selects it. */
+type KitMember = KitFromQr["assetKits"][number]["asset"];
+
+/**
+ * A resolved kit scan, defaulted so a test only has to state its members.
+ * `KitRow` reads `status`, `_count.assetKits` and each member's `status` and
+ * `availableToBook` on every scan regardless of what the test is checking, so
+ * leaving them out would crash the render rather than exercise the matching
+ * logic.
+ */
+function kitFixture({
+  id,
+  name,
+  members,
+}: {
+  id: string;
+  name: string;
+  members: Array<Pick<KitMember, "id" | "type" | "assetModelId">>;
+}): Partial<KitFromQr> {
+  return {
+    id,
+    name,
+    status: KitStatus.AVAILABLE,
+    _count: { assetKits: members.length },
+    assetKits: members.map((member, index) => ({
+      id: `${id}-membership-${index}`,
+      quantity: 1,
+      asset: {
+        status: AssetStatus.AVAILABLE,
+        availableToBook: true,
+        custody: [],
+        ...member,
+      },
+    })) as KitFromQr["assetKits"],
+  };
+}
+
 /**
  * Mounts the drawer with a seeded reservation session.
  *
@@ -120,26 +160,33 @@ function assetFixture(overrides: Partial<AssetFromQr>): AssetFromQr {
  * @param options.alreadyIncluded - Assets already on the booking, as the
  *   route would seed `assignAlreadyIncludedAtom`.
  * @param options.scannedAssets - Resolved asset scans, keyed by their QR id.
+ * @param options.scannedKits - Resolved kit scans, keyed by their QR id.
  */
 function renderDrawer(
   options: {
     expectedModelRequests?: ExpectedModelRequest[];
     alreadyIncluded?: AlreadyIncludedRow[];
     scannedAssets?: Record<string, Partial<AssetFromQr>>;
+    scannedKits?: Record<string, Partial<KitFromQr>>;
   } = {}
 ) {
   const store = createStore();
   store.set(expectedModelRequestsAtom, options.expectedModelRequests ?? []);
   store.set(assignAlreadyIncludedAtom, options.alreadyIncluded ?? []);
-  store.set(
-    scannedItemsAtom,
-    Object.fromEntries(
+  store.set(scannedItemsAtom, {
+    ...Object.fromEntries(
       Object.entries(options.scannedAssets ?? {}).map(([qrId, asset]) => [
         qrId,
         { type: "asset" as const, data: assetFixture(asset) },
       ])
-    )
-  );
+    ),
+    ...Object.fromEntries(
+      Object.entries(options.scannedKits ?? {}).map(([qrId, kit]) => [
+        qrId,
+        { type: "kit" as const, data: kit as KitFromQr },
+      ])
+    ),
+  });
 
   useLoaderDataMock.mockReturnValue({
     booking: {
@@ -214,5 +261,45 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
 
     expect(screen.getAllByText("1 / 2").length).toBeGreaterThan(0);
     expect(screen.queryAllByText("0 / 2")).toHaveLength(0);
+  });
+
+  // Review Focus 5: a kit's member counts once toward the model it answers,
+  // even when the operator also scans that member's own QR in the same
+  // session.
+  it("counts a scanned kit's member once, and not again for the member's own scan", () => {
+    renderDrawer({
+      expectedModelRequests: [
+        {
+          assetModelId: "model-1",
+          assetModelName: "Model One",
+          booked: 2,
+          remaining: 2,
+        },
+      ],
+      scannedKits: {
+        "qr-kit": kitFixture({
+          id: "kit-1",
+          name: "Kit One",
+          members: [
+            {
+              id: "asset-1",
+              type: AssetType.INDIVIDUAL,
+              assetModelId: "model-1",
+            },
+          ],
+        }),
+      },
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(screen.getAllByText("1 / 2").length).toBeGreaterThan(0);
+    expect(screen.queryAllByText("2 / 2")).toHaveLength(0);
   });
 });
