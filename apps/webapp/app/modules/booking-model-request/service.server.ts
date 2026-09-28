@@ -2138,16 +2138,53 @@ export async function claimUnstampedBookingRows(
 
   try {
     /**
-     * The eligible rows, and the asset fields the helper matches on. Scoped
-     * through the booking's own organization because `assetIds` is request
-     * input.
+     * The eligible rows, locked before anything is discharged. Scoped through
+     * the booking's own organization because `assetIds` is request input.
+     *
+     * The lock is what makes the claim safe to run twice at once. The stamp
+     * and the decrement are two statements here, unlike every other caller,
+     * which stamps while INSERTing and so collides on
+     * `BookingAsset_manual_unique`. Without it two scanners both read the row
+     * as unstamped, both discharge a unit, and only one stamp lands: one
+     * physical asset answers two reserved units, and the reservation then
+     * reads as fulfilled and refuses to be removed.
+     *
+     * Under READ COMMITTED the loser blocks here, re-evaluates the predicate
+     * once the winner commits, sees the stamp and comes back empty, so the
+     * early return below leaves the reservation alone. Prisma cannot express
+     * `FOR UPDATE`, hence the raw read; `OF ba` keeps the lock off `Booking`,
+     * which callers may already hold.
+     *
+     * `BookingAsset` and `Booking` declare no `@map` on these fields, so the
+     * Prisma names ARE the column names.
+     * @see {@link file://./../../../../../.claude/rules/raw-sql-respects-prisma-map.md}
+     */
+    const lockedRows: Array<{ assetId: string }> = await tx.$queryRaw`
+      SELECT ba."assetId"
+      FROM "BookingAsset" ba
+      JOIN "Booking" b ON b."id" = ba."bookingId"
+      WHERE ba."bookingId" = ${bookingId}
+        AND ba."assetId" = ANY(${uniqueAssetIds}::text[])
+        AND ba."assetKitId" IS NULL
+        AND ba."bookingModelRequestId" IS NULL
+        AND b."organizationId" = ${organizationId}
+      FOR UPDATE OF ba
+    `;
+
+    const lockedAssetIds = lockedRows.map((locked) => locked.assetId);
+    if (lockedAssetIds.length === 0) return new Map();
+
+    /**
+     * The asset fields the helper matches on, for the rows just locked. A
+     * second read rather than a wider raw select, so the asset shape stays
+     * typed and the model match keeps reading from one place.
      */
     const rows: Array<{
       asset: Pick<Asset, "id" | "title" | "assetModelId" | "type">;
     }> = await tx.bookingAsset.findMany({
       where: {
         bookingId,
-        assetId: { in: uniqueAssetIds },
+        assetId: { in: lockedAssetIds },
         assetKitId: null,
         bookingModelRequestId: null,
         booking: { organizationId },

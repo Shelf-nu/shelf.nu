@@ -40,6 +40,15 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+// why: the claim's transaction opens on the booking row, so lock order is the
+// same on every path that reaches it and the two cannot deadlock. The lock is
+// a raw `SELECT … FOR UPDATE`, which the model-shaped stubs above cannot
+// answer; this module only has to take it, and the ordering it guarantees is
+// asserted below.
+vi.mock("~/modules/booking/utils.server", () => ({
+  lockBookingForStatusCheck: vi.fn().mockResolvedValue("RESERVED"),
+}));
+
 // why: the full fulfil flow, scan-to-add and progressive check-out each have
 // their own suites in service.server.test.ts; this module only chooses and
 // sequences them, which is what these tests pin.

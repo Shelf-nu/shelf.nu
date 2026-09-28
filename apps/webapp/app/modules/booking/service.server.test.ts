@@ -16229,12 +16229,31 @@ describe("model reservation guard — write paths", () => {
     });
 
     it("writes no standalone row for a scanned asset the booking already holds loose", async () => {
-      expect.assertions(3);
+      expect.assertions(4);
       // why: the flat fixture answers every pre-existing read; here it says
       // `asset-held` already has a standalone row on this booking.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
       ).mockResolvedValue([{ assetId: "asset-held", quantity: 1 }]);
+      // why: unlike its siblings this case leaves one asset genuinely new, so
+      // the post-commit notes actually run. They read the booking's name and
+      // the assets' titles, neither of which the suite-wide stubs carry.
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => ({
+              id,
+              title: `Asset ${id}`,
+              type: AssetType.INDIVIDUAL,
+            }))
+          )
+      );
+      // @ts-expect-error mocked
+      db.booking.update.mockResolvedValue({
+        id: "booking-1",
+        name: "Booking 1",
+        status: BookingStatus.ONGOING,
+      });
 
       await addScannedAssetsToBooking({
         assetIds: ["asset-held", "asset-new"],
@@ -16263,6 +16282,18 @@ describe("model reservation guard — write paths", () => {
       expect(
         vitest.mocked(claimUnstampedBookingRows).mock.calls[0][0].assetIds
       ).toEqual(["asset-held"]);
+      // The audit trail describes what happened: only the new unit was added.
+      // A note or event naming the rescanned one is a false record, and the
+      // feed is where an operator goes to find out what a scan did.
+      const noteAssetIds = (
+        db.asset.findMany as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(
+          (call) =>
+            (call[0] as { where?: { id?: { in?: string[] } } })?.where?.id?.in
+        )
+        .filter((ids): ids is string[] => Array.isArray(ids));
+      expect(noteAssetIds.at(-1)).toEqual(["asset-new"]);
     });
 
     it("keeps the kit slice for a QUANTITY_TRACKED asset the booking already holds loose", async () => {

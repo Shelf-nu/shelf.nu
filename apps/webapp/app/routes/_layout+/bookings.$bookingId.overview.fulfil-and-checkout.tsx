@@ -52,6 +52,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
+import { resolveClaimableAssetIds } from "~/modules/booking-model-request/claimable";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -234,26 +235,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Assets whose standalone row carries no reservation stamp.
+     * Assets already on the booking that a scan could still make answer a
+     * reservation.
      *
-     * Such a row answers nothing: it arrived before the reservation existed,
-     * through a re-save, or before the asset's model matched one. Scanning it
-     * can still claim a reserved unit, which is what the drawer needs to know
-     * to show it as counted rather than as a duplicate. Computed here rather
-     * than shipped as raw ids because an asset can hold both a standalone row
-     * and kit rows, which the flat list below cannot express, and because the
-     * server owns the rule the write enforces.
-     *
-     * Kit-driven rows are excluded: a reservation promises loose units, and a
-     * kit's are answered by scanning the kit.
+     * Resolved server-side, and through the shared rule rather than inline:
+     * the drawer renders a "now counts" badge off this flag and moves the
+     * per-model progress strip by it, so it has to agree with what the write
+     * will do. It also reads every row of the booking, which the flat list
+     * below cannot express, because one asset can hold several at once.
      */
-    const claimableAssetIds = new Set(
-      booking.bookingAssets
-        .filter(
-          (ba) => ba.assetKitId === null && ba.bookingModelRequestId === null
-        )
-        .map((ba) => ba.asset.id)
-    );
+    const claimableAssetIds = resolveClaimableAssetIds(booking.bookingAssets);
 
     const alreadyIncluded = booking.bookingAssets.map((ba) => ({
       id: ba.asset.id,

@@ -181,6 +181,23 @@ function installClaimSimulator() {
       // stub. It must report whether the row exists and change nothing —
       // falling through to the claim branch below would silently increment
       // `fulfilledQuantity` on every upsert the suite runs.
+      // why: the claim's eligible-row lock is a fourth raw statement reaching
+      // this stub. It answers from the same staged rows as the typed read that
+      // follows it, so one `stageRows` call still describes the whole fixture.
+      // Falling through would increment `fulfilledQuantity` for a statement
+      // that discharges nothing.
+      if (sql.includes("FOR UPDATE") && sql.includes('"BookingAsset"')) {
+        const eligible = (await (
+          db.bookingAsset.findMany as unknown as (args: {
+            where: { bookingModelRequestId: null };
+          }) => Promise<Array<{ asset: { id: string } }>>
+        )({ where: { bookingModelRequestId: null } })) as Array<{
+          asset: { id: string };
+        }>;
+        return (eligible ?? []).map((eligibleRow) => ({
+          assetId: eligibleRow.asset.id,
+        }));
+      }
       if (sql.includes("FOR UPDATE") && sql.includes('"BookingModelRequest"')) {
         const locked = await (
           db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
@@ -2397,6 +2414,69 @@ describe("claimUnstampedBookingRows", () => {
     // @ts-expect-error mocked
     db.bookingModelRequest.findUnique.mockResolvedValue(null);
     stageRows([]);
+  });
+
+  it("locks the eligible rows before discharging anything", async () => {
+    expect.assertions(4);
+    stageRows([row("asset-1")]);
+    stageRequest();
+
+    await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    // Two scanners can reach the same unstamped row at once. This path stamps
+    // and decrements in separate statements, so without the lock both pass the
+    // eligibility read, both discharge a unit, and only one stamp lands.
+    const lock = lockOn("BookingAsset");
+    expect(lock).toBeDefined();
+    // The predicate has to be the eligibility one, or the lock guards the
+    // wrong rows: a lock on every row of the booking serialises unrelated
+    // scans, and one missing `bookingModelRequestId IS NULL` re-locks rows
+    // that already answered.
+    expect(lock?.sql).toContain('ba."bookingModelRequestId" IS NULL');
+    expect(lock?.sql).toContain('ba."assetKitId" IS NULL');
+    // Taken before the decrement, not after it. Locking once the unit is
+    // already discharged protects nothing.
+    const decrement = rawStatements().find((statement) =>
+      statement.sql.includes('SET "fulfilledQuantity"')
+    );
+    expect(lock?.order).toBeLessThan(decrement?.order ?? Infinity);
+  });
+
+  it("discharges nothing when the lock finds the row already claimed", async () => {
+    expect.assertions(2);
+    // The losing side of that race: the winner committed its stamp while this
+    // transaction waited on the row, so the predicate no longer matches.
+    stageRows([]);
+    stageRequest();
+
+    const claimed = await claimUnstampedBookingRows(
+      {
+        bookingId: BOOKING_ID,
+        assetIds: ["asset-1"],
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      },
+      tx
+    );
+
+    expect(claimed.size).toBe(0);
+    // The early return has to sit ABOVE the decrement. A reservation that lost
+    // the race must be left exactly as the winner set it.
+    expect(
+      (
+        await (
+          db.bookingModelRequest.findUnique as unknown as FindUniqueRequestMock
+        )()
+      )?.fulfilledQuantity
+    ).toBe(0);
   });
 
   it("claims for a standalone row that carries no stamp, and writes it", async () => {

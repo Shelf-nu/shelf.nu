@@ -3699,6 +3699,9 @@ export async function fulfilModelRequestsAndCheckout({
       organizationId,
     });
 
+    /** The assets the scan actually put on the booking, for the notes below. */
+    let addedAssetIds: string[] = [];
+
     /**
      * Single atomic transaction:
      *   1. Materialise scanned assets against outstanding model requests
@@ -3722,7 +3725,7 @@ export async function fulfilModelRequestsAndCheckout({
         await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
-        await addScannedAssetsToBookingWithinTx(tx, {
+        const scanResult = await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
           kitIds,
           kitSlices,
@@ -3730,6 +3733,9 @@ export async function fulfilModelRequestsAndCheckout({
           organizationId,
           userId,
         });
+        // Read post-commit, for the notes below. A scan that only claimed a
+        // unit already on the booking added nothing to narrate.
+        addedAssetIds = scanResult.addedAssetIds;
 
         /**
          * Post-scan snapshot of every booking asset that needs
@@ -3824,10 +3830,10 @@ export async function fulfilModelRequestsAndCheckout({
       { timeout: 15000 }
     );
 
-    /** Post-commit: activity notes for the scanned assets + kits */
+    /** Post-commit: activity notes for the assets that actually arrived */
     await createNotesForScannedAssetsAndKits({
       booking: { id: bookingFound.id, name: bookingFound.name },
-      assetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
@@ -15314,12 +15320,30 @@ async function addScannedAssetsToBookingWithinTx(
    * (from `quantities` map, default 1) plus every kit-driven slice qty
    * for the same asset created on this call.
    */
-  if (allScannedAssetIds.length > 0) {
+  /**
+   * The assets this call actually put on the booking.
+   *
+   * Not the raw scan. A scanned asset the booking already holds keeps the row
+   * it has, and a kit slice for a member already held loose is dropped, so
+   * neither gained anything here. An audit row and a note are claims about
+   * what happened, and "added X to booking" for a unit that was already on it
+   * is a false one: it shows up in the feed, in reports, and in the asset's
+   * own timeline with a quantity it never gained.
+   * @see {@link file://./../../../../../.claude/rules/bulk-event-parity.md}
+   */
+  const addedAssetIds = Array.from(
+    new Set([
+      ...newStandaloneScans.map((meta) => meta.id),
+      ...effectiveKitSlices.map((slice) => slice.assetId),
+    ])
+  );
+
+  if (addedAssetIds.length > 0) {
     const addedQtyByAssetId = new Map<string, number>();
-    for (const sid of assetIds) {
+    for (const meta of newStandaloneScans) {
       addedQtyByAssetId.set(
-        sid,
-        (addedQtyByAssetId.get(sid) ?? 0) + (quantities[sid] ?? 1)
+        meta.id,
+        (addedQtyByAssetId.get(meta.id) ?? 0) + (quantities[meta.id] ?? 1)
       );
     }
     for (const slice of effectiveKitSlices) {
@@ -15332,7 +15356,7 @@ async function addScannedAssetsToBookingWithinTx(
     }
 
     await recordEvents(
-      allScannedAssetIds.map((assetId) => {
+      addedAssetIds.map((assetId) => {
         const asset = scannedAssetsMetaById.get(assetId);
         return {
           organizationId,
@@ -15358,7 +15382,10 @@ async function addScannedAssetsToBookingWithinTx(
    * flow ({@link partialCheckoutBooking}), never as a side-effect of scanning.
    */
 
-  return booking;
+  // `addedAssetIds` travels out because the notes are written post-commit, by
+  // callers that only hold the raw scan and so cannot tell an arrival from a
+  // rescan.
+  return { booking, addedAssetIds };
 }
 
 /**
@@ -15406,29 +15433,29 @@ export async function addScannedAssetsToBooking({
      * overlap-conflict guard main added inline here was moved INTO the helper
      * so both call sites get it atomically with the writes.
      */
-    const updatedBooking = await db.$transaction(async (tx) =>
-      addScannedAssetsToBookingWithinTx(tx, {
-        assetIds,
-        kitIds,
-        bookingId,
-        organizationId,
-        userId,
-        quantities,
-        kitSlices,
-      })
+    const { booking: updatedBooking, addedAssetIds } = await db.$transaction(
+      async (tx) =>
+        addScannedAssetsToBookingWithinTx(tx, {
+          assetIds,
+          kitIds,
+          bookingId,
+          organizationId,
+          userId,
+          quantities,
+          kitSlices,
+        })
     );
 
     /**
-     * Step 2: Create activity notes. The notes helper derives standalone
-     * vs kit-driven attribution from `kitIds` membership, so it needs the
-     * full union of standalone + kit-slice asset ids.
+     * Step 2: Create activity notes, for the assets that actually arrived.
+     * The helper derives standalone vs kit-driven attribution from `kitIds`
+     * membership, so it takes the union of both kinds, but a rescan of a unit
+     * already on the booking added nothing and must not be narrated as if it
+     * had.
      */
-    const allAddedAssetIds = Array.from(
-      new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
-    );
     await createNotesForScannedAssetsAndKits({
       booking: updatedBooking,
-      assetIds: allAddedAssetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
