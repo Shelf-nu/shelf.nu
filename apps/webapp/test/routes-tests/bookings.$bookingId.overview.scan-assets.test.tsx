@@ -55,6 +55,14 @@ vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
 }));
 
+// why: the route now imports `db` at module scope for the ownership guard's
+// booking lookup. `requirePermissionMock` below resolves no role, so
+// `isSelfServiceOrBase` is falsy and the lookup never runs, but the module
+// still has to resolve to something without touching a real database.
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findUniqueOrThrow: vi.fn() } },
+}));
+
 // why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
@@ -112,7 +120,15 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
     } as any);
-    addScannedAssetsToBookingMock.mockResolvedValue(undefined as any);
+    // why: the action destructures `addedAssetIds`/`claimedAssetIds` off the
+    // service's return value to choose its notification; this test only
+    // cares about the call args and the redirect, so one added asset is a
+    // sane default that keeps the destructure from throwing.
+    addScannedAssetsToBookingMock.mockResolvedValue({
+      booking: { id: "booking-123", name: "Booking One", status: "DRAFT" },
+      addedAssetIds: ["asset-123"],
+      claimedAssetIds: [],
+    } as any);
   });
 
   it("allows submitting only asset IDs without kit IDs", async () => {

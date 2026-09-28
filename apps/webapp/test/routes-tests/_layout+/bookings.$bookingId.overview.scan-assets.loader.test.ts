@@ -1,5 +1,5 @@
 /**
- * Scan to Assign loader: `assignSession` derivation.
+ * Scan to Assign loader: `assignSession` derivation and the ownership gate.
  *
  * Pins:
  *  - `assignSession` is null when the booking reserves no models, so the
@@ -10,7 +10,10 @@
  *  - a request with `fulfilledAt` set is settled and does not surface as
  *    outstanding, even when `fulfilledQuantity` is still below `quantity`;
  *  - a standalone `BookingAsset` row with no reservation stamp is
- *    claimable, and one that already answered a reservation is not.
+ *    claimable, and one that already answered a reservation is not;
+ *  - a SELF_SERVICE or BASE user who is neither the booking's creator nor its
+ *    custodian is refused, even though both roles hold `booking:update`;
+ *  - the creator, the custodian, and ADMIN/OWNER are all unaffected.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.scan-assets.tsx}
  */
@@ -88,6 +91,24 @@ async function runLoader() {
       alreadyIncluded: Array<{ id: string; claimable: boolean }>;
     } | null;
   };
+}
+
+/**
+ * Runs the loader expecting it to THROW (the loader's own catch block
+ * re-wraps every refusal as `throw data(error(reason), { status })`, so a
+ * refusal rejects the promise rather than resolving with an error payload).
+ * Fails the test if the loader resolves instead, so a refusal that silently
+ * stops firing is caught here rather than by a false-positive status check.
+ */
+async function runLoaderExpectingRefusal() {
+  try {
+    await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+  } catch (thrown) {
+    return thrown as { init?: { status?: number } };
+  }
+  throw new Error("expected the loader to throw, but it resolved");
 }
 
 describe("scan-assets loader assignSession", () => {
@@ -211,4 +232,104 @@ describe("scan-assets loader assignSession", () => {
       ["asset-stamped", false],
     ]);
   });
+});
+
+/**
+ * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+ * `requirePermission` alone cannot stop a restricted user from opening a
+ * booking that is not theirs. These cases would pass (no throw) without the
+ * ownership check the loader now runs after `canUserManageBookingAssets`.
+ *
+ * SELF_SERVICE cases set the booking to DRAFT: `canUserManageBookingAssets`
+ * already restricts SELF_SERVICE to DRAFT bookings, so a non-DRAFT status
+ * would refuse the request before the ownership check ever ran, and the test
+ * would pass for the wrong reason. `canUserManageBookingAssets` does not
+ * apply that same restriction to BASE, so the BASE cases need no such setup.
+ */
+describe("scan-assets loader ownership gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(db.asset.findMany).mockResolvedValue([]);
+  });
+
+  function mockRole(role: string) {
+    vi.mocked(requirePermission).mockResolvedValue({
+      organizationId: "org-1",
+      role,
+      userOrganizations: [],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+  }
+
+  it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
+    mockRole("SELF_SERVICE");
+    vi.mocked(getBooking).mockResolvedValue(
+      bookingWith({
+        status: "DRAFT",
+        creatorId: "someone-else",
+        custodianUserId: "someone-else-too",
+      }) as unknown as Awaited<ReturnType<typeof getBooking>>
+    );
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("refuses a BASE user who is neither creator nor custodian", async () => {
+    mockRole("BASE");
+    vi.mocked(getBooking).mockResolvedValue(
+      bookingWith({
+        creatorId: "someone-else",
+        custodianUserId: "someone-else-too",
+      }) as unknown as Awaited<ReturnType<typeof getBooking>>
+    );
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("allows a SELF_SERVICE user who CREATED the booking", async () => {
+    mockRole("SELF_SERVICE");
+    vi.mocked(getBooking).mockResolvedValue(
+      bookingWith({
+        status: "DRAFT",
+        creatorId: "user-1",
+        custodianUserId: null,
+      }) as unknown as Awaited<ReturnType<typeof getBooking>>
+    );
+
+    await expect(runLoader()).resolves.toEqual(
+      expect.objectContaining({ assignSession: null })
+    );
+  });
+
+  it("allows a BASE user who is the CUSTODIAN of the booking", async () => {
+    mockRole("BASE");
+    vi.mocked(getBooking).mockResolvedValue(
+      bookingWith({
+        creatorId: "someone-else",
+        custodianUserId: "user-1",
+      }) as unknown as Awaited<ReturnType<typeof getBooking>>
+    );
+
+    await expect(runLoader()).resolves.toEqual(
+      expect.objectContaining({ assignSession: null })
+    );
+  });
+
+  it.each(["ADMIN", "OWNER"])(
+    "leaves %s able to open a booking they neither created nor hold custody of",
+    async (role) => {
+      mockRole(role);
+      vi.mocked(getBooking).mockResolvedValue(
+        bookingWith({
+          creatorId: "someone-else",
+          custodianUserId: "someone-else-too",
+        }) as unknown as Awaited<ReturnType<typeof getBooking>>
+      );
+
+      await expect(runLoader()).resolves.toEqual(
+        expect.objectContaining({ assignSession: null })
+      );
+    }
+  );
 });
