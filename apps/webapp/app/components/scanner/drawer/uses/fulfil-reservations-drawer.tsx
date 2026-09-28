@@ -401,7 +401,12 @@ export default function FulfilReservationsDrawer({
       const modelId = asset?.assetModelId ?? null;
       const expected = modelId ? expectedByModelId.get(modelId) : undefined;
 
-      if (expected) {
+      // Whole assets only, the same rule the kit-member pass applies above and
+      // the one the server enforces: a quantity-tracked scan contributes a
+      // slice of its pool, which is not the unit a `BookingModelRequest`
+      // reserves, so it falls through to unmatched. Without it the strip fills
+      // on a scan the write declines and the booking reads ready to leave.
+      if (expected && asset?.type === AssetType.INDIVIDUAL) {
         const consumed = matchedCountByModel.get(expected.assetModelId) ?? 0;
         // Only scans within the STILL-OUTSTANDING count match. If the
         // request is already partially pre-fulfilled (2 of 3 scanned

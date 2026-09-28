@@ -498,6 +498,24 @@ describe("FulfilReservationsDrawer already-on-booking scans", () => {
     expect(submittedValues("assetIds")).toContain("asset-claimable");
   });
 
+  it("leaves a fresh quantity-tracked scan out of the count", () => {
+    // A reserved unit is a whole unit, and the server refuses anything else,
+    // so a pool contributing a slice must not fill the strip. The kit-member
+    // pass has always applied this rule; a loose scan has to as well, or the
+    // booking reads ready to leave on a claim the write declines.
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-pool": {
+          ...scanOf("asset-pool", "model-0"),
+          type: "QUANTITY_TRACKED",
+        },
+      },
+    });
+
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+  });
+
   it("leaves a unit whose row already answered as a plain duplicate", () => {
     // Its reservation is already discharged, so counting it again would report
     // a reserved unit as satisfied twice over by one asset.
