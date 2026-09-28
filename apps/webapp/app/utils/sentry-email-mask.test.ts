@@ -50,6 +50,22 @@ describe("maskEmailAddresses", () => {
     );
   });
 
+  it.each([
+    ["an accented local part", "josé@example.com", "@example.com"],
+    ["an accented domain", "jane@exämple.de", "@exämple.de"],
+    ["a non-Latin address", "用户@例子.中国", "@例子.中国"],
+  ])("masks %s", (_label, address, keptDomain) => {
+    expect(maskEmailAddresses(`sent to ${address}`)).toBe(
+      `sent to ${MASKED_EMAIL_LOCAL_PART}${keptDomain}`
+    );
+  });
+
+  it("masks a percent-encoded internationalized address in a URL", () => {
+    expect(
+      maskEmailAddresses("/join?email=jos%C3%A9%40ex%C3%A4mple.com&x=1")
+    ).toBe(`/join?email=${MASKED_EMAIL_LOCAL_PART}%40ex%C3%A4mple.com&x=1`);
+  });
+
   it("keeps the page path when an address sits unencoded in a query", () => {
     expect(
       maskEmailAddresses("/forgot-password?email=jane@acme.com&next=/assets")
@@ -78,6 +94,7 @@ describe("maskEmailAddresses", () => {
     ["a long run ending in @", `${"a".repeat(80_000)}@`],
     ["a long run ending in %40", `${"a".repeat(80_000)}%40`],
     ["a long dotted run with no top-level domain", `a@${"a.".repeat(40_000)}1`],
+    ["a long run of accented letters ending in @", `${"é".repeat(80_000)}@`],
   ])("scans %s in linear time", (_label, text) => {
     const started = performance.now();
     const masked = maskEmailAddresses(text);

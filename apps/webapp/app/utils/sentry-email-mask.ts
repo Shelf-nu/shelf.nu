@@ -28,6 +28,10 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * The domain must be dotted and end in letters, so an npm-style specifier in a
  * file path (`@sentry+core@10.51.0`) is never mistaken for an address.
  *
+ * Letters and digits are matched in any script, so internationalized addresses
+ * (`josé@exämple.de`) are masked, and a domain may carry percent-encoded
+ * characters as a URL writes them (`ex%C3%A4mple.de`).
+ *
  * The local part accepts every character the email standard allows except the
  * five that delimit a URL (`/ ? = & #`), so an address such as
  * `o'connor@acme.com` or `john!smith@acme.com` is masked whole. Those five stay
@@ -45,7 +49,7 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * when percent-encoded), 32 labels of up to 63 characters for a domain.
  */
 const EMAIL_ADDRESS =
-  /(?:(?!%40)[A-Z0-9.!$%'*+^_`{|}~-]){1,256}(@|%40)((?:[A-Z0-9-]{1,63}\.){1,32}[A-Z]{2,63})/gi;
+  /(?:(?!%40)[\p{L}\p{M}\p{N}.!$%'*+^_`{|}~-]){1,256}(@|%40)((?:(?:[\p{L}\p{M}\p{N}-]|%[0-9A-F]{2}){1,63}\.){1,32}(?:[\p{L}\p{M}]|%[0-9A-F]{2}){2,63})/giu;
 
 /**
  * Stack traces and debug metadata describe code, not runtime data: file paths,
