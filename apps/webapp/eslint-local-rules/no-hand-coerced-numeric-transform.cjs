@@ -61,24 +61,6 @@ const NESTED_FUNCTION_TYPES = new Set([
   "FunctionDeclaration",
 ]);
 
-/**
- * The module that owns the one sanctioned coercion.
- *
- * `optionalNumberFromString()` coerces only after its own blank check has
- * already decided whether the field was left empty, which is the entire point
- * of the helper. This rule cannot see that a guard ran, so the implementation is
- * exempt while every caller stays covered.
- */
-const CANONICAL_HELPER_MODULE = "app/utils/zod-numeric.ts";
-
-/** Is `filename` the module that owns the sanctioned coercion? */
-function isCanonicalHelperModule(filename) {
-  return (
-    typeof filename === "string" &&
-    filename.replace(/\\/g, "/").endsWith(CANONICAL_HELPER_MODULE)
-  );
-}
-
 /** Is `node` the identifier `name`? */
 function isIdentifierNamed(node, name) {
   return Boolean(node) && node.type === "Identifier" && node.name === name;
@@ -181,9 +163,6 @@ module.exports = {
   },
 
   create(context) {
-    // The helper module coerces on purpose, behind its own blank check.
-    if (isCanonicalHelperModule(context.getFilename())) return {};
-
     return {
       CallExpression(node) {
         const callee = node.callee;

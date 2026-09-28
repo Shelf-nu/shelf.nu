@@ -37,6 +37,22 @@ import { z } from "zod";
  */
 const numericFieldText = z.union([z.string(), z.number(), z.undefined()]);
 
+/**
+ * The number this text represents, or the caller's absent value when it is blank.
+ *
+ * Kept as a named function rather than inlined into a `.transform()` callback:
+ * the coercion is only safe because `isBlank` runs first, and stating that in one
+ * place is clearer than a suppression comment at the call site. It also keeps the
+ * `no-hand-coerced-numeric-transform` lint rule honest, since the rule looks for a
+ * callback coercing its own parameter and has no way to know a guard ran.
+ */
+function coerceOrBlank<TBlank extends null | undefined>(
+  value: string | number | undefined,
+  blank: TBlank
+): number | TBlank {
+  return isBlank(value) ? blank : Number(value);
+}
+
 /** Whether submitted text means "the operator left this empty". */
 function isBlank(value: string | number | undefined): boolean {
   return value === undefined || (typeof value === "string" && !value.trim());
@@ -84,7 +100,7 @@ export function optionalNumberFromString<TBlank extends null | undefined>({
         });
       }
     })
-    .transform((value) => (isBlank(value) ? (blank as TBlank) : Number(value)));
+    .transform((value) => coerceOrBlank(value, blank));
 }
 
 /**

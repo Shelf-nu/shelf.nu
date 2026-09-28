@@ -90,17 +90,6 @@ ruleTester.run("no-hand-coerced-numeric-transform", rule, {
 
     // A coercion inside a NESTED callback may be a different `val` entirely.
     { code: `schema.transform((val) => val.map((val) => Number(val)));` },
-
-    // The helper module itself coerces on purpose, behind its own blank check,
-    // so the rule skips that one file while every caller stays covered.
-    {
-      code: `
-        numericFieldText.transform((value) =>
-          isBlank(value) ? blank : Number(value)
-        );
-      `,
-      filename: "/repo/apps/webapp/app/utils/zod-numeric.ts",
-    },
   ],
 
   invalid: [
