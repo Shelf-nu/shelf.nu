@@ -348,4 +348,104 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
 
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
+
+  // `claimable: true` is structural only (standalone, unstamped, INDIVIDUAL);
+  // it says nothing about whether an outstanding reservation matches. A
+  // booking with no matching model has nothing for the rescan to answer, so
+  // it is a plain duplicate and the blocker must fire.
+  it("disables submit for a claimable already-included asset whose model matches nothing outstanding", () => {
+    renderDrawer({
+      expectedModelRequests: [
+        {
+          assetModelId: "model-1",
+          assetModelName: "Model One",
+          booked: 2,
+          remaining: 2,
+        },
+      ],
+      alreadyIncluded: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-other",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+      ],
+      bookingAssets: [{ assetId: "asset-1" }],
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-other",
+        },
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  });
+
+  // The reservation's remaining capacity is shared across this scan session,
+  // via the matcher's single pass over one tally. Two already-included
+  // claimable assets of the same model, both scanned, contend for the same
+  // unit: the first one processed claims it, and the second has nothing left
+  // to answer and is a plain duplicate.
+  it("disables submit for a second claimable already-included asset once the first has claimed the model's only remaining unit", () => {
+    renderDrawer({
+      expectedModelRequests: [
+        {
+          assetModelId: "model-1",
+          assetModelName: "Model One",
+          booked: 1,
+          remaining: 1,
+        },
+      ],
+      alreadyIncluded: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-1",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+        {
+          id: "asset-2",
+          title: "Asset 2",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-1",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+      ],
+      bookingAssets: [{ assetId: "asset-1" }, { assetId: "asset-2" }],
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+        "qr-2": {
+          id: "asset-2",
+          title: "Asset 2",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  });
 });

@@ -234,6 +234,35 @@ export default function AddAssetsToBookingDrawer({
     [items, expectedModelRequests, alreadyIncludedIds, claimableIncludedIds]
   );
 
+  /**
+   * Scans that will actually answer a reservation, as opposed to assets whose
+   * row merely could in principle.
+   *
+   * `claimableIncludedIds` is structural: it says a row is standalone,
+   * unstamped and INDIVIDUAL, not that anything outstanding matches it. Only
+   * the matcher knows that, because it also needs a reserved model with
+   * capacity left after this session's other scans. Exempting the structural
+   * set from the duplicate blocker would wave through every ordinary rescan
+   * on a booking with no reservations, which is most of them.
+   *
+   * Reading the matcher's tally is a prediction of what the server will do,
+   * not a guarantee of it: this client tallies scans in its own iteration
+   * order, the server claims rows in its own query order, and the two can
+   * diverge on which of several equally-claimable rows wins a single unit.
+   * That is fine here because the direction only ever fails closed: the
+   * worst case is the blocker holding a scan the server would have accepted,
+   * never the reverse, which is the failure mode this fix removes.
+   */
+  const claimedAssetIds = useMemo(
+    () =>
+      new Set(
+        scannedBuckets.rows
+          .filter((row) => row.bucket === "claimed")
+          .map((row) => row.asset!.id)
+      ),
+    [scannedBuckets.rows]
+  );
+
   /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
   const progressByModel = useMemo<ModelProgress[]>(
     () =>
@@ -260,19 +289,25 @@ export default function AddAssetsToBookingDrawer({
 
   // Asset blockers
   //
-  // A CLAIMABLE asset is already on the booking by definition: its row
-  // exists with no reservation stamp yet, and scanning it is how it comes to
-  // answer a reserved unit (the server claims it via
-  // `claimUnstampedBookingRows`). Excluding claimable ids here is what lets
-  // that submit go through instead of being refused as a plain duplicate.
-  // The progress strip and pull list above already move when this happens,
-  // so the operator sees the claim take effect there.
+  // A scan the matcher put in the `claimed` bucket is already on the booking
+  // by definition, and scanning it is how it comes to answer a reserved unit
+  // (the server claims it via `claimUnstampedBookingRows`). Excluding those
+  // ids here is what lets that submit go through instead of being refused as
+  // a plain duplicate. The progress strip and pull list above already move
+  // when this happens, so the operator sees the claim take effect there.
+  //
+  // This must be `claimedAssetIds`, not the structural `claimableIncludedIds`
+  // a row is eligible on: eligibility alone says nothing about whether an
+  // outstanding reservation actually matches, or whether this session's
+  // other scans already used up what did. On a booking with no reservations,
+  // every already-added asset is structurally claimable, so exempting on
+  // that set would silently disable this blocker for the ordinary case.
   const assetsAlreadyAddedIds = assets
     .filter((asset) => !!asset)
     .filter(
       (asset) =>
         booking.bookingAssets.some((ba) => ba.assetId === asset.id) &&
-        !claimableIncludedIds.has(asset.id)
+        !claimedAssetIds.has(asset.id)
     )
     .map((a) => !!a && a.id);
 
