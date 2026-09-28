@@ -98,18 +98,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
-
-    if (!canManageAssets) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "You are not allowed to add assets for this booking at the moment.",
-        label: "Booking",
-        shouldBeCaptured: false,
-      });
-    }
-
     /**
      * `booking:update` is a permission BASE holds as well as SELF_SERVICE,
      * unlike the fulfil-and-checkout screen's `booking:checkout`, which BASE
@@ -120,6 +108,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * role set the mobile twin (`api+/mobile+/bookings.add-scanned-assets.ts`)
      * restricts for this same operation, which also folds BASE in with
      * SELF_SERVICE.
+     *
+     * Ownership is judged before status, as on the sibling booking screens: a
+     * caller with no claim on the booking should not learn what state it is
+     * in.
      */
     if (isSelfServiceOrBaseRole(role)) {
       validateBookingOwnership({
@@ -127,6 +119,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userId,
         role,
         action: "add assets to",
+      });
+    }
+
+    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+
+    if (!canManageAssets) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "You are not allowed to add assets for this booking at the moment.",
+        label: "Booking",
+        shouldBeCaptured: false,
       });
     }
 
