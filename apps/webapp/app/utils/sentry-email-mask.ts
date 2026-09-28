@@ -29,8 +29,12 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * file path (`@sentry+core@10.51.0`) is never mistaken for an address.
  *
  * Letters and digits are matched in any script, so internationalized addresses
- * (`josé@exämple.de`) are masked, and a domain may carry percent-encoded
- * characters as a URL writes them (`ex%C3%A4mple.de`).
+ * (`josé@exämple.de`) are masked. A domain may carry the percent-encoded bytes
+ * of non-ASCII letters as a URL writes them (`ex%C3%A4mple.de`) and an encoded
+ * dot (`example%2Ecom`), but no other encoded byte: an encoded `@` or comma
+ * never lets one address's domain run on into the next address in a list.
+ *
+ * A quoted local part (`"john doe"@acme.com`) is masked whole, quotes included.
  *
  * The local part accepts every character the email standard allows except the
  * five that delimit a URL (`/ ? = & #`), so an address such as
@@ -49,7 +53,7 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * when percent-encoded), 32 labels of up to 63 characters for a domain.
  */
 const EMAIL_ADDRESS =
-  /(?:(?!%40)[\p{L}\p{M}\p{N}.!$%'*+^_`{|}~-]){1,256}(@|%40)((?:(?:[\p{L}\p{M}\p{N}-]|%[0-9A-F]{2}){1,63}\.){1,32}(?:[\p{L}\p{M}]|%[0-9A-F]{2}){2,63})/giu;
+  /(?:"(?:[^"\\\r\n]|\\[^\r\n]){0,256}"|(?:(?!%40)[\p{L}\p{M}\p{N}.!$%'*+^_`{|}~-]){1,256})(@|%40)((?:(?:[\p{L}\p{M}\p{N}-]|%[89A-F][0-9A-F]){1,63}(?:\.|%2E)){1,32}(?:[\p{L}\p{M}]|%[89A-F][0-9A-F]){2,63})/giu;
 
 /**
  * Stack traces and debug metadata describe code, not runtime data: file paths,

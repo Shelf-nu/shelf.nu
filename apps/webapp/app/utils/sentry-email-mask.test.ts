@@ -66,6 +66,36 @@ describe("maskEmailAddresses", () => {
     ).toBe(`/join?email=${MASKED_EMAIL_LOCAL_PART}%40ex%C3%A4mple.com&x=1`);
   });
 
+  it.each([
+    ['"john..doe"@example.com', `${MASKED_EMAIL_LOCAL_PART}@example.com`],
+    ['"john doe"@example.com', `${MASKED_EMAIL_LOCAL_PART}@example.com`],
+  ])("masks the quoted local part in %s", (address, expected) => {
+    expect(maskEmailAddresses(`sent to ${address}`)).toBe(
+      `sent to ${expected}`
+    );
+  });
+
+  it("masks an address inside a JSON string without touching its quotes", () => {
+    expect(maskEmailAddresses('{"email":"jane@acme.com"}')).toBe(
+      `{"email":"${MASKED_EMAIL_LOCAL_PART}@acme.com"}`
+    );
+  });
+
+  it.each(["jane%40example%2Ecom", "jane%40example%2ecom"])(
+    "masks %s, whose domain dot is percent-encoded",
+    (text) => {
+      expect(maskEmailAddresses(text)).toBe(
+        `${MASKED_EMAIL_LOCAL_PART}${text.slice("jane".length)}`
+      );
+    }
+  );
+
+  it("masks every address in an encoded comma-separated list", () => {
+    expect(maskEmailAddresses("to=a%40x.com%2Cb%40y.com")).toBe(
+      `to=${MASKED_EMAIL_LOCAL_PART}%40x.com${MASKED_EMAIL_LOCAL_PART}%40y.com`
+    );
+  });
+
   it("keeps the page path when an address sits unencoded in a query", () => {
     expect(
       maskEmailAddresses("/forgot-password?email=jane@acme.com&next=/assets")
@@ -95,6 +125,11 @@ describe("maskEmailAddresses", () => {
     ["a long run ending in %40", `${"a".repeat(80_000)}%40`],
     ["a long dotted run with no top-level domain", `a@${"a.".repeat(40_000)}1`],
     ["a long run of accented letters ending in @", `${"é".repeat(80_000)}@`],
+    ["a long run of encoded dots", `a@${"a%2E".repeat(20_000)}1`],
+    [
+      "open quotes with no closing quote",
+      `${`"${"a".repeat(300)}`.repeat(270)}@`,
+    ],
   ])("scans %s in linear time", (_label, text) => {
     const started = performance.now();
     const masked = maskEmailAddresses(text);
