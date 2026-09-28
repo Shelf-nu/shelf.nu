@@ -145,18 +145,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { perPage } = cookie;
 
   try {
-    const {
-      organizationId,
-      isSelfServiceOrBase,
-      currentOrganization,
-      userOrganizations,
-      access,
-    } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, userOrganizations, access } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     // Get the booking with basic asset information
     const [booking, tags, notifyData] = await Promise.all([
@@ -175,12 +170,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
-          // Only include notification recipients for admin/owner users.
-          // Self-service/base users don't need this data (they can't see or
-          // manage notification settings).
-          ...(isSelfServiceOrBase
-            ? {}
-            : {
+          // Recipients are loaded only for members who may view and manage
+          // them (notifications.manageBookingRecipients).
+          ...(access.policy.notifications.manageBookingRecipients
+            ? {
                 notificationRecipients: {
                   select: {
                     id: true,
@@ -194,7 +187,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                     },
                   },
                 },
-              }),
+              }
+            : {}),
         },
       }),
       db.tag.findMany({
@@ -207,13 +201,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
-      // Only fetch notification team members for admin/owner users
-      isSelfServiceOrBase
-        ? Promise.resolve({
+      // The recipient picker's roster, only for members who manage recipients
+      access.policy.notifications.manageBookingRecipients
+        ? getTeamMembersForNotify({ organizationId })
+        : Promise.resolve({
             teamMembersForNotify: [],
             totalTeamMembersForNotify: 0,
-          })
-        : getTeamMembersForNotify({ organizationId }),
+          }),
     ]);
 
     // Exclude custodian from the notification recipients picker since
@@ -1410,7 +1404,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateNotificationRecipients: PermissionAction.update,
     };
 
-    const { organizationId, isSelfServiceOrBase, access, userOrganizations } =
+    const { organizationId, access, userOrganizations } =
       await requirePermission({
         userId,
         request,
@@ -1674,7 +1668,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianUserId: parsedData.custodian?.userId,
           custodianTeamMemberId: parsedData.custodian?.id,
           hints: getClientHint(request),
-          isSelfServiceOrBase,
+          alertsOrgOnReservation:
+            access.policy.notifications.reservationAlertsAdmins,
           tags,
           userId,
         });
@@ -2069,7 +2064,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "updateNotificationRecipients": {
-        if (isSelfServiceOrBase) {
+        if (!access.policy.notifications.manageBookingRecipients) {
           throw new ShelfError({
             cause: null,
             message:

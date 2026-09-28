@@ -73,7 +73,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles, isAdministratorOrOwner } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   const roleAccess = useRoleAccess();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =
@@ -201,7 +201,6 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
               <Card className="field-card m-0 overflow-visible">
                 <NotificationRecipientsField
                   disabled={disabled}
-                  isAdminOrOwner={isAdministratorOrOwner}
                   creatorName="You"
                 />
               </Card>

@@ -37,7 +37,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { roles, isAdministratorOrOwner } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   const roleAccess = useRoleAccess();
   const custodianIsSelf = bookingCustodianIsSelf(roleAccess);
   // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
@@ -181,7 +181,6 @@ export default function CreateBookingForSelectedAssetsDialog() {
             <Card className="m-0 overflow-visible">
               <NotificationRecipientsField
                 disabled={disabled}
-                isAdminOrOwner={isAdministratorOrOwner}
                 creatorName="You"
               />
             </Card>

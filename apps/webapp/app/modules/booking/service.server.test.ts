@@ -452,10 +452,7 @@ vitest.mock("./email-helpers", async () => {
 
 // why: avoiding organization admin lookups during booking notification tests
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsEmails: vitest
-    .fn()
-    .mockResolvedValue(["admin@example.com"]),
-  getOrganizationAdminsForNotification: vitest.fn().mockResolvedValue([
+  getOrganizationNotificationAudience: vitest.fn().mockResolvedValue([
     {
       id: "admin-1",
       email: "admin@example.com",
@@ -3617,7 +3614,7 @@ describe("reserveBooking", () => {
     to: futureToDate,
     description: "Reserved booking description",
     hints: mockClientHints,
-    isSelfServiceOrBase: false,
+    alertsOrgOnReservation: false,
     tags: [],
   };
 
@@ -16409,7 +16406,7 @@ describe("model reservation guard — write paths", () => {
       to: futureToDate,
       description: "Reserved booking description",
       hints: mockClientHints,
-      isSelfServiceOrBase: false,
+      alertsOrgOnReservation: false,
       tags: [],
     };
 

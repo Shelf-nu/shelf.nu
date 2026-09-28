@@ -1,5 +1,5 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
@@ -15,6 +15,7 @@ import {
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
 import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
@@ -1321,7 +1322,8 @@ export async function fixTeamMembersNames(
 
 /**
  * Fetches team members eligible for the notification recipients picker.
- * Returns only admins/owners with linked user accounts (no NRMs).
+ * Returns members with linked user accounts (no NRMs) whose role may be picked
+ * as a notification recipient (`notifications.selectableAsRecipient`).
  *
  * Used by booking form loaders to provide initial data for the
  * `DynamicDropdown` component's `initialDataKey`.
@@ -1340,8 +1342,9 @@ export async function getTeamMembersForNotify({
   try {
     const idsToExclude = excludeTeamMemberIds ?? [];
 
-    // Single query using a nested relation filter to find team members
-    // whose linked user has an admin/owner role in this organization.
+    // Single query using a nested relation filter to find team members whose
+    // linked user's role in this organization may be picked as a recipient
+    // (`notifications.selectableAsRecipient`).
     const teamMembersForNotify = await db.teamMember.findMany({
       where: {
         organizationId,
@@ -1351,7 +1354,9 @@ export async function getTeamMembersForNotify({
             some: {
               organizationId,
               roles: {
-                hasSome: [OrganizationRoles.ADMIN, OrganizationRoles.OWNER],
+                hasSome: rolesWhere(
+                  (p) => p.notifications.selectableAsRecipient
+                ),
               },
             },
           },

@@ -781,4 +781,16 @@ describe("GET /api/model-filters", () => {
       expect(lastWhere().AND).toBeUndefined();
     });
   });
+
+  it("selectableRecipientsOnly narrows team members to roles that may be picked as recipients", async () => {
+    dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+    await callLoader(
+      "name=teamMember&queryKey=name&queryValue=a&selectableRecipientsOnly=true"
+    );
+
+    expect(JSON.stringify(lastWhere().AND)).toContain(
+      '"hasSome":["OWNER","ADMIN"]'
+    );
+  });
 });

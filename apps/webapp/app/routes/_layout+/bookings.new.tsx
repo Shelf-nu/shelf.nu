@@ -144,7 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, isSelfServiceOrBase, access } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession?.userId,
         request,
@@ -330,12 +330,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // Parse per-booking notification recipient IDs from the form.
     // The MultiSelect submits a comma-separated string of team member IDs.
-    // Only admin/owner users can set these; the field is hidden for
-    // self-service/base users, but we guard server-side as well.
+    // Only members who manage booking recipients may set these; the field is
+    // hidden for everyone else and this guards a crafted POST.
     const notificationRecipientIdsRaw = formData.get(
       "notificationRecipientIds"
     ) as string | null;
-    if (notificationRecipientIdsRaw && !isSelfServiceOrBase) {
+    if (
+      notificationRecipientIdsRaw &&
+      access.policy.notifications.manageBookingRecipients
+    ) {
       const recipientIds = notificationRecipientIdsRaw
         .split(",")
         .filter(Boolean);

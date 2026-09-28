@@ -27,8 +27,9 @@ interface QuickActionsProps {
   /** Role can change custody (assign/release). Server-enforced; this hides the button. */
   canCustody: boolean;
   /**
-   * Self-service wording (web parity): those users can only take custody
-   * themselves, so the button says "Take Custody" instead of "Assign Custody".
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the button says "Take Custody"
+   * instead of "Assign Custody" (web parity).
    */
   isSelfService?: boolean;
   /** Role can update the asset (location/edit). */

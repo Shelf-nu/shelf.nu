@@ -2,7 +2,9 @@
 /**
  * The reminder recipient picker serves the set and edit reminder dialogs, so
  * either reminder permission opens it, and it fetches only what the picker
- * renders.
+ * renders. Its candidates are the members whose role may be picked as a
+ * recipient (`notifications.selectableAsRecipient`), not a hand-listed role
+ * pair.
  *
  * @see {@link file://../../../app/routes/api+/reminders.team-members.ts}
  * @see {@link file://../../../app/components/asset-reminder/team-members-selector.tsx}
@@ -72,5 +74,13 @@ describe("reminder recipient picker", () => {
     expect(args.where.organizationId).toBe("org-1");
     expect(args.include).toHaveProperty("user");
     expect(args.include).not.toHaveProperty("custodies");
+  });
+
+  it("offers members whose role may be picked as a recipient", async () => {
+    await load();
+
+    const [args] = vi.mocked(db.teamMember.findMany).mock
+      .calls[0] as unknown as [{ where: unknown }];
+    expect(JSON.stringify(args.where)).toContain('"hasSome":["OWNER","ADMIN"]');
   });
 });

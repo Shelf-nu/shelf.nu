@@ -17,6 +17,7 @@ import {
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
 import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
+import { rolesWhere } from "~/utils/permissions/role-access";
 
 /**
  * Booking statuses a booking search returns when the caller does not ask for a
@@ -72,7 +73,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
-    userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+    selectableRecipientsOnly: z.coerce.boolean().optional(), // Only members whose role may be picked as a notification recipient
     usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
     /**
      * Which question this custodian picker is asking — see
@@ -213,7 +214,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
 
       where.deletedAt = modelFilters.deletedAt;
-      if (modelFilters.userWithAdminAndOwnerOnly) {
+      if (modelFilters.selectableRecipientsOnly) {
         where.AND = [
           { user: { isNot: null } },
           {
@@ -222,7 +223,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 some: {
                   AND: [
                     { organizationId },
-                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                    {
+                      roles: {
+                        hasSome: rolesWhere(
+                          (p) => p.notifications.selectableAsRecipient
+                        ),
+                      },
+                    },
                   ],
                 },
               },

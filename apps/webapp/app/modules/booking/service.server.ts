@@ -1922,7 +1922,7 @@ export async function reserveBooking({
   description,
   organizationId,
   hints,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
   tags,
   userId,
 }: Partial<
@@ -1940,7 +1940,11 @@ export async function reserveBooking({
 > &
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
-    isSelfServiceOrBase: boolean;
+    /**
+     * Whether this reservation triggers the workspace booking broadcast: the
+     * caller's `notifications.reservationAlertsAdmins`.
+     */
+    alertsOrgOnReservation: boolean;
     tags: { id: string }[];
     userId?: User["id"];
   }) {
@@ -2390,14 +2394,14 @@ export async function reserveBooking({
     }
 
     // Resolve notification recipients and send emails.
-    // Pass isSelfServiceOrBase so admin broadcast only fires for
-    // reservations made by base/self-service users (pickup requests).
+    // Forwarded so the broadcast fires only for reservations whose maker's
+    // role triggers it.
     const recipients = await getBookingNotificationRecipients({
       booking: bookingFound,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
-      isSelfServiceOrBase,
+      alertsOrgOnReservation,
     });
 
     if (recipients.length > 0) {

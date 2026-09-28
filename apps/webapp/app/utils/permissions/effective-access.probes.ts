@@ -26,7 +26,6 @@ import {
   assertCanDeleteBooking,
   assertCanDownloadBookingDocuments,
   bookingWriteScopeClause,
-  isSelfServiceOrBaseRole,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import {
@@ -53,10 +52,12 @@ import {
   SSO_ASSIGNABLE_ROLES,
   canManageBookingItems,
   canPartialCheckInOut,
+  canRemoveBookingItems,
   isExplicitScanRequired,
   isWorkspaceOwner,
   resolveRole,
   resolveRoleAccess,
+  rolesWhere,
   transfersOwnershipOnRoleChange,
 } from "./role-access";
 import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
@@ -169,13 +170,6 @@ const A = PermissionAction;
 /** Statuses a booking can still be changed in. */
 const OPEN_STATUSES = ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] as const;
 
-/** Statuses whose items can no longer change. */
-const CLOSED_STATUSES: readonly string[] = [
-  "COMPLETE",
-  "ARCHIVED",
-  "CANCELLED",
-];
-
 /** Delete rules compare the status with DRAFT only: one draft, one not. */
 const DRAFT_OR_NOT = ["DRAFT", "RESERVED"] as const;
 
@@ -273,27 +267,6 @@ function holdsAny(
   set: OrganizationRoles[]
 ): boolean {
   return roles.some((role) => set.includes(role));
-}
-
-/**
- * `useUserRoleHelper()`'s flags (`hooks/user-user-role-helper.ts:14-31`). Each
- * is true when the role is held ANYWHERE in the membership. An empty
- * membership stands in for the loading state (`roles` undefined): every flag
- * is false either way.
- */
-function hookFlags(roles: OrganizationRoles[]) {
-  const isAdministrator = roles.includes(R.ADMIN);
-  const isOwner = roles.includes(R.OWNER);
-  const isSelfService = roles.includes(R.SELF_SERVICE);
-  const isBase = roles.includes(R.BASE);
-  return {
-    isAdministrator,
-    isOwner,
-    isAdministratorOrOwner: isAdministrator || isOwner,
-    isSelfService,
-    isBase,
-    isBaseOrSelfService: isBase || isSelfService,
-  };
 }
 
 /**
@@ -901,12 +874,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   });
 
   // B9:D-46: does a reservation made by this member trigger the org broadcast?
-  // web: bookings.$bookingId.overview.tsx reserve intent (~1692-1705) passes
-  // requirePermission's isSelfServiceOrBase (effective role); mobile:
-  // bookings.reserve.ts passes the context's isSelfServiceOrBase, the same
-  // effective role, which the policy's `reservationAlertsAdmins` answers.
+  // Both the web reserve intent (bookings.$bookingId.overview.tsx) and the
+  // mobile reserve route (api+/mobile+/bookings.reserve.ts) pass
+  // `access.policy.notifications.reservationAlertsAdmins` as
+  // `alertsOrgOnReservation`; mobile first requires booking:create.
   snapshot["B9:D-46:reservation-trigger"] = perRoleSet((roles) => ({
-    web: isSelfServiceOrBaseRole(webRole(roles)),
+    web: accessFor(roles).policy.notifications.reservationAlertsAdmins,
     mobile: can(roles, E.booking, A.create)
       ? accessFor(roles).policy.notifications.reservationAlertsAdmins
       : "denied:gate",
@@ -1494,79 +1467,94 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Notifications: Task 9 =====================
 
-  // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: … }`:
-  // orgBookingBroadcasts modules/organization/service.server.ts:567
-  // (getOrganizationAdminsEmails) + lowStock :618 (getOrganizationAdminsForNotification);
-  // bookingNotifyPicker modules/team-member/service.server.ts:1241;
-  // reminderPicker routes/api+/reminders.team-members.ts:55;
-  // modelFiltersRecipients routes/api+/model-filters.ts:222.
+  // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: rolesWhere(...) }`:
+  // orgBookingBroadcasts and lowStock modules/organization/service.server.ts
+  // (getOrganizationNotificationAudience, audiences `orgBookingBroadcasts` and
+  // `inventoryAlerts`); bookingNotifyPicker modules/team-member/service.server.ts
+  // (getTeamMembersForNotify); reminderPicker routes/api+/reminders.team-members.ts;
+  // modelFiltersRecipients routes/api+/model-filters.ts (selectableRecipientsOnly).
+  // The last three read `notifications.selectableAsRecipient`.
   snapshot["B9:D-45/D-48/D-49:audiences"] = perRoleSet((roles) => ({
-    orgBookingBroadcasts: holdsAny(roles, [R.OWNER, R.ADMIN]),
-    lowStock: holdsAny(roles, [R.OWNER, R.ADMIN]),
-    bookingNotifyPicker: holdsAny(roles, [R.ADMIN, R.OWNER]),
-    reminderPicker: holdsAny(roles, [R.ADMIN, R.OWNER]),
-    modelFiltersRecipients: holdsAny(roles, [R.ADMIN, R.OWNER]),
+    orgBookingBroadcasts: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.orgBookingBroadcasts)
+    ),
+    lowStock: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.inventoryAlerts)
+    ),
+    bookingNotifyPicker: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
+    reminderPicker: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
+    modelFiltersRecipients: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
   }));
 
-  // B9:D-47: manage a booking's recipients:
-  // actionsDropdown `!isBaseOrSelfService` (components/booking/actions-dropdown.tsx:56,158);
-  // recipientsField `isAdministratorOrOwner` (new-booking-form.tsx:202,
-  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx:180);
-  // server loader/action and bookings.new action on requirePermission's
-  // isSelfServiceOrBase (overview.tsx:181,2104; bookings.new.tsx:340).
+  // B9:D-47: manage a booking's recipients, `notifications.manageBookingRecipients`
+  // on the effective role at every site: actionsDropdown
+  // (components/booking/actions-dropdown.tsx, `useRoleAccess()`); recipientsField
+  // (components/booking/forms/fields/notification-recipients.tsx, `useRoleAccess()`);
+  // the overview loader and updateNotificationRecipients action
+  // (bookings.$bookingId.overview.tsx) and the bookings.new action, on
+  // requirePermission's `access`.
   snapshot["B9:D-47:manage-recipients"] = perRoleSet((roles) => {
-    const flags = hookFlags(roles);
-    const server = !isSelfServiceOrBaseRole(webRole(roles));
+    const manages =
+      accessFor(roles).policy.notifications.manageBookingRecipients;
     return {
-      actionsDropdown: !flags.isBaseOrSelfService,
-      recipientsField: flags.isAdministratorOrOwner,
-      overviewLoaderAndAction: server,
-      bookingsNewAction: server,
+      actionsDropdown: manages,
+      recipientsField: manages,
+      overviewLoaderAndAction: manages,
+      bookingsNewAction: manages,
     };
   });
 
   // ===================== Companion: Task 10 (B8) =====================
-  // Reproduced here because the webapp cannot import the companion. Task 10
-  // rewrites them onto the same resolver its lib/role-access.ts uses.
+  // Reproduced here because the webapp cannot import the companion. Each probe
+  // reads the same `resolveRoleAccess` answer the companion's
+  // lib/role-access.ts `accessForOrganization` resolves (toggles off), and
+  // apps/companion/lib/role-access.test.ts pins the same rows.
 
   // B8:D-20/D-21: booking detail item actions (apps/companion/app/(tabs)/bookings/[id].tsx):
-  // isRestrictedRole = SELF_SERVICE or BASE held anywhere (:147-149);
-  // add = manage models / scan / browse (:1426,1777,1805);
-  // remove = select to remove (:1835); fulfilCta (:1981).
+  // add = manage models / scan to add / browse to add (`canAddItemsToBooking`,
+  // i.e. `canManageBookingItems`); remove = select to remove
+  // (`canRemoveItemsFromBooking`, i.e. `canRemoveBookingItems`); fulfilCta =
+  // RESERVED and add.
   snapshot["B8:D-20/D-21:companion-booking-items"] = perRoleSet((roles) => {
-    const isRestrictedRole = roles.some(
-      (r) => r === R.SELF_SERVICE || r === R.BASE
-    );
+    const access = accessFor(roles);
     return perCase(BOOKING_STATUSES, (status) => {
-      const editable =
-        !CLOSED_STATUSES.includes(status) &&
-        (!isRestrictedRole || status === "DRAFT");
+      const add = canManageBookingItems({ access, bookingStatus: status });
       return {
-        add: editable,
-        remove: editable,
-        fulfilCta: !isRestrictedRole && status === "RESERVED",
+        add,
+        remove: canRemoveBookingItems({ access, bookingStatus: status }),
+        fulfilCta: status === "RESERVED" && add,
       };
     });
   });
 
-  // B8:D-15: companion "writes only own bookings" (bookings/[id].tsx:1398-1399).
+  // B8:D-15: companion "writes only own bookings" (bookings/[id].tsx
+  // `isRestrictedToOwnBookings = !access.bookings.writeAll`).
   snapshot["B8:D-15:companion-own-writes"] = perRoleSet(
-    (roles) =>
-      roles.some((r) => r === R.SELF_SERVICE || r === R.BASE) &&
-      !roles.some((r) => r === R.OWNER || r === R.ADMIN)
+    (roles) => !accessFor(roles).bookings.writeAll
   );
 
-  // B8:D-29: companion custody "take for yourself only": SELF_SERVICE held
-  // anywhere (app/(tabs)/scanner.tsx:231; app/(tabs)/assets/[id].tsx:87).
-  snapshot["B8:D-29:companion-self-custody"] = perRoleSet((roles) =>
-    roles.includes(R.SELF_SERVICE)
+  // B8:D-29: companion custody "take for yourself only"
+  // (`access.custody.assign === "self"`; app/(tabs)/scanner.tsx,
+  // app/(tabs)/assets/[id].tsx).
+  snapshot["B8:D-29:companion-self-custody"] = perRoleSet(
+    (roles) => accessFor(roles).custody.assign === "self"
   );
 
-  // B8:D-42: companion "All audits" toggle (lib/permissions.ts:37-39,
-  // userCanSeeOrgWideAudits): OWNER or ADMIN held anywhere.
+  // B8:D-42: companion "All audits" toggle (app/(tabs)/audits/index.tsx,
+  // `access.audits.seeAll`).
   snapshot["B8:D-42:companion-audit-scope"] = perRoleSet(
-    (roles) =>
-      roles.length > 0 && roles.some((r) => r === R.OWNER || r === R.ADMIN)
+    (roles) => accessFor(roles).audits.seeAll
   );
 
   // ===================== Custody and asset list =====================

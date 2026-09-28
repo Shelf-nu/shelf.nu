@@ -86,13 +86,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { bookingId, timeZone } = await parseMobileBody(BodySchema, request);
 
-    // The caller's access, judged by the membership's effective role.
-    // `isSelfServiceOrBase` (the same effective role) decides whether the
-    // reservation alerts the workspace admins.
-    const { access, isSelfServiceOrBase } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // The caller's access, judged by the membership's effective role. Its
+    // `notifications.reservationAlertsAdmins` decides whether the reservation
+    // alerts the workspace booking broadcast audience.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Read the draft's current values; the mobile "Reserve" tap transitions it
     // to RESERVED without re-entering the form.
@@ -299,7 +296,8 @@ export async function action({ request }: ActionFunctionArgs) {
       custodianUserId: booking.custodianUserId ?? undefined,
       tags: booking.tags.map((t) => ({ id: t.id })),
       hints,
-      isSelfServiceOrBase,
+      alertsOrgOnReservation:
+        access.policy.notifications.reservationAlertsAdmins,
       userId: user.id,
     });
 

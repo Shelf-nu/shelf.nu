@@ -162,4 +162,39 @@ describe("GET /api/mobile/me", () => {
       selfServiceCanSeeCustody: false,
     });
   });
+
+  it("sends each organization in the shape the companion resolves access from", async () => {
+    // Keep in step with meOrganization() in apps/companion/lib/role-access.test.ts
+    findMany.mockResolvedValue([row()] as never);
+
+    const response = await invoke();
+    const body = (await response.json()) as {
+      organizations: Array<Record<string, unknown>>;
+    };
+    const org = body.organizations[0];
+
+    expect(Object.keys(org)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "name",
+        "type",
+        "roles",
+        "barcodesEnabled",
+        "auditsEnabled",
+        "selfServiceCanSeeBookings",
+        "baseUserCanSeeBookings",
+        "selfServiceCanSeeCustody",
+        "baseUserCanSeeCustody",
+      ])
+    );
+    expect(Array.isArray(org.roles)).toBe(true);
+    for (const toggle of [
+      "selfServiceCanSeeBookings",
+      "baseUserCanSeeBookings",
+      "selfServiceCanSeeCustody",
+      "baseUserCanSeeCustody",
+    ] as const) {
+      expect(typeof org[toggle]).toBe("boolean");
+    }
+  });
 });

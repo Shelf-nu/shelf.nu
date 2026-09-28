@@ -36,6 +36,11 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
+import {
+  canAddItemsToBooking,
+  canRemoveItemsFromBooking,
+} from "@/lib/role-access";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -136,17 +141,11 @@ export default function BookingDetailScreen() {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   /**
-   * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
-   * a RESTRICTED role may only build its own DRAFT booking.
-   *
-   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
-   * (its parameter is named `isSelfService`, but every caller hands it
-   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
-   * below therefore turn off past DRAFT for both roles.
+   * The member's access; booking item rules below read
+   * `canAddItemsToBooking` / `canRemoveItemsFromBooking`, the same rules the
+   * server applies.
    */
-  const isRestrictedRole = Boolean(
-    currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
-  );
+  const access = useRoleAccess();
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -1384,19 +1383,8 @@ export default function BookingDetailScreen() {
     hasUnitsLeftToCheckOut &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
-  /**
-   * Whether the server would scope this user's booking writes to their own
-   * bookings.
-   *
-   * Roles are a set, and the server judges a request by the most privileged
-   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
-   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
-   * restricted role is present — which is the right test for the DRAFT-only
-   * editing rules above but would hide controls from a multi-role admin here.
-   */
-  const isRestrictedToOwnBookings =
-    isRestrictedRole &&
-    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
+  /** Whether the server scopes this member's booking writes to their own bookings. */
+  const isRestrictedToOwnBookings = !access.bookings.writeAll;
 
   /**
    * Whether to offer the progressive check-out affordances (scan and select).
@@ -1419,11 +1407,8 @@ export default function BookingDetailScreen() {
         (booking.creator.id === user.id ||
           booking.custodianUser?.id === user.id)));
 
-  // Same gate the manage buttons use: an editable booking, and self-service
-  // users only on their own DRAFTs (server re-checks ownership + status).
-  const canManageModels =
-    !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-    (!isRestrictedRole || booking.status === "DRAFT");
+  // Same gate the add affordances use (server re-checks ownership + status).
+  const canManageModels = canAddItemsToBooking(access, booking.status);
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1772,67 +1757,63 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
-            {booking &&
-              !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=add`
-                    )
-                  }
-                  accessibilityLabel="Scan assets or kits to add to this booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Scan to Add Assets
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {booking && canAddItemsToBooking(access, booking.status) && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=add`
+                  )
+                }
+                accessibilityLabel="Scan assets or kits to add to this booking"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Add Assets
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Browse available assets/kits to add (date-aware picker) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/bookings/add-assets?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&from=${encodeURIComponent(
-                        booking.from
-                      )}&to=${encodeURIComponent(booking.to)}`
-                    )
-                  }
-                  accessibilityLabel="Browse available assets and kits to add"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="search"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Browse to Add
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {canAddItemsToBooking(access, booking.status) && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/bookings/add-assets?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&from=${encodeURIComponent(
+                      booking.from
+                    )}&to=${encodeURIComponent(booking.to)}`
+                  )
+                }
+                accessibilityLabel="Browse available assets and kits to add"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Browse to Add
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Select assets to remove (editable bookings with assets) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") &&
+            {canRemoveItemsFromBooking(access, booking.status) &&
               booking.assetCount > 0 && (
                 <TouchableOpacity
                   style={[
@@ -1973,13 +1954,13 @@ export default function BookingDetailScreen() {
                 booking, and the scanner confirms that before submitting.
                 Scan-first IS the point of book-by-model: reserve the count
                 now, scan the items when you grab them, no browse picker.
-                (Browse to Add above stays for hand-picking.) Gated
-                `!isRestrictedRole` to match the add/browse affordances above:
-                a restricted custodian can only edit a DRAFT booking, so on a
-                RESERVED booking the assign+checkout flow can't succeed for
-                them — showing the CTA would just lead to a rejected submit. */}
-            {!isRestrictedRole &&
-              booking.status === "RESERVED" &&
+                (Browse to Add above stays for hand-picking.) Gated on adding
+                items past DRAFT, like the add/browse affordances above: a
+                member who may not add items to a RESERVED booking cannot
+                complete the assign and check-out flow, so showing the CTA
+                would only lead to a rejected submit. */}
+            {booking.status === "RESERVED" &&
+              canAddItemsToBooking(access, booking.status) &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}

@@ -17901,13 +17901,13 @@
       "bookingsNewAction": true
     },
     "OWNER+SELF_SERVICE": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
     "OWNER+BASE": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
@@ -17919,25 +17919,25 @@
       "bookingsNewAction": true
     },
     "ADMIN+SELF_SERVICE": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
     "ADMIN+BASE": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
     "SELF_SERVICE+OWNER": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
     "SELF_SERVICE+ADMIN": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
@@ -17949,13 +17949,13 @@
       "bookingsNewAction": false
     },
     "BASE+OWNER": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
     "BASE+ADMIN": {
-      "actionsDropdown": false,
+      "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
@@ -17967,13 +17967,13 @@
       "bookingsNewAction": false
     },
     "(none)": {
-      "actionsDropdown": true,
+      "actionsDropdown": false,
       "recipientsField": false,
       "overviewLoaderAndAction": false,
       "bookingsNewAction": false
     },
     "UNKNOWN_ROLE": {
-      "actionsDropdown": true,
+      "actionsDropdown": false,
       "recipientsField": false,
       "overviewLoaderAndAction": false,
       "bookingsNewAction": false
@@ -18062,7 +18062,7 @@
       },
       "RESERVED": {
         "add": false,
-        "remove": false,
+        "remove": true,
         "fulfilCta": false
       },
       "ONGOING": {
@@ -18172,18 +18172,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18209,18 +18209,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18283,18 +18283,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18320,18 +18320,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18357,18 +18357,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18394,18 +18394,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18432,7 +18432,7 @@
       },
       "RESERVED": {
         "add": false,
-        "remove": false,
+        "remove": true,
         "fulfilCta": false
       },
       "ONGOING": {
@@ -18468,18 +18468,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18505,18 +18505,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": false,
-        "remove": false,
-        "fulfilCta": false
+        "add": true,
+        "remove": true,
+        "fulfilCta": true
       },
       "ONGOING": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": false,
-        "remove": false,
+        "add": true,
+        "remove": true,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18543,7 +18543,7 @@
       },
       "RESERVED": {
         "add": false,
-        "remove": false,
+        "remove": true,
         "fulfilCta": false
       },
       "ONGOING": {
@@ -18579,18 +18579,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": true,
-        "remove": true,
-        "fulfilCta": true
+        "add": false,
+        "remove": false,
+        "fulfilCta": false
       },
       "ONGOING": {
-        "add": true,
-        "remove": true,
+        "add": false,
+        "remove": false,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": true,
-        "remove": true,
+        "add": false,
+        "remove": false,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18616,18 +18616,18 @@
         "fulfilCta": false
       },
       "RESERVED": {
-        "add": true,
-        "remove": true,
-        "fulfilCta": true
+        "add": false,
+        "remove": false,
+        "fulfilCta": false
       },
       "ONGOING": {
-        "add": true,
-        "remove": true,
+        "add": false,
+        "remove": false,
         "fulfilCta": false
       },
       "OVERDUE": {
-        "add": true,
-        "remove": true,
+        "add": false,
+        "remove": false,
         "fulfilCta": false
       },
       "COMPLETE": {
@@ -18664,8 +18664,8 @@
     "BASE+OWNER": false,
     "BASE+ADMIN": false,
     "BASE+SELF_SERVICE": true,
-    "(none)": false,
-    "UNKNOWN_ROLE": false
+    "(none)": true,
+    "UNKNOWN_ROLE": true
   },
   "B8:D-29:companion-self-custody": {
     "OWNER": false,
@@ -18673,13 +18673,13 @@
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": false,
-    "OWNER+SELF_SERVICE": true,
+    "OWNER+SELF_SERVICE": false,
     "OWNER+BASE": false,
     "ADMIN+OWNER": false,
-    "ADMIN+SELF_SERVICE": true,
+    "ADMIN+SELF_SERVICE": false,
     "ADMIN+BASE": false,
-    "SELF_SERVICE+OWNER": true,
-    "SELF_SERVICE+ADMIN": true,
+    "SELF_SERVICE+OWNER": false,
+    "SELF_SERVICE+ADMIN": false,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": false,
     "BASE+ADMIN": false,

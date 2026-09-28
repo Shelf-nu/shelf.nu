@@ -2,6 +2,10 @@
  * Reminder recipient candidates.
  *
  * Feeds the team member selector in the set and edit reminder dialogs.
+ * Candidates are members whose role may be picked as a recipient
+ * (`notifications.selectableAsRecipient`). The reminder writer still accepts
+ * any in-workspace member with a linked user (`validateTeamMembersForReminder`),
+ * so existing reminders stay editable.
  *
  * @see {@link file://./../../components/asset-reminder/team-members-selector.tsx}
  */
@@ -15,6 +19,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import { requireAnyPermission } from "~/utils/roles.server";
 
 /** What the reminder recipient picker renders for each candidate. */
@@ -74,7 +79,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 some: {
                   AND: [
                     { organizationId },
-                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                    {
+                      roles: {
+                        hasSome: rolesWhere(
+                          (p) => p.notifications.selectableAsRecipient
+                        ),
+                      },
+                    },
                   ],
                 },
               },

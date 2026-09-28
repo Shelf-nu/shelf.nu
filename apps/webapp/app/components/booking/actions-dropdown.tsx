@@ -54,7 +54,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
   } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const { roles } = useUserRoleHelper();
   const roleAccess = useRoleAccess();
 
   const canArchiveBooking = userHasPermission({
@@ -157,7 +157,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
           <When
             truthy={
-              !isBaseOrSelfService &&
+              roleAccess.policy.notifications.manageBookingRecipients &&
               !isCompleted &&
               !isArchived &&
               !isCancelled

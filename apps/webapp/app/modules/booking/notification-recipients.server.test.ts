@@ -5,7 +5,7 @@ import type {
 } from "@prisma/client";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 
@@ -37,11 +37,11 @@ vitest.mock("~/modules/booking-settings/service.server", () => ({
 
 // why: external database call
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsForNotification: vitest.fn(),
+  getOrganizationNotificationAudience: vitest.fn(),
 }));
 
 const mockedGetSettings = vitest.mocked(getBookingNotificationSettingsForOrg);
-const mockedGetAdmins = vitest.mocked(getOrganizationAdminsForNotification);
+const mockedGetAdmins = vitest.mocked(getOrganizationNotificationAudience);
 
 /** Helper to build a mock booking that satisfies BookingForEmail shape */
 function buildMockBooking(
@@ -210,9 +210,13 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "RESERVATION",
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
+      alertsOrgOnReservation: true,
     });
 
+    expect(mockedGetAdmins).toHaveBeenCalledWith({
+      organizationId: "org-1",
+      audience: "orgBookingBroadcasts",
+    });
     const adminRecipients = recipients.filter((r) => r.reason === "admin");
     expect(adminRecipients).toHaveLength(2);
     expect(adminRecipients.map((r) => r.email)).toEqual(
@@ -248,7 +252,7 @@ describe("getBookingNotificationRecipients", () => {
     expect(adminRecipients).toHaveLength(0);
   });
 
-  it("excludes admins for RESERVATION when custodian is admin (not self-service)", async () => {
+  it("excludes admins for RESERVATION when the maker's role does not trigger the broadcast", async () => {
     mockedGetSettings.mockResolvedValue({
       ...defaultSettings(),
       notifyAdminsOnNewBooking: true,
@@ -259,7 +263,7 @@ describe("getBookingNotificationRecipients", () => {
       booking,
       eventType: "RESERVATION",
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      alertsOrgOnReservation: false,
     });
 
     expect(mockedGetAdmins).not.toHaveBeenCalled();

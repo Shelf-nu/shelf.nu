@@ -379,6 +379,23 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 
 ---
 
+## Role access
+
+Every role decision in the app comes from `@shelf/permissions`:
+`userHasPermission` (`lib/permissions.ts`) for the permission matrix and
+`useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
+custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
+workspace's visibility toggles for this. Never compare role strings in the app.
+
+**Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update
+to every live `runtimeVersion` (1.5.0, 1.4.0, 1.3.0, 1.2.0). Builds older than
+1.2.0 cannot update over the air; for them an unknown role denies every
+client-gated affordance, and server-computed booking actions keep working.
+A companion bundle that reaches a device before the server sends the toggles
+reads them as off, which only under-offers.
+
+---
+
 ## Tech Stack
 
 | Layer      | Technology                        |
