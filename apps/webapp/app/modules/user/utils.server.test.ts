@@ -16,8 +16,10 @@
  *    be the looser one.
  *
  * 4. A role change takes the target's membership lock first, reads the
- *    member's effective role under it, and validates the transfer recipient
- *    before writing the role or the role-change log, all in one transaction.
+ *    member's effective role under it, authorizes and writes the role, then
+ *    validates the transfer recipient and moves entities, and writes the
+ *    role-change log last, all in one transaction: a refused recipient rolls
+ *    the role write back.
  *
  * @see {@link file://./utils.server.ts}
  * @see {@link file://./../invite/roles.ts}
