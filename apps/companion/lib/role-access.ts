@@ -130,3 +130,30 @@ export function canRemoveItemsFromBooking(
     canRemoveBookingItems({ access, bookingStatus })
   );
 }
+
+/**
+ * Whether the server's ownership check accepts this member changing a
+ * booking's items (add, remove, model requests).
+ *
+ * A role whose booking writes are scoped (`!access.bookings.writeAll`) may
+ * change only bookings it is the custodian of: the mobile add, remove and
+ * model-request endpoints key on the custodian, not the creator. Seeing every
+ * booking (a workspace see-toggle) does not widen this.
+ *
+ * @param args.access - The member's access
+ * @param args.userId - The signed-in user; missing while loading
+ * @param args.custodianUserId - The booking's custodian user, if any
+ * @returns `true` when the member may change this booking's items
+ */
+export function mayWriteBookingItems({
+  access,
+  userId,
+  custodianUserId,
+}: {
+  access: RoleAccess;
+  userId: string | undefined;
+  custodianUserId: string | undefined;
+}): boolean {
+  if (access.bookings.writeAll) return true;
+  return !!userId && custodianUserId === userId;
+}

@@ -39,6 +39,7 @@ import { userHasPermission } from "@/lib/permissions";
 import {
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
+  mayWriteBookingItems,
 } from "@/lib/role-access";
 import { useRoleAccess } from "@/hooks/use-role-access";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
@@ -1407,8 +1408,26 @@ export default function BookingDetailScreen() {
         (booking.creator.id === user.id ||
           booking.custodianUser?.id === user.id)));
 
-  // Same gate the add affordances use (server re-checks ownership + status).
-  const canManageModels = canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+  /**
+   * Whether the server accepts this member changing this booking's items: a
+   * role whose writes are scoped must be the custodian (the add, remove and
+   * model-request endpoints key on the custodian). Every item affordance below
+   * requires it, so none of them leads to a 403.
+   */
+  const mayChangeItems = mayWriteBookingItems({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+  });
+  const canAddItems =
+    mayChangeItems &&
+    canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+  const canRemoveItems =
+    mayChangeItems &&
+    canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles);
+
+  // Model reservations are item changes, so they share the add gate.
+  const canManageModels = canAddItems;
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1757,7 +1776,7 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
-            {booking && canAddItemsToBooking(access, booking.status, currentOrg?.roles) && (
+            {canAddItems && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={() =>
@@ -1784,7 +1803,7 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Browse available assets/kits to add (date-aware picker) */}
-            {canAddItemsToBooking(access, booking.status, currentOrg?.roles) && (
+            {canAddItems && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={() =>
@@ -1813,42 +1832,41 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Select assets to remove (editable bookings with assets) */}
-            {canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles) &&
-              booking.assetCount > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "remove" && styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    toggleSelectMode("remove");
-                  }}
-                  accessibilityLabel={
+            {canRemoveItems && booking.assetCount > 0 && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButtonOutline,
+                  selectMode === "remove" && styles.actionButtonOutlineActive,
+                ]}
+                onPress={() => {
+                  toggleSelectMode("remove");
+                }}
+                accessibilityLabel={
+                  selectMode === "remove"
+                    ? "Cancel selection"
+                    : "Select assets to remove"
+                }
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={selectMode === "remove" ? "close" : "trash-outline"}
+                  size={18}
+                  color={
                     selectMode === "remove"
-                      ? "Cancel selection"
-                      : "Select assets to remove"
+                      ? colors.error
+                      : colors.buttonSecondaryText
                   }
-                  accessibilityRole="button"
+                />
+                <Text
+                  style={[
+                    styles.actionButtonOutlineText,
+                    selectMode === "remove" && { color: colors.error },
+                  ]}
                 >
-                  <Ionicons
-                    name={selectMode === "remove" ? "close" : "trash-outline"}
-                    size={18}
-                    color={
-                      selectMode === "remove"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "remove" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "remove" ? "Cancel" : "Select to Remove"}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  {selectMode === "remove" ? "Cancel" : "Select to Remove"}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Full check-out is RESERVED-only (web parity); the loader's
                 canCheckout reflects that. It is hidden when the workspace
@@ -1960,7 +1978,7 @@ export default function BookingDetailScreen() {
                 complete the assign and check-out flow, so showing the CTA
                 would only lead to a rejected submit. */}
             {booking.status === "RESERVED" &&
-              canAddItemsToBooking(access, booking.status, currentOrg?.roles) &&
+              canAddItems &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}

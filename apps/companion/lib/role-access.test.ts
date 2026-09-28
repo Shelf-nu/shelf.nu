@@ -26,6 +26,7 @@ import {
   accessForOrganization,
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
+  mayWriteBookingItems,
 } from "./role-access";
 
 /** One organization from `/api/mobile/me`, as it arrives over the wire. */
@@ -155,40 +156,19 @@ describe("custody for yourself only", () => {
 
 describe("booking item rules", () => {
   test("SELF_SERVICE removes items on RESERVED, like the server", () => {
-    assert.equal(
-      mayRemove(["SELF_SERVICE"], "RESERVED"),
-      true
-    );
-    assert.equal(
-      mayRemove(["SELF_SERVICE"], "ONGOING"),
-      false
-    );
+    assert.equal(mayRemove(["SELF_SERVICE"], "RESERVED"), true);
+    assert.equal(mayRemove(["SELF_SERVICE"], "ONGOING"), false);
   });
 
   test("BASE removes only on DRAFT; ADMIN until the booking closes", () => {
-    assert.equal(
-      mayRemove(["BASE"], "RESERVED"),
-      false
-    );
-    assert.equal(
-      mayRemove(["ADMIN"], "OVERDUE"),
-      true
-    );
-    assert.equal(
-      mayRemove(["ADMIN"], "COMPLETE"),
-      false
-    );
+    assert.equal(mayRemove(["BASE"], "RESERVED"), false);
+    assert.equal(mayRemove(["ADMIN"], "OVERDUE"), true);
+    assert.equal(mayRemove(["ADMIN"], "COMPLETE"), false);
   });
 
   test("adding after DRAFT is admin-only; closed bookings refuse everyone", () => {
-    assert.equal(
-      mayAdd(["SELF_SERVICE"], "DRAFT"),
-      true
-    );
-    assert.equal(
-      mayAdd(["SELF_SERVICE"], "RESERVED"),
-      false
-    );
+    assert.equal(mayAdd(["SELF_SERVICE"], "DRAFT"), true);
+    assert.equal(mayAdd(["SELF_SERVICE"], "RESERVED"), false);
     assert.equal(mayAdd(["ADMIN"], "RESERVED"), true);
     assert.equal(mayAdd(["ADMIN"], "ARCHIVED"), false);
   });
@@ -225,8 +205,64 @@ describe("booking item rules", () => {
 
   test("a status this build does not know denies", () => {
     assert.equal(mayAdd(["ADMIN"], "PAUSED"), false);
+    assert.equal(mayRemove(["ADMIN"], "PAUSED"), false);
+  });
+});
+
+describe("mayWriteBookingItems", () => {
+  const custodian = { custodianUserId: "user-1" };
+  const colleagues = { custodianUserId: "user-2" };
+
+  test("a role whose booking writes are scoped needs to be the custodian", () => {
+    for (const roles of [["SELF_SERVICE"], ["BASE"]]) {
+      const access = accessOf(roles);
+      const label = roles.join("+");
+      assert.equal(
+        mayWriteBookingItems({ access, userId: "user-1", ...custodian }),
+        true,
+        label
+      );
+      assert.equal(
+        mayWriteBookingItems({ access, userId: "user-1", ...colleagues }),
+        false,
+        label
+      );
+    }
+  });
+
+  test("seeing every booking does not widen who may change its items", () => {
+    const access = accessForOrganization(
+      meOrganization({ selfServiceCanSeeBookings: true })
+    );
     assert.equal(
-      mayRemove(["ADMIN"], "PAUSED"),
+      mayWriteBookingItems({ access, userId: "user-1", ...colleagues }),
+      false
+    );
+  });
+
+  test("a role that writes every booking may change anyone's", () => {
+    assert.equal(
+      mayWriteBookingItems({
+        access: accessOf(["ADMIN"]),
+        userId: "user-1",
+        ...colleagues,
+      }),
+      true
+    );
+  });
+
+  test("an unknown signed-in user or custodian denies a scoped role", () => {
+    const access = accessOf(["SELF_SERVICE"]);
+    assert.equal(
+      mayWriteBookingItems({ access, userId: undefined, ...custodian }),
+      false
+    );
+    assert.equal(
+      mayWriteBookingItems({
+        access,
+        userId: "user-1",
+        custodianUserId: undefined,
+      }),
       false
     );
   });
