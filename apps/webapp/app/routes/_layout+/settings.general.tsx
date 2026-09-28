@@ -1,4 +1,4 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
+import { Currency, OrganizationType } from "@prisma/client";
 import {
   MaxFileSizeExceededError,
   parseFormData,
@@ -210,7 +210,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, role, organizations } =
+    const { organizationId, currentOrganization, access, organizations } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -392,7 +392,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "sso": {
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
@@ -452,8 +452,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Defense in depth: the transfer card is hidden from non-owners, but a
         // hand-crafted POST must not be able to transfer the workspace either.
         // `requirePermission` above cannot catch this — ADMIN and OWNER share
-        // every permission, so the role has to be checked explicitly.
-        if (role !== OrganizationRoles.OWNER) {
+        // every permission, so ownership has to be checked explicitly.
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
@@ -501,7 +501,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
@@ -549,7 +549,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",

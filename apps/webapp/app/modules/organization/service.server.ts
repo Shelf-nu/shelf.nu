@@ -19,6 +19,8 @@ import {
 } from "~/utils/error";
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { emailMatchesDomains } from "~/utils/misc";
+import { holdsRoleWhere } from "~/utils/permissions/membership-access";
+import { isWorkspaceOwner, rolesWhere } from "~/utils/permissions/role-access";
 import {
   createStripeCustomer,
   customerHasPaymentMethod,
@@ -802,15 +804,28 @@ export function updateOrganizationPermissions({
   });
 }
 
+/**
+ * Members who may be chosen as the new owner in an ownership transfer
+ * (`membership.eligibleAsNewOwner`). `transferOwnership` re-checks the same
+ * policy, so the candidate list and the transfer cannot disagree.
+ *
+ * @param args.organizationId - The workspace being transferred
+ * @returns The eligible members' users
+ * @throws {ShelfError} If the query fails
+ */
 export async function getOrganizationAdmins({
   organizationId,
 }: {
   organizationId: Organization["id"];
 }) {
   try {
-    /** Get all the admins in current organization */
     const admins = await db.userOrganization.findMany({
-      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
+      where: {
+        organizationId,
+        roles: {
+          hasSome: rolesWhere((p) => p.membership.eligibleAsNewOwner),
+        },
+      },
       select: {
         user: {
           select: {
@@ -883,7 +898,11 @@ export async function transferOwnership({
         organizationId: currentOrganization.id,
         OR: [
           { userId: newOwnerId },
-          { roles: { has: OrganizationRoles.OWNER } },
+          {
+            roles: {
+              hasSome: rolesWhere((p) => p.membership.ownsWorkspace),
+            },
+          },
         ],
       },
       select: {
@@ -915,7 +934,7 @@ export async function transferOwnership({
      * all, so the two identities must stay separate.
      */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
-      userOrg.roles.includes(OrganizationRoles.OWNER)
+      isWorkspaceOwner(userOrg.roles)
     );
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
@@ -954,8 +973,13 @@ export async function transferOwnership({
       });
     }
 
-    /** Validate if the new owner is ADMIN in the current organization */
-    if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
+    /** The new owner must hold a role eligible to own the workspace */
+    if (
+      !holdsRoleWhere(
+        newOwnerUserOrg.roles,
+        (p) => p.membership.eligibleAsNewOwner
+      )
+    ) {
       throw new ShelfError({
         cause: null,
         message: "New owner is not an admin of the organization.",

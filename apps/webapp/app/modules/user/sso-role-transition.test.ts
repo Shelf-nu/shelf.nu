@@ -387,7 +387,7 @@ describe("SSO role transition: a membership that is gone or revoked", () => {
       where: {
         userId: USER,
         organizationId: ORG,
-        NOT: { roles: { has: "OWNER" } },
+        NOT: { roles: { hasSome: ["OWNER"] } },
       },
     });
     expect(dbMocks.userUpdate).toHaveBeenCalledWith({

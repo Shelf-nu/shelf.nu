@@ -5,7 +5,6 @@ import {
   type Qr,
   type User,
   type CustomTierLimit,
-  OrganizationRoles,
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
@@ -39,6 +38,7 @@ import {
   isDelete,
   parseData,
 } from "~/utils/http.server";
+import { isWorkspaceOwner } from "~/utils/permissions/role-access";
 import { requireAdmin } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -166,7 +166,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       (uo) =>
         uo.organization.enabledSso &&
         uo.organization.ssoDetails &&
-        uo.roles.some((role) => role === OrganizationRoles.OWNER)
+        isWorkspaceOwner(uo.roles)
     );
 
     /** Process the data you already have - no second query needed! */

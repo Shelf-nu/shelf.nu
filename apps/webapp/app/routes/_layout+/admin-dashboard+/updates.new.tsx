@@ -1,10 +1,11 @@
-import { UpdateStatus, OrganizationRoles } from "@prisma/client";
+import { UpdateStatus } from "@prisma/client";
 import { DateTime } from "luxon";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect } from "react-router";
 import { z } from "zod";
 import { Card } from "~/components/shared/card";
 import { UpdateForm } from "~/components/update/update-form";
+import { parseTargetRoles } from "~/modules/update/audience";
 import { createUpdate } from "~/modules/update/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
@@ -39,13 +40,8 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     const formData = await request.formData();
 
-    // Handle role targeting
-    const targetRoles: OrganizationRoles[] = [];
-    if (formData.get("targetAdmin")) targetRoles.push(OrganizationRoles.ADMIN);
-    if (formData.get("targetOwner")) targetRoles.push(OrganizationRoles.OWNER);
-    if (formData.get("targetSelfService"))
-      targetRoles.push(OrganizationRoles.SELF_SERVICE);
-    if (formData.get("targetBase")) targetRoles.push(OrganizationRoles.BASE);
+    // The roles the update targets; none checked means visible to everyone.
+    const targetRoles = parseTargetRoles(formData);
 
     // Parse the submitted publish-date wall-clock in the acting admin's
     // RESOLVED timezone preference (the same zone the form seeds it in), not

@@ -16,7 +16,11 @@ import {
   hasPermission,
   validatePermission,
 } from "./permissions/permission.validator.server";
-import { resolveRole, resolveRoleAccess } from "./permissions/role-access";
+import {
+  isWorkspaceOwner,
+  resolveRole,
+  resolveRoleAccess,
+} from "./permissions/role-access";
 import { ROLE_PRECEDENCE } from "./role-precedence";
 import { SSO_GROUP_ROLE, type SsoGroupField } from "./sso-group-roles";
 
@@ -355,13 +359,10 @@ export async function requirePermissionInOrganization({
 }
 
 /**
- * Whether the user holds OWNER in the given organization.
- *
- * Checks membership of the roles ARRAY rather than `resolveEffectiveRole`,
- * which returns `roles[0]` — a user carrying more than one role could be the
- * owner without OWNER being first. This mirrors the check the loaders already
- * use to decide whether to render the purchase UI, so the server gate and the
- * UI gate cannot disagree.
+ * Whether the user owns the given organization: OWNER anywhere in the
+ * membership (`isWorkspaceOwner`). The loaders use the same check to decide
+ * whether to render the purchase UI, so the server gate and the UI gate cannot
+ * disagree.
  *
  * @param userOrganizations - The caller's memberships, as returned by `requirePermission`
  * @param organizationId - The active organization
@@ -377,10 +378,8 @@ export function isOrganizationOwner({
   }>;
   organizationId: string;
 }): boolean {
-  return (
-    userOrganizations
-      .find((o) => o.organization.id === organizationId)
-      ?.roles.includes(OrganizationRoles.OWNER) ?? false
+  return isWorkspaceOwner(
+    userOrganizations.find((o) => o.organization.id === organizationId)?.roles
   );
 }
 

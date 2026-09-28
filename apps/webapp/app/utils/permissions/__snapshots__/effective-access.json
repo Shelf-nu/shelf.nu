@@ -17585,7 +17585,7 @@
       "updatesPageRole": "OWNER"
     },
     "ADMIN+OWNER": {
-      "layoutBadgeRole": "ADMIN",
+      "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
     "ADMIN+SELF_SERVICE": {
@@ -17597,11 +17597,11 @@
       "updatesPageRole": "ADMIN"
     },
     "SELF_SERVICE+OWNER": {
-      "layoutBadgeRole": "SELF_SERVICE",
+      "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
     "SELF_SERVICE+ADMIN": {
-      "layoutBadgeRole": "SELF_SERVICE",
+      "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
     "SELF_SERVICE+BASE": {
@@ -17609,25 +17609,45 @@
       "updatesPageRole": "SELF_SERVICE"
     },
     "BASE+OWNER": {
-      "layoutBadgeRole": "BASE",
+      "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
     "BASE+ADMIN": {
-      "layoutBadgeRole": "BASE",
+      "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
     "BASE+SELF_SERVICE": {
-      "layoutBadgeRole": "BASE",
+      "layoutBadgeRole": "SELF_SERVICE",
       "updatesPageRole": "SELF_SERVICE"
     },
     "(none)": {
       "layoutBadgeRole": null,
-      "updatesPageRole": "BASE"
+      "updatesPageRole": null
     },
     "UNKNOWN_ROLE": {
-      "layoutBadgeRole": "UNKNOWN_ROLE",
+      "layoutBadgeRole": "BASE",
       "updatesPageRole": "BASE"
     }
+  },
+  "F4:announcementRole": {
+    "OWNER": "OWNER",
+    "ADMIN": "ADMIN",
+    "SELF_SERVICE": "SELF_SERVICE",
+    "BASE": "BASE",
+    "OWNER+ADMIN": "OWNER",
+    "OWNER+SELF_SERVICE": "OWNER",
+    "OWNER+BASE": "OWNER",
+    "ADMIN+OWNER": "OWNER",
+    "ADMIN+SELF_SERVICE": "ADMIN",
+    "ADMIN+BASE": "ADMIN",
+    "SELF_SERVICE+OWNER": "OWNER",
+    "SELF_SERVICE+ADMIN": "ADMIN",
+    "SELF_SERVICE+BASE": "SELF_SERVICE",
+    "BASE+OWNER": "OWNER",
+    "BASE+ADMIN": "ADMIN",
+    "BASE+SELF_SERVICE": "SELF_SERVICE",
+    "(none)": null,
+    "UNKNOWN_ROLE": "BASE"
   },
   "B9:D-06/D-08/D-09:owner-and-recipients": {
     "OWNER": {

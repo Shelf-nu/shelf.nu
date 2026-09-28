@@ -1789,7 +1789,9 @@ async function deleteMembershipUnlessOwner(
     where: {
       userId,
       organizationId,
-      NOT: { roles: { has: OrganizationRoles.OWNER } },
+      NOT: {
+        roles: { hasSome: rolesWhere((p) => p.membership.ownsWorkspace) },
+      },
     },
   });
 

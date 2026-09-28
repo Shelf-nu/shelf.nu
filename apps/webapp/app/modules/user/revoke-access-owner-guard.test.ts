@@ -101,7 +101,7 @@ describe("revokeAccessToOrganization — owner protection", () => {
       where: {
         userId: "admin-user",
         organizationId: "org-1",
-        NOT: { roles: { has: OrganizationRoles.OWNER } },
+        NOT: { roles: { hasSome: [OrganizationRoles.OWNER] } },
       },
     });
   });

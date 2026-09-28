@@ -20,6 +20,13 @@ vi.mock("~/hooks/user-user-role-helper", () => ({
   useUserRoleHelper: vi.fn(),
 }));
 
+// why: workspace ownership comes from the layout loader, which is not mounted
+// here; it only words the "unlock barcodes" card, which these tests never show
+vi.mock("~/hooks/use-role-access", async () => {
+  const { accessFor } = await import("@helpers/role-access");
+  return { useRoleAccess: () => accessFor(["ADMIN"]) };
+});
+
 // why: the organization comes from the layout loader, which is not mounted
 // here; barcodes are on so the button renders without its "unlock" reason card
 vi.mock("~/hooks/use-current-organization", () => ({
@@ -40,7 +47,6 @@ vi.mock("./add-barcode-dialog", () => ({
 function renderAs(roles: OrganizationRoles[] | undefined) {
   vi.mocked(useUserRoleHelper).mockReturnValue({
     roles,
-    isOwner: roles?.includes("OWNER") ?? false,
   } as unknown as ReturnType<typeof useUserRoleHelper>);
 
   return render(

@@ -147,7 +147,7 @@ describe("SSO group-claim revocation", () => {
       where: {
         userId: USER_ID,
         organizationId: ORG_ID,
-        NOT: { roles: { has: "OWNER" } },
+        NOT: { roles: { hasSome: ["OWNER"] } },
       },
     });
   });

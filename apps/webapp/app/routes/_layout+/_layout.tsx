@@ -46,6 +46,7 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { announcementRole } from "~/modules/update/audience";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -235,12 +236,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       await Promise.all([
         getBookingSettingsForOrganization(currentOrganization.id),
         getWorkingHoursForOrganization(currentOrganization.id),
-        currentOrganizationUserRoles?.[0]
-          ? getUnreadCountForUser({
-              userId: authSession.userId,
-              userRole: currentOrganizationUserRoles[0],
-            })
-          : Promise.resolve(0),
+        (() => {
+          // Same audience rule as the updates page (announcementRole), so the
+          // badge counts exactly what the list shows.
+          const userRole = announcementRole(currentOrganizationUserRoles);
+          return userRole
+            ? getUnreadCountForUser({ userId: authSession.userId, userRole })
+            : Promise.resolve(0);
+        })(),
       ]);
 
     return data(

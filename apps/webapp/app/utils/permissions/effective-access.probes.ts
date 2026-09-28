@@ -21,6 +21,7 @@ import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
 import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
+import { announcementRole } from "~/modules/update/audience";
 import {
   assertCanDeleteBooking,
   assertCanDownloadBookingDocuments,
@@ -1455,18 +1456,25 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     })
   );
 
-  // B9:F4: announcement audience role: layout badge
-  // routes/_layout+/_layout.tsx:221-226 (`roles[0]`; no role → count 0), updates
-  // page routes/_layout+/updates.tsx and routes/api+/updates.tsx
-  // (requirePermission's effective role).
+  // B9:F4: announcement audience role. The layout badge
+  // (routes/_layout+/_layout.tsx) and the updates page
+  // (routes/_layout+/updates.tsx, routes/api+/updates.tsx, via
+  // requirePermission's `access.role`) both read `announcementRole`.
   snapshot["B9:F4:announcements"] = perRoleSet((roles) => ({
-    layoutBadgeRole: roles[0] ?? null,
-    updatesPageRole: webRole(roles),
+    layoutBadgeRole: announcementRole(roles),
+    updatesPageRole: announcementRole(roles),
   }));
 
+  // F4: the role announcements target for every membership.
+  snapshot["F4:announcementRole"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [key(roles), announcementRole(roles)])
+  );
+
   // B9:D-06/D-08/D-09: "held anywhere" membership reads: owner
-  // (utils/roles.server.ts:299-314), new-owner eligibility
-  // (modules/organization/service.server.ts:958), transfer recipients
+  // (`isOrganizationOwner` in utils/roles.server.ts, which asks
+  // `isWorkspaceOwner`), new-owner eligibility (`transferOwnership` and
+  // `getOrganizationAdmins` in modules/organization/service.server.ts: any role
+  // whose policy is eligible as the new owner), transfer recipients
   // (routes/api+/user.transfer-recipients.ts and assertTransferRecipient in
   // modules/user/service.server.ts: any role whose policy may receive transfers).
   snapshot["B9:D-06/D-08/D-09:owner-and-recipients"] = perRoleSet((roles) => ({
@@ -1474,7 +1482,10 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
       userOrganizations: [{ organization: { id: "org" }, roles }],
       organizationId: "org",
     }),
-    eligibleAsNewOwner: roles.includes(R.ADMIN),
+    eligibleAsNewOwner: holdsRoleWhere(
+      roles,
+      (p) => p.membership.eligibleAsNewOwner
+    ),
     receivesTransfers: holdsRoleWhere(
       roles,
       (p) => p.membership.canReceiveTransfers
