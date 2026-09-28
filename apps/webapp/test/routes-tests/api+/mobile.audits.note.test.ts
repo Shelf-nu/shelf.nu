@@ -29,8 +29,7 @@ vi.mock("react-router", async () => {
 });
 
 // why: external auth — don't hit Supabase. getMobileUserContext carries the
-// paid-add-on flag (canUseAudits) so we can assert it gates this route
-// (#2551 replaced the old requireMobileAuditsEnabled helper).
+// paid-add-on flag (canUseAudits) so we can assert it gates this route.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
@@ -44,10 +43,13 @@ vi.mock("~/modules/audit/mobile-evidence.server", () => ({
   requireAuditAssetInSession: vi.fn(),
 }));
 
-// why: external database — don't hit the real DB
+// why: external database — don't hit the real DB. The comment is written
+// inside a transaction that first locks the audit row and reads its status.
 vi.mock("~/database/db.server", () => ({
   db: {
     auditNote: { create: vi.fn() },
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -115,6 +117,11 @@ describe("POST /api/mobile/audits/note", () => {
     });
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (requireAuditAssetInSession as any).mockResolvedValue(undefined);
+    (db.$transaction as any).mockImplementation(
+      (cb: (tx: unknown) => unknown) => cb(db)
+    );
+    // The locked audit row the comment is written against.
+    (db.$queryRaw as any).mockResolvedValue([{ status: "ACTIVE" }]);
   });
 
   it("creates a condition note scoped to the auditAsset and returns it", async () => {
@@ -142,6 +149,21 @@ describe("POST /api/mobile/audits/note", () => {
       })
     );
   });
+
+  it.each(["COMPLETED", "CANCELLED", "ARCHIVED"])(
+    "refuses a note on a %s audit",
+    async (auditStatus) => {
+      // A finished audit is a record; its receipt prints the notes it holds.
+      (db.$queryRaw as any).mockResolvedValue([{ status: auditStatus }]);
+
+      const result = await action(
+        createActionArgs({ request: createNoteRequest(validBody) })
+      );
+
+      expect((result as unknown as Response).status).toBe(400);
+      expect(db.auditNote.create).not.toHaveBeenCalled();
+    }
+  );
 
   it("returns 403 when the workspace lacks the Audits add-on (revenue bypass closed)", async () => {
     (getMobileUserContext as any).mockResolvedValue({

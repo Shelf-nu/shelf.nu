@@ -9,7 +9,31 @@ const Select = SelectPrimitive.Root;
 
 const SelectGroup = SelectPrimitive.Group;
 
-const SelectValue = SelectPrimitive.Value;
+/**
+ * Radix renders a string `placeholder` as a bare text node inside the value
+ * span and removes that node when a value is picked. Page translation rewrites
+ * text nodes in place, which would make that removal target a node that is no
+ * longer there. Rendering the placeholder inside an element keeps the swap an
+ * element removal, which stays valid on a translated page.
+ */
+const SelectValue = React.forwardRef<
+  ElementRef<typeof SelectPrimitive.Value>,
+  ComponentPropsWithoutRef<typeof SelectPrimitive.Value>
+>(function SelectValue({ placeholder, ...props }, ref) {
+  return (
+    <SelectPrimitive.Value
+      ref={ref}
+      placeholder={
+        typeof placeholder === "string" ? (
+          <span>{placeholder}</span>
+        ) : (
+          placeholder
+        )
+      }
+      {...props}
+    />
+  );
+});
 
 const SelectTrigger = React.forwardRef<
   ElementRef<typeof SelectPrimitive.Trigger>,
@@ -91,6 +115,25 @@ const SelectContent = React.forwardRef<
           className
         )}
         {...props}
+        // A modal Radix Dialog — every `Sheet`, and so every route rendered
+        // through `ContextualSidebar` — mounts `react-remove-scroll`, which
+        // cancels any `wheel` whose target sits outside the dialog content.
+        // This content is portalled to `document.body`, which counts as
+        // outside, so without this a long option list cannot be scrolled by
+        // wheel inside a sheet; only dragging the scrollbar works, since that
+        // is a pointer interaction rather than a wheel event.
+        //
+        // React attaches portal listeners to the portal container, and
+        // `document.body` is a descendant of the `document` remove-scroll
+        // listens on, so stopping here runs first and keeps the event alive.
+        onWheel={(event) => {
+          event.stopPropagation();
+          props.onWheel?.(event);
+        }}
+        onTouchMove={(event) => {
+          event.stopPropagation();
+          props.onTouchMove?.(event);
+        }}
       >
         <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
       </SelectPrimitive.Content>

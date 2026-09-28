@@ -9,9 +9,9 @@ import {
 } from "@radix-ui/react-popover";
 import { useFetcher } from "react-router";
 import { ChevronRight, SuccessIcon } from "~/components/icons/library";
-import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
+import type { UserFriendlyRoles } from "~/utils/organization-roles";
 import { isDemotion } from "~/utils/roles";
 import { tw } from "~/utils/tw";
 import { Button } from "../shared/button";

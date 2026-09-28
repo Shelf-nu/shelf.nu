@@ -13,6 +13,11 @@
  * Cancelling either dialog cancels the whole selection and leaves the value
  * untouched.
  *
+ * The inline iOS picker draws straight onto the form's card, so it is told the
+ * app's own light or dark appearance; left alone it takes the phone's, which
+ * the app's Appearance setting can contradict. Android's dialogs paint their
+ * own background and take no such setting.
+ *
  * Mount it only while the picker should be showing — `onConfirm` and `onCancel`
  * are both terminal, and the parent is expected to unmount on either.
  *
@@ -25,6 +30,7 @@ import { Platform, View, type StyleProp, type ViewStyle } from "react-native";
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
+import { useTheme } from "@/lib/theme-context";
 
 type DateTimeFieldProps = {
   /** Value the picker opens on. */
@@ -52,6 +58,7 @@ export function DateTimeField({
   inlineStyle,
   accentColor,
 }: DateTimeFieldProps) {
+  const { isDark } = useTheme();
   /**
    * Callbacks and the opening value live in refs because the Android picker
    * re-opens its native dialog whenever `onChange` or `value` change identity,
@@ -134,6 +141,7 @@ export function DateTimeField({
         timeZoneName={timeZoneName}
         onChange={handleIosChange}
         accentColor={accentColor}
+        themeVariant={isDark ? "dark" : "light"}
       />
     </View>
   );

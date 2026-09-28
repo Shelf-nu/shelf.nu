@@ -32,7 +32,10 @@ import type {
   CodeEntityKind,
   ResolvedDisplayCode,
 } from "~/modules/barcode/display";
-import { labelForPreference } from "~/modules/barcode/display";
+import {
+  describeCodeFallback,
+  labelForPreference,
+} from "~/modules/barcode/display";
 import { tw } from "~/utils/tw";
 
 type AssetCodeBadgeProps = Omit<ResolvedDisplayCode, "entityKind"> & {
@@ -71,8 +74,9 @@ type AssetCodeBadgeProps = Omit<ResolvedDisplayCode, "entityKind"> & {
  * pattern as `BarcodeTypeTooltip` in `~/components/forms/barcodes-input.tsx`
  * and `InfoTooltip` body styling. Three branches:
  *
- * 1. Fallback — workspace asked for type X but the asset has none, so
- *    we're showing QR. Body names both types and the fix.
+ * 1. Fallback — workspace asked for type X but the entity has none, so
+ *    we're showing QR. Body is the shared fallback sentence from
+ *    `describeCodeFallback`, plus how to fix it where a fix exists.
  * 2. Override — chip's type differs from the workspace preference but
  *    isn't a fallback, so a per-asset override is in effect.
  * 3. Default — chip's type matches the workspace preference.
@@ -90,23 +94,21 @@ function buildTooltipContent(
   const typeLabel = labelForPreference(type);
   const wsLabel = labelForPreference(workspacePreference);
 
-  if (isFallback) {
-    // why a kit gets different words: the generic body tells the reader to
-    // "add one", and for a kit on a SAM ID workspace that is impossible —
-    // `Kit` has no `sequentialId` column and there is no UI to set one. An
-    // instruction nobody can follow reads as the reader's fault rather than a
-    // product gap, so name the gap instead. Only SAM_ID can reach this for a
-    // kit; kits carry their own QR and barcodes, so every other preference
-    // resolves normally.
-    if (entityKind === "kit" && workspacePreference === "SAM_ID") {
-      return {
-        title: `${typeLabel}: ${value} (fallback)`,
-        body: `Your workspace prefers ${wsLabel}, which kits do not have. Showing the ${typeLabel} instead.`,
-      };
-    }
+  const fallback = describeCodeFallback({
+    type,
+    isFallback,
+    workspacePreference,
+    entityKind,
+  });
+  if (fallback) {
     return {
       title: `${typeLabel}: ${value} (fallback)`,
-      body: `Your workspace prefers ${wsLabel} but this item has no ${wsLabel}. Add one (or change the workspace setting) to fix.`,
+      // Advise adding the missing code only where the entity can carry one.
+      // An instruction nobody can follow — "add a SAM ID" to a kit — reads as
+      // the reader's fault rather than a product gap.
+      body: fallback.fixable
+        ? `${fallback.text} Add one (or change the workspace setting) to fix.`
+        : fallback.text,
     };
   }
   if (type !== workspacePreference) {

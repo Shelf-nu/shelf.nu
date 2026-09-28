@@ -101,17 +101,28 @@ export const custodyApi = {
     return result;
   },
 
-  /** Update asset location */
+  /**
+   * Update asset location. `quantity` is the per-placement amount for a
+   * QUANTITY_TRACKED asset (units to place at the location — the remainder
+   * stays in the unplaced pool); omit it to place the full pool. INDIVIDUAL
+   * assets ignore it. The server treats the write as a pivot replace, so any
+   * multi-placement collapses to the single new row.
+   */
   updateLocation: async (
     orgId: string,
     assetId: string,
-    locationId: string
+    locationId: string,
+    quantity?: number
   ) => {
     const result = await apiFetch<UpdateLocationResponse>(
       `/api/mobile/asset/update-location?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetId, locationId }),
+        body: JSON.stringify({
+          assetId,
+          locationId,
+          ...(quantity != null ? { quantity } : {}),
+        }),
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/locations");

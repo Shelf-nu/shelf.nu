@@ -31,11 +31,13 @@ import { getParams } from "~/utils/http.server";
  * reserve in this booking's window, plus this booking's existing model-level
  * reservations so the app can show current amounts and offer edits.
  *
- * Read-only. Org-scoped, and — like the booking detail read
- * (`bookings.$bookingId.ts`) — custodian-scoped for SELF_SERVICE / BASE so
- * they can only pick models against a booking they own. The actual
- * reserve/edit/remove mutation is enforced separately in
- * `bookings.$bookingId.model-requests.ts`.
+ * Read-only, but a MUTATION-TARGET picker: every model it lists is one the
+ * caller is about to reserve against this booking. So it scopes by custody for
+ * SELF_SERVICE / BASE — the set `bookings.$bookingId.model-requests.ts` will
+ * actually accept a write for — rather than by the wider read rule the booking
+ * list and detail use, which the workspace's booking-visibility override can
+ * widen. Offering a booking here that the mutation then refuses is the
+ * dead-end this narrower scope exists to avoid.
  *
  * @see {@link file://./../../_layout+/bookings.$bookingId.overview.manage-assets.tsx} web twin
  * @see {@link file://./../../../modules/booking-model-request/service.server.ts} shared service
@@ -70,9 +72,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
     );
 
-    // Self-service / base users may only see their OWN bookings — scope the
-    // lookup by custodian exactly like the booking detail read, so a booking
-    // they don't own 404s instead of leaking its models/reservations.
+    // Self-service / base users may only pick models against a booking they
+    // own, so an unowned booking 404s here instead of leaking its models and
+    // reservations. Deliberately the WRITE scope, not the read scope: see the
+    // module docblock.
     const { role } = await getMobileUserContext(user.id, organizationId);
     const isSelfServiceOrBase =
       role === OrganizationRoles.SELF_SERVICE ||

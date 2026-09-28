@@ -173,6 +173,32 @@
         "no-console": "off",
         "@typescript-eslint/require-await": "off"
       }
+    },
+    {
+      // Client code runs in browsers and on plain-HTTP self-hosted origins where
+      // `crypto.randomUUID` is undefined; `generateClientId` covers both. The
+      // selector catches every spelling (`crypto.`, `globalThis.crypto.`,
+      // `window.crypto.`, bracket access), which `no-restricted-properties`
+      // cannot do for nested objects.
+      //
+      // Regex lookbehind is the one syntax the build cannot lower to the browser
+      // floor: esbuild rewrites the literal into `new RegExp(...)`, so the chunk
+      // parses and then throws when that line runs on Safari below 16.4.
+      "files": ["app/**/*.ts", "app/**/*.tsx"],
+      "excludedFiles": ["app/**/*.server.ts", "app/utils/id/client-id.ts"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "MemberExpression[computed=false][property.name='randomUUID'], MemberExpression[computed=true][property.value='randomUUID']",
+            "message": "Use generateClientId() from ~/utils/id/client-id: crypto.randomUUID is missing in older browsers and in insecure contexts."
+          },
+          {
+            "selector": "Literal[regex.pattern=/\\(\\?<(=|!)/], :matches(NewExpression, CallExpression)[callee.name='RegExp'] > Literal[value=/\\(\\?<(=|!)/]",
+            "message": "Regex lookbehind throws on Safari below 16.4, which is above the browser floor, and the build cannot lower it. Rewrite without lookbehind, or keep it in a *.server.ts module."
+          }
+        ]
+      }
     }
   ]
 }

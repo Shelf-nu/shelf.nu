@@ -7,11 +7,11 @@ import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { INVITABLE_ROLES } from "~/modules/invite/roles";
-import type { UserFriendlyRoles } from "~/routes/_layout+/settings.team";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
+import type { UserFriendlyRoles } from "~/utils/organization-roles";
 import Input from "../forms/input";
 import {
   Select,
@@ -167,6 +167,7 @@ export default function InviteUserDialog({
                             imageId={organization.imageId}
                             alt="img"
                             className="size-6 rounded-[2px] object-cover"
+                            updatedAt={organization.updatedAt}
                           />
 
                           <div className=" ml-px max-w-full truncate text-sm text-gray-900">

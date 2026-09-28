@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PUBLIC_BUCKET } from "./constants";
+import { SUPABASE_URL } from "./env";
 import { ShelfError } from "./error";
 import {
   findShelfErrorInCause,
@@ -6,6 +8,8 @@ import {
   isSupabaseServerError,
   parsePdfFormData,
   removeFilesByPrefix,
+  MAX_PUBLIC_FILES_PER_REMOVE,
+  removePublicFiles,
 } from "./storage.server";
 
 // why: parsePdfFormData uploads to real Supabase Storage via
@@ -13,8 +17,8 @@ import {
 // parsing this security test exercises runs for real, unmocked.
 const mockUpload = vi.fn();
 // why: removeFilesByPrefix paginates through Supabase Storage's list() and
-// then calls remove() - stub both so the pagination loop can be exercised
-// without a real bucket.
+// then calls remove(), and removePublicFiles calls remove() - stub both so
+// the tests stay offline and can assert the paths sent in each request.
 const mockList = vi.fn();
 const mockRemove = vi.fn();
 vi.mock("~/integrations/supabase/client", () => ({
@@ -462,6 +466,80 @@ describe("removeFilesByPrefix", () => {
       entityId: "asset-1",
     });
 
+    expect(mockRemove).not.toHaveBeenCalled();
+  });
+});
+
+describe("removePublicFiles", () => {
+  const publicUrlFor = (path: string) =>
+    `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/${path}`;
+
+  beforeEach(() => {
+    mockRemove.mockReset();
+    mockRemove.mockResolvedValue({ data: [], error: null });
+  });
+
+  it("removes every file in a single storage request", async () => {
+    const result = await removePublicFiles({
+      publicUrls: [
+        publicUrlFor("org-1/locations/loc-1/a.jpg"),
+        publicUrlFor("org-1/locations/loc-1/a-thumbnail.jpg"),
+        publicUrlFor("org-1/locations/loc-2/b.jpg"),
+      ],
+    });
+
+    expect(mockRemove).toHaveBeenCalledTimes(1);
+    expect(mockRemove).toHaveBeenCalledWith([
+      "org-1/locations/loc-1/a.jpg",
+      "org-1/locations/loc-1/a-thumbnail.jpg",
+      "org-1/locations/loc-2/b.jpg",
+    ]);
+    expect(result).toEqual({ invalidUrlCount: 0 });
+  });
+
+  it("skips URLs outside the public bucket and still removes the rest", async () => {
+    const result = await removePublicFiles({
+      publicUrls: [
+        "https://elsewhere.example.com/files/x.jpg",
+        publicUrlFor("org-1/locations/loc-1/a.jpg"),
+      ],
+    });
+
+    expect(mockRemove).toHaveBeenCalledWith([
+      "org-1/locations/loc-1/a.jpg",
+    ]);
+    expect(result).toEqual({ invalidUrlCount: 1 });
+  });
+
+  it("makes no request when no URL points into the public bucket", async () => {
+    const result = await removePublicFiles({
+      publicUrls: ["https://elsewhere.example.com/files/x.jpg"],
+    });
+
+    expect(mockRemove).not.toHaveBeenCalled();
+    expect(result).toEqual({ invalidUrlCount: 1 });
+  });
+
+  it("throws when the storage request fails", async () => {
+    mockRemove.mockResolvedValue({
+      data: null,
+      error: new Error("storage down"),
+    });
+
+    await expect(
+      removePublicFiles({ publicUrls: [publicUrlFor("org-1/a.jpg")] })
+    ).rejects.toBeInstanceOf(ShelfError);
+  });
+
+  it("refuses more files than one storage request accepts", async () => {
+    const publicUrls = Array.from(
+      { length: MAX_PUBLIC_FILES_PER_REMOVE + 1 },
+      (_, i) => publicUrlFor(`org-1/${i}.jpg`)
+    );
+
+    await expect(removePublicFiles({ publicUrls })).rejects.toBeInstanceOf(
+      ShelfError
+    );
     expect(mockRemove).not.toHaveBeenCalled();
   });
 });

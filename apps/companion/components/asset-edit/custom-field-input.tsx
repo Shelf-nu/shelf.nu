@@ -371,7 +371,7 @@ function DateFieldInput({
   accessibilityLabel: string;
   accessibilityHint: string | undefined;
 }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
   const [open, setOpen] = useState(false);
@@ -467,6 +467,10 @@ function DateFieldInput({
             display={Platform.OS === "ios" ? "inline" : "default"}
             onChange={handleChange}
             accentColor={colors.primary}
+            // The inline iOS calendar draws on the form's card, so it follows
+            // the app's appearance rather than the phone's. Android's dialog
+            // paints its own background and ignores this prop.
+            themeVariant={isDark ? "dark" : "light"}
           />
         </View>
       )}

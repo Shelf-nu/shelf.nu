@@ -8,14 +8,14 @@ import type {
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { getNrmIndexWhere } from "~/modules/team-member/nrm-scope";
-import {
-  organizationRolesMap,
-  type UserFriendlyRoles,
-} from "~/routes/_layout+/settings.team";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { ShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
+import {
+  organizationRolesMap,
+  type UserFriendlyRoles,
+} from "~/utils/organization-roles";
 
 const label = "Settings";
 
