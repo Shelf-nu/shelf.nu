@@ -94,6 +94,15 @@ export type ListProps = {
    * that selects rows nobody can see.
    */
   items?: ListItemData[];
+
+  /**
+   * Overrides the count line under the title.
+   *
+   * For a list whose rendered rows are not all instances of the thing the
+   * title names: the model view renders a "No model" bucket alongside the
+   * models, so the row count and the model count are different numbers.
+   */
+  countLabel?: () => ReactNode;
 };
 
 /**
@@ -115,6 +124,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     extraItemComponentProps,
     disableSelectAllItems,
     items: itemsProp,
+    countLabel,
   }: ListProps,
   ref
 ) {
@@ -159,6 +169,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 disableSelectAllItems={disableSelectAllItems}
                 hasBulkActions={!!bulkActions}
                 items={items}
+                countLabel={countLabel}
               />
             </div>
             <div className="flex items-center justify-end gap-2">

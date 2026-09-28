@@ -222,7 +222,7 @@ export const AssetsList = ({
             <>
               <div className="-mb-2 flex items-center gap-1 px-1 text-sm text-gray-500">
                 <span>
-                  {`${totalModelsShown} models · ${totalRollupAssets} ${
+                  {`${totalRollupAssets} ${
                     totalRollupAssets === 1 ? "asset" : "assets"
                   } match your filters`}
                 </span>
@@ -252,13 +252,28 @@ export const AssetsList = ({
               <AssetIndexSettingsProvider freezeColumn={false}>
                 <List
                   title="Asset models"
+                  // The ONLY model count on this screen. `totalItems` counts
+                  // rendered rows, which includes the "No model" bucket, and a
+                  // bucket is not a model; `totalModels` excludes it. Two
+                  // counts of the same thing disagreeing is worse than either.
+                  countLabel={() =>
+                    `${totalModelsShown} ${
+                      totalModelsShown === 1 ? "asset model" : "asset models"
+                    }`
+                  }
                   ItemComponent={AssetModelRow}
                   customPagination={<AssetIndexPagination />}
                   headerChildren={
                     <>
-                      <Th>Category</Th>
+                      {/* "Default category", not "Category": the cell shows
+                          the model's DEFAULT, which applies at creation only,
+                          so its assets may sit in other categories. */}
+                      <Th>Default category</Th>
                       <Th>Assets</Th>
-                      <Th>Availability</Th>
+                      {/* "Status", not "Availability": the cell counts asset
+                          status, which is not what a booking can take. See
+                          `StatusSplit`. */}
+                      <Th>Status</Th>
                       <Th>Total value</Th>
                     </>
                   }

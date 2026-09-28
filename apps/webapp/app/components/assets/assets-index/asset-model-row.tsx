@@ -31,18 +31,30 @@ import { CategoryBadge } from "../category-badge";
  * `notBookable` is an independent `availableToBook` flag that overlaps all
  * three, so it renders as its own chip and is never folded into a total.
  */
-function AvailabilitySplit({ item }: { item: AssetModelRollupRow }) {
+/**
+ * Where this model's matching assets currently are.
+ *
+ * A count of asset STATUS, not of what a booking could take. The three values
+ * partition the row (`in + out + in custody === assets`), so all three render
+ * even at zero: a reader can add them up and get the row's own total.
+ *
+ * Deliberately avoids the word "available". Booking availability is a
+ * different number over a booking window, computed as fleet minus custody
+ * minus overlapping reservations, and it ignores status entirely: a unit out
+ * on a booking that ends before the new window is bookable while sitting in
+ * "out" here. The bookable figure belongs in the booking dialog, beside the
+ * dates that define it, and `getAssetModelAvailability` is what produces it.
+ *
+ * `notBookable` is not part of the partition. `availableToBook` is an
+ * independent flag that overlaps all three, so it renders as its own badge and
+ * is never added into a total.
+ */
+function StatusSplit({ item }: { item: AssetModelRollupRow }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-      <span className="font-medium text-gray-900">
-        {item.available} available
-      </span>
-      {item.checkedOut > 0 ? (
-        <span className="text-gray-500">{item.checkedOut} checked out</span>
-      ) : null}
-      {item.inCustody > 0 ? (
-        <span className="text-gray-500">{item.inCustody} in custody</span>
-      ) : null}
+      <span className="font-medium text-gray-900">{item.available} in</span>
+      <span className="text-gray-500">{item.checkedOut} out</span>
+      <span className="text-gray-500">{item.inCustody} in custody</span>
       {item.notBookable > 0 ? (
         <Badge
           color={BADGE_COLORS.orange.bg}
@@ -157,7 +169,7 @@ export const AssetModelRow = memo(function AssetModelRow({
       </Td>
 
       <Td>
-        <AvailabilitySplit item={item} />
+        <StatusSplit item={item} />
       </Td>
 
       <Td>{formatCurrency({ value: item.totalValue, locale, currency })}</Td>

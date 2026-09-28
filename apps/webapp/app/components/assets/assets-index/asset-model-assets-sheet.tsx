@@ -31,7 +31,7 @@ import {
   SheetTrigger,
 } from "../../shared/sheet";
 import { Spinner } from "../../shared/spinner";
-import { Table } from "../../table";
+import { Th } from "../../table";
 
 /**
  * The endpoint's response body. `payload()` SPREADS its argument onto
@@ -162,10 +162,14 @@ export function AssetModelAssetsSheet({
           </p>
         </SheetHeader>
 
-        {/* Vertical only: the shared `Table` brings its own horizontal
-            scroll container, and scrolling both axes here would give a wide
-            column set two horizontal scrollbars. */}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* The ONE scroll container, both axes.
+            Deliberately a plain table rather than the shared `Table`: that
+            component is built for the index page and brings its own
+            `overflow-auto` box capped at `vh - 280px`. Nested inside this
+            sheet that yields two scrollbars per axis, dead space below the
+            table where the cap reserves height the sheet does not have, and
+            an outer scroll that slides the whole table sideways out of view. */}
+        <div className="min-h-0 flex-1 overflow-auto">
           {isLoading ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
@@ -179,9 +183,18 @@ export function AssetModelAssetsSheet({
             </div>
           ) : (
             <AssetIndexSettingsProvider freezeColumn={false}>
-              <Table>
+              <table className="w-full table-auto border-collapse">
                 <thead>
                   <tr>
+                    {/* `AdvancedTableHeader` emits the CONFIGURED columns only,
+                        which never include the name: on the index, `ListHeader`
+                        draws that first cell itself. A table that renders the
+                        columns alone therefore puts every header one cell left
+                        of its data, so this supplies the name header the way
+                        `ListHeader` does. */}
+                    <Th className="whitespace-nowrap bg-gray-25 md:border-0">
+                      Name
+                    </Th>
                     <AdvancedTableHeader columns={columns} />
                   </tr>
                 </thead>
@@ -192,7 +205,7 @@ export function AssetModelAssetsSheet({
                     </tr>
                   ))}
                 </tbody>
-              </Table>
+              </table>
             </AssetIndexSettingsProvider>
           )}
         </div>
