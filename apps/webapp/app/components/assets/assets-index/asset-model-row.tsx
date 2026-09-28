@@ -11,9 +11,10 @@
  *
  * @see {@link file://./../../../modules/asset-model/rollup.server.ts}
  */
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { Currency } from "@prisma/client";
+import type { AssetModelBucket } from "~/modules/asset-model/bucket";
 import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { formatCurrency } from "~/utils/currency";
@@ -23,6 +24,14 @@ import ImageWithPreview from "../../image-with-preview/image-with-preview";
 import { Badge } from "../../shared/badge";
 import { Td } from "../../table";
 import { CategoryBadge } from "../category-badge";
+
+/**
+ * How the bucket of assets carrying no model is named, in the row and in the
+ * title of the sheet it opens. One constant so the two cannot drift, and so
+ * the name matches the "No model" option the advanced filter offers for the
+ * same set.
+ */
+const NO_MODEL_LABEL = "No model";
 
 /**
  * Renders the status split so a reader can see the pool at a glance.
@@ -98,6 +107,23 @@ export const AssetModelRow = memo(function AssetModelRow({
   const locale = extraProps?.locale ?? "en-US";
   const currency = extraProps?.currency ?? "USD";
 
+  /**
+   * The one place a rollup row's nullable model id becomes a bucket. Past this
+   * line the drill-down addresses itself through the union, so neither the
+   * endpoint nor the "view all" link can be built from a missing id.
+   *
+   * Memoised because the sheet's link is memoised on it: an object rebuilt on
+   * every render would rebuild that link too, defeating this component's own
+   * `memo()`.
+   */
+  const bucket = useMemo<AssetModelBucket>(
+    () =>
+      item.assetModelId === null
+        ? { kind: "unassigned" }
+        : { kind: "model", assetModelId: item.assetModelId },
+    [item.assetModelId]
+  );
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -111,9 +137,13 @@ export const AssetModelRow = memo(function AssetModelRow({
           )}
         >
           {isNoModel ? (
-            <div className="flex size-12 shrink-0 items-center justify-center rounded border border-dashed border-gray-300 text-gray-400">
-              —
-            </div>
+            // The dashed outline carries "no image" on its own. A dash
+            // character in the slot reads as a value rather than an absence,
+            // and the row is already named "No model".
+            <div
+              aria-hidden
+              className="size-12 shrink-0 rounded border border-dashed border-gray-300"
+            />
           ) : (
             <ImageWithPreview
               thumbnailUrl={item.thumbnailImage ?? item.image ?? undefined}
@@ -128,7 +158,7 @@ export const AssetModelRow = memo(function AssetModelRow({
                 isNoModel ? "text-gray-500" : "text-gray-900"
               )}
             >
-              {isNoModel ? "No model" : item.name}
+              {isNoModel ? NO_MODEL_LABEL : item.name}
             </div>
             {item.description ? (
               <div className="line-clamp-1 text-sm text-gray-500">
@@ -154,18 +184,15 @@ export const AssetModelRow = memo(function AssetModelRow({
       </Td>
 
       <Td>
-        {isNoModel ? (
-          <span className="text-gray-500">
-            {item.matchingAssets}{" "}
-            {item.matchingAssets === 1 ? "asset" : "assets"}
-          </span>
-        ) : (
-          <AssetModelAssetsSheet
-            assetModelId={item.assetModelId as string}
-            modelName={item.name ?? "Asset model"}
-            matchingAssets={item.matchingAssets}
-          />
-        )}
+        {/* The no-model bucket drills down like every other row. It is where a
+            customer starts grouping an existing fleet into models, so it is
+            the row that most needs to lead somewhere: open it, select the
+            units, then Update asset model. */}
+        <AssetModelAssetsSheet
+          bucket={bucket}
+          title={isNoModel ? NO_MODEL_LABEL : item.name ?? "Asset model"}
+          matchingAssets={item.matchingAssets}
+        />
       </Td>
 
       <Td>

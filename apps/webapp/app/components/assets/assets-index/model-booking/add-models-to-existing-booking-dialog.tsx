@@ -39,6 +39,7 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { bulkDialogAtom } from "~/atoms/bulk-update-dialog";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-update-dialog";
 import Input from "~/components/forms/input";
 import { CheckIcon } from "~/components/icons/library";
@@ -288,9 +289,20 @@ function BookingSelect({
                       <div className="max-w-[250px] truncate font-medium">
                         {booking.name}
                       </div>
-                      <div className="text-xs text-gray-500">
-                        <DateS date={booking.from} includeTime /> -{" "}
-                        <DateS date={booking.to} includeTime />
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                        <span>
+                          <DateS date={booking.from} includeTime /> -{" "}
+                          <DateS date={booking.to} includeTime />
+                        </span>
+                        {/* The picker mixes statuses (a draft and an ongoing
+                            booking are both writable), so the row states which
+                            one it is. `custodianUserId` is absent from this
+                            slim projection; it only drives a base-user tooltip
+                            the picker does not need. */}
+                        <BookingStatusBadge
+                          status={booking.status}
+                          custodianUserId={undefined}
+                        />
                       </div>
                     </div>
                     <When truthy={booking.id === selectedId}>
@@ -445,16 +457,36 @@ export default function AddModelsToExistingBookingDialog() {
     enabled: isDialogOpen,
   });
 
-  // Asked of the shared predicate rather than matched against a list spelled
-  // out here: the statuses that still accept a reservation are the service's
-  // rule, and a second copy of it drifts.
-  const bookings = useMemo(
-    () =>
-      (bookingsData?.bookings ?? []).filter((booking) =>
-        canEditModelReservations(booking.status)
-      ),
-    [bookingsData]
-  );
+  /**
+   * The bookings offered in the picker, soonest first.
+   *
+   * Eligibility is asked of the shared predicate rather than matched against a
+   * list spelled out here: the statuses that still accept a reservation are
+   * the service's rule, and a second copy of it drifts.
+   *
+   * Sorted here rather than in `/api/bookings/get-all`, which orders by start
+   * date ascending and is shared with the asset index's dialog. That ordering
+   * opens the picker on the oldest booking in the workspace and pushes the one
+   * a user is most likely to want to the bottom. "Soonest first" is not
+   * expressible as a single column sort anyway: a booking that has already
+   * ended belongs last, whatever its start date, and that is a comparison
+   * against the current time.
+   */
+  const bookings = useMemo(() => {
+    const now = Date.now();
+    const hasEnded = (booking: PickerBooking) =>
+      new Date(booking.to).getTime() < now;
+
+    return (bookingsData?.bookings ?? [])
+      .filter((booking) => canEditModelReservations(booking.status))
+      .sort((a, b) => {
+        const aEnded = hasEnded(a);
+        if (aEnded !== hasEnded(b)) {
+          return aEnded ? 1 : -1;
+        }
+        return new Date(a.from).getTime() - new Date(b.from).getTime();
+      });
+  }, [bookingsData]);
 
   const availabilityParams = useMemo(() => {
     const params = new URLSearchParams();

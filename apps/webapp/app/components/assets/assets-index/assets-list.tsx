@@ -51,6 +51,7 @@ import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import { AssetModelRow } from "./asset-model-row";
+import { AssetModelSortHeader } from "./asset-model-sort-header";
 import AssetQuickActions from "./asset-quick-actions";
 import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
@@ -71,6 +72,16 @@ import { useAssetAvailabilityData } from "./use-asset-availability-data";
  */
 const MODEL_BULK_ACTIONS = <BookSelectedModelsDropdown />;
 
+/**
+ * What an asset model is, in one sentence.
+ *
+ * A workspace with no models has to be told this in two different places: a line
+ * above a list that still has rows, and the empty state when it has none. One
+ * constant so the two cannot drift into describing the feature differently.
+ */
+const ASSET_MODEL_EXPLAINER =
+  "A model is a make and specification that several assets share, so a booking can ask for any unit of it.";
+
 export const AssetsList = ({
   customEmptyStateContent,
   disableTeamMemberFilter,
@@ -82,8 +93,14 @@ export const AssetsList = ({
   disableBulkActions?: boolean;
   wrapperClassName?: string;
 }) => {
-  const { items, modelRollup, totalRollupAssets, totalModels, locale } =
-    useLoaderData<AssetIndexLoaderData>();
+  const {
+    items,
+    modelRollup,
+    totalRollupAssets,
+    totalModels,
+    totalAssetModels,
+    locale,
+  } = useLoaderData<AssetIndexLoaderData>();
   // We use the hook because it handles optimistic UI
   const {
     isAvailabilityView,
@@ -141,6 +158,62 @@ export const AssetsList = ({
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
+  /**
+   * Whether the viewer may create asset models, which decides whether the
+   * empty-workspace line hands them a link or tells them who can. BASE reads
+   * models but cannot add one, so linking every viewer there would send some of
+   * them to a 403.
+   */
+  const canCreateAssetModels = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetModel,
+    action: PermissionAction.create,
+  });
+  /**
+   * The model view's column headers.
+   *
+   * Every column the rollup can order by is a sort control; Default category is
+   * not, because `getAssetModelRollup` has no sort expression for it and an
+   * unsupported key falls back to name, leaving a header that shows a direction
+   * the list is not in.
+   *
+   * The name header is here rather than in `ListHeader` (see
+   * `hideFirstHeaderColumn` below), so its cell classes are mirrored from there
+   * to keep the two views' headers aligned. The freeze classes are not, because
+   * this view renders unfrozen.
+   */
+  const modelHeaderChildren = useMemo(
+    () => (
+      <>
+        <AssetModelSortHeader
+          sortKey="name"
+          label="Name"
+          columnName="name"
+          className={tw(
+            "!border-b-0 border-r border-r-transparent bg-gray-25",
+            canBookSelectedModels ? "!pl-0" : ""
+          )}
+        />
+        {/* "Default category", not "Category": the cell shows the model's
+            DEFAULT, which applies at creation only, so its assets may sit in
+            other categories. */}
+        <Th>Default category</Th>
+        <AssetModelSortHeader sortKey="assets" label="Assets" />
+        {/* "Status", not "Availability": the cell counts asset status, which is
+            not what a booking can take. See `StatusSplit`. The cell carries
+            three counts and the rollup can order by the first of them, so the
+            control names which one rather than leaving a reader to work out
+            what moved. */}
+        <AssetModelSortHeader
+          sortKey="available"
+          label="Status"
+          sortsBy="assets in"
+        />
+        <AssetModelSortHeader sortKey="value" label="Total value" />
+      </>
+    ),
+    [canBookSelectedModels]
+  );
   const setDisabledBulkItems = useSetAtom(setDisabledBulkItemsAtom);
   // The "No model" bucket is not a model, so there are no units of it to
   // reserve. It stays on the page — it answers "what has no model assigned" —
@@ -220,30 +293,69 @@ export const AssetsList = ({
           />
           {isModelView ? (
             <>
-              <div className="-mb-2 flex items-center gap-1 px-1 text-sm text-gray-500">
-                <span>
-                  {`${totalRollupAssets} ${
-                    totalRollupAssets === 1 ? "asset" : "assets"
-                  } match your filters`}
-                </span>
-                {/* The asset count here is deliberately smaller than the list
-                    view's for the same filters: models are an INDIVIDUAL-only
-                    concept, so quantity-tracked assets are not part of this
-                    rollup. Stated rather than left for the reader to discover
-                    as apparent data loss when switching views. */}
-                <InfoTooltip
-                  iconClassName="size-4"
-                  content={
-                    <>
-                      <h6>Asset models</h6>
-                      <p>
-                        Counts cover the assets matching your current filters.
-                        Asset models apply to individually-tracked assets only,
-                        so quantity-tracked assets are not included here.
-                      </p>
-                    </>
-                  }
-                />
+              <div className="-mb-2 flex flex-col gap-1 px-1 text-sm text-gray-500">
+                <div className="flex items-center gap-1">
+                  <span>
+                    {`${totalRollupAssets} ${
+                      totalRollupAssets === 1 ? "asset" : "assets"
+                    } match your filters`}
+                  </span>
+                  {/* The asset count here is deliberately smaller than the list
+                      view's for the same filters: models are an INDIVIDUAL-only
+                      concept, so quantity-tracked assets are not part of this
+                      rollup. Stated rather than left for the reader to discover
+                      as apparent data loss when switching views. */}
+                  <InfoTooltip
+                    iconClassName="size-4"
+                    content={
+                      <>
+                        <h6>Asset models</h6>
+                        <p>
+                          Counts cover the assets matching your current filters.
+                          Asset models apply to individually-tracked assets
+                          only, so quantity-tracked assets are not included
+                          here.
+                        </p>
+                      </>
+                    }
+                  />
+                </div>
+                {/* Reads the workspace's own model count, not the rollup's.
+                    `totalAssetModels` counts AssetModel rows in the
+                    organization and no filter narrows it, so this says "this
+                    workspace has no models" and can never be mistaken for "no
+                    models match these filters", which is a different state with
+                    a model count above zero. Without this line a workspace that
+                    has never used models shows "0 asset models" over a list of
+                    unassigned assets, with nothing saying what a model is or
+                    where one is made.
+
+                    Skipped when the list has no rows at all, where the empty
+                    state says the same thing with room for a full call to
+                    action. A list with rows is the common case: a workspace with
+                    unassigned individually-tracked assets renders the "No
+                    model" row, so no empty state mounts to carry the message. */}
+                <When
+                  truthy={totalAssetModels === 0 && modelRollupItems.length > 0}
+                >
+                  <p>
+                    No asset models in this workspace yet.{" "}
+                    {ASSET_MODEL_EXPLAINER}{" "}
+                    {canCreateAssetModels ? (
+                      <Button
+                        to="/settings/asset-models/new"
+                        variant="link"
+                        className="font-normal"
+                      >
+                        Create an asset model
+                      </Button>
+                    ) : (
+                      <span>
+                        A workspace administrator creates them in settings.
+                      </span>
+                    )}
+                  </p>
+                </When>
               </div>
               {/* Freezing is switched off here: it pins the header's name
                   cell with `sticky left-[48px]`, and `AssetModelRow` applies no
@@ -263,20 +375,14 @@ export const AssetsList = ({
                   }
                   ItemComponent={AssetModelRow}
                   customPagination={<AssetIndexPagination />}
-                  headerChildren={
-                    <>
-                      {/* "Default category", not "Category": the cell shows
-                          the model's DEFAULT, which applies at creation only,
-                          so its assets may sit in other categories. */}
-                      <Th>Default category</Th>
-                      <Th>Assets</Th>
-                      {/* "Status", not "Availability": the cell counts asset
-                          status, which is not what a booking can take. See
-                          `StatusSplit`. */}
-                      <Th>Status</Th>
-                      <Th>Total value</Th>
-                    </>
-                  }
+                  // The name header is drawn here rather than by `ListHeader`,
+                  // for two reasons that both only hold on this view: it has to
+                  // be a sort control, and `ListHeader`'s own name cell carries
+                  // the advanced-mode options popover, whose "Freeze column"
+                  // and "Hide asset image" both configure the asset list and
+                  // neither reaches a model row.
+                  hideFirstHeaderColumn
+                  headerChildren={modelHeaderChildren}
                   items={modelRollupItems}
                   extraItemComponentProps={modelExtraProps}
                   bulkActions={
@@ -288,9 +394,29 @@ export const AssetsList = ({
                   // filters" would reserve only the page in front of the user
                   // while the header claimed the whole set.
                   disableSelectAllItems
+                  // The zero-data slot, not the filtered one. `EmptyState`
+                  // renders its own "nothing matched" copy whenever a search or
+                  // a filter is set and reaches this content only when none is,
+                  // so copy about filters here is shown exactly when no filter
+                  // was applied.
+                  //
+                  // Reaching it at all takes an empty rollup with no filters
+                  // active: no model rows, and nothing in the "No model" row
+                  // either. The call to action is the model, because that is the
+                  // part a reader can act on from here.
                   customEmptyStateContent={{
-                    title: "No asset models match your filters",
-                    text: "Clear or change your filters to see models here.",
+                    title: "No asset models yet",
+                    text: ASSET_MODEL_EXPLAINER,
+                    ...(canCreateAssetModels
+                      ? {
+                          newButtonRoute: "/settings/asset-models/new",
+                          newButtonContent: "New asset model",
+                          // `EmptyState` names its default button after the
+                          // loader's model, which is the asset. Spread last, so
+                          // this is the accessible name that survives.
+                          buttonProps: { "aria-label": "New asset model" },
+                        }
+                      : {}),
                   }}
                 />
               </AssetIndexSettingsProvider>

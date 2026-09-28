@@ -440,6 +440,10 @@ export async function simpleModeLoader({
       modelRollup: null,
       totalRollupAssets: 0,
       totalModels: 0,
+      // The rollup's default ordering, so the model view's sortable headers can
+      // read the active sort off one union-typed payload.
+      modelSortBy: "name" as const,
+      modelSortDirection: "asc" as const,
       categories,
       tags,
       search,

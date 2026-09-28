@@ -53,10 +53,25 @@ export interface Sort {
   cfType?: string;
 }
 
+/**
+ * The advanced index's Filter and Sort controls.
+ *
+ * Sort is unmounted on the model view. Its options are asset columns and it
+ * writes `sortBy`, which orders a list of assets; the model view renders a
+ * rollup ordered by `modelSortBy`, so every option in that popover would apply
+ * and change nothing. The model view sorts from its column headers instead.
+ *
+ * Filter stays: the rollup is built from the same filtered asset set as the
+ * list, so every filter applies to it unchanged.
+ *
+ * @see {@link file://./asset-model-sort-header.tsx}
+ */
 export function AdvancedFilteringAndSorting() {
+  const { isModelView } = useAssetIndexView();
+
   return (
     <>
-      <AdvancedFilter /> <AdvancedSorting />
+      <AdvancedFilter /> {isModelView ? null : <AdvancedSorting />}
     </>
   );
 }

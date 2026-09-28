@@ -21,3 +21,19 @@ export const MODEL_VIEW_SCOPED_PARAMS = [
   "modelSortDirection",
   "page",
 ] as const;
+
+/**
+ * Params the model view cannot express, stripped from any asset query it
+ * builds.
+ *
+ * The inverse of {@link MODEL_VIEW_SCOPED_PARAMS}: these mean something real
+ * to a query over assets, but nothing reachable from this view, so a value
+ * left in the URL is stale state the user has no control to clear.
+ *
+ * `lowStockOnly` narrows to `QUANTITY_TRACKED` assets at or below their
+ * reorder threshold. The rollup counts `INDIVIDUAL` assets only, so the two
+ * are mutually exclusive by construction: forwarded into a drill-down it
+ * returns nothing, every time, and the model view hides the toggle that would
+ * let anyone turn it back off.
+ */
+export const MODEL_VIEW_INAPPLICABLE_PARAMS = ["lowStockOnly"] as const;

@@ -5,6 +5,11 @@
  * the index can answer "which models do I have, and how many of each, within
  * the slice I am looking at" rather than listing assets one by one.
  *
+ * Every model in the workspace gets a row, including a model no asset in the
+ * filtered slice matches: it reports zeros. This view is where someone goes to
+ * start grouping, so a model with nothing under it yet has to be visible here,
+ * and the filters narrow the counts on a row rather than the set of rows.
+ *
  * The filtering is not reimplemented here: this reuses
  * {@link generateWhereClause}, the same builder the advanced asset list uses,
  * and changes only the projection. Every advanced filter, custom-field filter
@@ -40,9 +45,14 @@ export type AssetModelRollupSortKey =
 /**
  * One row of the rollup.
  *
- * `assetModelId` is `null` for the synthetic "No model" bucket — assets that
+ * `assetModelId` is `null` for the synthetic "No model" bucket - assets that
  * matched the filters but have no model assigned. That bucket is always sorted
- * last and is excluded from `totalModels`.
+ * last and is excluded from `totalModels`. Unlike a model, the bucket only
+ * exists when at least one asset falls into it.
+ *
+ * A model no asset matched is a real row with every count at `0`, not an
+ * omission. Nothing downstream may treat `matchingAssets === 0` as a reason to
+ * drop the row: hiding it is the thing this shape exists to prevent.
  *
  * The three status counts are exhaustive: `AssetStatus` has exactly three
  * values, so `available + checkedOut + inCustody === matchingAssets`.
@@ -93,20 +103,85 @@ function buildRollupFilterJoins(filters: Filter[]): Prisma.Sql {
   return hasCustodyFilter ? CUSTODY_AGG_JOIN : Prisma.empty;
 }
 
-/** Sort expression per key. A whitelist, not interpolation — the key comes
- * from a URL param and must never reach `Prisma.raw` unvalidated. */
+/** Sort expression per key. A whitelist, not interpolation: the key comes
+ * from a URL param and must never reach `Prisma.raw` unvalidated.
+ *
+ * The counts are `COUNT(a.id)`, never `COUNT(*)`. A model no asset matched
+ * contributes a row whose asset columns are all NULL (see
+ * {@link buildRollupFrom}), and `COUNT(*)` counts that row, which would order
+ * an empty model as if it held one asset. */
 const SORT_EXPRESSIONS: Record<AssetModelRollupSortKey, string> = {
   name: "am.name",
-  assets: "COUNT(*)",
-  available: `COUNT(*) FILTER (WHERE a.status = 'AVAILABLE')`,
+  assets: "COUNT(a.id)",
+  available: `COUNT(a.id) FILTER (WHERE a.status = 'AVAILABLE')`,
   value: "COALESCE(SUM(COALESCE(a.value, 0)), 0)",
 };
+
+/**
+ * The rollup's `FROM` clause: every model in the workspace, joined against the
+ * filtered asset set.
+ *
+ * Neither side can drive the query on its own. Assets driving it is what hides
+ * a model nothing matched, since that model has no asset row to hang from;
+ * models driving it drops the "No model" bucket, since those assets have no
+ * model row to hang from. A `FULL OUTER JOIN` preserves both in one pass,
+ * which also lets the paged query and the totals query share this fragment
+ * instead of describing the same set two ways.
+ *
+ * **The asset predicates belong to the asset side only.** They are NULL for
+ * the row an unmatched model contributes, so an outer `WHERE` would discard
+ * exactly the rows this shape exists to produce. Keeping them inside the
+ * subquery is also what makes them resolvable: there `a` is the `Asset` table,
+ * so every column {@link generateWhereClause} reaches for is in scope, and so
+ * is the `custody_agg` alias `filterJoins` introduces.
+ *
+ * **Models are scoped to the organization on their own side.** The asset
+ * predicates say nothing about which models exist, and a single-table
+ * predicate in the join's `ON` would not help either: a `FULL OUTER JOIN`
+ * keeps unpaired rows from both sides, so another workspace's models would
+ * still come back as rows, merely never paired with an asset.
+ *
+ * Both derived tables keep the alias of the table they read, so a projection,
+ * a `FILTER` predicate and a sort expression spell a column the same way
+ * whether it comes from the table or from the derived row.
+ *
+ * @param args.organizationId - Workspace whose models are listed.
+ * @param args.whereClause - `generateWhereClause` output, applied to assets.
+ * @param args.filterJoins - The joins those predicates need in scope.
+ * @returns The `FROM` clause, exposing `a` (filtered assets) and `am` (models).
+ */
+function buildRollupFrom({
+  organizationId,
+  whereClause,
+  filterJoins,
+}: {
+  organizationId: string;
+  whereClause: Prisma.Sql;
+  filterJoins: Prisma.Sql;
+}): Prisma.Sql {
+  return Prisma.sql`
+      FROM (
+        SELECT a.id, a."assetModelId", a.status, a."availableToBook", a.value
+        FROM public."Asset" a
+        ${filterJoins}
+        ${whereClause}
+          AND a.type = 'INDIVIDUAL'
+      ) a
+      FULL OUTER JOIN (
+        SELECT am.id, am.name, am.description, am.image, am."thumbnailImage",
+               am."defaultCategoryId"
+        FROM public."AssetModel" am
+        WHERE am."organizationId" = ${organizationId}
+      ) am ON a."assetModelId" = am.id`;
+}
 
 /** The two unpaged totals the rollup header needs, independent of which page
  * is being viewed. */
 type AssetModelRollupTotals = {
+  /** Every model in the workspace: filters narrow the counts on a row, never
+   * the set of rows. Excludes the no-model bucket, which is not a model. */
   totalModels: number;
-  /** Rows the list renders — models plus the no-model bucket when non-empty.
+  /** Rows the list renders: models, plus the no-model bucket when non-empty.
    * Pagination must cover this, not `totalModels`. */
   totalGroups: number;
   totalRollupAssets: number;
@@ -124,6 +199,10 @@ type AssetModelRollupTotals = {
  * was set) — so the caller runs this only once it has ruled out the first
  * case via `skip > 0`.
  *
+ * Reads the same `FROM` clause as the primary query ({@link buildRollupFrom}),
+ * so the two cannot come to describe different sets.
+ *
+ * @param organizationId - Workspace whose models are counted.
  * @param whereClause - The same `generateWhereClause` output the primary
  *   query used, so the totals describe the identical filtered set.
  * @param filterJoins - The same joins the primary query used, so a custody
@@ -131,25 +210,27 @@ type AssetModelRollupTotals = {
  * @returns The filtered set's totals, `0` for each when there are no rows.
  */
 async function getAssetModelRollupTotals(
+  organizationId: string,
   whereClause: Prisma.Sql,
   filterJoins: Prisma.Sql
 ): Promise<AssetModelRollupTotals> {
   const query = Prisma.sql`
     SELECT
-      COUNT(DISTINCT am.id) FILTER (WHERE am.id IS NOT NULL)::int AS "totalModels",
+      -- COUNT(DISTINCT) skips NULL, so this excludes the no-model bucket
+      -- without a FILTER. It counts models with no matching asset, which the
+      -- join contributes a row for.
+      COUNT(DISTINCT am.id)::int                                   AS "totalModels",
       -- Rows the list renders: every model, plus the no-model bucket when it
       -- has any assets. Separate from 'totalModels' because that one answers
       -- the header's "N models", which a bucket is not.
       (
-        COUNT(DISTINCT am.id) FILTER (WHERE am.id IS NOT NULL)
-        + (CASE WHEN COUNT(*) FILTER (WHERE am.id IS NULL) > 0 THEN 1 ELSE 0 END)
+        COUNT(DISTINCT am.id)
+        + (CASE WHEN COUNT(a.id) FILTER (WHERE am.id IS NULL) > 0 THEN 1 ELSE 0 END)
       )::int                                                       AS "totalGroups",
-      COUNT(*)::int                                                AS "totalRollupAssets"
-    FROM public."Asset" a
-    LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
-    ${filterJoins}
-    ${whereClause}
-      AND a.type = 'INDIVIDUAL'
+      -- COUNT(a.id), never COUNT(*): a model with no matching asset carries no
+      -- asset on its row, and COUNT(*) would add that row to the asset total.
+      COUNT(a.id)::int                                             AS "totalRollupAssets"
+    ${buildRollupFrom({ organizationId, whereClause, filterJoins })}
   `;
 
   const result = await withPrismaRetry(
@@ -254,33 +335,42 @@ export async function getAssetModelRollup({
         am."defaultCategoryId"                               AS "defaultCategoryId",
         cat.name                                             AS "defaultCategoryName",
         cat.color                                            AS "defaultCategoryColor",
-        COUNT(*)::int                                        AS "matchingAssets",
-        COUNT(*) FILTER (WHERE a.status = 'AVAILABLE')::int   AS "available",
-        COUNT(*) FILTER (WHERE a.status = 'CHECKED_OUT')::int AS "checkedOut",
-        COUNT(*) FILTER (WHERE a.status = 'IN_CUSTODY')::int  AS "inCustody",
-        COUNT(*) FILTER (WHERE a."availableToBook" = false)::int AS "notBookable",
+        -- COUNT(a.id), never COUNT(*): a model with no matching asset still
+        -- gets a row, whose asset columns are all NULL, and COUNT(*) would
+        -- report that row as one asset. The FILTER counts reach 0 on their own
+        -- (a NULL status matches no predicate) but stay COUNT(a.id) so the
+        -- whole projection reads one way.
+        COUNT(a.id)::int                                        AS "matchingAssets",
+        COUNT(a.id) FILTER (WHERE a.status = 'AVAILABLE')::int   AS "available",
+        COUNT(a.id) FILTER (WHERE a.status = 'CHECKED_OUT')::int AS "checkedOut",
+        COUNT(a.id) FILTER (WHERE a.status = 'IN_CUSTODY')::int  AS "inCustody",
+        COUNT(a.id) FILTER (WHERE a."availableToBook" = false)::int AS "notBookable",
         -- Asset.valuation is @map("value"); 'value' is the real column. No
-        -- ::bigint cast — SUM over a float returns double precision and the
+        -- ::bigint cast: SUM over a float returns double precision and the
         -- cast would truncate fractional totals.
-        COALESCE(SUM(COALESCE(a.value, 0)), 0)               AS "totalValue",
+        COALESCE(SUM(COALESCE(a.value, 0)), 0)                  AS "totalValue",
         -- Window aggregates run after GROUP BY and before LIMIT, so these are
-        -- the UNPAGED totals. The no-model bucket is not a model, so it is
-        -- excluded from the model count but not from the asset count.
-        COUNT(*) FILTER (WHERE am.id IS NOT NULL) OVER ()::int AS "totalModels",
+        -- the UNPAGED totals. COUNT(*) OVER () counts GROUPS rather than asset
+        -- rows, which is what the two counts below want: one group per model,
+        -- plus the bucket. The bucket is not a model, so it is excluded from
+        -- the model count but not from the row count.
+        COUNT(*) FILTER (WHERE am.id IS NOT NULL) OVER ()::int   AS "totalModels",
         -- Rows the list renders, which pagination must cover: the no-model
         -- bucket is one of them even though it is not a model.
-        COUNT(*) OVER ()::int                                 AS "totalGroups",
-        SUM(COUNT(*)) OVER ()::int                            AS "totalRollupAssets"
-      FROM public."Asset" a
-      LEFT JOIN public."AssetModel" am ON a."assetModelId" = am.id
+        COUNT(*) OVER ()::int                                    AS "totalGroups",
+        -- Assets, so it sums the per-group asset counts. An empty model's
+        -- group adds 0 and cannot inflate the header's asset total.
+        SUM(COUNT(a.id)) OVER ()::int                            AS "totalRollupAssets"
+      ${buildRollupFrom({ organizationId, whereClause, filterJoins })}
       LEFT JOIN public."Category" cat ON am."defaultCategoryId" = cat.id
-      ${filterJoins}
-      ${whereClause}
-        AND a.type = 'INDIVIDUAL'
-      -- cat.id joins the grouping because Postgres extends a functional
-      -- dependency only within the grouped table: am.id covers every am.*
-      -- column, but cat.name / cat.color need Category's own key.
-      GROUP BY am.id, cat.id
+      -- Every projected model column is grouped, rather than am.id alone:
+      -- Postgres infers a functional dependency from a grouped key only when
+      -- it is a base table's primary key, which cat.id is and a derived
+      -- table's am.id is not. Grouping by the extra columns changes nothing,
+      -- since am.id determines all of them, and NULLs group together so the
+      -- bucket stays one row.
+      GROUP BY am.id, am.name, am.description, am.image, am."thumbnailImage",
+               am."defaultCategoryId", cat.id
       ${orderBy}
       LIMIT ${take} OFFSET ${skip}
     `;
@@ -300,7 +390,11 @@ export async function getAssetModelRollup({
     // with matches as having none.
     const totals =
       result.length === 0 && skip > 0
-        ? await getAssetModelRollupTotals(whereClause, filterJoins)
+        ? await getAssetModelRollupTotals(
+            organizationId,
+            whereClause,
+            filterJoins
+          )
         : {
             totalModels: first?.totalModels ?? 0,
             totalGroups: first?.totalGroups ?? 0,
