@@ -1,12 +1,14 @@
 /**
- * Case builders for the check-out / check-in characterization (spec §4.6.1).
+ * Case builders for the check-out / check-in characterization.
  *
- * Pure data: the paths §4.6.1 lists (loader and action separately), the role
- * sets, booking relationships, statuses and workspace variants each path is
- * evaluated against, and the rows a fake database hands the real guards.
+ * Pure data: every check-out/check-in path (loader and action listed
+ * separately, across the web quick/overview/partial/fulfil surfaces and the
+ * mobile quick/partial/fulfil endpoints), the role sets, booking
+ * relationships, statuses and workspace variants each path is evaluated
+ * against, and the rows a fake database hands the real guards.
  *
- * Route tests that pin one §4.6.1 cell build their fixtures from here too, so a
- * focused test and the characterization can never describe two different
+ * Route tests that pin one path's cell build their fixtures from here too, so
+ * a focused test and the characterization can never describe two different
  * bookings. The relationship keys and user ids match the `RELATIONSHIPS` of the
  * effective-access probes; they are declared again here because the probes
  * module imports server modules a route test must not load.
@@ -152,10 +154,10 @@ export type CheckinoutPathKey =
   | "mobile:partial-checkout"
   | "mobile:fulfil-and-checkout";
 
-/** One §4.6.1 path: a loader or an action, in one direction. */
+/** One check-out/check-in path: a loader or an action, in one direction. */
 export type CheckinoutPath = {
   key: CheckinoutPathKey;
-  /** The §4.6.1 table row this path belongs to. */
+  /** The human-readable surface this path belongs to, e.g. "Web partial check-out page (loader)". */
   specRow: string;
   surface: "web" | "mobile";
   kind: "loader" | "action";
@@ -165,7 +167,7 @@ export type CheckinoutPath = {
   readsExplicit: boolean;
 };
 
-/** Every §4.6.1 path; the two quick rows are split by direction. */
+/** Every check-out/check-in path; the two quick rows are split by direction. */
 export const CHECKINOUT_PATHS: readonly CheckinoutPath[] = [
   {
     key: "web:overview:checkOut",

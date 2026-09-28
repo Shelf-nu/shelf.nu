@@ -1,13 +1,15 @@
 /**
  * The booking statuses each check-out / check-in service refuses itself. This
- * is the service half of spec §4.6.1.
+ * is the service half of the check-out/check-in contract: route guards decide
+ * WHO may act on a booking, and the services decide WHICH booking statuses
+ * they accept.
  *
- * Route guards decide who may act on a booking. The services decide which
- * booking statuses they accept. Several §4.6.1 guards read no status at all:
- * mobile partial check-out, both fulfil actions, and quick check-in or
- * check-out for ADMIN. On those paths the refusals pinned here are the only
- * thing between a direct POST and a DRAFT or closed booking. A status check
- * must never move from a service into a guard, or disappear.
+ * Several of the check-out/check-in guards (see `@helpers/checkinout-cases`)
+ * read no status at all: mobile partial check-out, both fulfil actions, and
+ * quick check-in or check-out for ADMIN. On those paths the refusals pinned
+ * here are the only thing between a direct POST and a DRAFT or closed
+ * booking. A status check must never move from a service into a guard, or
+ * disappear.
  *
  * Each service runs for real against a database fake that answers only the
  * booking and user reads every service starts with. A case is:
@@ -214,7 +216,7 @@ async function outcomeOf(
 
 type Probe = { sliceOut: boolean; run: () => Promise<unknown> };
 
-/** Each service, called the way its §4.6.1 paths call it. */
+/** Each service, called the way its check-out/check-in guard paths call it. */
 const PROBES = {
   checkoutBooking: {
     sliceOut: false,
@@ -318,7 +320,7 @@ const REFUSED_STATUSES: Record<ServiceName, BookingStatus[]> = {
   fulfilModelRequestsAndCheckout: [],
 };
 
-describe("check-out / check-in services refuse booking statuses themselves (spec §4.6.1)", () => {
+describe("check-out / check-in services refuse booking statuses themselves", () => {
   it.each(Object.keys(PROBES) as ServiceName[])("%s", async (name) => {
     const probe: Probe = PROBES[name];
     const refused: BookingStatus[] = [];

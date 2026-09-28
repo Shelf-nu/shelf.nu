@@ -1812,11 +1812,15 @@ async function deleteMembershipUnlessOwner(
 /**
  * Locks a membership row and returns its roles as persisted now.
  *
- * Every path that changes a member's role or removes them calls this FIRST in
- * its transaction, before any entity write, so concurrent role changes and
- * removals on the same member queue on this lock instead of each holding a lock
- * the other needs. Decide from the returned roles, never from a snapshot read
- * before the transaction.
+ * The manual change-role action (`resolveUserAction`'s `"changeRole"` case),
+ * the SSO group reconciler (`reconcileSsoGroupMembership`), account deletion
+ * (`softDeleteUser`) and membership revocation (`revokeMembershipInTx`) call
+ * this FIRST in their transaction, before any entity write, so concurrent
+ * role changes and removals on the same member queue on this lock instead of
+ * each holding a lock the other needs. `transferOwnership` is the one
+ * role-changing path that does not take it: it decides eligibility from a
+ * pre-transaction read of both memberships. Decide from the returned roles,
+ * never from a snapshot read before the transaction.
  *
  * @param tx - The surrounding transaction
  * @param args.userId - The member

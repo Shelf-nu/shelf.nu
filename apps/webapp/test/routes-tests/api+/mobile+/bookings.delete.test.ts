@@ -107,7 +107,7 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
     expect(deleteBooking).not.toHaveBeenCalled();
   });
 
-  it("judges a mixed [SELF_SERVICE, ADMIN] membership by its highest role (B9)", async () => {
+  it("judges a mixed [SELF_SERVICE, ADMIN] membership by its highest role", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],

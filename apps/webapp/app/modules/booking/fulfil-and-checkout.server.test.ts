@@ -773,7 +773,9 @@ describe("fulfilAndCheckOut", () => {
  *
  * Neither fulfil guard (web action, mobile endpoint) reads the booking's
  * status, so this table is what refuses a DRAFT or a closed booking on those
- * paths. It also decides which flow a status takes. Spec §4.6.1, service half.
+ * paths. It also decides which flow a status takes: this is the service half
+ * of the check-out/check-in contract, the counterpart to the route guards in
+ * `checkinout-service-status.test.ts`.
  */
 describe("fulfilAndCheckOut, the flow each booking status takes", () => {
   type Flow = "full" | "scanned-only" | "refused";

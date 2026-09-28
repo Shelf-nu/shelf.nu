@@ -1,6 +1,6 @@
 /**
- * Check-out / check-in characterization: every path of spec §4.6.1, as its
- * guards decide today.
+ * Check-out / check-in characterization: every check-out/check-in path
+ * (`@helpers/checkinout-cases`), as its guards decide today.
  *
  * Each path runs, loader and action separately, through the REAL route, the
  * REAL `requirePermission` and mobile auth helpers, and the REAL ownership,
@@ -439,7 +439,7 @@ function record(tree: Tree, keys: string[], value: string) {
 
 const RESULTS: Record<string, unknown> = {};
 
-describe("check-out / check-in paths (spec §4.6.1)", () => {
+describe("check-out / check-in paths", () => {
   beforeAll(() => {
     // why: every refused case logs a handled 4xx and every sentinel stop logs
     // an error. Thousands of lines would bury the one failure that matters.

@@ -47,8 +47,8 @@ export const links: LinksFunction = () => [
 ];
 
 /**
- * Check-in guard shared by the loader and the action (spec section 4.6.1,
- * partial check-in page).
+ * Check-in guard shared by the loader and the action of the partial
+ * check-in page.
  *
  * `canPartialCheckInOut` answers it: the manage-items rule, or, for roles
  * whose policy has `bookings.partialScanAsCustodian`, an ONGOING or OVERDUE

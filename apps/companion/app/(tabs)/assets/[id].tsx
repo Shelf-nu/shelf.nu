@@ -911,8 +911,8 @@ export default function AssetDetailScreen() {
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
             // why: composer shows only when the workspace is resolved AND
-            // the member holds note:create: the server gates adding a note on
-            // note:create (spec section 6.4); members without it get a
+            // the member holds note:create, because the server gates adding a
+            // note on that same permission; members without it get a
             // read-only activity feed instead of a box that 403s on Post.
             canPostNote={!!currentOrg?.id && canCreateNote}
           />

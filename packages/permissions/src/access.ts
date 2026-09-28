@@ -165,9 +165,10 @@ export function canRemoveBookingItems({
 /**
  * The partial-scan pages' rule (web check-out/check-in pages, mobile partial
  * check-in): the manage-items rule, or, for roles with `partialScanAsCustodian`,
- * a live booking the caller is the custodian of. Only the paths spec section
- * 4.6.1 names may call this; quick, overview and fulfil paths keep their own
- * guard.
+ * a live booking the caller is the custodian of. Only the partial check-out
+ * and check-in pages (web loader and action) and the mobile partial check-in
+ * endpoint call this; the quick, overview and fulfil paths keep their own
+ * guard instead.
  *
  * @param args.direction - checkout accepts RESERVED/ONGOING/OVERDUE, checkin ONGOING/OVERDUE
  */

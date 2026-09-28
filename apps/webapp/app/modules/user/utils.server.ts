@@ -404,12 +404,12 @@ export async function resolveUserAction(
 
       /**
        * Lock order: the target's membership row FIRST, then the authorized
-       * role write, then entity writes. Every path that changes or removes a
-       * membership takes that lock first (SSO transitions and account deletion
-       * included), so two role changes on the same member queue on it instead
-       * of each holding a lock the other needs. Everything the change moves,
-       * and the role the audit entry records, is read from the persisted row
-       * under that lock.
+       * role write, then entity writes, matching the other paths that take
+       * this same lock (SSO reconciliation, account deletion, revocation; see
+       * {@link lockMembership}), so two role changes on the same member queue
+       * on it instead of each holding a lock the other needs. Everything the
+       * change moves, and the role the audit entry records, is read from the
+       * persisted row under that lock.
        */
       const currentRole = await db.$transaction(async (tx) => {
         const targetUserOrg = await lockMembership(tx, {

@@ -244,35 +244,43 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const teamMemberWhere: Prisma.TeamMemberWhereInput = {
       organizationId,
       deletedAt: null,
-      ...(teamMemberSearchConditions.length
-        ? { OR: teamMemberSearchConditions }
-        : {}),
-      // Members who cannot see all custody see only team members they share
-      // custody with, and themselves
-      ...(access.custody.seeAll
-        ? {}
-        : {
-            OR: [
-              // Team members they have assets in custody from
+      // Combined with AND, not spread in beside each other: both this query's
+      // search `OR` and the custody-scope `OR` below use the same `OR` key, so
+      // spreading them into one object would let the second clobber the
+      // first instead of narrowing it.
+      AND: [
+        ...(teamMemberSearchConditions.length
+          ? [{ OR: teamMemberSearchConditions }]
+          : []),
+        // Members who cannot see all custody see only team members they
+        // share custody with, and themselves
+        ...(access.custody.seeAll
+          ? []
+          : [
               {
-                custodies: {
-                  some: {
-                    custodian: { userId },
+                OR: [
+                  // Team members they have assets in custody from
+                  {
+                    custodies: {
+                      some: {
+                        custodian: { userId },
+                      },
+                    },
                   },
-                },
-              },
-              // Team members they have kits in custody from
-              {
-                kitCustodies: {
-                  some: {
-                    custodian: { userId },
+                  // Team members they have kits in custody from
+                  {
+                    kitCustodies: {
+                      some: {
+                        custodian: { userId },
+                      },
+                    },
                   },
-                },
+                  // Their own team member record
+                  { userId },
+                ],
               },
-              // Their own team member record
-              { userId },
-            ],
-          }),
+            ]),
+      ],
     };
 
     const auditWhere: Prisma.AuditSessionWhereInput = {

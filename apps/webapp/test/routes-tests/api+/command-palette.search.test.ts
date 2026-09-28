@@ -9,8 +9,10 @@
 // @vitest-environment node
 import type { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 import { db } from "~/database/db.server";
+import { requirePermission } from "~/utils/roles.server";
 
 const state = vi.hoisted(() => ({ roles: ["SELF_SERVICE"] as string[] }));
 
@@ -109,5 +111,28 @@ describe("command-palette search", () => {
     const [{ where }] = vi.mocked(db.auditSession.findMany).mock
       .calls[0] as unknown as [{ where: Record<string, unknown> }];
     expect(where).not.toHaveProperty("assignments");
+  });
+
+  it("a restricted-custody caller's team-member search still applies the text search", async () => {
+    // why: no current role holds teamMember:read without custody.seeAll, so
+    // this crafts the access shape by hand to exercise the combination the
+    // next role to gain that pairing (Custody Manager) will produce.
+    const context = permissionContext({ roles: ["ADMIN"] });
+    vi.mocked(requirePermission).mockResolvedValueOnce({
+      ...context,
+      access: {
+        ...context.access,
+        custody: { ...context.access.custody, seeAll: false },
+      },
+    } as Awaited<ReturnType<typeof requirePermission>>);
+
+    await search(["ADMIN"]);
+
+    const [{ where }] = vi.mocked(db.teamMember.findMany).mock
+      .calls[0] as unknown as [{ where: Record<string, unknown> }];
+    // The custody scope must narrow the results without discarding the text
+    // search: both conditions have to survive combined under one `AND`.
+    expect(JSON.stringify(where)).toContain('"contains":"kit"');
+    expect(JSON.stringify(where)).toContain('"userId":"caller"');
   });
 });

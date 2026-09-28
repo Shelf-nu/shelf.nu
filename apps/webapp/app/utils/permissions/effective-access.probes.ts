@@ -9,9 +9,8 @@
  *
  * The fixture is the proof that the refactor changes nothing it does not
  * announce: a probe's IMPLEMENTATION may move from an old helper to the new
- * policy API, but its KEY and its RECORDED VALUE may only change in the commit
- * that makes a listed fix (spec section 8.3 / 8.5), with the reason in the
- * commit body.
+ * policy API, but its KEY and its RECORDED VALUE may only change in a commit
+ * that names the intended behaviour change in its commit body.
  *
  * @see {@link file://./effective-access.characterization.test.ts}
  */

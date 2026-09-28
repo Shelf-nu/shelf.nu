@@ -2,9 +2,9 @@
  * Effective-access characterization: pins every role decision that has a pure
  * helper to a committed fixture.
  *
- * A failure here means a role decision changed. If the change is one of the
- * listed fixes (spec section 8.3 / 8.5), update the fixture in the same commit
- * with `pnpm webapp:test -- --run <this file> -u` and say why in the commit
+ * A failure here means a role decision changed. If the change is an intended
+ * behaviour change, update the fixture in the same commit with
+ * `pnpm webapp:test -- --run <this file> -u` and name the change in the commit
  * body. Otherwise it is a regression: fix the code, not the fixture.
  *
  * @see {@link file://./effective-access.probes.ts}
