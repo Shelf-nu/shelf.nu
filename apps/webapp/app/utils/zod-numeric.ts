@@ -132,6 +132,20 @@ export function requiredNumberFromString({
             ? `${fieldName} is required`
             : "This field is required",
         });
+        return;
+      }
+
+      // Named here for the same reason the blank case is: this builder rejects
+      // before any bound piped after it runs, so leaving unreadable text to
+      // `z.coerce.number()` would answer "Expected number, received nan" and
+      // shadow the field's own message.
+      if (Number.isNaN(Number(value))) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: fieldName
+            ? `${fieldName} must be a number`
+            : "This field must be a number",
+        });
       }
     })
     .pipe(z.coerce.number());

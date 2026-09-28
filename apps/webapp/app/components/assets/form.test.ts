@@ -264,6 +264,11 @@ describe("NewAssetFormSchema - valuation", () => {
     });
 
     expect(result.success).toBe(false);
+    if (!result.success) {
+      // The builder is the only validator on this field, so its message is the
+      // one the operator reads. It has to name the field.
+      expect(result.error.issues[0].message).toBe("Valuation must be a number");
+    }
   });
 });
 
@@ -307,6 +312,51 @@ describe("NewAssetBulkFormSchema - count", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.count).toBe(5);
+    }
+  });
+});
+
+/**
+ * Unreadable numeric text has to keep naming its field.
+ *
+ * The shared builder rejects before the bound piped after it runs, so a builder
+ * that answered generically would shadow the field-specific `invalid_type_error`
+ * these schemas already set.
+ */
+describe("NewAssetFormSchema - named messages for unreadable numbers", () => {
+  const baseValidData = {
+    title: "Test Asset",
+    description: "A description",
+    category: "cat-123",
+  };
+
+  it("names min quantity", () => {
+    const result = NewAssetFormSchema.safeParse({
+      ...baseValidData,
+      type: "QUANTITY_TRACKED",
+      quantity: "10",
+      minQuantity: "abc",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe(
+        "Min quantity must be a number"
+      );
+    }
+  });
+
+  it("names count", () => {
+    const result = NewAssetBulkFormSchema.safeParse({
+      ...baseValidData,
+      assetModelId: "model-1",
+      nameTemplate: "Asset {n}",
+      count: "abc",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toBe("Count must be a number");
     }
   });
 });

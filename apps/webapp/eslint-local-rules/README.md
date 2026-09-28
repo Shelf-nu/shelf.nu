@@ -218,7 +218,7 @@ The `*.test.server.ts` spelling is banned too — that infix only ever existed t
 
 **Purpose**: Keep hand-rolled numeric coercion out of zod `.transform()` callbacks.
 
-**Problem**: `Number("")`, `Number("   ")` and `Number("0")` all return `0`, and `+""` is `0` too. A coercion written inside `.transform()` therefore cannot tell an untouched form field from a deliberate zero, so every optional numeric field written that way has to pick one of two wrong answers. The guard usually wrapped around it does not help: `val ? +val : null` discards a real `0`, which is how a deliberate zero (a valuation, a quantity) gets silently dropped.
+**Problem**: `Number("")`, `Number("   ")` and `Number("0")` all return `0`, and `+""` is `0` too, so a bare coercion inside `.transform()` cannot tell an untouched form field from a deliberate zero. The truthiness guard usually wrapped around it only half helps: in `val ? +val : null` the string `"0"` is truthy so a real zero survives, and `""` is falsy so a missing value becomes null, but `"   "` is truthy as well and coerces to `0`. A field the operator only put spaces in is therefore stored as a deliberate zero, which is how a whitespace submission becomes a valuation of nothing.
 
 **Solution**: `optionalNumberFromString()` and `requiredNumberFromString()` in `app/utils/zod-numeric.ts` decide blank vs zero on the **string**, before any coercion, and handle trimming and `NaN` along the way. Use them instead of coercing by hand.
 

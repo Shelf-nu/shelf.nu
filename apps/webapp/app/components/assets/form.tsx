@@ -119,7 +119,10 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val && val.length > 0 ? val : null)),
-  valuation: optionalNumberFromString({ blank: null }),
+  valuation: optionalNumberFromString({
+    blank: null,
+    fieldName: "Valuation",
+  }),
   addAnother: z
     .string()
     .optional()
@@ -154,7 +157,10 @@ export const NewAssetFormSchema = z.object({
   // `minQuantity != null` rather than truthiness, and the CSV importer accepts
   // any non-negative whole number, so the bound here is non-negative while
   // "no threshold" is carried by the null a blank input becomes.
-  minQuantity: optionalNumberFromString({ blank: null }).pipe(
+  minQuantity: optionalNumberFromString({
+    blank: null,
+    fieldName: "Min quantity",
+  }).pipe(
     z
       .number({ invalid_type_error: "Min quantity must be a number" })
       .int("Min quantity must be a whole number")

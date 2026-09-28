@@ -1,11 +1,15 @@
 /**
  * ESLint rule banning hand-rolled numeric coercion inside a zod `.transform()`.
  *
- * `Number("")`, `Number("   ")` and `Number("0")` all return `0`, so a coercion
- * written inside `.transform()` has no way to tell an untouched form field from
- * a deliberate zero. The guards that get wrapped around it do not fix that:
- * `val ? +val : null` throws away a real `0`, and every value the guard does
- * let through is still coerced by the same blind rules.
+ * `Number("")`, `Number("   ")` and `Number("0")` all return `0`, so a bare
+ * coercion inside `.transform()` cannot tell an untouched form field from a
+ * deliberate zero.
+ *
+ * A truthiness guard only half fixes it. In `val ? +val : null` the string `"0"`
+ * is truthy, so a real zero does survive, and `""` is falsy, so a missing value
+ * does become null. What it misses is whitespace: `"   "` is truthy too, and
+ * coerces to `0`, so a field the operator only put spaces in is stored as a
+ * deliberate zero. That is the case these guards keep getting wrong.
  *
  * `optionalNumberFromString()` and `requiredNumberFromString()` in
  * `~/utils/zod-numeric` decide blank vs zero on the STRING, before any
