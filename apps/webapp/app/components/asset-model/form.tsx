@@ -32,6 +32,11 @@ import { zodFieldIsRequired } from "~/utils/zod";
 import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  IMAGE_HINT_8MB,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
 import { Button } from "../shared/button";
@@ -40,7 +45,6 @@ import When from "../when/when";
 
 /** Links each image input to the <p> stating its accepted formats and size. */
 const INLINE_IMAGE_HELP_ID = "asset-model-image-help-inline";
-const PAGE_IMAGE_HELP_ID = "asset-model-image-help";
 
 /** Zod schema for creating/editing an asset model. */
 export const AssetModelFormSchema = z.object({
@@ -282,9 +286,8 @@ function FullPageForm({
     actionData?.error
   );
 
-  // Client-side file guard (type + 8MB cap) shared with the asset/kit image
-  // inputs, so all three surfaces reject the same files with the same copy.
-  const [, validateFile] = useAtom(assetModelImageValidateFileAtom);
+  // Error slot of this form's own file guard (type + 8MB cap, the same rules
+  // as asset and kit images); the image field runs the guard itself.
   const fileError = useAtomValue(assetModelImageErrorAtom);
 
   /**
@@ -418,59 +421,44 @@ function FullPageForm({
           subHeading="Uploaded once and shown on every asset of this model that has no image of its own."
           className="border-b-0 pt-[10px]"
         >
-          <div>
-            {assetModel?.image ? (
-              // `imageUrl` is required alongside `withPreview`: the preview
-              // trigger is keyboard-focusable and labelled "Open preview for …",
-              // but its handler no-ops without a full-size URL — a dead control.
-              <ImageWithPreview
-                imageUrl={assetModel.image}
-                thumbnailUrl={assetModel.thumbnailImage ?? assetModel.image}
-                alt={`${assetModel.name} image`}
-                className="mb-2 size-16 rounded border object-cover"
-                withPreview
-              />
-            ) : null}
-            <p id={PAGE_IMAGE_HELP_ID} className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-            <Input
-              disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label="Image"
-              hideLabel
-              /**
-               * The requirements text is duplicated for the two breakpoints, so
-               * both ids are referenced — whichever copy is display:none is
-               * absent from the accessibility tree, leaving exactly one
-               * description. `Input` spreads unknown props onto the <input> and
-               * adds no describedby of its own, so nothing is being overridden.
-               */
-              aria-describedby={`${PAGE_IMAGE_HELP_ID} ${PAGE_IMAGE_HELP_ID}-sm`}
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p id={`${PAGE_IMAGE_HELP_ID}-sm`} className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-            </p>
-            {/*
-              Blast radius: replacing this image changes what these assets show
-              immediately — nothing is copied, so every one of them resolves the
-              new URL on its next render.
-            */}
-            <When truthy={Boolean(assetModel?._count?.assets)}>
-              <p className="mt-2 text-[12px] text-gray-500">
-                Used by <b>{assetModel?._count?.assets}</b>{" "}
-                {assetModel?._count?.assets === 1 ? "asset" : "assets"} that
-                {assetModel?._count?.assets === 1 ? " doesn't" : " don't"} have
-                an image of their own.
-              </p>
-            </When>
-          </div>
+          <ImageFileField
+            name="image"
+            label="Image"
+            currentImage={
+              assetModel?.image ? (
+                // `imageUrl` is required alongside `withPreview`: the preview
+                // trigger is keyboard-focusable and labelled "Open preview for
+                // ...", but its handler no-ops without a full-size URL.
+                <ImageWithPreview
+                  imageUrl={assetModel.image}
+                  thumbnailUrl={assetModel.thumbnailImage ?? assetModel.image}
+                  alt={`${assetModel.name} image`}
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  withPreview
+                />
+              ) : null
+            }
+            previewAlt="Asset model image"
+            validateFileAtom={assetModelImageValidateFileAtom}
+            hint={IMAGE_HINT_8MB}
+            belowInput={
+              // Blast radius: replacing this image changes what these assets
+              // show immediately. Nothing is copied, so every one of them
+              // resolves the new URL on its next render.
+              <When truthy={Boolean(assetModel?._count?.assets)}>
+                <p className="mt-2 text-[12px] text-gray-500">
+                  Used by <b>{assetModel?._count?.assets}</b>{" "}
+                  {assetModel?._count?.assets === 1 ? "asset" : "assets"} that
+                  {assetModel?._count?.assets === 1
+                    ? " doesn't"
+                    : " don't"}{" "}
+                  have an image of their own.
+                </p>
+              </When>
+            }
+            error={imageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         {/* -- Bottom action bar -- */}
