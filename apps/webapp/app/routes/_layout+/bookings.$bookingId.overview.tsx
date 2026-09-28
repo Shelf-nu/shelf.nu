@@ -1445,7 +1445,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId
+        userId,
+        // Re-checked at write time: the booking may have left DRAFT since.
+        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });

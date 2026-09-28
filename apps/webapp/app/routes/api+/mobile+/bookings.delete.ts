@@ -84,7 +84,9 @@ export async function action({ request }: ActionFunctionArgs) {
     await deleteBooking(
       { id: bookingId, organizationId },
       getClientHint(request),
-      user.id
+      user.id,
+      // Re-checked at write time: the booking may have left DRAFT since.
+      { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
     );
 
     return data({ success: true });

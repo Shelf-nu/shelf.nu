@@ -159,6 +159,8 @@ describe("booking page delete intent", () => {
       status: "DRAFT",
     });
     expect(deleteBookingMock).toHaveBeenCalledTimes(1);
+    // The draft-only rule is re-checked when the row is deleted.
+    expect(deleteBookingMock.mock.calls[0][3]).toEqual({ onlyIfDraft: true });
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/bookings");
   });
@@ -180,6 +182,8 @@ describe("booking page delete intent", () => {
       creatorId: "someone-else",
     });
     expect(deleteBookingMock).toHaveBeenCalledTimes(1);
+    // A role that may delete any status needs no write-time draft check.
+    expect(deleteBookingMock.mock.calls[0][3]).toEqual({ onlyIfDraft: false });
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/bookings");
   });

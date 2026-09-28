@@ -122,6 +122,10 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
 
     expect((await post()).status).toBe(200);
     expect(deleteBooking).toHaveBeenCalledTimes(1);
+    // The highest role (ADMIN) may delete any status.
+    expect(vi.mocked(deleteBooking).mock.calls[0][3]).toEqual({
+      onlyIfDraft: false,
+    });
   });
 
   it("holds SELF_SERVICE to its own drafts", async () => {
@@ -154,6 +158,10 @@ describe("POST /api/mobile/bookings/delete: ownership and status", () => {
 
       expect((await post()).status).toBe(200);
       expect(deleteBooking).toHaveBeenCalledTimes(1);
+      // The draft-only rule is re-checked when the row is deleted.
+      expect(vi.mocked(deleteBooking).mock.calls[0][3]).toEqual({
+        onlyIfDraft: true,
+      });
     }
   );
 });
