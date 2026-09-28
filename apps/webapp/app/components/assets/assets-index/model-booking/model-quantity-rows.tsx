@@ -22,7 +22,7 @@
  *
  * @see {@link file://./../../../../modules/booking-model-request/service.server.ts} — the transactional guard the hint anticipates
  */
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Button } from "~/components/shared/button";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 
@@ -164,6 +164,7 @@ function ModelQuantityRowItem({
   onChange: (assetModelId: string, quantity: number) => void;
   onRemove: (assetModelId: string) => void;
 }) {
+  const [draft, setDraft] = useState<string | null>(null);
   const inputId = `${idPrefix}model-quantity-${row.assetModelId}`;
   const nameId = `${idPrefix}model-name-${row.assetModelId}`;
   const hintId = `${idPrefix}model-hint-${row.assetModelId}`;
@@ -202,9 +203,27 @@ function ModelQuantityRowItem({
           {...numberInputWheelGuard}
           min={MINIMUM_QUANTITY}
           step={1}
-          value={quantity}
+          /**
+           * The draft while the field is being edited, the reported quantity
+           * otherwise.
+           *
+           * A controlled input bound straight to the number cannot be cleared:
+           * emptying it reports the minimum, the prop does not change, and
+           * React writes the old digit back with the caret after it, so typing
+           * 5 over 1 reserves 15. The draft lets the field sit empty for as
+           * long as someone is typing in it.
+           */
+          value={draft ?? quantity}
           onChange={(event) => {
-            const parsed = Number.parseInt(event.target.value, 10);
+            const raw = event.target.value;
+            setDraft(raw);
+            /**
+             * Reported on every keystroke, including the ones that leave the
+             * field unparseable. Enter submits without firing blur, so a field
+             * that merely looks empty must already have reported a number the
+             * server will accept.
+             */
+            const parsed = Number.parseInt(raw, 10);
             onChange(
               row.assetModelId,
               Number.isNaN(parsed) || parsed < MINIMUM_QUANTITY
@@ -212,6 +231,9 @@ function ModelQuantityRowItem({
                 : parsed
             );
           }}
+          // Editing is over, so the field goes back to showing what will
+          // actually be submitted rather than what was half-typed.
+          onBlur={() => setDraft(null)}
           // The label is one word for everyone's sake; the name and the hint
           // carry the context it leaves out.
           aria-describedby={hint ? `${nameId} ${hintId}` : nameId}

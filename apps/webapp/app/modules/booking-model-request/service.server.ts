@@ -748,7 +748,17 @@ export async function assertModelUnitsNotReservedElsewhere({
   // Sorted so two transactions contending for the same models take the locks
   // in one global order and cannot deadlock. Every lock is taken before any
   // pool is measured, matching the reservation guard.
-  claims.sort((a, b) => a.assetModelId.localeCompare(b.assetModelId));
+  //
+  // Plain code-unit order, which is what every other writer of these rows
+  // uses. `localeCompare` would be a second ordering over one lock set, and
+  // two orderings are the cycle this sort exists to prevent.
+  claims.sort((a, b) =>
+    a.assetModelId < b.assetModelId
+      ? -1
+      : a.assetModelId > b.assetModelId
+      ? 1
+      : 0
+  );
   for (const claim of claims) {
     await lockAssetModelForReservation(tx, claim.assetModelId, organizationId);
   }
@@ -1653,11 +1663,37 @@ export async function upsertBookingModelRequests({
 
   try {
     return await db.$transaction(async (tx) => {
-      // Read through `tx`, because it is the operand of every absolute target
-      // below. Read off the global client it is a snapshot another
-      // transaction is free to move before the writes land, and the batch
-      // would add to a quantity the booking no longer has.
-      //
+      /**
+       * Locks first, then the read they protect.
+       *
+       * The read below is the operand of every absolute target, so it has to
+       * be taken under the same locks as the writes. A plain read commits to
+       * nothing: Postgres runs READ COMMITTED here (no client sets an
+       * isolation level), so it returns a snapshot another transaction is free
+       * to supersede before these writes land. Two callers each adding 3 to a
+       * booking holding 5 would both read 5, both target 8, and the booking
+       * would end at 8 instead of 11. The loss is silent, because the second
+       * write sees its target equal to what the first committed, takes the
+       * reduction path, skips the pool check and emits no event.
+       *
+       * Both locks, not just the pool lock: `removeBookingModelRequest` takes
+       * only the reservation row lock, so the pool lock alone leaves a
+       * concurrent cancellation free to move the operand.
+       *
+       * Sorted by model id, NOT by the order the caller selected. Each lock is
+       * `SELECT … FOR UPDATE` and holds to commit, so two batches covering the
+       * same models in opposite orders would each hold what the other waits
+       * for, and Postgres would break the cycle by aborting one. Plain
+       * code-unit order, matching every other writer of these rows. Taking the
+       * locks here rather than inside the write core does not widen the set
+       * the batch holds at commit; it only acquires them sooner.
+       */
+      const orderedModelIds = [...additionsByModel.keys()].sort();
+      for (const assetModelId of orderedModelIds) {
+        await lockAssetModelForReservation(tx, assetModelId, organizationId);
+        await lockModelRequestRow(tx, bookingId, assetModelId);
+      }
+
       // Scoped to the workspace even though every write re-proves it: this
       // read takes a caller-supplied `bookingId`, and an id that belongs to
       // another workspace has no quantities to offer this one.
@@ -1665,7 +1701,7 @@ export async function upsertBookingModelRequests({
         where: {
           bookingId,
           booking: { organizationId },
-          assetModelId: { in: [...additionsByModel.keys()] },
+          assetModelId: { in: orderedModelIds },
         },
         select: { assetModelId: true, quantity: true },
       });
@@ -1674,13 +1710,6 @@ export async function upsertBookingModelRequests({
       );
 
       const requests: BookingModelRequest[] = [];
-      // Sorted by model id, NOT by the order the caller selected.
-      // `lockAssetModelForReservation` takes `SELECT … FOR UPDATE` on each
-      // model and holds it to commit, so two batches covering the same models
-      // in opposite orders would each hold what the other waits for. Postgres
-      // breaks that by aborting one of them, turning a valid reservation into
-      // a spurious failure. A deterministic global order cannot form a cycle.
-      const orderedModelIds = [...additionsByModel.keys()].sort();
 
       for (const assetModelId of orderedModelIds) {
         const addition = additionsByModel.get(assetModelId)!;

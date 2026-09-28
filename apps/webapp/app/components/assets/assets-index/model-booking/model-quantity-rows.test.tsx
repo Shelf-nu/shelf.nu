@@ -131,4 +131,69 @@ describe("ModelQuantityRows", () => {
 
     expect(onChange).toHaveBeenCalledWith("m2", 4);
   });
+
+  it("lets the field be cleared so a new number can be typed", () => {
+    // why: the input is controlled on a number. Coercing an emptied field back
+    // to the minimum on the same keystroke re-inserts the old digit, so typing
+    // over "1" with "5" reserves 15. The field has to be allowed to sit empty
+    // while the user types.
+    const onChange = vi.fn();
+    render(
+      <ModelQuantityRows
+        rows={[row({ assetModelId: "m1" })]}
+        quantities={{ m1: 1 }}
+        onChange={onChange}
+        onRemove={vi.fn()}
+      />
+    );
+
+    const input = screen.getByLabelText(/^add$/i);
+    fireEvent.change(input, { target: { value: "" } });
+
+    expect(input).toHaveValue(null);
+
+    fireEvent.change(input, { target: { value: "5" } });
+
+    expect(input).toHaveValue(5);
+    expect(onChange).toHaveBeenLastCalledWith("m1", 5);
+  });
+
+  it("never reports a quantity below one while the field is empty", () => {
+    // why: Enter submits the form without firing blur, so an empty-looking
+    // field must still have reported a usable number. The draft may be blank;
+    // what the parent holds may not be.
+    const onChange = vi.fn();
+    render(
+      <ModelQuantityRows
+        rows={[row({ assetModelId: "m1" })]}
+        quantities={{ m1: 7 }}
+        onChange={onChange}
+        onRemove={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/^add$/i), { target: { value: "" } });
+
+    expect(onChange).toHaveBeenLastCalledWith("m1", 1);
+  });
+
+  it("restores the reported quantity when the field is left empty", () => {
+    // why: blur is the point the draft stops being the user's business. An
+    // input left blank must show the number that will actually be submitted.
+    const onChange = vi.fn();
+    render(
+      <ModelQuantityRows
+        rows={[row({ assetModelId: "m1" })]}
+        quantities={{ m1: 1 }}
+        onChange={onChange}
+        onRemove={vi.fn()}
+      />
+    );
+
+    const input = screen.getByLabelText(/^add$/i);
+    fireEvent.change(input, { target: { value: "" } });
+    fireEvent.blur(input);
+
+    expect(input).toHaveValue(1);
+  });
 });

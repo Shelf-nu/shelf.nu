@@ -1506,6 +1506,35 @@ describe("upsertBookingModelRequests", () => {
     ]);
   });
 
+  it("takes both locks before reading the quantities it sums onto", async () => {
+    stageExistingReservations([{ assetModelId: MODEL_ID, quantity: 5 }]);
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: MODEL_ID, quantity: 3 }],
+    });
+
+    // The read is the operand of the absolute target, so it has to happen
+    // under the locks that hold until commit. Taken after them, it is a READ
+    // COMMITTED snapshot a competing transaction can supersede: two callers
+    // each adding 3 to a booking holding 5 would both target 8, and the write
+    // that lands second takes the reduction path, so the lost units are never
+    // reported. Asserted as an ordering rather than a call count, which is why
+    // `rawStatements` exposes `order`.
+    const poolLock = lockOn("AssetModel");
+    const rowLock = lockOn("BookingModelRequest");
+    const readOrder = (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mock.invocationCallOrder[0];
+
+    expect(poolLock).toBeDefined();
+    expect(rowLock).toBeDefined();
+    expect(poolLock!.order).toBeLessThan(readOrder);
+    expect(rowLock!.order).toBeLessThan(readOrder);
+  });
+
   it("writes the addition as-is when the model is not reserved yet", async () => {
     expect.assertions(1);
 
