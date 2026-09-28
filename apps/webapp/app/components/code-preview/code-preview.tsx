@@ -7,8 +7,8 @@ import { useReactToPrint } from "react-to-print";
 import { BarcodeDisplay } from "~/components/barcode/barcode-display";
 import { Button } from "~/components/shared/button";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveShowShelfBranding } from "~/utils/branding";
 import {
   PermissionAction,
@@ -136,7 +136,7 @@ export const CodePreview = ({
   const captureDivRef = useRef<HTMLImageElement>(null);
   const downloadBtnRef = useRef<HTMLAnchorElement>(null);
   const { canUseBarcodes } = useBarcodePermissions();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { ownsWorkspace: isOwner } = useRoleAccess();
   /** Adding a code writes to the asset, so it follows `asset:update`. */
   const canAddCode = userHasPermission({

@@ -139,7 +139,6 @@ describe("POST /api/mobile/custody/release", () => {
     // The caller's custody scope is forwarded to releaseCustody, which
     // enforces it. ADMIN here so the release is permitted.
     (getMobileUserContext as any).mockResolvedValue({
-      role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
       access: accessFor([OrganizationRoles.ADMIN]),
     });

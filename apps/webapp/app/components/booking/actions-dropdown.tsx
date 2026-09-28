@@ -10,8 +10,8 @@ import {
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
@@ -54,7 +54,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
   } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
 
   const canArchiveBooking = userHasPermission({

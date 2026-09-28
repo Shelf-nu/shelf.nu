@@ -22,7 +22,7 @@ import Header from "~/components/layout/header";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { Button } from "~/components/shared/button";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -323,7 +323,7 @@ export default function AuditDetailsPage() {
     stats,
     userId,
   } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const isCompleted = session.status === AuditStatus.COMPLETED;
   const isCancelled = session.status === AuditStatus.CANCELLED;
@@ -335,8 +335,8 @@ export default function AuditDetailsPage() {
     (assignment) => assignment.userId === userId
   );
 
-  // ADMIN/OWNER can scan/complete any audit;
-  // BASE/SELF_SERVICE only when assigned
+  // Members whose audit scope covers every audit can scan and complete any of
+  // them; everyone else only the audits assigned to them.
   const canScanAndComplete = isAssignee || canSeeAllAudits;
 
   // The activity loader requires `auditNote:read` and 403s without it, so the

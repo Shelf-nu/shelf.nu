@@ -29,7 +29,7 @@ import { UserBadge } from "~/components/shared/user-badge";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditFilterMetadata } from "~/modules/audit/audit-filter-utils";
 import type { AuditFilterType } from "~/modules/audit/audit-filter-utils";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
@@ -794,7 +794,7 @@ function ClearFilterButton() {
 }
 
 function CustodianHeader() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadCustody = userHasPermission({
     roles,
     entity: PermissionEntity.custody,

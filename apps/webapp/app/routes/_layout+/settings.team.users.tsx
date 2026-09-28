@@ -20,7 +20,7 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -150,7 +150,7 @@ export default function UserTeamSetting() {
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   /* Importing users sends invites too, so both buttons need the invite grant. */
   const canInviteUsers = userHasPermission({
     roles,
@@ -230,7 +230,7 @@ export default function UserTeamSetting() {
 }
 
 function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   /* Row actions (change role, revoke, resend) are team-member updates. */
   const canUpdateTeamMembers = userHasPermission({
     roles,

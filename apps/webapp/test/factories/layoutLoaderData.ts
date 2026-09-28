@@ -5,7 +5,7 @@ import { accessFor } from "../helpers/role-access";
  * Factory for the `routes/_layout+/_layout` loader payload.
  *
  * Components under `_layout` read this through `useRouteLoaderData`-backed
- * hooks (`useRoleAccess`, `useUserRoleHelper`, `useIsShelfAdmin`,
+ * hooks (`useRoleAccess`, `useOrganizationRoles`, `useIsShelfAdmin`,
  * `useCurrentOrganization`), so a test mocking that hook has to hand back a
  * payload of this shape. Shared because the ownership-transfer surfaces render
  * on two different pages and their fixtures must not drift apart.

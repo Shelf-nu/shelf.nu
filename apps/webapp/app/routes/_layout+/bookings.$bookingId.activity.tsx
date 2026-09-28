@@ -12,7 +12,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import { MarkdownNoteSchema } from "~/components/notes/markdown-note-form";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getBooking } from "~/modules/booking/service.server";
 import {
   getBookingNotes,
@@ -245,7 +245,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function BookingActivity() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadBookingNotes = userHasPermission({
     roles,
     entity: PermissionEntity.bookingNote,

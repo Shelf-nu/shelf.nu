@@ -9,10 +9,10 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
@@ -164,7 +164,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const reservationIsRequest = useReservationIsRequest();
 

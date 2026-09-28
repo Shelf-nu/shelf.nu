@@ -11,17 +11,17 @@ import type { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
 import { CodePreview } from "./code-preview";
 
 // why: the layout loader supplies the roles, and it is not mounted here
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: vi.fn(),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: vi.fn(),
 }));
 
 // why: workspace ownership comes from the layout loader, which is not mounted
-// here; it only words the "unlock barcodes" card, which these tests never show
+// here; it only gates the "unlock barcodes" card, which these tests never show
 vi.mock("~/hooks/use-role-access", async () => {
   const { accessFor } = await import("@helpers/role-access");
   return { useRoleAccess: () => accessFor(["ADMIN"]) };
@@ -45,9 +45,7 @@ vi.mock("./add-barcode-dialog", () => ({
 
 /** Renders the preview for an asset with one QR code, as `roles`. */
 function renderAs(roles: OrganizationRoles[] | undefined) {
-  vi.mocked(useUserRoleHelper).mockReturnValue({
-    roles,
-  } as unknown as ReturnType<typeof useUserRoleHelper>);
+  vi.mocked(useOrganizationRoles).mockReturnValue(roles);
 
   return render(
     <CodePreview

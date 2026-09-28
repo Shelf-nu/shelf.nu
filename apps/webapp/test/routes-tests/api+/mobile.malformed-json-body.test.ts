@@ -90,8 +90,6 @@ describe("mobile actions with a body that is not JSON", () => {
     vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
     vi.mocked(requireMobilePermission).mockResolvedValue(undefined as never);
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      role: "ADMIN",
-      canSeeAllCustody: true,
       access: accessFor(["ADMIN"]),
       canUseAudits: true,
     } as never);

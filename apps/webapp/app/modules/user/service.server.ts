@@ -566,8 +566,9 @@ interface UserOrgTransition {
  *
  * - No membership any more: nothing is written; the user has no access.
  * - The workspace owner (OWNER anywhere in the membership) is never changed by
- *   a group mapping: the membership is kept as-is, nothing moves, and a warning
- *   is logged. Removing the owner would strand the workspace, and throwing
+ *   a group mapping: the membership is kept as-is and nothing moves. A warning
+ *   is logged only when the groups map to no role, i.e. would have revoked the
+ *   owner's access. Removing the owner would strand the workspace, and throwing
  *   would lock the owner out on the way in; an operator must transfer
  *   ownership before the IdP can deprovision them.
  * - No mapped role: access is revoked by {@link revokeMembershipInTx}, the same
@@ -585,7 +586,12 @@ interface UserOrgTransition {
  * ERROR SEMANTICS: deliberately fail closed. Any failure aborts the whole login
  * rather than being logged and skipped per workspace: swallowing it would leave
  * the user signed in holding access this call exists to change. The
- * transaction cannot half-apply.
+ * transaction cannot half-apply. This includes failures that repeat on every
+ * attempt: a transfer recipient (`organization.userId`) that is missing, is the
+ * member themself, or holds no eligible membership, and a transaction that
+ * exceeds its timeout while moving a large member's records. Each fails that
+ * member's SSO login closed on every attempt until an operator fixes the data
+ * (for the recipient, the workspace's owner row).
  *
  * @param userId - The Shelf user signing in
  * @param organization - The workspace; `userId` is its owner, the transfer
@@ -681,15 +687,20 @@ async function reconcileSsoGroupMembership(
           hasAccess: false,
         };
       case "owner":
-        Logger.warn({
-          message:
-            "SSO group claims would have changed the workspace owner's membership; kept it unchanged",
-          additionalData: {
-            userId,
-            organizationId: organization.id,
-            desiredRole,
-          },
-        });
+        // An owner is never mapped to OWNER, so a mapped role is the ordinary
+        // case (the owner sits in the admin group). Only a claim set that maps
+        // to no role puts the owner's access at risk, and that needs an
+        // operator: ownership must move before the IdP can deprovision them.
+        if (!desiredRole) {
+          Logger.warn({
+            message:
+              "SSO group claims would have revoked the workspace owner's access; kept it unchanged",
+            additionalData: {
+              userId,
+              organizationId: organization.id,
+            },
+          });
+        }
         return {
           ...base,
           newRole: resolveRole(outcome.roles),
@@ -2095,6 +2106,7 @@ export async function changeUserRole({
         message: "User is not a member of this organization",
         additionalData: { userId, organizationId },
         label,
+        status: 404,
         shouldBeCaptured: false,
       });
     }

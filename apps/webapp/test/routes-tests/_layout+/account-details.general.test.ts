@@ -110,7 +110,6 @@ describe("account-details.general action — deleteUser recipients", () => {
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
     } as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>);
   });
 

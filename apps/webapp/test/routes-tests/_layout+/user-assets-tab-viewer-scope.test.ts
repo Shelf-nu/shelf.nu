@@ -83,12 +83,9 @@ function mockPermission(canSeeAllCustody: boolean) {
   vi.mocked(rolesServer.requirePermission).mockResolvedValue({
     organizationId: "org123",
     userOrganizations: [],
-    isSelfServiceOrBase: !canSeeAllCustody,
     organizations: [],
     currentOrganization: {} as any,
     role: {} as any,
-    canSeeAllBookings: false,
-    canSeeAllCustody,
     canUseBarcodes: false,
     canUseAudits: false,
     // A BASE member whose workspace toggle decides custody visibility.

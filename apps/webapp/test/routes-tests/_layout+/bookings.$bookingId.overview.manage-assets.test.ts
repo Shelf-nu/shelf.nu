@@ -191,14 +191,11 @@ describe("manage-assets route validation", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // An ADMIN membership: the routes decide from `access`. The legacy
-      // `canSeeAll*` fields below are false and unread, and the membership
+      // An ADMIN membership: the routes decide from `access`. The membership
       // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1209,14 +1206,11 @@ describe("manage-assets loader — Models tab payload", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // An ADMIN membership: the routes decide from `access`. The legacy
-      // `canSeeAll*` fields below are false and unread, and the membership
+      // An ADMIN membership: the routes decide from `access`. The membership
       // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
       organizations: [],
       currentOrganization: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1484,14 +1478,11 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
         organizationId: "org123",
         roles: [OrganizationRoles.ADMIN],
       }),
-      // An ADMIN membership: the routes decide from `access`. The legacy
-      // `canSeeAll*` fields below are false and unread, and the membership
+      // An ADMIN membership: the routes decide from `access`. The membership
       // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
       organizations: [],
       currentOrganization: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });

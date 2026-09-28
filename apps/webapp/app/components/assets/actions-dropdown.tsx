@@ -10,9 +10,9 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
@@ -57,7 +57,7 @@ const ConditionalActionsDropdown = () => {
     : 0;
   const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canUpdateAsset = userHasPermission({
     roles,
     entity: PermissionEntity.asset,

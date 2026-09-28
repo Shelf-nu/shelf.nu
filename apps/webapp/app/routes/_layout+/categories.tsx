@@ -18,7 +18,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   deleteCategory,
   getCategories,
@@ -150,7 +150,7 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   // The bulk menu offers Delete only.
   const showBulkActions = userHasPermission({
     roles,

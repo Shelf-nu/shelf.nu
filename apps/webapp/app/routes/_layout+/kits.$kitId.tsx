@@ -25,8 +25,8 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
   validateBarcodeValue,
@@ -607,7 +607,7 @@ export default function KitDetails() {
   usePosition();
   const { kit, currentBooking, qrObj, lastScan, userId, currentOrganization } =
     useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { canUseBarcodes } = useBarcodePermissions();
 
   const kitHasUnavailableAssets = kit.assetKits.some(

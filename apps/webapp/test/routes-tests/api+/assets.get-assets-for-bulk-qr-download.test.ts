@@ -31,7 +31,6 @@ vi.mock("~/utils/roles.server", async () => {
     requirePermission: vi.fn().mockResolvedValue({
       organizationId: "org-1",
       role: "ADMIN",
-      canSeeAllCustody: true,
       access: accessFor(["ADMIN"]),
       // The loader reads these off the organization for the response, after the
       // QR work; omitting them makes the handler 500 on its last line while the

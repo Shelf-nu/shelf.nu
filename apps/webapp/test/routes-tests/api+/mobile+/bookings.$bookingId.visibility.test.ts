@@ -167,7 +167,13 @@ describe("GET /api/mobile/bookings/:bookingId — who may open it", () => {
     "opens someone else's booking for %s once the workspace override is on",
     async (role) => {
       getMobileUserContextMock.mockResolvedValue(
-        mobileUserContext({ roles: [role], canSeeAllBookings: true })
+        mobileUserContext({
+          roles: [role],
+          workspace: {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          },
+        })
       );
       findFirstMock.mockResolvedValue(
         bookingRow({ custodianUserId: SOMEONE_ELSE })

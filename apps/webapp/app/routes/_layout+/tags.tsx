@@ -20,7 +20,7 @@ import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -154,7 +154,7 @@ export const handle = {
 export const ErrorBoundary = () => <ErrorContent />;
 
 export default function CategoriesPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   // The bulk menu offers Delete only.
   const showBulkActions = userHasPermission({
     roles,

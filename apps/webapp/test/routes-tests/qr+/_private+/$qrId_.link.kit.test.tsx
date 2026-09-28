@@ -87,7 +87,7 @@ vi.mock("react-router", async () => {
     // why: mirrors real production behaviour for this exact route.
     // `qr+/_private+` is not nested under `_layout+/_layout`, so
     // `useRouteLoaderData("routes/_layout+/_layout")` (called by
-    // `useUserRoleHelper`) resolves to `undefined` there — it does NOT
+    // `useOrganizationRoles`) resolves to `undefined` there; it does NOT
     // throw. Modeling that precisely (rather than letting the real hook
     // throw "must be used within a data router" for lack of a full router
     // in this test) means the pre-fix component fails for the SAME reason

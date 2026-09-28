@@ -17,8 +17,8 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { useBookingStatusHelpers } from "./use-booking-status";
+import { useOrganizationRoles } from "./use-organization-roles";
 import { useRoleAccess } from "./use-role-access";
-import { useUserRoleHelper } from "./user-user-role-helper";
 
 /**
  * Which bulk actions the current user may take on the booking being viewed.
@@ -39,7 +39,7 @@ import { useUserRoleHelper } from "./user-user-role-helper";
  */
 export function useBookingBulkActions() {
   const { booking } = useLoaderData<BookingPageLoaderData>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const bookingStatus = useBookingStatusHelpers(
     booking.status as BookingStatus

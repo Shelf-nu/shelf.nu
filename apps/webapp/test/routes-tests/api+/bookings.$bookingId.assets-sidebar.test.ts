@@ -55,7 +55,7 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: each test supplies the (organizationId, canSeeAllBookings) it needs
+// why: each test supplies the (organizationId, access) it needs
 // rather than running the real permission machinery.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
@@ -104,7 +104,6 @@ beforeEach(() => {
   dbMocks.partialCheckoutFindMany.mockResolvedValue([]);
   requirePermissionMock.mockResolvedValue({
     organizationId: "org-1",
-    canSeeAllBookings: true,
     access: accessFor(["ADMIN"]),
   } as never);
 });
@@ -141,7 +140,6 @@ describe("api/bookings/:bookingId/assets-sidebar — read gate", () => {
   it("403s a restricted user asking for a booking they do not hold", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as never);
     dbMocks.bookingFindFirst.mockResolvedValue(
@@ -161,7 +159,6 @@ describe("api/bookings/:bookingId/assets-sidebar — read gate", () => {
     // `custodianUserId` never backfilled — `canSeeBooking` matches either link.
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as never);
     dbMocks.bookingFindFirst.mockResolvedValue(

@@ -135,7 +135,6 @@ beforeEach(() => {
   requireOrganizationAccessMock.mockResolvedValue(FAKE_ORG_ID);
   requireMobilePermissionMock.mockResolvedValue(undefined);
   getMobileUserContextMock.mockResolvedValue({
-    canSeeAllCustody: true,
     access: accessFor(["ADMIN"]),
   } as Awaited<ReturnType<typeof getMobileUserContext>>);
 });
@@ -325,7 +324,6 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
     // `kit: read` is held by BASE and SELF_SERVICE, and this select reaches
     // `custodian.user.email` — without the gate the whole identity is sent.
     getMobileUserContextMock.mockResolvedValue({
-      canSeeAllCustody: false,
       access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     findFirstMock.mockResolvedValue(kitInColleaguesCustody() as never);
@@ -342,7 +340,6 @@ describe("GET /api/mobile/kits/:kitId — custody visibility", () => {
 
   it("keeps the viewer's OWN custody visible", async () => {
     getMobileUserContextMock.mockResolvedValue({
-      canSeeAllCustody: false,
       access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     const own = kitInColleaguesCustody();

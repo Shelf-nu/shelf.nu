@@ -25,45 +25,6 @@
  * @see {@link file://./../../routes/api+/mobile+/assets.$assetId.ts} — detail endpoint consumer
  */
 
-import type { Organization } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
-
-/**
- * Computes whether a member may see ALL custody records in the organization.
- *
- * Mirrors the web's `canSeeAllCustody` in `requirePermission`
- * (~/utils/roles.server.ts:113-122) / `userHasCustodyViewPermission`:
- * ADMIN and OWNER always can; SELF_SERVICE and BASE only when the matching
- * org override is enabled.
- *
- * @param args.role - The viewer's role in the organization
- * @param args.organization - Org row with the two custody-visibility overrides
- * @returns true when the viewer may see every holder's custody
- */
-export function computeCanSeeAllCustody({
-  role,
-  organization,
-}: {
-  role: OrganizationRoles;
-  organization: Pick<
-    Organization,
-    "selfServiceCanSeeCustody" | "baseUserCanSeeCustody"
-  >;
-}): boolean {
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
-
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBase ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      organization.selfServiceCanSeeCustody) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE && organization.baseUserCanSeeCustody)
-  );
-}
-
 /**
  * Filters a shaped `custodyList` down to what the viewer may see.
  *

@@ -111,7 +111,6 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });
@@ -165,7 +164,6 @@ describe("POST /api/mobile/bulk-release-custody", () => {
     // `bulkCheckInAssets` refuses to release custody held by anyone but the
     // caller when the scope is `self`; the route must forward the scope.
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     });

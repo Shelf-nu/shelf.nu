@@ -29,7 +29,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
@@ -245,7 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function LocationKits() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { locationId } = useParams<z.infer<typeof paramsSchema>>();
   const userRoleCanManageKits = userHasPermission({
     roles,

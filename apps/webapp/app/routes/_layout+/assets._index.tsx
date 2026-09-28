@@ -15,7 +15,7 @@ import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   advancedModeLoader,
   simpleModeLoader,
@@ -349,7 +349,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetIndexPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
 

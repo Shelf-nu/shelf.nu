@@ -76,12 +76,11 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // `canSeeAllBookings: true` models the admin/owner case these formatting
+    // ADMIN access models the admin/owner case these formatting
     // assertions are about. The route also gates self-service/base callers to
     // their own bookings; that gate has its own test below.
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: true,
       access: accessFor(["ADMIN"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
@@ -168,7 +167,6 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("refuses to export another user's booking for a caller who cannot see all bookings", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
@@ -196,7 +194,6 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("exports the caller's own booking when they cannot see all bookings", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
@@ -229,7 +226,6 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("exports a legacy booking held via the caller's team-member link alone", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
@@ -256,7 +252,6 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("refuses to export a booking whose team-member link belongs to another user", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
       access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({

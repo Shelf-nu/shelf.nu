@@ -1,12 +1,8 @@
-import type { SsoDetails } from "@prisma/client";
-import { OrganizationRoles, Roles } from "@prisma/client";
+import type { SsoDetails, OrganizationRoles } from "@prisma/client";
+import { Roles } from "@prisma/client";
 import * as Sentry from "@sentry/react-router";
 import { db } from "~/database/db.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
-import {
-  isSelfServiceOrBaseRole,
-  resolveCanSeeAllBookings,
-} from "./booking-authorization.server";
 import { ShelfError } from "./error";
 import type {
   PermissionAction,
@@ -21,7 +17,6 @@ import {
   resolveRole,
   resolveRoleAccess,
 } from "./permissions/role-access";
-import { ROLE_PRECEDENCE } from "./role-precedence";
 import { SSO_GROUP_ROLE, type SsoGroupField } from "./sso-group-roles";
 
 export async function requireUserWithPermission(name: Roles, userId: string) {
@@ -58,97 +53,6 @@ export async function isAdmin(context: Record<string, any>) {
   });
 
   return !!user;
-}
-
-/**
- * The caller's effective role in one organization.
- *
- * A membership's `roles` is an array, but the app treats the **first** entry as
- * authoritative everywhere a single role is needed. Exported so callers outside
- * {@link requirePermission} (e.g. `/api/model-filters`) resolve the role the
- * exact same way — a different rule here would make a search disagree with the
- * loader that seeded it.
- *
- * @param args.userOrganizations - Memberships from `getSelectedOrganization`.
- * @param args.organizationId - Workspace whose membership to read.
- * @returns The effective role, defaulting to `BASE` when no membership matches.
- */
-export function resolveEffectiveRole({
-  userOrganizations,
-  organizationId,
-}: {
-  userOrganizations: Array<{
-    organization: { id: string };
-    roles: OrganizationRoles[];
-  }>;
-  organizationId: string;
-}): OrganizationRoles {
-  const roles =
-    userOrganizations.find((o) => o.organization.id === organizationId)
-      ?.roles ?? [];
-
-  // Most privileged, not roles[0]. Both callers use this to decide how much a
-  // user may see — the custodian picker's scope and booking visibility — so a
-  // membership ordered [SELF_SERVICE, ADMIN] would otherwise hand an actual
-  // admin the restricted view. Shares its ordering with SSO group resolution.
-  return (
-    ROLE_PRECEDENCE.find((candidate) => roles.includes(candidate)) ??
-    OrganizationRoles.BASE
-  );
-}
-
-/**
- * `isSelfServiceOrBaseRole` and `resolveCanSeeAllBookings` are defined in
- * `booking-authorization.server.ts` and re-exported here for the modules that
- * import them from this path.
- *
- * They live there because the mobile API needs the same rule and cannot import
- * this module: it pulls in Sentry and the organization service, and through it
- * Stripe and the mailer. Import them from `booking-authorization.server` in
- * new code.
- */
-export {
-  isSelfServiceOrBaseRole,
-  resolveCanSeeAllBookings,
-} from "./booking-authorization.server";
-
-/**
- * Whether the caller may see custody information for people other than
- * themselves.
- *
- * ADMIN / OWNER always can. SELF_SERVICE and BASE only when the workspace has
- * switched their respective override on. Callers read the same answer from
- * `access.custody.seeAll` (returned by {@link requirePermission}); a surface
- * that invents its own rule ends up disagreeing with the loader that seeded it.
- *
- * This governs VIEWING only. It never grants the right to assign custody:
- * SELF_SERVICE may assign only to themselves and BASE may not assign at all,
- * regardless of this flag. See `resolveCustodianPickerScope`.
- *
- * @param args.role - Effective role from {@link resolveEffectiveRole}.
- * @param args.currentOrganization - Workspace whose override settings apply.
- * @returns `true` when custody reads should NOT be restricted to the caller.
- */
-export function resolveCanSeeAllCustody({
-  role,
-  currentOrganization,
-}: {
-  role: OrganizationRoles;
-  currentOrganization: {
-    selfServiceCanSeeCustody: boolean;
-    baseUserCanSeeCustody: boolean;
-  };
-}): boolean {
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBaseRole(role) ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeCustody) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeCustody)
-  );
 }
 
 export async function requirePermission({
@@ -201,20 +105,8 @@ export async function requirePermission({
   // workspace's visibility toggles.
   const access = resolveRoleAccess({ roles, workspace: currentOrganization });
 
-  // The membership's effective (highest-rank) role, the same one `access`
-  // reads its policy from.
+  // The effective role, for logging and Sentry tags. Decisions read `access`.
   const role: OrganizationRoles = access.role;
-
-  const isSelfServiceOrBase = isSelfServiceOrBaseRole(role);
-
-  /**
-   * This checks the organization settings permissions overrides for BASE and SELF_SERVICE roles
-   * If the user is in a BASE or SELF_SERVICE role, we check if they can see all bookings
-   */
-  const canSeeAllBookings = resolveCanSeeAllBookings({
-    role,
-    currentOrganization,
-  });
 
   // Determine if user can use barcodes based on organization settings
   const canUseBarcodes = currentOrganization.barcodesEnabled ?? false;
@@ -222,18 +114,12 @@ export async function requirePermission({
   // Determine if user can use audits based on organization settings
   const canUseAudits = currentOrganization.auditsEnabled ?? false;
 
-  // Mirrors `access.custody.seeAll` for callers that still read the flag.
-  const canSeeAllCustody = access.custody.seeAll;
-
   return {
     organizations,
     organizationId,
     currentOrganization,
     role,
-    isSelfServiceOrBase,
     userOrganizations,
-    canSeeAllBookings,
-    canSeeAllCustody,
     canUseBarcodes,
     canUseAudits,
     access,

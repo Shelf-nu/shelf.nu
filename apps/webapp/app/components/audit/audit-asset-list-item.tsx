@@ -29,7 +29,7 @@ import { Td } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getPrimaryCustody } from "~/modules/custody/utils";
@@ -89,7 +89,7 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
   const custody = getPrimaryCustody(custodyArray);
   const [searchParams] = useSearchParams();
   const currentFilter = searchParams.get("auditStatus");
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   // Resolve the asset's display code. Audits run on physical assets, so this
   // is the strongest case for the badge — the field worker matches the label

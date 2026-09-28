@@ -36,7 +36,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
 import type { EntityForCodeResolution } from "~/modules/barcode/display";
@@ -314,7 +314,7 @@ export const handle = {
 
 export default function KitsIndexPage() {
   const { items } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   /**
    * The bulk menu holds custody, edit and delete actions; any one opens it.
    * Each item inside stays gated on its own permission.

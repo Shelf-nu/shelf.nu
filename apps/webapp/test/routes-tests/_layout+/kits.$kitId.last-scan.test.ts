@@ -97,7 +97,6 @@ function callerHolds(roles: OrganizationRoles[]) {
     organizationId: ORG,
     currentOrganization: { id: ORG },
     canUseBarcodes: false,
-    canSeeAllCustody: true,
     access: accessFor(roles, {
       selfServiceCanSeeCustody: true,
       baseUserCanSeeCustody: true,

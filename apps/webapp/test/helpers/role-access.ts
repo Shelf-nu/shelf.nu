@@ -13,10 +13,6 @@
  * @see {@link file://../../app/utils/permissions/role-access.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
-import {
-  isSelfServiceOrBaseRole,
-  resolveMostPrivilegedRole,
-} from "~/utils/booking-authorization.server";
 import type {
   RoleAccess,
   WorkspaceAccessSettings,
@@ -48,9 +44,9 @@ export function accessFor(
 }
 
 /**
- * A `requirePermission` return value for route tests: the fields routes read
- * today plus `access`, all derived from the same roles and toggles so they
- * cannot disagree.
+ * A `requirePermission` return value for route tests: `access`, the effective
+ * `role` and the membership, all derived from the same roles and toggles so
+ * they cannot disagree.
  *
  * @param args.roles - Every role on the membership (defaults to ADMIN)
  * @param args.workspace - Toggles to switch on
@@ -67,14 +63,10 @@ export function permissionContext({
 } = {}) {
   const toggles = { ...ALL_TOGGLES_OFF, ...workspace };
   const access = accessFor(roles, toggles);
-  const role = resolveMostPrivilegedRole(roles);
 
   return {
     organizationId,
-    role,
-    isSelfServiceOrBase: isSelfServiceOrBaseRole(role),
-    canSeeAllBookings: access.bookings.seeAll,
-    canSeeAllCustody: access.custody.seeAll,
+    role: access.role,
     access,
     userOrganizations: [{ organization: { id: organizationId }, roles }],
     currentOrganization: { id: organizationId, ...toggles },

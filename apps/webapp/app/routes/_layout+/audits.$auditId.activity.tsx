@@ -6,7 +6,7 @@ import { z } from "zod";
 import { AuditNotes } from "~/components/audit/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import TextualDivider from "~/components/shared/textual-divider";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAuditNotes } from "~/modules/audit/note-service.server";
 import {
   getAuditSessionDetails,
@@ -107,7 +107,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function AuditActivity() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadAuditNotes = userHasPermission({
     roles,
     entity: PermissionEntity.auditNote,

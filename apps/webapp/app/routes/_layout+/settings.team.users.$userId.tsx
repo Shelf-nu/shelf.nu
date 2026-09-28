@@ -15,7 +15,7 @@ import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getUserProfileForOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
 import { getUserContactForDisplay } from "~/modules/user-contact/service.server";
@@ -118,7 +118,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const { user, organizationId } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   /* Notes tab is only visible to ADMIN/OWNER roles.
    * BASE and SELF_SERVICE users will never see it.

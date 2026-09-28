@@ -84,7 +84,7 @@ export default function InviteUserDialog({
   const organization = useCurrentOrganization();
   const { ownsWorkspace } = useRoleAccess();
   /** Roles this member may grant; only the owner may grant an owner-only role. */
-  const roleOptions = INVITABLE_ROLES.filter((role) =>
+  const grantableRoles = INVITABLE_ROLES.filter((role) =>
     canAssignRole({ actorOwnsWorkspace: ownsWorkspace, role })
   );
 
@@ -211,7 +211,7 @@ export default function InviteUserDialog({
                     align="start"
                   >
                     <div className=" max-h-[320px] overflow-auto">
-                      {roleOptions.map((role) => (
+                      {grantableRoles.map((role) => (
                         <SelectItem value={role} key={role} className="p-2">
                           <div className="flex items-center gap-2">
                             <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">

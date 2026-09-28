@@ -18,7 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import { ImportNrmButton } from "~/components/workspace/import-nrm-button";
 import { TeamMembersActionsDropdown } from "~/components/workspace/nrm-actions-dropdown";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getPaginatedAndFilterableSettingTeamMembers } from "~/modules/settings/service.server";
 import { getHeldCustodyCount } from "~/modules/team-member/custody-count";
 import { deleteNRM } from "~/modules/team-member/service.server";
@@ -162,7 +162,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
  */
 export default function NrmSettings() {
   const { canImportNRM } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const can = (action: PermissionAction) =>
     userHasPermission({
       roles,

@@ -114,7 +114,6 @@ describe("POST /api/mobile/custody/assign", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });

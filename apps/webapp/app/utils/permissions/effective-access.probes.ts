@@ -152,16 +152,13 @@ function outcome(fn: () => unknown): "allowed" | "denied" {
 }
 
 // ---------------------------------------------------------------------------
-// Mixed-role baseline (Task 1c)
+// Mixed-role baseline
 //
 // Probes for every decision whose answer for a MIXED membership depends on
-// how the call site reads the role: positionally (`roles[0]`, mobile
-// `getMobileUserContext().role`), as "any role held" (`useUserRoleHelper`
-// flags, companion `isRestrictedRole`), or as the effective role. Inline call
-// sites are reproduced here with the inputs the call site derives; each probe
-// cites its lines. A task that migrates a call site rewrites its probe to
-// reproduce the migrated code, and the fixture diff must equal the key's row in
-// the plan's Task 1c mapping table.
+// how the call site reads the role. Inline call sites are reproduced here with
+// the inputs the call site derives; each probe cites its source. A change to
+// a call site rewrites its probe to reproduce the new code, and any change to
+// a recorded value is an announced behaviour change.
 // ---------------------------------------------------------------------------
 
 const E = PermissionEntity;
@@ -584,7 +581,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     SINGLE_ROLES.map((role) => [role, getDefaultModeForRole(role)])
   );
 
-  // ===================== Bookings: Task 4b =====================
+  // ===================== Bookings: visibility =====================
 
   // B9:D-14: "view other bookings" link in the adjust-quantity dialog:
   // `useRoleAccess().bookings.seeAll`
@@ -604,7 +601,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     )
   );
 
-  // ===================== Bookings: Task 4c =====================
+  // ===================== Bookings: write gates =====================
 
   // B9:D-15: the web write gate for every membership (web callers pass the
   // `access` requirePermission resolves, and the membership's roles for the
@@ -789,7 +786,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     });
   });
 
-  // ===================== Bookings: Task 4d =====================
+  // ===================== Bookings: custodian pickers =====================
 
   // B9:D-19/D-29: picker scopes for every membership on the web, all read
   // from the membership's access.
@@ -897,7 +894,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // ===================== Bookings: Task 4e =====================
+  // ===================== Bookings: adding and removing items =====================
 
   // B9:D-20: web add-items rule for every membership, per call-site rule:
   // `selfServiceFlag` is the scan page (`canScanAddBookingItems`),
@@ -1013,7 +1010,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     );
   });
 
-  // ===================== Bookings: Task 4f =====================
+  // ===================== Bookings: check-out and check-in =====================
 
   // B9:D-26: explicit check-out / check-in switch for every membership, read
   // through `isExplicitScanRequired` with the caller's access on every surface.
@@ -1084,7 +1081,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // ===================== Bookings: Task 4g (menu half: 4f) =====================
+  // ===================== Bookings: deletion =====================
 
   // B9:D-22: booking Delete menu item (actions-dropdown.tsx):
   // `!useRoleAccess().policy.bookings.deleteOnlyDrafts || isDraft`.
@@ -1111,7 +1108,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     });
   });
 
-  // ===================== Custody & assets: Task 5c =====================
+  // ===================== Custody & assets =====================
 
   // B9:D-29/D-30: mobile custody routes judge "self only" by the membership's
   // custody scope (`access.custody.assign`, effective role), after an
@@ -1168,7 +1165,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     (roles) => accessFor(roles).custody.assign === "self"
   );
 
-  // ===================== Assets: Task 5d =====================
+  // ===================== Assets: index mode =====================
 
   // B9:D-33: default index mode on the web (effective role) for every membership.
   snapshot["B9:D-33:web-server"] = perRoleSet((roles) =>
@@ -1216,7 +1213,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     can(roles, E.assetReminders, A.create)
   );
 
-  // ===================== Audits: Tasks 6a, 6b =====================
+  // ===================== Audits =====================
 
   // B9:D-42: mobile audit scope from `access.audits.seeAll`: audits.ts gates
   // audit:read; audits.complete.ts and audits.record-scan.ts gate
@@ -1245,7 +1242,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // ===================== Admin areas: Tasks 7b, 7e =====================
+  // ===================== Admin areas =====================
 
   // B9:D-38: settings tabs for a team workspace, as the Settings layout loader
   // computes them (routes/_layout+/settings.tsx): each tab shows with the
@@ -1315,7 +1312,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
   }));
 
-  // ===================== Membership: Tasks 8a-8f =====================
+  // ===================== Membership =====================
 
   // B9:D-01/D-10: how a membership is shown, always as its effective role:
   // teamList modules/settings/service.server.ts (getPaginatedAndFilterableSettingUsers)
@@ -1465,7 +1462,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     ),
   }));
 
-  // ===================== Notifications: Task 9 =====================
+  // ===================== Notifications =====================
 
   // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: rolesWhere(...) }`:
   // orgBookingBroadcasts and lowStock modules/organization/service.server.ts
@@ -1515,7 +1512,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     };
   });
 
-  // ===================== Companion: Task 10 (B8) =====================
+  // ===================== Companion =====================
   // Reproduced here because the webapp cannot import the companion. Each probe
   // reads the same `resolveRoleAccess` answer the companion's
   // lib/role-access.ts `accessForOrganization` resolves (toggles off), and

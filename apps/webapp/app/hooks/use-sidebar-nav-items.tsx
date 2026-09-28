@@ -32,7 +32,7 @@ import {
   visibleTeamTabs,
 } from "~/utils/permissions/settings-tabs";
 import { useCurrentOrganization } from "./use-current-organization";
-import { useUserRoleHelper } from "./user-user-role-helper";
+import { useOrganizationRoles } from "./use-organization-roles";
 
 type BaseNavItem = {
   title: string;
@@ -82,7 +82,7 @@ export type NavItem =
 export function useSidebarNavItems() {
   const { isAdmin, canUseBookings, subscription, unreadUpdatesCount } =
     useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   const isPersonalOrganization = isPersonalOrg(currentOrganization);
 

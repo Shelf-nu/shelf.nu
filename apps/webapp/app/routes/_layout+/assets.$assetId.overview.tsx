@@ -1,10 +1,6 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import {
-  AssetStatus,
-  CustomFieldType,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -49,9 +45,9 @@ import {
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
@@ -808,7 +804,7 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({

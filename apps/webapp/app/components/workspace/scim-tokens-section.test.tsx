@@ -101,7 +101,7 @@ const routeLoaderDefaults: Record<string, unknown> = {
       },
     },
   },
-  // useRoleAccess and useUserRoleHelper → useRouteLoaderData("routes/_layout+/_layout")
+  // useRoleAccess and useOrganizationRoles → useRouteLoaderData("routes/_layout+/_layout")
   "routes/_layout+/_layout": {
     currentOrganizationUserRoles: ["OWNER"],
     roleAccess: accessFor(["OWNER"]),

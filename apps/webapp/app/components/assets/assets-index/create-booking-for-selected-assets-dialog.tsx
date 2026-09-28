@@ -16,10 +16,10 @@ import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
@@ -37,7 +37,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const custodianIsSelf = bookingCustodianIsSelf(roleAccess);
   // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone

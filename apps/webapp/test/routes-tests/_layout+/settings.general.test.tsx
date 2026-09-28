@@ -128,10 +128,7 @@ describe("settings.general loader", () => {
       currentOrganization: baseOrganization(),
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -199,10 +196,7 @@ describe("settings.general loader", () => {
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -240,10 +234,7 @@ describe("settings.general loader", () => {
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -304,10 +295,7 @@ describe("settings.general action", () => {
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -416,10 +404,7 @@ describe("settings.general action", () => {
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
       organizations: [orgWithBrandingOff],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -472,10 +457,7 @@ describe("settings.general action", () => {
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -531,10 +513,7 @@ describe("settings.general action", () => {
       role: OrganizationRoles.OWNER,
       access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -619,10 +598,7 @@ describe("settings.general transfer-ownership authorization", () => {
       role,
       access: accessFor([role]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
   }

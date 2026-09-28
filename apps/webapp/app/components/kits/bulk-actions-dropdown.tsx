@@ -3,9 +3,9 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
 import { someKitMemberBlocksCustodyAssignment } from "~/utils/kits";
 import { isSelectingAllItems } from "~/utils/list";
@@ -67,7 +67,7 @@ function ConditionalDropdown() {
   const selectedKits = useAtomValue(selectedBulkItemsAtom);
   const allSelected = isSelectingAllItems(selectedKits);
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 

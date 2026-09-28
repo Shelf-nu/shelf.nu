@@ -8,9 +8,9 @@
 import type { OrganizationRoles } from "@prisma/client";
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useOrganizationRoles } from "./use-organization-roles";
 import type { NavItem } from "./use-sidebar-nav-items";
 import { useSidebarNavItems } from "./use-sidebar-nav-items";
-import { useUserRoleHelper } from "./user-user-role-helper";
 
 // why: the layout loader supplies nav data; no data router is mounted here
 vi.mock("react-router", async () => {
@@ -32,8 +32,8 @@ vi.mock("./use-current-organization", () => ({
 }));
 
 // why: roles come from the layout loader, which is not mounted here
-vi.mock("./user-user-role-helper", () => ({
-  useUserRoleHelper: vi.fn(),
+vi.mock("./use-organization-roles", () => ({
+  useOrganizationRoles: vi.fn(),
 }));
 
 /** Titles of the visible top items, plus `Parent/Child` for visible children. */
@@ -53,9 +53,7 @@ function titles(items: NavItem[]): string[] {
 }
 
 function sidebarFor(roles: OrganizationRoles[]): string[] {
-  vi.mocked(useUserRoleHelper).mockReturnValue({ roles } as ReturnType<
-    typeof useUserRoleHelper
-  >);
+  vi.mocked(useOrganizationRoles).mockReturnValue(roles);
   return titles(
     renderHook(() => useSidebarNavItems()).result.current.topMenuItems
   );

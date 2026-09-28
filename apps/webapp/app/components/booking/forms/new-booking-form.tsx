@@ -7,9 +7,9 @@ import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type {
   NewBookingActionReturnType,
@@ -73,7 +73,7 @@ export function NewBookingForm({ booking, action }: NewBookingFormData) {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
 
   const { startDate: defaultStartDate, endDate: defaultEndDate } =

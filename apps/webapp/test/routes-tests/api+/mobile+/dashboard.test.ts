@@ -99,10 +99,11 @@ const ORG_ID = "org-1";
  * Points the stubbed mobile-auth helpers at a caller holding `role`.
  *
  * @param role - The caller's role in `ORG_ID`
+ * @param options.canSeeAllBookings - Switch on both booking visibility toggles
  */
 function actAs(
   role: OrganizationRoles,
-  overrides: { canSeeAllBookings?: boolean } = {}
+  { canSeeAllBookings = false }: { canSeeAllBookings?: boolean } = {}
 ) {
   requireMobileAuthMock.mockResolvedValue({
     user: {
@@ -119,8 +120,15 @@ function actAs(
     // The guard reads the full array, not roles[0].
     mobileUserContext({
       roles: [role],
-      canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
-      ...overrides,
+      workspace: {
+        // Custody visibility on for every role but SELF_SERVICE.
+        ...(role !== OrganizationRoles.SELF_SERVICE
+          ? { selfServiceCanSeeCustody: true, baseUserCanSeeCustody: true }
+          : {}),
+        ...(canSeeAllBookings
+          ? { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true }
+          : {}),
+      },
     })
   );
 }

@@ -214,6 +214,63 @@ import { action } from "~/routes/api+/mobile+/qr.claim";
 
 The `*.test.server.ts` spelling is banned too — that infix only ever existed to dodge the warmup glob. The error message names the exact destination path to move the file to.
 
+### `no-direct-role-checks`
+
+**Purpose**: Every role decision goes through `@shelf/permissions`.
+
+**Problem**: A role comparison decides for the roles it names and guesses for
+the rest. A deny-list (`role === SELF_SERVICE || role === BASE`) treats any
+other role as an admin; an allow-list (`roles.includes(ADMIN)`) treats it as
+restricted. Both styles compile and pass tests, and they disagree silently as
+soon as a role is added.
+
+**Reports**: a role name (`"OWNER" | "ADMIN" | "SELF_SERVICE" | "BASE" |
+"CUSTODY_MANAGER"` or `OrganizationRoles.X`, including aliases) used as an
+operand of `===`/`!==`/`==`/`!=`, a `case` test, an argument of
+`.includes/.indexOf/.lastIndexOf/.has/.some` (or an element of the array they
+are called on), the value of a Prisma `has`, an element of a Prisma
+`hasSome/hasEvery/in/notIn/equals` array, or one of two or more role keys of an
+object literal; and any `roles[0]`.
+
+**Not reported**: role writes (`roles: [OrganizationRoles.OWNER]`,
+`set: [newRole]`), role names as object values, types.
+
+**Allowed files**: `packages/permissions/**`, parity files, tests, `test/`,
+mocks, factories, fixtures, and the effective-access probes.
+
+#### Examples
+
+❌ **Bad**:
+
+```ts
+if (
+  role === OrganizationRoles.SELF_SERVICE ||
+  role === OrganizationRoles.BASE
+) {
+}
+where: {
+  roles: {
+    hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN];
+  }
+}
+const label = organizationRolesMap[userOrg.roles[0]];
+```
+
+✅ **Good**:
+
+```ts
+if (!access.bookings.writeAll) {
+}
+where: {
+  roles: {
+    hasSome: rolesWhere((p) => p.notifications.orgBookingBroadcasts);
+  }
+}
+const label = ROLE_LABELS[resolveRole(userOrg.roles)];
+```
+
+Also enforced in `apps/companion` (its flat config imports this file).
+
 ## Development
 
 To add new rules:

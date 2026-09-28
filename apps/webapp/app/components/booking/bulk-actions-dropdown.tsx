@@ -4,8 +4,8 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -75,7 +75,7 @@ function ConditionalDropdown() {
     ].includes(b.status as any)
   );
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
 
   const navigation = useNavigation();

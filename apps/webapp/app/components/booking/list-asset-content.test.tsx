@@ -105,21 +105,21 @@ vi.mock("~/hooks/use-booking-status", () => ({
     mockUseBookingStatusHelpers(status),
 }));
 
-const mockUseUserRoleHelper = vi.fn();
+const mockUseOrganizationRoles = vi.fn();
 
 // why: providing test user role context without auth dependencies, and letting
 // a test choose the roles — the row's checkbox is gated on what those roles may
 // actually do with a selection.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockUseOrganizationRoles(),
 }));
 
-/** The roles the role-helper mock returns; the access mock reads the same. */
+/** The roles the organization-roles mock returns; the access mock reads the same. */
 let mockRoles: OrganizationRoles[] = [];
 
 // why: the row and the bulk-actions hook read the member's access from the
 // `_layout` loader, which is not mounted here; drive it from the same roles
-// the role-helper mock returns.
+// the organization-roles mock returns.
 vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => accessFor(mockRoles),
 }));
@@ -177,14 +177,9 @@ describe("ListAssetContent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Default: no roles, matching what every test here assumed before the
-    // checkbox became role-dependent. Tests that care set their own.
-    mockUseUserRoleHelper.mockReturnValue({
-      isBase: false,
-      isSelfService: false,
-      isBaseOrSelfService: false,
-      roles: undefined,
-    });
+    // Default: no roles, as while the layout data loads. Tests that care set
+    // their own.
+    mockUseOrganizationRoles.mockReturnValue(undefined);
     mockRoles = [];
 
     mockUseBookingStatusHelpers.mockImplementation((status: string) => ({
@@ -1039,15 +1034,7 @@ describe("ListAssetContent", () => {
       status: string,
       roles: OrganizationRoles[] = [OrganizationRoles.BASE]
     ) => {
-      const restricted =
-        roles.includes(OrganizationRoles.BASE) ||
-        roles.includes(OrganizationRoles.SELF_SERVICE);
-      mockUseUserRoleHelper.mockReturnValue({
-        isBase: roles.includes(OrganizationRoles.BASE),
-        isSelfService: roles.includes(OrganizationRoles.SELF_SERVICE),
-        isBaseOrSelfService: restricted,
-        roles,
-      });
+      mockUseOrganizationRoles.mockReturnValue(roles);
       mockRoles = roles;
       mockUseLoaderData.mockReturnValue(bookingAt(status));
 
@@ -1121,7 +1108,7 @@ describe("ListAssetContent", () => {
       custodian: boolean;
       partOfKit?: boolean;
     }) => {
-      mockUseUserRoleHelper.mockReturnValue({ roles });
+      mockUseOrganizationRoles.mockReturnValue(roles);
       mockRoles = roles;
       mockUseLoaderData.mockReturnValue({
         booking: {

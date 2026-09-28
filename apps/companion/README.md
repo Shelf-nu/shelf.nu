@@ -385,7 +385,10 @@ Every role decision in the app comes from `@shelf/permissions`:
 `userHasPermission` (`lib/permissions.ts`) for the permission matrix and
 `useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
 custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
-workspace's visibility toggles for this. Never compare role strings in the app.
+workspace's visibility toggles for this. Never compare role strings in the app:
+`local-rules/no-direct-role-checks` (shared with the webapp, wired in
+`eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
+outside tests.
 
 **Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update
 to every live `runtimeVersion` (1.5.0, 1.4.0, 1.3.0, 1.2.0). Builds older than

@@ -83,7 +83,6 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     // existing shape assertions to "may see all" so they keep measuring the
     // shaper, not the custody gate — which has its own tests below.
     getMobileUserContext: vi.fn().mockResolvedValue({
-      canSeeAllCustody: true,
       access: accessFor(["ADMIN"]),
     }),
   };
@@ -593,7 +592,6 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     // The mobile asset DETAIL route gated this; the list did not, so the same
     // holder name was readable one endpoint over.
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
       access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -626,7 +624,6 @@ describe("GET /api/mobile/assets — custody visibility", () => {
       },
     ] as never);
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
       access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
@@ -639,7 +636,6 @@ describe("GET /api/mobile/assets — custody visibility", () => {
 
   it("keeps custody visible for a viewer who may see all of it", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: true,
       access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 

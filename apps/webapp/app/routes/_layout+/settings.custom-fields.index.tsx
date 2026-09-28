@@ -20,7 +20,7 @@ import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { GrayBadge } from "~/components/shared/gray-badge";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   countActiveCustomFields,
   getFilteredAndPaginatedCustomFields,
@@ -127,7 +127,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 /** The custom fields list, with its create button and bulk actions. */
 export default function CustomFieldsIndexPage() {
   const { canCreateMoreCustomFields } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   // The bulk menu offers Activate and Deactivate.
   const showBulkActions = userHasPermission({
     roles,

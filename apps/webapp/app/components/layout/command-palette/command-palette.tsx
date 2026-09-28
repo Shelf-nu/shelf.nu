@@ -30,7 +30,7 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -525,7 +525,7 @@ export function CommandPalette() {
     enabled: open && Boolean(debouncedQuery),
   });
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canCreateBookings = layoutData?.canUseBookings ?? false;
   const isPersonalWorkspace = isPersonalOrg(layoutData?.currentOrganization);
 

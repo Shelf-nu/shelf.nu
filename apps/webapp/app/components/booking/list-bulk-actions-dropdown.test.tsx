@@ -32,7 +32,7 @@ import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accessFor } from "@helpers/role-access";
 
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
 import ListBulkActionsDropdown from "./list-bulk-actions-dropdown";
 
@@ -45,11 +45,11 @@ vi.mock("react-router", async () => {
 
 // why: the role under test. The real hook reads `useRouteLoaderData` for the
 // `_layout` route, which is not mounted here.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: vi.fn(),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: vi.fn(),
 }));
 
-/** The roles the role-helper mock returns; the access mock reads the same. */
+/** The roles the organization-roles mock returns; the access mock reads the same. */
 let mockRoles: OrganizationRoles[] = [];
 
 // why: the bulk-actions hook reads the member's access from the `_layout`
@@ -95,7 +95,7 @@ vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
 }));
 
 const mockedUseLoaderData = vi.mocked(useLoaderData);
-const mockedUseUserRoleHelper = vi.mocked(useUserRoleHelper);
+const mockedUseOrganizationRoles = vi.mocked(useOrganizationRoles);
 
 function setup({
   status,
@@ -111,9 +111,7 @@ function setup({
     remainingToCheckOutByAsset: {},
   } as never);
 
-  mockedUseUserRoleHelper.mockReturnValue({
-    roles,
-  } as ReturnType<typeof useUserRoleHelper>);
+  mockedUseOrganizationRoles.mockReturnValue(roles);
   mockRoles = roles;
 
   render(<ListBulkActionsDropdown />);
@@ -230,9 +228,7 @@ describe("ListBulkActionsDropdown check-out eligibility", () => {
       remainingToCheckOutByAsset: {},
     } as never);
     mockSelectedBulkItems = [{ ...camera, bookingAssetId: "ba-camera" }];
-    mockedUseUserRoleHelper.mockReturnValue({
-      roles: [OrganizationRoles.ADMIN],
-    } as ReturnType<typeof useUserRoleHelper>);
+    mockedUseOrganizationRoles.mockReturnValue([OrganizationRoles.ADMIN]);
     mockRoles = [OrganizationRoles.ADMIN];
 
     render(<ListBulkActionsDropdown />);

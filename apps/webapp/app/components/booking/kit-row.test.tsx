@@ -24,7 +24,7 @@ import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.ove
 import KitRow from "./kit-row";
 
 const mockUseLoaderData = vi.fn();
-const mockUseUserRoleHelper = vi.fn();
+const mockUseOrganizationRoles = vi.fn();
 
 // why: the real hook reads the booking off route loader data, which needs a
 // router context these component tests don't mount.
@@ -38,15 +38,15 @@ vi.mock("react-router", async () => {
 
 // why: each case picks the roles under test; the checkbox is gated on what
 // those roles may do with a selection.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockUseOrganizationRoles(),
 }));
 
-/** The roles the role-helper mock returns; the access mock reads the same. */
+/** The roles the organization-roles mock returns; the access mock reads the same. */
 let mockRoles: OrganizationRoles[] = [];
 
 // why: the row and the bulk-actions hook read the member's access from the
-// layout loader; drive it from the same roles the role-helper mock returns
+// layout loader; drive it from the same roles the organization-roles mock returns
 vi.mock("~/hooks/use-role-access", () => ({
   useRoleAccess: () => accessFor(mockRoles),
 }));
@@ -108,14 +108,7 @@ const assets = [
 /** Renders one collapsed kit row on a booking in `status`, as `roles`. */
 const renderRow = (status: BookingStatus, roles: OrganizationRoles[]) => {
   mockRoles = roles;
-  mockUseUserRoleHelper.mockReturnValue({
-    isBase: roles.includes(OrganizationRoles.BASE),
-    isSelfService: roles.includes(OrganizationRoles.SELF_SERVICE),
-    isBaseOrSelfService:
-      roles.includes(OrganizationRoles.BASE) ||
-      roles.includes(OrganizationRoles.SELF_SERVICE),
-    roles,
-  });
+  mockUseOrganizationRoles.mockReturnValue(roles);
   mockUseLoaderData.mockReturnValue({
     booking: { id: "booking-1", status, assets: [], custodianUser: null },
   });
@@ -246,12 +239,7 @@ describe("KitRow already-booked signal (QT-only kit)", () => {
     assets: AssetWithBooking[],
     kit: ComponentProps<typeof KitRow>["kit"] = checkedOutKit
   ) => {
-    mockUseUserRoleHelper.mockReturnValue({
-      isBase: false,
-      isSelfService: false,
-      isBaseOrSelfService: false,
-      roles: [OrganizationRoles.ADMIN],
-    });
+    mockUseOrganizationRoles.mockReturnValue([OrganizationRoles.ADMIN]);
     mockRoles = [OrganizationRoles.ADMIN];
     // RESERVED (not ONGOING/OVERDUE): the "Already booked" badge is
     // withheld while THIS booking is itself in progress, since a kit it

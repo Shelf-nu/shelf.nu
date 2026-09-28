@@ -182,10 +182,8 @@ describe("POST /api/mobile/custody/release-quantity", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
       access: accessFor(["ADMIN"]),
     });
 
@@ -394,10 +392,8 @@ describe("POST /api/mobile/custody/release-quantity", () => {
 
   it("returns 403 when a SELF_SERVICE user releases someone else's custody", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
       access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
@@ -425,10 +421,8 @@ describe("POST /api/mobile/custody/release-quantity", () => {
 
   it("allows a SELF_SERVICE user to release their own custody", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
       access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({

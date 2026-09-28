@@ -5,9 +5,9 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import type {
@@ -99,7 +99,7 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 

@@ -1,13 +1,7 @@
 import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
 import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
-import { resolveMostPrivilegedRole } from "./role-precedence";
 import { resolveBookingHolderName, type UserNameFields } from "./user";
-
-// The resolver lives in role-precedence.ts so client gates can share it; server
-// callers keep importing it from here.
-export { resolveMostPrivilegedRole };
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -247,68 +241,6 @@ export function assertCanDeleteBooking({
       shouldBeCaptured: false,
     });
   }
-}
-
-/**
- * Whether a role is one of the two restricted, "own records only" roles.
- *
- * @param role - Effective role from `resolveEffectiveRole` (web) or
- *   {@link resolveMostPrivilegedRole} (mobile).
- * @returns `true` for SELF_SERVICE and BASE.
- */
-export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
-  return (
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
-  );
-}
-
-/**
- * Whether the caller may see bookings they are not the custodian of.
- *
- * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
- * has switched the corresponding setting on. This is the standard visibility
- * rule for bookings; every read path that can surface someone else's booking
- * gates on it, on web (`/bookings`, the command palette, CSV export) and on
- * mobile (the list, the calendar, the booking detail, the dashboard).
- *
- * Exported so callers outside `requirePermission` resolve it identically. A
- * surface that invents its own rule disagrees with the loader that seeded it -
- * a picker whose list changes the moment the user types, or two platforms that
- * disagree about which bookings exist.
- *
- * READ only. It never widens a mutation: a restricted user may legitimately
- * view a booking they cannot write to. Writes stay on the role's permission
- * grant plus {@link validateBookingOwnership} / {@link bookingWriteScopeClause}.
- *
- * Lives here rather than in `roles.server.ts` so the mobile API can reach it:
- * that module pulls in Sentry and the organization service, and through it
- * Stripe and the mailer, which no mobile route or its test can carry. This
- * module imports only Prisma types and two local helpers - keep it that way.
- *
- * @param args.role - The caller's effective role.
- * @param args.currentOrganization - Workspace whose override settings apply.
- * @returns `true` when bookings should NOT be restricted to the caller's own.
- */
-export function resolveCanSeeAllBookings({
-  role,
-  currentOrganization,
-}: {
-  role: OrganizationRoles;
-  currentOrganization: {
-    selfServiceCanSeeBookings: boolean;
-    baseUserCanSeeBookings: boolean;
-  };
-}): boolean {
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBaseRole(role) ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeBookings) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeBookings)
-  );
 }
 
 /**

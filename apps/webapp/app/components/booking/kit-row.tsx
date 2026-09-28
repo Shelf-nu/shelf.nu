@@ -20,8 +20,8 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   hasAssetBookingConflicts,
@@ -99,7 +99,7 @@ export default function KitRow({
   partialCheckoutDetails,
   shouldShowCheckoutColumns,
 }: KitRowProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
   const { isInProgress, isFinished } = useBookingStatusHelpers(bookingStatus);

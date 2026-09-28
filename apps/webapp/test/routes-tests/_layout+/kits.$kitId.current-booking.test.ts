@@ -127,7 +127,6 @@ async function loadAs(viewerUserId: string, canSeeAllCustody: boolean) {
     organizationId: ORG,
     currentOrganization: { id: ORG },
     canUseBarcodes: false,
-    canSeeAllCustody,
     access: accessFor([OrganizationRoles.SELF_SERVICE], {
       selfServiceCanSeeCustody: canSeeAllCustody,
     }),

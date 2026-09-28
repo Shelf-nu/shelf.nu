@@ -17,7 +17,7 @@ import { List } from "~/components/list";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAssetModels } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -96,7 +96,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function AssetModelsIndexPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   // The bulk menu offers Delete only.
   const showBulkActions = userHasPermission({
     roles,

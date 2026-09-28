@@ -118,7 +118,6 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     });
@@ -213,7 +212,6 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     // `bulkCheckOutAssets` refuses assignments to anyone but the caller when
     // the scope is `self`; the route must forward the scope for that to run.
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     });

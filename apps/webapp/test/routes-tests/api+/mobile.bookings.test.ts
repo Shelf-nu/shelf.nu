@@ -165,7 +165,10 @@ describe("GET /api/mobile/bookings", () => {
       vi.mocked(getMobileUserContext).mockResolvedValue(
         mobileUserContext({
           roles: [role as OrganizationRoles],
-          canSeeAllBookings: true,
+          workspace: {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          },
         })
       );
 
@@ -180,7 +183,10 @@ describe("GET /api/mobile/bookings", () => {
     // The override widens WHOSE bookings are visible. A draft stays private to
     // its creator either way, exactly as on web.
     vi.mocked(getMobileUserContext).mockResolvedValue(
-      mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
+      mobileUserContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeBookings: true },
+      })
     );
 
     await loader(createLoaderArgs({ request: request() }));
@@ -194,8 +200,7 @@ describe("GET /api/mobile/bookings", () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: ["BASE"],
-        canSeeAllBookings: true,
-        canSeeAllCustody: false,
+        workspace: { baseUserCanSeeBookings: true },
       })
     );
     vi.mocked(db.booking.findMany).mockResolvedValue([
@@ -229,8 +234,7 @@ describe("GET /api/mobile/bookings", () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: ["BASE"],
-        canSeeAllBookings: true,
-        canSeeAllCustody: false,
+        workspace: { baseUserCanSeeBookings: true },
       })
     );
     vi.mocked(db.booking.findMany).mockResolvedValue([
@@ -261,8 +265,7 @@ describe("GET /api/mobile/bookings", () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({
         roles: ["BASE"],
-        canSeeAllBookings: true,
-        canSeeAllCustody: false,
+        workspace: { baseUserCanSeeBookings: true },
       })
     );
     vi.mocked(db.booking.findMany).mockResolvedValue([

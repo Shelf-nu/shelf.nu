@@ -26,8 +26,8 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
@@ -76,7 +76,7 @@ export const AssetsList = ({
   const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   /** The bulk menu holds custody, edit and delete actions; any one opens it. */
   const canBulkAct = userHasPermission({
     roles,

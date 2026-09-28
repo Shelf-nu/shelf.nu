@@ -15,7 +15,7 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
@@ -99,7 +99,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   // The bulk menu offers Delete and Create audit.
   const showBulkActions =
     userHasPermission({

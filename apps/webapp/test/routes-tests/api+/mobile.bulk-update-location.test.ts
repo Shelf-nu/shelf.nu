@@ -107,7 +107,6 @@ describe("POST /api/mobile/bulk-update-location", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       access: accessFor(["ADMIN"]),
     });

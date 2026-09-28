@@ -5,9 +5,9 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { StartAuditFromContextDialog } from "~/components/audit/start-audit-from-context-dialog";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { loader } from "~/routes/_layout+/kits.$kitId";
 import {
   PermissionAction,
@@ -74,7 +74,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
       ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
   );
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 

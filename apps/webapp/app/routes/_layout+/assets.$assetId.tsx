@@ -19,7 +19,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   deleteAsset,
@@ -555,7 +555,7 @@ export const links: LinksFunction = () => [
 export default function AssetDetailsPage() {
   const { asset } = useLoaderData<typeof loader>();
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const items = [
     { to: "overview", content: "Overview" },
