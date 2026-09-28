@@ -1,10 +1,14 @@
 import type { CSSProperties } from "react";
+import { useMemo } from "react";
 import { AssetStatus, AssetType, KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
+import { PackageIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { z } from "zod";
 import {
+  assignAlreadyIncludedAtom,
   clearScannedItemsAtom,
+  expectedModelRequestsAtom,
   removeScannedItemAtom,
   scannedAssetQuantitiesAtom,
   scannedItemsAtom,
@@ -12,12 +16,21 @@ import {
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import type {
+  ModelProgress,
+  PendingModelRow,
+} from "~/components/booking/model-pending-rows";
+import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
+import { ModelProgressStrips } from "~/components/booking/model-progress-strips";
+import { Badge } from "~/components/shared/badge";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { matchScansToModelRequests } from "~/modules/booking-model-request/scan-matching";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
+import { BADGE_COLORS } from "~/utils/badge-colors";
 import { tw } from "~/utils/tw";
 import {
   assetLabelPresets,
@@ -168,6 +181,78 @@ export default function AddAssetsToBookingDrawer({
         assetIdsForBooking.includes(assetId)
       )
     )
+  );
+
+  // Outstanding model reservations for this booking, seeded by the route's
+  // session hook. Empty on a booking that reserves no models, which is what
+  // keeps every value derived from it below empty too.
+  const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
+
+  /**
+   * Assets already on the booking before this scan session, as the route
+   * seeded them. Read from `assignAlreadyIncludedAtom` rather than the Check
+   * Out drawer's session atom: the two screens own separate lifecycles, so
+   * tearing one down can never clear the other's data.
+   */
+  const alreadyIncluded = useAtomValue(assignAlreadyIncludedAtom);
+
+  const alreadyIncludedIds = useMemo(
+    () => new Set(alreadyIncluded.map((row) => row.id)),
+    [alreadyIncluded]
+  );
+
+  /**
+   * Which of those a scan could still make answer a reservation. An asset can
+   * appear twice, once standalone and once through a kit, so one entry saying
+   * yes is enough.
+   */
+  const claimableIncludedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const row of alreadyIncluded) {
+      if (row.claimable) set.add(row.id);
+    }
+    return set;
+  }, [alreadyIncluded]);
+
+  /**
+   * Which scans answer which reservation. The same matcher Check Out uses, so
+   * the two screens can never disagree about what a scan is worth.
+   *
+   * `checksOutScannedOnly` is false here because this screen never checks
+   * anything out: an asset already on the booking is a duplicate unless its
+   * row can still claim a unit.
+   */
+  const scannedBuckets = useMemo(
+    () =>
+      matchScansToModelRequests({
+        items,
+        expectedModelRequests,
+        alreadyIncludedIds,
+        claimableIncludedIds,
+        checksOutScannedOnly: false,
+      }),
+    [items, expectedModelRequests, alreadyIncludedIds, claimableIncludedIds]
+  );
+
+  /** Per-model progress. `prefulfilled` covers units assigned before this scan. */
+  const progressByModel = useMemo<ModelProgress[]>(
+    () =>
+      expectedModelRequests.map((expected) => ({
+        assetModelId: expected.assetModelId,
+        assetModelName: expected.assetModelName,
+        booked: expected.booked,
+        remaining: expected.remaining,
+        prefulfilled: Math.max(0, expected.booked - expected.remaining),
+        matched:
+          scannedBuckets.matchedCountByModel.get(expected.assetModelId) ?? 0,
+      })),
+    [expectedModelRequests, scannedBuckets.matchedCountByModel]
+  );
+
+  /** One synthetic row per unit still to pull, grouped by model. */
+  const pendingModelRows = useMemo(
+    () => buildPendingModelRows(progressByModel),
+    [progressByModel]
   );
 
   // Setup blockers
@@ -428,7 +513,89 @@ export default function AddAssetsToBookingDrawer({
       className={className}
       style={style}
       formName="AddScannedAssetsToBooking"
+      headerContent={
+        <AssignReservationHeader
+          progressByModel={progressByModel}
+          pendingModelRows={pendingModelRows}
+        />
+      }
     />
+  );
+}
+
+/**
+ * Header content rendered above the scanned list: per-model progress strips,
+ * then one row per unit still to pull for those models.
+ *
+ * Lives in `ConfigurableDrawer`'s `headerContent` slot rather than in the
+ * item list itself. `ConfigurableDrawer` owns that list, the blockers
+ * placement and the empty state; reusing its shared strips and pending-row
+ * builder here keeps this screen's numbers identical to Check Out's without
+ * taking over rendering this feature doesn't need to change.
+ *
+ * Renders nothing when the booking reserves no models, so a plain booking
+ * looks exactly as this screen always has.
+ */
+function AssignReservationHeader({
+  progressByModel,
+  pendingModelRows,
+}: {
+  progressByModel: ModelProgress[];
+  pendingModelRows: PendingModelRow[];
+}) {
+  if (progressByModel.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border border-b-0 bg-gray-50 p-4">
+      <div className="flex flex-col gap-3">
+        <ModelProgressStrips
+          progressByModel={progressByModel}
+          idPrefix="assign"
+        />
+        {pendingModelRows.length > 0 ? (
+          <ul className="flex flex-col gap-2 border-t border-gray-200 pt-3">
+            {pendingModelRows.map((row) => (
+              <PendingModelRowItem
+                key={row.key}
+                assetModelName={row.assetModelName}
+              />
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One row standing in for a single unit still to pull for a reserved model.
+ * Not interactive: the operator resolves it by scanning a matching QR, the
+ * same as the placeholder row Check Out shows for the same unit.
+ */
+function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
+  return (
+    <li className="flex items-center gap-2">
+      <div
+        aria-hidden="true"
+        className="flex size-[40px] shrink-0 items-center justify-center rounded-[2px] border border-gray-200 bg-white"
+      >
+        <PackageIcon className="size-5 text-gray-400" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <span className="word-break whitespace-break-spaces text-sm font-medium text-gray-800">
+          {assetModelName}
+        </span>
+        <Badge
+          color={BADGE_COLORS.gray.bg}
+          textColor={BADGE_COLORS.gray.text}
+          withDot={false}
+        >
+          Pending
+        </Badge>
+      </div>
+    </li>
   );
 }
 
