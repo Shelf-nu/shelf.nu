@@ -39,6 +39,7 @@ import { userHasPermission } from "@/lib/permissions";
 import {
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
+  mayRemoveBookingItemsAsCustodian,
   mayWriteBookingItems,
 } from "@/lib/role-access";
 import { useRoleAccess } from "@/hooks/use-role-access";
@@ -1409,21 +1410,28 @@ export default function BookingDetailScreen() {
           booking.custodianUser?.id === user.id)));
 
   /**
-   * Whether the server accepts this member changing this booking's items: a
-   * role whose writes are scoped must be the custodian (the add, remove and
-   * model-request endpoints key on the custodian). Every item affordance below
-   * requires it, so none of them leads to a 403.
+   * Whether the server accepts this member changing this booking's items. A
+   * role whose writes are scoped must be the custodian: the add and
+   * model-request endpoints check the direct custodian user only, while the
+   * remove endpoint also accepts the custodian team member's user. Every item
+   * affordance below requires its own check, so none of them leads to a 403.
    */
-  const mayChangeItems = mayWriteBookingItems({
+  const mayAddItems = mayWriteBookingItems({
     access,
     userId: user?.id,
     custodianUserId: booking.custodianUser?.id,
   });
+  const mayRemoveItems = mayRemoveBookingItemsAsCustodian({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+    custodianTeamMemberUserId: booking.custodianTeamMember?.userId,
+  });
   const canAddItems =
-    mayChangeItems &&
+    mayAddItems &&
     canAddItemsToBooking(access, booking.status, currentOrg?.roles);
   const canRemoveItems =
-    mayChangeItems &&
+    mayRemoveItems &&
     canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles);
 
   // Model reservations are item changes, so they share the add gate.

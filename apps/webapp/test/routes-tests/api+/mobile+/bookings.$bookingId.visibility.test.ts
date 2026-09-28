@@ -218,6 +218,21 @@ describe("GET /api/mobile/bookings/:bookingId — who may open it", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status ?? 200).toBe(200);
+    // The companion hides item removal unless it can see the caller is the
+    // custodian through either link, so the team member's user must be sent.
+    expect(
+      (response.data as { booking: { custodianTeamMember: unknown } }).booking
+        .custodianTeamMember
+    ).toEqual({ id: "tm-1", name: "Caller", userId: CALLER });
+    expect(findFirstMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          custodianTeamMember: {
+            select: expect.objectContaining({ userId: true }),
+          },
+        }),
+      })
+    );
   });
 
   it("still 404s a booking that genuinely is not there", async () => {

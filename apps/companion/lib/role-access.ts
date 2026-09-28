@@ -132,13 +132,14 @@ export function canRemoveItemsFromBooking(
 }
 
 /**
- * Whether the server's ownership check accepts this member changing a
- * booking's items (add, remove, model requests).
+ * Whether the server's ownership check accepts this member adding items to a
+ * booking (scan or browse to add, model requests, fulfil).
  *
  * A role whose booking writes are scoped (`!access.bookings.writeAll`) may
- * change only bookings it is the custodian of: the mobile add, remove and
- * model-request endpoints key on the custodian, not the creator. Seeing every
- * booking (a workspace see-toggle) does not widen this.
+ * add only to bookings whose direct custodian user it is: the mobile add and
+ * model-request endpoints key on that link, not the creator. Removal accepts
+ * the team member link too; see `mayRemoveBookingItemsAsCustodian`. Seeing
+ * every booking (a workspace see-toggle) does not widen this.
  *
  * @param args.access - The member's access
  * @param args.userId - The signed-in user; missing while loading
@@ -156,4 +157,35 @@ export function mayWriteBookingItems({
 }): boolean {
   if (access.bookings.writeAll) return true;
   return !!userId && custodianUserId === userId;
+}
+
+/**
+ * Whether the server's ownership check accepts this member removing items from
+ * a booking.
+ *
+ * The remove endpoint is looser than add: a scoped role (`!writeAll`) passes
+ * when it is the custodian through EITHER link, the booking's direct custodian
+ * user or the custodian team member's user. A booking assigned before its
+ * custodian accepted their invite keeps only the team member link.
+ *
+ * @param args.access - The member's access
+ * @param args.userId - The signed-in user; missing while loading
+ * @param args.custodianUserId - The booking's direct custodian user, if any
+ * @param args.custodianTeamMemberUserId - The custodian team member's user, if any
+ * @returns `true` when the member may remove items from this booking
+ */
+export function mayRemoveBookingItemsAsCustodian({
+  access,
+  userId,
+  custodianUserId,
+  custodianTeamMemberUserId,
+}: {
+  access: RoleAccess;
+  userId: string | undefined;
+  custodianUserId: string | undefined;
+  custodianTeamMemberUserId: string | null | undefined;
+}): boolean {
+  if (access.bookings.writeAll) return true;
+  if (!userId) return false;
+  return custodianUserId === userId || custodianTeamMemberUserId === userId;
 }

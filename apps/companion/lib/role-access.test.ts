@@ -26,6 +26,7 @@ import {
   accessForOrganization,
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
+  mayRemoveBookingItemsAsCustodian,
   mayWriteBookingItems,
 } from "./role-access";
 
@@ -264,6 +265,70 @@ describe("mayWriteBookingItems", () => {
         custodianUserId: undefined,
       }),
       false
+    );
+  });
+});
+
+describe("mayRemoveBookingItemsAsCustodian", () => {
+  test("a scoped role is the custodian through the direct user link", () => {
+    assert.equal(
+      mayRemoveBookingItemsAsCustodian({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: "user-1",
+        custodianTeamMemberUserId: undefined,
+      }),
+      true
+    );
+  });
+
+  test("a scoped role is the custodian through the team member link", () => {
+    // Custody assigned before the member accepted their invite: the booking has
+    // no direct user link, only the team member that is now theirs.
+    assert.equal(
+      mayRemoveBookingItemsAsCustodian({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: undefined,
+        custodianTeamMemberUserId: "user-1",
+      }),
+      true
+    );
+  });
+
+  test("a scoped role on a colleague's booking is refused on both links", () => {
+    assert.equal(
+      mayRemoveBookingItemsAsCustodian({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: "user-2",
+        custodianTeamMemberUserId: "user-2",
+      }),
+      false
+    );
+  });
+
+  test("an unknown signed-in user is refused even with no links set", () => {
+    assert.equal(
+      mayRemoveBookingItemsAsCustodian({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: undefined,
+        custodianUserId: undefined,
+        custodianTeamMemberUserId: undefined,
+      }),
+      false
+    );
+  });
+
+  test("a role that writes every booking may remove from anyone's", () => {
+    assert.equal(
+      mayRemoveBookingItemsAsCustodian({
+        access: accessOf(["ADMIN"]),
+        userId: "user-1",
+        custodianUserId: "user-2",
+        custodianTeamMemberUserId: undefined,
+      }),
+      true
     );
   });
 });

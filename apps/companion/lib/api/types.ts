@@ -931,6 +931,8 @@ export type BookingDetail = {
   custodianTeamMember: {
     id: string;
     name: string;
+    /** The team member's user, once they have accepted an invite. */
+    userId?: string | null;
   } | null;
   tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
