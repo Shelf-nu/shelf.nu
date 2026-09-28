@@ -177,6 +177,48 @@ describe("ModelQuantityRows", () => {
     expect(onChange).toHaveBeenLastCalledWith("m1", 1);
   });
 
+  it("reads the whole value, so exponent notation is not truncated", () => {
+    // why: a number input accepts "1e2" and shows it. `parseInt` stops at the
+    // "e" and reports 1, so the field would read 100 while the booking
+    // reserved one unit. The displayed number and the submitted number have to
+    // be the same number.
+    const onChange = vi.fn();
+    render(
+      <ModelQuantityRows
+        rows={[row({ assetModelId: "m1" })]}
+        quantities={{ m1: 1 }}
+        onChange={onChange}
+        onRemove={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/^add$/i), {
+      target: { value: "1e2" },
+    });
+
+    expect(onChange).toHaveBeenLastCalledWith("m1", 100);
+  });
+
+  it("falls back to the minimum for a value that is not a whole number", () => {
+    // why: widening the parse must not start accepting fractions. The server
+    // rejects a non-integer quantity, so the field should never report one.
+    const onChange = vi.fn();
+    render(
+      <ModelQuantityRows
+        rows={[row({ assetModelId: "m1" })]}
+        quantities={{ m1: 1 }}
+        onChange={onChange}
+        onRemove={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText(/^add$/i), {
+      target: { value: "1.5" },
+    });
+
+    expect(onChange).toHaveBeenLastCalledWith("m1", 1);
+  });
+
   it("restores the reported quantity when the field is left empty", () => {
     // why: blur is the point the draft stops being the user's business. An
     // input left blank must show the number that will actually be submitted.

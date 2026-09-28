@@ -223,12 +223,19 @@ function ModelQuantityRowItem({
              * that merely looks empty must already have reported a number the
              * server will accept.
              */
-            const parsed = Number.parseInt(raw, 10);
+            /**
+             * `Number`, not `parseInt`: a number input accepts exponent
+             * notation and displays it, and `parseInt` stops at the "e", so
+             * "1e2" would show 100 and reserve 1. The whole value is parsed
+             * and then required to be a whole number in range, which keeps
+             * fractions and anything unparseable on the minimum.
+             */
+            const parsed = Number(raw);
             onChange(
               row.assetModelId,
-              Number.isNaN(parsed) || parsed < MINIMUM_QUANTITY
-                ? MINIMUM_QUANTITY
-                : parsed
+              Number.isSafeInteger(parsed) && parsed >= MINIMUM_QUANTITY
+                ? parsed
+                : MINIMUM_QUANTITY
             );
           }}
           // Editing is over, so the field goes back to showing what will
