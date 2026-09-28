@@ -31,7 +31,8 @@
     "seed:reporting-demo": "dotenv -e ../../.env -- tsx scripts/seed-reporting-demo.ts",
     "seed:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/seed-reporting-demo.ts",
     "clean:reporting-demo": "dotenv -e ../../.env -- tsx scripts/clean-reporting-demo.ts",
-    "clean:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/clean-reporting-demo.ts"
+    "clean:reporting-demo:staging": "dotenv -e ../../.env.staging -- tsx scripts/clean-reporting-demo.ts",
+    "docs:roles": "tsx scripts/render-roles-doc.ts"
   },
   "dependencies": {
     "@bwip-js/browser": "^4.9.0",
