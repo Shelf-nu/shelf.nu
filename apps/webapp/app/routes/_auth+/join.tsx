@@ -24,6 +24,8 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
 import { signUpWithEmailPass } from "~/modules/auth/service.server";
 import {
+  clearSignupIntentHeaders,
+  readSignupIntent,
   refreshSignupIntentHeaders,
   signupIntentHeaders,
 } from "~/modules/signup-intent/cookie.server";
@@ -81,9 +83,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       getCurrentSearchParams(request)
     );
 
-    return data(payload({ title, subHeading, signupIntent }), {
-      headers: await signupIntentHeaders(signupIntent),
-    });
+    // A visit without intent parameters starts a signup of its own, so it
+    // drops any intent an earlier visit on this browser left behind. Every
+    // in-app link back to `/join` forwards the query string, so a signup in
+    // progress never lands here without its parameters.
+    let headers: Array<[string, string]> = [];
+    if (signupIntent) {
+      headers = await signupIntentHeaders(signupIntent);
+    } else if (await readSignupIntent(request)) {
+      headers = await clearSignupIntentHeaders();
+    }
+
+    return data(payload({ title, subHeading, signupIntent }), { headers });
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

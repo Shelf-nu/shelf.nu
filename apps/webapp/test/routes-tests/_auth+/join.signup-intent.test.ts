@@ -74,9 +74,9 @@ async function cookieHeaderFor(setCookieValue: string) {
   return setCookieValue.split(";")[0];
 }
 
-function loaderArgs(url: string, isAuthenticated = false) {
+function loaderArgs(url: string, isAuthenticated = false, cookie?: string) {
   return {
-    request: new Request(url),
+    request: new Request(url, cookie ? { headers: { Cookie: cookie } } : {}),
     context: { isAuthenticated },
     params: {},
   } as unknown as LoaderFunctionArgs;
@@ -145,6 +145,23 @@ describe("join loader — reading the signup link", () => {
     expect(body.signupIntent).toBeNull();
     expect(body.title).toBe("Create an account");
     expect(response.headers.getSetCookie()).toEqual([]);
+  });
+
+  it("clears an intent left by an earlier visit when the link carries none", async () => {
+    const staleCookie = await cookieHeaderFor(
+      await serializeSignupIntent(TEAM_TRIAL_INTENT)
+    );
+
+    const response = (await loader(
+      loaderArgs("http://localhost:3000/join", false, staleCookie)
+    )) as Response;
+
+    expect(response.status).toBe(200);
+    const setCookie = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith("signup-intent="));
+    expect(setCookie).toContain("Max-Age=0");
+    await expect(signupIntentSetBy(response)).resolves.toBeNull();
   });
 
   it("keeps a redirectTo alongside the plan", async () => {
