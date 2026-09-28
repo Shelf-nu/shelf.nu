@@ -6,8 +6,7 @@
  *  - the stored logo, on the versioned `/api/image/<id>?v=<updatedAt ms>` URL
  *    (an unversioned URL would keep serving a replaced logo from cache),
  *  - the placeholder when the workspace has no logo,
- *  - the owner's profile picture on a PERSONAL workspace,
- *  - a picked file's preview, at the logo's size, on both kinds of workspace.
+ *  - a picked file's preview, at the logo's size.
  * Validation and object URL cleanup are covered by the shared field's tests.
  *
  * @see {@link file://./workspace-logo-field.tsx}
@@ -20,15 +19,6 @@ import { createStore, Provider } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceLogoField } from "./workspace-logo-field";
 
-// why: ProfilePicture reads the signed-in user from the _layout route loader,
-// which does not exist outside a router.
-vi.mock("~/hooks/use-user-data", () => ({
-  useUserData: () => ({
-    username: "owner",
-    profilePicture: "https://cdn.example.com/owner.png",
-  }),
-}));
-
 const UPDATED_AT = new Date("2026-09-24T09:30:00.123Z");
 
 /** Renders the field in its own jotai store so validation state never leaks. */
@@ -40,7 +30,7 @@ function renderField(props: Parameters<typeof WorkspaceLogoField>[0] = {}) {
   );
 }
 
-/** The logo picture shown next to the input (not the personal-workspace avatar). */
+/** The logo picture shown next to the input. */
 function logo() {
   return screen.getByRole("img", { name: "Workspace logo" });
 }
@@ -91,22 +81,6 @@ describe("WorkspaceLogoField", () => {
     );
   });
 
-  it("shows the owner's profile picture on a personal workspace", () => {
-    renderField({
-      imageId: "img_logo",
-      updatedAt: UPDATED_AT,
-      isPersonal: true,
-    });
-
-    expect(screen.getByRole("img", { name: "owner" })).toHaveAttribute(
-      "src",
-      "https://cdn.example.com/owner.png"
-    );
-    expect(
-      screen.queryByRole("img", { name: "Workspace logo" })
-    ).not.toBeInTheDocument();
-  });
-
   it("previews a picked file before it is uploaded", async () => {
     const user = userEvent.setup();
     renderField({ imageId: "img_logo", updatedAt: UPDATED_AT });
@@ -120,14 +94,5 @@ describe("WorkspaceLogoField", () => {
     // The picked file stays in the input, under the field name the action reads.
     expect(fileInput().name).toBe("image");
     expect(fileInput().files?.[0]).toBe(file);
-  });
-
-  it("previews a picked file on a personal workspace too", async () => {
-    const user = userEvent.setup();
-    renderField({ isPersonal: true });
-
-    await user.upload(fileInput(), pngFile("new-logo.png"));
-
-    expect(logo()).toHaveAttribute("src", "blob:mock-1");
   });
 });

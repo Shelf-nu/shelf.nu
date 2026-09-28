@@ -197,7 +197,6 @@ const WorkspaceGeneralEditForms = ({
           <WorkspaceLogoField
             imageId={organization.imageId}
             updatedAt={organization.updatedAt}
-            isPersonal={isPersonalWorkspace}
             error={imageError}
           />
         </FormRow>

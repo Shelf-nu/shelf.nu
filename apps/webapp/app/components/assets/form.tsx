@@ -66,11 +66,6 @@ import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -524,6 +519,13 @@ export const AssetForm = ({
    * model's again.
    */
   const [clearMainImage, setClearMainImage] = useState(false);
+
+  /**
+   * True while the image input holds a valid picked file. A picked file wins
+   * over `clearMainImage` in the edit action, so while one is picked the
+   * image-source controls give way to a note saying the pick is what saves.
+   */
+  const [hasPickedImage, setHasPickedImage] = useState(false);
 
   /**
    * True when the asset currently stores an image of its own.
@@ -1013,20 +1015,30 @@ export const AssetForm = ({
             previewAlt="Asset main image"
             validateFileAtom={assetImageValidateFileAtom}
             hint={
-              <HoverCard openDelay={50} closeDelay={50}>
-                <HoverCardTrigger className={tw("inline-flex w-full  ")}>
-                  Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-                </HoverCardTrigger>
-                <HoverCardContent side="left">
-                  Images will be automatically resized on upload. Width will be
-                  set at 1200px and height will be adjusted accordingly to keep
-                  the aspect ratio.
-                </HoverCardContent>
-              </HoverCard>
+              <>
+                Accepts PNG, JPG, JPEG, or WebP (max.8 MB). Resized to 1200px
+                wide on upload.
+              </>
             }
+            onFileChange={(file) => setHasPickedImage(Boolean(file))}
             aboveInput={
               <>
-                <When truthy={Boolean(inheritableAssetModelImage)}>
+                <When
+                  truthy={
+                    hasPickedImage &&
+                    Boolean(inheritableAssetModelImage || hasOwnImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    The picked image becomes this asset's own image when you
+                    save.
+                  </p>
+                </When>
+                <When
+                  truthy={
+                    !hasPickedImage && Boolean(inheritableAssetModelImage)
+                  }
+                >
                   <p className="mb-1 text-sm text-gray-600">
                     {showOwnImagePreview ? (
                       <>
@@ -1073,7 +1085,10 @@ export const AssetForm = ({
                   value={clearMainImage ? "true" : "false"}
                 />
                 <When
-                  truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
+                  truthy={
+                    !hasPickedImage &&
+                    Boolean(hasOwnImage && !inheritableAssetModelImage)
+                  }
                 >
                   <p className="mb-1 text-sm text-gray-600">
                     <Button

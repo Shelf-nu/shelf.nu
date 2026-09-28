@@ -76,6 +76,12 @@ type ImageFileFieldProps = {
   aboveInput?: ReactNode;
   /** Extra content below the input (e.g. where the image is used). */
   belowInput?: ReactNode;
+  /**
+   * Called after each pick with the file that will be uploaded, or `null`
+   * when the input ends up empty (rejected or cleared). Lets the form keep
+   * copy about the saved image in step with the picture.
+   */
+  onFileChange?: (file: File | null) => void;
   /** Error to show under the input (server or client validation). */
   error?: string;
   disabled?: boolean;
@@ -96,6 +102,7 @@ export function ImageFileField({
   hint = IMAGE_HINT_4MB,
   aboveInput,
   belowInput,
+  onFileChange,
   error,
   disabled,
 }: ImageFileFieldProps) {
@@ -121,8 +128,9 @@ export function ImageFileField({
     // Read the file after validation: a rejected file has been cleared from
     // the input, and an accepted one may have been swapped for a copy with a
     // sanitised name.
-    const file = event.target.files?.[0];
+    const file = event.target.files?.[0] ?? null;
     setPreviewUrl(file ? URL.createObjectURL(file) : null);
+    onFileChange?.(file);
   }
 
   const picture = previewUrl ? (

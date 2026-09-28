@@ -4,8 +4,9 @@
  *
  * The saved image renders the way the locations list renders it: the stored
  * thumbnail (falling back to the full image), or the placeholder for a
- * location without one, at the size every image form uses. Each upload is stored under a new path, so a replaced
- * image always comes with a new URL and needs no cache version.
+ * location without one, at the size every image form uses. Each upload is
+ * stored under a new path, so a replaced image always comes with a new URL
+ * and needs no cache version.
  *
  * @see {@link file://./form.tsx} Location form (new and edit pages)
  * @see {@link file://../forms/image-file-field.tsx} Preview and validation

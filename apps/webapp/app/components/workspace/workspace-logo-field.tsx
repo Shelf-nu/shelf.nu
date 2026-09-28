@@ -1,11 +1,12 @@
 /**
  * "Main image" field of the workspace forms, with a picture of the
- * workspace's logo next to the file input.
+ * workspace's stored logo next to the file input.
  *
- * The saved picture mirrors the sidebar:
- * - a PERSONAL workspace shows the owner's profile picture,
- * - any other workspace shows its stored logo, or the placeholder when it has
- *   none.
+ * The picture is always the stored logo (or the placeholder when there is
+ * none), for every workspace type. The logo is what the booking, receipt,
+ * audit and report PDFs print, including on a PERSONAL workspace, so this row
+ * must show that image even though the sidebar shows a personal workspace as
+ * its owner's profile picture.
  *
  * Picking a file previews it in place of that picture; validation and the
  * preview itself live in the shared {@link ImageFileField}.
@@ -20,7 +21,6 @@ import {
   ImageFileField,
 } from "../forms/image-file-field";
 import { Image } from "../shared/image";
-import ProfilePicture from "../user/profile-picture";
 
 type WorkspaceLogoFieldProps = {
   /** Stored logo of the workspace; omit when there is none yet. */
@@ -30,8 +30,6 @@ type WorkspaceLogoFieldProps = {
    * which `/api/image` needs to serve a replaced logo instead of a cached one.
    */
   updatedAt?: Date | string;
-  /** PERSONAL workspace: show the owner's profile picture as the logo. */
-  isPersonal?: boolean;
   /** Error to show under the input (server or client validation). */
   error?: string;
 };
@@ -44,7 +42,6 @@ type WorkspaceLogoFieldProps = {
 export function WorkspaceLogoField({
   imageId,
   updatedAt,
-  isPersonal = false,
   error,
 }: WorkspaceLogoFieldProps) {
   return (
@@ -52,16 +49,12 @@ export function WorkspaceLogoField({
       name="image"
       label="Main image"
       currentImage={
-        isPersonal ? (
-          <ProfilePicture width="w-16" height="h-16" className="object-cover" />
-        ) : (
-          <Image
-            imageId={imageId}
-            updatedAt={updatedAt}
-            alt="Workspace logo"
-            className={IMAGE_FIELD_PICTURE_CLASSES}
-          />
-        )
+        <Image
+          imageId={imageId}
+          updatedAt={updatedAt}
+          alt="Workspace logo"
+          className={IMAGE_FIELD_PICTURE_CLASSES}
+        />
       }
       previewAlt="Workspace logo"
       error={error}

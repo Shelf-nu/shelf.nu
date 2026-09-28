@@ -10,6 +10,7 @@
  *  - the format hint describing the input once,
  *  - no picture at all when there is no saved image, until a file is picked,
  *  - the caller's validation rules, hint and extra content,
+ *  - the caller told which file will be uploaded after each pick,
  *  - the field name, error and disabled state reaching the input.
  *
  * @see {@link file://./image-file-field.tsx}
@@ -216,6 +217,20 @@ describe("ImageFileField", () => {
     expect(fileInput().compareDocumentPosition(below)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
+  });
+
+  it("tells the caller which file will be uploaded after each pick", async () => {
+    const user = userEvent.setup();
+    const onFileChange = vi.fn();
+    renderField({ onFileChange });
+    const file = pngFile("new.png");
+
+    await user.upload(fileInput(), file);
+    expect(onFileChange).toHaveBeenLastCalledWith(file);
+
+    // A rejected pick empties the input: nothing will be uploaded.
+    await user.upload(fileInput(), pngFile("too-big.png", TOO_BIG));
+    expect(onFileChange).toHaveBeenLastCalledWith(null);
   });
 
   it("shows the error and passes the disabled state to the input", () => {
