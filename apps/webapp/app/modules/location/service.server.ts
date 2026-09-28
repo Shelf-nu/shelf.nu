@@ -31,6 +31,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
@@ -39,8 +40,10 @@ import {
 } from "~/utils/markdoc-wrappers";
 import {
   getFileUploadPath,
+  MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFile,
+  removePublicFiles,
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
@@ -884,20 +887,114 @@ export async function createLocation({
   }
 }
 
+/** A location's id and the public URLs of its stored image files. */
+type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
+
+/**
+ * Removes the image and thumbnail files of deleted locations from the public
+ * storage bucket.
+ *
+ * Call this only after the location rows are deleted. Files are removed in one
+ * storage request per chunk of locations, one request after another, so even a select-all delete makes only a handful of
+ * requests. Best effort: a failed request is logged and the next one still
+ * runs, because a stale storage object can be cleaned up later, while failing
+ * would report a delete that already happened as an error. Never rejects.
+ *
+ * @param locations - The deleted locations and their stored image URLs
+ */
+async function safeRemoveImageFilesOfLocations(
+  locations: LocationImageFiles[]
+): Promise<void> {
+  /**
+   * Each location has at most two files, so a chunk of this size stays within
+   * the storage API's per-request limit. Read at call time rather than module
+   * load, so tests that mock the storage module without it can still import
+   * this service.
+   */
+  const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
+  const locationsWithFiles = locations.filter(
+    (location) => !!location.imageUrl || !!location.thumbnailUrl
+  );
+
+  for (
+    let i = 0;
+    i < locationsWithFiles.length;
+    i += LOCATIONS_PER_STORAGE_REMOVE
+  ) {
+    const chunk = locationsWithFiles.slice(i, i + LOCATIONS_PER_STORAGE_REMOVE);
+    const publicUrls = chunk.flatMap((location) =>
+      [location.imageUrl, location.thumbnailUrl].filter(
+        (url): url is string => !!url
+      )
+    );
+    // The raw URLs stay out of the logs: they contain the storage object
+    // keys. The location ids are enough to trace the files.
+    const locationIds = chunk.map((location) => location.id);
+
+    try {
+      const { invalidUrlCount } = await removePublicFiles({ publicUrls });
+
+      if (invalidUrlCount > 0) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message:
+              "Skipped location image files outside the public bucket during delete",
+            additionalData: { locationIds, invalidUrlCount },
+            label,
+          })
+        );
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to remove location images from storage during delete",
+          additionalData: { locationIds },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
+ * Deletes a location, its legacy `Image` row, and its stored image files.
+ *
+ * The location and its `Image` row are deleted in one transaction. The image
+ * and thumbnail files are removed after it commits, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param id - ID of the location to delete
+ * @param organizationId - Organization the location must belong to
+ * @returns The deleted location
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function deleteLocation({
   id,
   organizationId,
 }: Pick<Location, "id" | "organizationId">) {
   try {
-    const location = await db.location.delete({
-      where: { id, organizationId },
+    /**
+     * Both deletes commit together, so the cleanup below always runs once the
+     * location is gone. Its URLs cannot be read back after the row is deleted.
+     */
+    const location = await db.$transaction(async (tx) => {
+      const deleted = await tx.location.delete({
+        where: { id, organizationId },
+      });
+
+      if (deleted.imageId) {
+        await tx.image.delete({
+          where: { id: deleted.imageId },
+        });
+      }
+
+      return deleted;
     });
 
-    if (location.imageId) {
-      await db.image.delete({
-        where: { id: location.imageId },
-      });
-    }
+    await safeRemoveImageFilesOfLocations([location]);
 
     return location;
   } catch (cause) {
@@ -1194,6 +1291,20 @@ export async function createLocationsIfNotExists({
   }
 }
 
+/**
+ * Deletes the selected locations of an organization, their legacy `Image`
+ * rows, and their stored image files.
+ *
+ * The locations and `Image` rows are deleted in one transaction. The image and
+ * thumbnail files are removed in the background after it commits, so this
+ * resolves without waiting on storage, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param locationIds - IDs to delete, or `ALL_SELECTED_KEY` for every location
+ *   in the organization
+ * @param organizationId - Organization the locations must belong to
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function bulkDeleteLocations({
   locationIds,
   organizationId,
@@ -1202,18 +1313,21 @@ export async function bulkDeleteLocations({
   organizationId: Organization["id"];
 }) {
   try {
-    /** We have to delete the images of locations if any */
+    /**
+     * Read before the delete: the `Image` row ids and the storage URLs are
+     * gone once the location rows are deleted.
+     */
     const locations = await db.location.findMany({
       where: locationIds.includes(ALL_SELECTED_KEY)
         ? { organizationId }
         : { id: { in: locationIds }, organizationId },
-      select: { id: true, imageId: true },
+      select: { id: true, imageId: true, imageUrl: true, thumbnailUrl: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all locations */
       await tx.location.deleteMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause (lines 1062-1067), so they are already org-proven before this delete
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause, so they are already org-proven before this delete
         where: { id: { in: locations.map((location) => location.id) } },
       });
 
@@ -1232,6 +1346,14 @@ export async function bulkDeleteLocations({
         },
       });
     });
+
+    /**
+     * Not awaited: the transaction has committed, so the response does not wait
+     * on storage. A select-all delete can mean thousands of files. Cleanup is
+     * best effort either way: a run cut short leaves an orphaned file, the same
+     * outcome as a storage failure.
+     */
+    void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
     throw new ShelfError({
       cause,
