@@ -199,6 +199,16 @@ export function AssetModelAssetsSheet({
                 Try again
               </Button>
             </div>
+          ) : assets.length === 0 ? (
+            /* No table for an empty set. A model with nothing under it is an
+               ordinary row in this view, so this is reached often. Rendering
+               the grid anyway gives a dozen empty columns and a horizontal
+               scrollbar over nothing, and a message inside a cell spanning
+               them all is drawn off-screen, since the cell is as wide as the
+               table rather than as wide as the viewport. */
+            <div className="px-6 py-8 text-sm text-gray-500">
+              No assets match your filters
+            </div>
           ) : (
             <AssetIndexSettingsProvider freezeColumn={false}>
               <table className="w-full table-auto border-collapse">
@@ -217,32 +227,11 @@ export function AssetModelAssetsSheet({
                   </tr>
                 </thead>
                 <tbody>
-                  {assets.length === 0 ? (
-                    <tr>
-                      {/* A model with nothing under it is an ordinary row in
-                          this view, so the sheet opens on an empty set often
-                          enough to say so. Spans the CONFIGURED columns plus
-                          one, because the name header is supplied here rather
-                          than by the column list (which never includes it). */}
-                      <td
-                        colSpan={
-                          columns.filter((column) => column.visible).length + 1
-                        }
-                        className="px-6 py-8 text-center text-sm text-gray-500"
-                      >
-                        No assets match your filters
-                      </td>
+                  {assets.map((asset) => (
+                    <tr key={asset.id}>
+                      <AdvancedAssetRow item={asset} extraProps={{ columns }} />
                     </tr>
-                  ) : (
-                    assets.map((asset) => (
-                      <tr key={asset.id}>
-                        <AdvancedAssetRow
-                          item={asset}
-                          extraProps={{ columns }}
-                        />
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </AssetIndexSettingsProvider>
