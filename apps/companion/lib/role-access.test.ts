@@ -50,6 +50,16 @@ function accessOf(roles: string[]) {
   return accessForOrganization(meOrganization({ roles }));
 }
 
+/** Whether a membership holding `roles` may add items in `status`. */
+function mayAdd(roles: string[], status: string) {
+  return canAddItemsToBooking(accessOf(roles), status, roles);
+}
+
+/** Whether a membership holding `roles` may remove items in `status`. */
+function mayRemove(roles: string[], status: string) {
+  return canRemoveItemsFromBooking(accessOf(roles), status, roles);
+}
+
 describe("accessForOrganization", () => {
   test("a see-toggle widens seeing for its own role, never writing", () => {
     const access = accessForOrganization(
@@ -146,41 +156,41 @@ describe("custody for yourself only", () => {
 describe("booking item rules", () => {
   test("SELF_SERVICE removes items on RESERVED, like the server", () => {
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["SELF_SERVICE"]), "RESERVED"),
+      mayRemove(["SELF_SERVICE"], "RESERVED"),
       true
     );
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["SELF_SERVICE"]), "ONGOING"),
+      mayRemove(["SELF_SERVICE"], "ONGOING"),
       false
     );
   });
 
   test("BASE removes only on DRAFT; ADMIN until the booking closes", () => {
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["BASE"]), "RESERVED"),
+      mayRemove(["BASE"], "RESERVED"),
       false
     );
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["ADMIN"]), "OVERDUE"),
+      mayRemove(["ADMIN"], "OVERDUE"),
       true
     );
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["ADMIN"]), "COMPLETE"),
+      mayRemove(["ADMIN"], "COMPLETE"),
       false
     );
   });
 
   test("adding after DRAFT is admin-only; closed bookings refuse everyone", () => {
     assert.equal(
-      canAddItemsToBooking(accessOf(["SELF_SERVICE"]), "DRAFT"),
+      mayAdd(["SELF_SERVICE"], "DRAFT"),
       true
     );
     assert.equal(
-      canAddItemsToBooking(accessOf(["SELF_SERVICE"]), "RESERVED"),
+      mayAdd(["SELF_SERVICE"], "RESERVED"),
       false
     );
-    assert.equal(canAddItemsToBooking(accessOf(["ADMIN"]), "RESERVED"), true);
-    assert.equal(canAddItemsToBooking(accessOf(["ADMIN"]), "ARCHIVED"), false);
+    assert.equal(mayAdd(["ADMIN"], "RESERVED"), true);
+    assert.equal(mayAdd(["ADMIN"], "ARCHIVED"), false);
   });
 
   test("a restricted role alongside OWNER or ADMIN manages items past DRAFT", () => {
@@ -189,28 +199,34 @@ describe("booking item rules", () => {
       ["BASE", "OWNER"],
     ]) {
       for (const status of ["RESERVED", "ONGOING", "OVERDUE"]) {
-        const access = accessOf(roles);
         const label = `${roles.join("+")} ${status}`;
-        assert.equal(canAddItemsToBooking(access, status), true, label);
-        assert.equal(canRemoveItemsFromBooking(access, status), true, label);
+        assert.equal(mayAdd(roles, status), true, label);
+        assert.equal(mayRemove(roles, status), true, label);
       }
     }
   });
 
-  test("an empty membership manages items on DRAFT only", () => {
-    const access = accessOf([]);
-    assert.equal(canAddItemsToBooking(access, "DRAFT"), true);
-    assert.equal(canRemoveItemsFromBooking(access, "DRAFT"), true);
-    for (const status of ["RESERVED", "ONGOING", "OVERDUE"]) {
-      assert.equal(canAddItemsToBooking(access, status), false, status);
-      assert.equal(canRemoveItemsFromBooking(access, status), false, status);
+  test("BASE still manages items on its DRAFT bookings", () => {
+    assert.equal(mayAdd(["BASE"], "DRAFT"), true);
+    assert.equal(mayRemove(["BASE"], "DRAFT"), true);
+  });
+
+  test("an empty, loading or unknown membership manages no items", () => {
+    // A role this build does not know (e.g. one added after it shipped) holds
+    // no permission, so the matrix half of the gate denies it, like the server.
+    for (const roles of [[], ["FUTURE_ROLE"]]) {
+      for (const status of ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"]) {
+        const label = `${roles.join("+") || "(none)"} ${status}`;
+        assert.equal(mayAdd(roles, status), false, label);
+        assert.equal(mayRemove(roles, status), false, label);
+      }
     }
   });
 
   test("a status this build does not know denies", () => {
-    assert.equal(canAddItemsToBooking(accessOf(["ADMIN"]), "PAUSED"), false);
+    assert.equal(mayAdd(["ADMIN"], "PAUSED"), false);
     assert.equal(
-      canRemoveItemsFromBooking(accessOf(["ADMIN"]), "PAUSED"),
+      mayRemove(["ADMIN"], "PAUSED"),
       false
     );
   });

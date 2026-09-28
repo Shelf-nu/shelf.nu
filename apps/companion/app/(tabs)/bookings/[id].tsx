@@ -1408,7 +1408,7 @@ export default function BookingDetailScreen() {
           booking.custodianUser?.id === user.id)));
 
   // Same gate the add affordances use (server re-checks ownership + status).
-  const canManageModels = canAddItemsToBooking(access, booking.status);
+  const canManageModels = canAddItemsToBooking(access, booking.status, currentOrg?.roles);
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1757,7 +1757,7 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
-            {booking && canAddItemsToBooking(access, booking.status) && (
+            {booking && canAddItemsToBooking(access, booking.status, currentOrg?.roles) && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={() =>
@@ -1784,7 +1784,7 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Browse available assets/kits to add (date-aware picker) */}
-            {canAddItemsToBooking(access, booking.status) && (
+            {canAddItemsToBooking(access, booking.status, currentOrg?.roles) && (
               <TouchableOpacity
                 style={styles.actionButtonOutline}
                 onPress={() =>
@@ -1813,7 +1813,7 @@ export default function BookingDetailScreen() {
             )}
 
             {/* Select assets to remove (editable bookings with assets) */}
-            {canRemoveItemsFromBooking(access, booking.status) &&
+            {canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles) &&
               booking.assetCount > 0 && (
                 <TouchableOpacity
                   style={[
@@ -1960,7 +1960,7 @@ export default function BookingDetailScreen() {
                 complete the assign and check-out flow, so showing the CTA
                 would only lead to a rejected submit. */}
             {booking.status === "RESERVED" &&
-              canAddItemsToBooking(access, booking.status) &&
+              canAddItemsToBooking(access, booking.status, currentOrg?.roles) &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}

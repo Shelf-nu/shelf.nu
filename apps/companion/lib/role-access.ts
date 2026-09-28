@@ -19,6 +19,7 @@ import {
   canManageBookingItems,
   canRemoveBookingItems,
   resolveRoleAccess,
+  roleHasPermission,
 } from "@shelf/permissions";
 
 import type { Organization } from "./api/types";
@@ -70,37 +71,62 @@ function knownStatus(status: string): BookingStatusName | null {
 }
 
 /**
+ * Whether the membership holds `booking:update`, which every add or remove
+ * requires on the server.
+ *
+ * The status rules alone are not enough: an empty, still-loading or unknown
+ * role set resolves to BASE access (whose DRAFT rules allow item changes), but
+ * holds no permission. This half is what keeps those gates closed, as the
+ * server does.
+ *
+ * @param roles - Every role on the membership, as `/api/mobile/me` sent them
+ * @returns `true` when the membership may update bookings
+ */
+function mayUpdateBookings(roles: readonly string[] | undefined): boolean {
+  return roleHasPermission({ roles, entity: "booking", action: "update" });
+}
+
+/**
  * Whether items may be added to a booking in this status (scan-to-add, browse,
- * model reservations, fulfil). Unknown statuses deny.
+ * model reservations, fulfil). Unknown statuses and memberships without
+ * `booking:update` deny.
  *
  * @param access - The member's access
  * @param status - The booking status as the API sent it
+ * @param roles - Every role on the membership (`currentOrg.roles`)
  * @returns `true` when the member may add items
  */
 export function canAddItemsToBooking(
   access: RoleAccess,
-  status: string
+  status: string,
+  roles: readonly string[] | undefined
 ): boolean {
   const bookingStatus = knownStatus(status);
   return (
-    bookingStatus !== null && canManageBookingItems({ access, bookingStatus })
+    bookingStatus !== null &&
+    mayUpdateBookings(roles) &&
+    canManageBookingItems({ access, bookingStatus })
   );
 }
 
 /**
  * Whether items may be removed from a booking in this status. Unknown
- * statuses deny.
+ * statuses and memberships without `booking:update` deny.
  *
  * @param access - The member's access
  * @param status - The booking status as the API sent it
+ * @param roles - Every role on the membership (`currentOrg.roles`)
  * @returns `true` when the member may remove items
  */
 export function canRemoveItemsFromBooking(
   access: RoleAccess,
-  status: string
+  status: string,
+  roles: readonly string[] | undefined
 ): boolean {
   const bookingStatus = knownStatus(status);
   return (
-    bookingStatus !== null && canRemoveBookingItems({ access, bookingStatus })
+    bookingStatus !== null &&
+    mayUpdateBookings(roles) &&
+    canRemoveBookingItems({ access, bookingStatus })
   );
 }

@@ -1518,17 +1518,20 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // apps/companion/lib/role-access.test.ts pins the same rows.
 
   // B8:D-20/D-21: booking detail item actions (apps/companion/app/(tabs)/bookings/[id].tsx):
-  // add = manage models / scan to add / browse to add (`canAddItemsToBooking`,
-  // i.e. `canManageBookingItems`); remove = select to remove
-  // (`canRemoveItemsFromBooking`, i.e. `canRemoveBookingItems`); fulfilCta =
-  // RESERVED and add.
+  // add = manage models / scan to add / browse to add (`canAddItemsToBooking`:
+  // the `booking:update` grant and `canManageBookingItems`); remove = select to
+  // remove (`canRemoveItemsFromBooking`: the grant and `canRemoveBookingItems`);
+  // fulfilCta = RESERVED and add.
   snapshot["B8:D-20/D-21:companion-booking-items"] = perRoleSet((roles) => {
     const access = accessFor(roles);
+    const mayUpdate = can(roles, E.booking, A.update);
     return perCase(BOOKING_STATUSES, (status) => {
-      const add = canManageBookingItems({ access, bookingStatus: status });
+      const add =
+        mayUpdate && canManageBookingItems({ access, bookingStatus: status });
       return {
         add,
-        remove: canRemoveBookingItems({ access, bookingStatus: status }),
+        remove:
+          mayUpdate && canRemoveBookingItems({ access, bookingStatus: status }),
         fulfilCta: status === "RESERVED" && add,
       };
     });
