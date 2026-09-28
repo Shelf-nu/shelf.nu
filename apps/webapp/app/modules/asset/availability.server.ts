@@ -62,7 +62,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { AssetStatus, BookingStatus } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import {
   checkQuantityAvailable,
   computeAvailability,
@@ -70,10 +70,13 @@ import {
 } from "@shelf/quantity-control";
 import { db } from "~/database/db.server";
 import { computeCheckedOutBreakdownForAsset } from "~/modules/booking/checked-out.server";
-import type { CheckoutSession } from "~/modules/booking/checkout-attribution";
+import type {
+  CheckoutAttributionLog,
+  CheckoutSession,
+} from "~/modules/booking/checkout-attribution";
 import {
-  attributeDispositionsByBookingAsset,
   checkoutSessionsToLogsByAsset,
+  computeUnitsStillOutBySlice,
 } from "~/modules/booking/checkout-attribution";
 import {
   computeAvailableQuantity,
@@ -85,6 +88,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
+  computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
   resolveIntervalTo,
@@ -92,6 +96,8 @@ import {
 import type {
   AssertAssetQuantityNotBelowReservationsTxClient,
   AvailabilityInterval,
+  CustodyAvailability,
+  CustodyAvailabilityClient,
 } from "./availability-primitives.server";
 
 const label: ErrorLabel = "Assets";
@@ -104,6 +110,7 @@ export {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantityNotBelowReservations,
   buildActiveBookingWhere,
+  computeCustodyAvailability,
   peakConcurrent,
   RESERVATION_REDUCING_CATEGORIES,
   resolveIntervalTo,
@@ -111,6 +118,8 @@ export {
 export type {
   AssertAssetQuantityNotBelowReservationsTxClient,
   AvailabilityInterval,
+  CustodyAvailability,
+  CustodyAvailabilityClient,
 };
 
 /**
@@ -178,6 +187,21 @@ export type PrismaClientOrTx = {
     >;
   };
   consumptionLog: {
+    /**
+     * The checked-out read (`computeCheckedOutBreakdownForAsset`): the RETURN /
+     * CONSUME / LOSS / DAMAGE logs on the asset's active bookings, with their
+     * slice tag.
+     */
+    findMany: (args: {
+      where: Prisma.ConsumptionLogWhereInput;
+      select: { bookingId: true; bookingAssetId: true; quantity: true };
+    }) => Promise<
+      Array<{
+        bookingId: string | null;
+        bookingAssetId: string | null;
+        quantity: number;
+      }>
+    >;
     groupBy: (args: {
       by: ["bookingId"];
       where: Prisma.ConsumptionLogWhereInput;
@@ -545,11 +569,11 @@ export type AvailabilityBatchClient = {
         bookingId: true;
         quantity: true;
         assetKitId?: true;
-        booking: { select: { from: true; to: true; status: true } };
         // Optional like `id`/`assetKitId`: only the checked-out read needs the
-        // live asset status (to gate the legacy all-at-once branch per asset);
-        // the reserved-rows read leaves it off.
-        asset?: { select: { status: true } };
+        // slice's departure records.
+        checkedOutAt?: true;
+        checkedOutQuantity?: true;
+        booking: { select: { from: true; to: true; status: true } };
       };
     }) => Promise<
       Array<{
@@ -558,8 +582,9 @@ export type AvailabilityBatchClient = {
         bookingId: string;
         quantity: number;
         assetKitId?: string | null;
+        checkedOutAt?: Date | null;
+        checkedOutQuantity?: number | null;
         booking: { from: Date; to: Date; status: BookingStatus } | null;
-        asset?: { status: AssetStatus } | null;
       }>
     >;
   };
@@ -582,6 +607,27 @@ export type AvailabilityBatchClient = {
     >;
   };
   consumptionLog: {
+    /**
+     * The checked-out read: every RETURN / CONSUME / LOSS / DAMAGE log on the
+     * active bookings, with its slice tag, so units that came back are taken
+     * off the slice they came back to.
+     */
+    findMany: (args: {
+      where: Prisma.ConsumptionLogWhereInput;
+      select: {
+        bookingId: true;
+        assetId: true;
+        bookingAssetId: true;
+        quantity: true;
+      };
+    }) => Promise<
+      Array<{
+        bookingId: string | null;
+        assetId: string;
+        bookingAssetId: string | null;
+        quantity: number;
+      }>
+    >;
     groupBy: (args: {
       by: ["bookingId", "assetId"];
       where: Prisma.ConsumptionLogWhereInput;
@@ -884,8 +930,8 @@ type CheckedOutBreakdown = { total: number; standalone: number };
 /**
  * Batched `checkedOut` breakdown — reimplements
  * {@link computeCheckedOutBreakdownForAsset}'s physically-out math for MANY
- * assets in TWO queries total, instead of calling that per-asset helper in a
- * loop (which would turn a picker with N assets into `O(2·N)` extra
+ * assets in THREE queries total, instead of calling that per-asset helper in a
+ * loop (which would turn a picker with N assets into `O(3·N)` extra
  * round-trips — the exact fan-out {@link getAssetAvailabilityBatch} exists to
  * avoid).
  *
@@ -897,9 +943,9 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  * // calling it once per distinct booking (which is itself a form of
  * // per-something DB fan-out, just bounded by booking count instead of
  * // asset count). Re-deriving the formula directly against the raw tables
- * // keeps the query count fixed at 2 regardless of how many bookings or
- * // assets are involved, at the cost of duplicating the arithmetic — the
- * // trade-off called out in Task 8 of the QT-availability plan.
+ * // keeps the query count fixed at 3 regardless of how many bookings or
+ * // assets are involved. Only the grouping is repeated here; the per-slice
+ * // arithmetic is the shared `computeUnitsStillOutBySlice`.
  *
  * Returns per asset BOTH figures (#2790 ③):
  *   - `total`     — every checked-out unit (kit + standalone); the DISPLAYED
@@ -909,16 +955,13 @@ type CheckedOutBreakdown = { total: number; standalone: number };
  *                   subtracts so kit-driven checked-out units aren't
  *                   double-counted against `inKits`.
  *
- * Per (booking, asset), attribution mirrors
- * {@link computeCheckedOutBreakdownForAsset} exactly:
- *   - legacy all-at-once asset (live `CHECKED_OUT` with no
- *     {@link PartialBookingCheckout} claims of its own on this booking)
- *     ⇒ every slice's checked-out = its full `quantity`;
- *   - otherwise the booking's claims for the asset are attributed across its
- *     slices via {@link attributeDispositionsByBookingAsset} (standalone-first
- *     greedy) and each slice's checked-out = `min(slice.quantity, claimed)`.
- * Summing the per-slice checked-out reproduces the per-booking
- * `booked − remaining` the pre-split code computed, so `total` is unchanged.
+ * Per (booking, asset), the units still out come from the same
+ * {@link computeUnitsStillOutBySlice} the singular
+ * {@link computeCheckedOutBreakdownForAsset} runs: what left (the larger of the
+ * slice's session claims, or the whole slice when only its `checkedOutAt`
+ * records the departure, and the stored `checkedOutQuantity`) minus what came
+ * back or was used up. The two are pinned together by
+ * `checked-out-batch-parity.test.ts`.
  *
  * Booking statuses are pre-filtered to ONGOING/OVERDUE by the pivots query,
  * so — unlike the check-out-side helpers, which fetch `Booking.status`
@@ -959,32 +1002,22 @@ async function computeCheckedOutBreakdownBatch(
       bookingId: true,
       quantity: true,
       assetKitId: true,
+      checkedOutAt: true,
+      checkedOutQuantity: true,
       booking: { select: { from: true, to: true, status: true } },
-      // Live asset status — the per-asset half of the legacy all-at-once
-      // detection below. Must stay in step with the singular
-      // `computeCheckedOutBreakdownForAsset`, which the parity test pins.
-      asset: { select: { status: true } },
     },
   });
 
   if (pivots.length === 0) return breakdownByAsset;
 
-  /**
-   * Assets currently flagged off the shelf. The all-at-once checkout sets
-   * CHECKED_OUT on every asset it processed, so this separates "was on the
-   * booking when it was checked out" from "added afterwards" (which
-   * `updateBookingAssets` leaves AVAILABLE on purpose). Only the former may
-   * take the legacy branch below — see GitHub #2815.
-   */
-  const checkedOutAssetIds = new Set<string>();
-  for (const p of pivots) {
-    if (p.asset?.status === AssetStatus.CHECKED_OUT) {
-      checkedOutAssetIds.add(p.assetId);
-    }
-  }
-
   /** slices grouped: bookingId → assetId → its slices on that booking. */
-  type Slice = { id: string; quantity: number; assetKitId: string | null };
+  type Slice = {
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedOutQuantity: number;
+  };
   const slicesByBookingByAsset = new Map<string, Map<string, Slice[]>>();
   for (const p of pivots) {
     let byAsset = slicesByBookingByAsset.get(p.bookingId);
@@ -999,6 +1032,8 @@ async function computeCheckedOutBreakdownBatch(
       id: p.id ?? `${p.bookingId}:${p.assetId}`,
       quantity: p.quantity ?? 0,
       assetKitId: p.assetKitId ?? null,
+      checkedOutAt: p.checkedOutAt ?? null,
+      checkedOutQuantity: p.checkedOutQuantity ?? 0,
     };
     const list = byAsset.get(p.assetId);
     if (list) {
@@ -1008,15 +1043,48 @@ async function computeCheckedOutBreakdownBatch(
     }
   }
 
-  const sessions = await client.partialBookingCheckout.findMany({
-    where: { bookingId: { in: [...slicesByBookingByAsset.keys()] } },
-    select: {
-      bookingId: true,
-      assetIds: true,
-      quantities: true,
-      bookingAssetIds: true,
-    },
-  });
+  const activeBookingIds = [...slicesByBookingByAsset.keys()];
+  const [sessions, dispositionLogs] = await Promise.all([
+    client.partialBookingCheckout.findMany({
+      where: { bookingId: { in: activeBookingIds } },
+      select: {
+        bookingId: true,
+        assetIds: true,
+        quantities: true,
+        bookingAssetIds: true,
+      },
+    }),
+    client.consumptionLog.findMany({
+      where: {
+        assetId: { in: assetIds },
+        bookingId: { in: activeBookingIds },
+        category: { in: [...RESERVATION_REDUCING_CATEGORIES] },
+      },
+      select: {
+        bookingId: true,
+        assetId: true,
+        bookingAssetId: true,
+        quantity: true,
+      },
+    }),
+  ]);
+
+  /** dispositions grouped: bookingId → assetId → its logs on that booking. */
+  const dispositionsByBookingByAsset = new Map<
+    string,
+    Map<string, CheckoutAttributionLog[]>
+  >();
+  for (const log of dispositionLogs) {
+    if (!log.bookingId) continue;
+    let byAsset = dispositionsByBookingByAsset.get(log.bookingId);
+    if (!byAsset) {
+      byAsset = new Map();
+      dispositionsByBookingByAsset.set(log.bookingId, byAsset);
+    }
+    const list = byAsset.get(log.assetId) ?? [];
+    list.push({ bookingAssetId: log.bookingAssetId, quantity: log.quantity });
+    byAsset.set(log.assetId, list);
+  }
 
   const sessionsByBooking = new Map<string, CheckoutSession[]>();
   for (const s of sessions) {
@@ -1036,35 +1104,21 @@ async function computeCheckedOutBreakdownBatch(
     );
 
     for (const [assetId, slices] of byAsset) {
-      const claimedBySlice = attributeDispositionsByBookingAsset({
-        bookingAssetRows: slices,
-        consumptionLogs: logsByAsset.get(assetId) ?? [],
+      const stillOutBySlice = computeUnitsStillOutBySlice({
+        slices,
+        checkoutClaims: logsByAsset.get(assetId) ?? [],
+        dispositions:
+          dispositionsByBookingByAsset.get(bookingId)?.get(assetId) ?? [],
       });
-
-      // Legacy all-at-once checkout, decided PER ASSET — mirror of
-      // `computeCheckedOutBreakdownForAsset`. This asset is flagged off the
-      // shelf and has NO recorded claims on this booking, so its zeroed
-      // counters are the all-at-once flow's silence rather than "still on the
-      // shelf". Keying on the asset (not on the booking having zero sessions)
-      // keeps it correct once a later batch records a session for a DIFFERENT
-      // asset, and leaves an asset added after the checkout — still AVAILABLE —
-      // holding no units (GitHub #2815).
-      const assetHasClaims = slices.some(
-        (slice) => (claimedBySlice.get(slice.id) ?? 0) > 0
-      );
-      const assetIsLegacyAllAtOnce =
-        checkedOutAssetIds.has(assetId) && !assetHasClaims;
 
       const acc = breakdownByAsset.get(assetId) ?? { total: 0, standalone: 0 };
       for (const slice of slices) {
-        const checkedOutSlice = assetIsLegacyAllAtOnce
-          ? slice.quantity
-          : Math.min(slice.quantity, claimedBySlice.get(slice.id) ?? 0);
-        acc.total += checkedOutSlice;
-        // Standalone (free-pool) iff no kit FK — `!= null` matches
+        const out = stillOutBySlice.get(slice.id) ?? 0;
+        acc.total += out;
+        // Standalone (free-pool) iff no kit FK. `== null` matches
         // `attributeDispositionsByBookingAsset`'s kit-driven test.
         if (slice.assetKitId == null) {
-          acc.standalone += checkedOutSlice;
+          acc.standalone += out;
         }
       }
       breakdownByAsset.set(assetId, acc);

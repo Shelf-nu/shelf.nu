@@ -30,6 +30,7 @@ import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
 } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
@@ -431,6 +432,11 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   // assets each caller hands it, so the default is an empty result and tests
   // assert on the call argument.
   fulfilModelRequestsForAssets: vitest.fn().mockResolvedValue(new Map()),
+  // why: the claim for rows that were already on the booking runs through the
+  // same chokepoint, and its own matching rules are covered in
+  // booking-model-request/service.server.test.ts. Here the tests assert which
+  // assets each caller offers it. Default: nothing claimed.
+  claimUnstampedBookingRows: vitest.fn().mockResolvedValue(new Map()),
   // why: the same split for the model reservation guard — its pool math is
   // covered in booking-model-request/service.server.test.ts. Here the tests
   // assert which assets and window each write path hands it, and that a
@@ -16343,6 +16349,74 @@ describe("model reservation guard — write paths", () => {
       expect(created.data.bookingAssets.create).toEqual([]);
       // Nothing arrived, so nothing may discharge a reservation either.
       expect(fulfilmentCandidateIds()).toEqual([]);
+    });
+
+    it("writes no standalone row for a scanned asset the booking already holds loose", async () => {
+      expect.assertions(4);
+      // why: the flat fixture answers every pre-existing read; here it says
+      // `asset-held` already has a standalone row on this booking.
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([{ assetId: "asset-held", quantity: 1 }]);
+      // why: unlike its siblings this case leaves one asset genuinely new, so
+      // the post-commit notes actually run. They read the booking's name and
+      // the assets' titles, neither of which the suite-wide stubs carry.
+      (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+        (args?: { where?: { id?: { in?: string[] } } }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => ({
+              id,
+              title: `Asset ${id}`,
+              type: AssetType.INDIVIDUAL,
+            }))
+          )
+      );
+      // @ts-expect-error mocked
+      db.booking.update.mockResolvedValue({
+        id: "booking-1",
+        name: "Booking 1",
+        status: BookingStatus.ONGOING,
+      });
+
+      await addScannedAssetsToBooking({
+        assetIds: ["asset-held", "asset-new"],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      });
+
+      // Operators scan what is in front of them, which routinely includes
+      // units the booking already holds. `BookingAsset_manual_unique` is a
+      // partial unique on `assetKitId IS NULL`, so a second standalone row for
+      // one of them aborts the whole transaction. Prisma is mocked here, so
+      // only this assertion can see it: the index cannot.
+      const created = vitest.mocked(db.booking.update).mock.calls[0]?.[0] as {
+        data: {
+          bookingAssets: { create: Array<{ assetId: string }> };
+        };
+      };
+      expect(created.data.bookingAssets.create).toEqual([
+        expect.objectContaining({ assetId: "asset-new", assetKitId: null }),
+      ]);
+      // No row is being inserted for it, so it is not a fulfilment candidate.
+      expect(fulfilmentCandidateIds()).toEqual(["asset-new"]);
+      // It answers a reservation through the claim instead, which keys on the
+      // stamp rather than on whether a row exists.
+      expect(
+        vitest.mocked(claimUnstampedBookingRows).mock.calls[0][0].assetIds
+      ).toEqual(["asset-held"]);
+      // The audit trail describes what happened: only the new unit was added.
+      // A note or event naming the rescanned one is a false record, and the
+      // feed is where an operator goes to find out what a scan did.
+      const noteAssetIds = (
+        db.asset.findMany as ReturnType<typeof vitest.fn>
+      ).mock.calls
+        .map(
+          (call) =>
+            (call[0] as { where?: { id?: { in?: string[] } } })?.where?.id?.in
+        )
+        .filter((ids): ids is string[] => Array.isArray(ids));
+      expect(noteAssetIds.at(-1)).toEqual(["asset-new"]);
     });
 
     it("keeps the kit slice for a QUANTITY_TRACKED asset the booking already holds loose", async () => {

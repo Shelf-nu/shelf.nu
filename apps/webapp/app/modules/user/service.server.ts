@@ -41,6 +41,11 @@ import {
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
+import {
+  signupIntentEventProperties,
+  signupIntentInitialPersonProperties,
+} from "~/modules/signup-intent/analytics";
+import type { SignupIntent } from "~/modules/signup-intent/schema";
 
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import type { DetectedFormatPrefs } from "~/utils/date-format";
@@ -986,6 +991,12 @@ export async function createUser(
     /** Browser-detected prefs to stamp on the new row; undefined → resolved at read time. */
     formatPrefs?: DetectedFormatPrefs;
     skipPersonalOrg?: boolean;
+    /**
+     * What the signup link asked for (plan, trial, campaign), carried by the
+     * signup flow. Recorded on the `signup_completed` event only; the
+     * business-intel record is written at onboarding, which owns the cookie.
+     */
+    signupIntent?: SignupIntent | null;
   }
 ) {
   const {
@@ -1000,6 +1011,7 @@ export async function createUser(
     createdWithInvite,
     formatPrefs,
     skipPersonalOrg,
+    signupIntent,
   } = payload;
 
   /**
@@ -1115,7 +1127,9 @@ export async function createUser(
      * Best-effort funnel analytics: a brand-new account was created. Fire-and-
      * forget — never throws and is a no-op when PostHog is unconfigured, so it
      * cannot affect signup. `created_with_invite` / `is_sso` let the funnel
-     * isolate genuine self-serve signups downstream.
+     * isolate genuine self-serve signups downstream; the signup link's plan
+     * and campaign (when there was one) let it attribute them, and are also
+     * set once on the person so the first campaign stays with them.
      */
     captureServerEvent({
       distinctId: userId,
@@ -1123,7 +1137,9 @@ export async function createUser(
       properties: {
         created_with_invite: Boolean(createdWithInvite),
         is_sso: Boolean(isSSO),
+        ...signupIntentEventProperties(signupIntent),
       },
+      setOnce: signupIntentInitialPersonProperties(signupIntent),
     });
 
     return createdUser;

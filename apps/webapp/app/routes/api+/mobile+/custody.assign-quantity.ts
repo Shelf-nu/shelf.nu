@@ -148,6 +148,7 @@ export async function action({ request }: ActionFunctionArgs) {
       quantity,
       userId: user.id,
       organizationId,
+      custodyAssign: access.custody.assign,
       note,
     });
 

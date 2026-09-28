@@ -104,6 +104,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       quantity,
       userId,
       organizationId,
+      custodyAssign: access.custody.assign,
       note,
     });
 

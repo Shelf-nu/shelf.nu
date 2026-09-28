@@ -52,6 +52,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
+import { resolveClaimableAssetIds } from "~/modules/booking-model-request/claimable";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -229,12 +230,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
+    /**
+     * Assets already on the booking that a scan could still make answer a
+     * reservation.
+     *
+     * Resolved server-side, and through the shared rule rather than inline:
+     * the drawer renders a "now counts" badge off this flag and moves the
+     * per-model progress strip by it, so it has to agree with what the write
+     * will do. It also reads every row of the booking, which the flat list
+     * below cannot express, because one asset can hold several at once.
+     */
+    const claimableAssetIds = resolveClaimableAssetIds(booking.bookingAssets);
+
     const alreadyIncluded = booking.bookingAssets.map((ba) => ({
       id: ba.asset.id,
       title: ba.asset.title,
       mainImage: ba.asset.mainImage,
       thumbnailImage: ba.asset.thumbnailImage,
       assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
+      /** Whether scanning this asset could still answer a reservation. */
+      claimable: claimableAssetIds.has(ba.asset.id),
       kitId: ba.asset.assetKits[0]?.kitId ?? null,
       // `ba.quantity` is the BOOKING-specific unit count (from the
       // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for

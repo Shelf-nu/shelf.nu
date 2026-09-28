@@ -190,6 +190,7 @@ export async function action({ request }: ActionFunctionArgs) {
         consumed,
         userId: user.id,
         organizationId,
+        custodyAssign: access.custody.assign,
         note,
       });
 

@@ -12,6 +12,7 @@ import {
   recordEvents,
 } from "~/modules/activity-event/service.server";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -128,6 +129,11 @@ vitest.mock("~/database/db.server", () => ({
     // partial uniques — operator-only WHERE kitCustodyId IS NULL and
     // kit-only WHERE kitCustodyId IS NOT NULL. `aggregate` totals every
     // Custody row on the asset for the availability calc.
+    // why: custody availability subtracts units allocated to kits, so the
+    // quantity paths read `AssetKit` as well as `Custody`.
+    assetKit: {
+      aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+    },
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       findFirst: vitest.fn().mockResolvedValue(null),
@@ -206,9 +212,16 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
 // `updateAsset` imports the guard from the dependency-free leaf (not
 // `availability.server`) to avoid the heavy transitive import chain — mock the
 // leaf so the stub intercepts.
-vitest.mock("~/modules/asset/availability-primitives.server", () => ({
-  assertAssetQuantityNotBelowReservations: vitest.fn(),
-}));
+// why: only the stock-lowering guard is stubbed. `computeCustodyAvailability`
+// lives in this same leaf and IS the math the checkout suites assert, so it
+// must keep running for real against the mocked db.
+vitest.mock(
+  "~/modules/asset/availability-primitives.server",
+  async (importOriginal) => {
+    const actual = await importOriginal<typeof AvailabilityPrimitivesModule>();
+    return { ...actual, assertAssetQuantityNotBelowReservations: vitest.fn() };
+  }
+);
 
 // why: avoid touching real consumption log writes during checkOutQuantity tests
 vitest.mock("~/modules/consumption-log/service.server", () => ({
@@ -1018,6 +1031,58 @@ describe("checkOutQuantity — availability accounting", () => {
     });
   });
 
+  it("refuses units that are allocated to a kit", async () => {
+    // A kit holds part of the stock, so those units are not free to hand to a
+    // custodian, the same rule booking availability already applies. Without
+    // the kit term this asset reads as 100 free and the checkout succeeds,
+    // putting units in someone's hands and inside a kit at the same time.
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 30 },
+    });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 80,
+        userId: "user-1",
+        organizationId: "org-1",
+        custodyAssign: "anyone",
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    // 100 total − 30 in kits = 70 free.
+    expect(error.message).toContain("Only 70 units are available");
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+
+  it("leaves the pool alone when no units are in a kit", async () => {
+    mockCustodyAggregate.mockResolvedValue({ _sum: { quantity: 20 } });
+    mockBookingAssetAggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-1",
+      quantity: 80,
+      userId: "user-1",
+      organizationId: "org-1",
+      custodyAssign: "anyone",
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
+  });
+
   it("rejects when booking-reserved units push requested qty over available", async () => {
     // Regression guard: availability must subtract BOTH direct custody
     // AND units tied to ONGOING/OVERDUE bookings. Without the booking
@@ -1034,6 +1099,7 @@ describe("checkOutQuantity — availability accounting", () => {
         quantity: 25,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       });
     } catch (err) {
       caught = err;
@@ -1060,6 +1126,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 15,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockCustodyCreate).toHaveBeenCalledTimes(1);
@@ -1083,6 +1150,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 90,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // Assert the aggregate was invoked with the ONGOING/OVERDUE filter —
@@ -1141,6 +1209,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1171,6 +1240,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 3,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledWith(
@@ -1227,6 +1297,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1270,6 +1341,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // `updateMany` + a `status: { not: CHECKED_OUT }` guard, so releasing the
@@ -1305,6 +1377,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
@@ -1383,6 +1456,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // Exactly one log, classified as consumption. Writing RETURN here is the
@@ -1419,6 +1493,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
@@ -1453,6 +1528,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // One event per field that changed: stock dropped by the consumed
@@ -1495,6 +1571,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 0,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
@@ -1531,6 +1608,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1556,6 +1634,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1580,6 +1659,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 5,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow(/consumable/i);
 
@@ -1600,6 +1680,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 11,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow();
 
@@ -1625,6 +1706,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // The three write methods the mocked client exposes — the same set
@@ -1654,6 +1736,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(db.assetLocation.update).toHaveBeenCalledWith({
@@ -1683,6 +1766,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     expect(db.assetLocation.update).not.toHaveBeenCalled();
@@ -1703,6 +1787,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 40,
       userId: "user-1",
       organizationId: "org-1",
+      custodyAssign: "anyone",
     });
 
     // Guarded `updateMany` — see the sibling assertion in the
@@ -3261,6 +3346,236 @@ describe("bulk custody — refusals of the selection answer 400", () => {
     expect(error.message).toContain(message);
     expect(error.status).toBe(400);
     expect(error.shouldBeCaptured).toBe(false);
+  });
+});
+
+/**
+ * The per-unit custody path carries the same self-service restriction as the
+ * whole-asset one. It lives in `checkOutQuantity` rather than at its routes
+ * because three of them reach custody through it (web bulk, web single-asset
+ * and mobile), and a guard at one leaves the other two to remember.
+ */
+describe("checkOutQuantity: SELF_SERVICE guard", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyCreate = db.custody.create as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: earlier suites in this file leave rejections on the asset write
+    // mocks; `clearAllMocks` drops call history but keeps implementations.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    (
+      db.bookingAsset.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+  });
+
+  it("refuses a SELF_SERVICE actor handing units to someone else", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-other",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        custodyAssign: "self",
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(
+      "Self service users can only assign custody to themselves."
+    );
+    // Nothing may be written: the refusal has to come before the custody row.
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE actor handing units to themselves", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "user-1" } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-self",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      custodyAssign: "self",
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
+  });
+
+  it("does not restrict the custodian for a non-SELF_SERVICE actor", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    await checkOutQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-other",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      custodyAssign: "anyone",
+    });
+
+    expect(mockCustodyCreate).toHaveBeenCalled();
+  });
+
+  it("refuses a custodian from another workspace before writing", async () => {
+    // The lookup is org-scoped, so a foreign team member resolves to nothing.
+    mockTeamMemberFindFirst.mockResolvedValue(null);
+
+    let caught: unknown;
+    try {
+      await checkOutQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-foreign",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        custodyAssign: "anyone",
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(mockCustodyCreate).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Releasing carries the same self-service restriction as assigning, and for
+ * the release path this is the ONLY place it can live: the bulk route
+ * deliberately excludes quantity-tracked rows from its own guard, so that
+ * one asset a colleague holds cannot refuse a whole selection nobody asked
+ * to release.
+ */
+describe("releaseQuantity: SELF_SERVICE guard", () => {
+  const mockLock = lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>;
+  const mockTeamMemberFindFirst = db.teamMember.findFirst as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockCustodyUpdate = db.custody.update as ReturnType<typeof vitest.fn>;
+  const mockCustodyDelete = db.custody.delete as ReturnType<typeof vitest.fn>;
+
+  const lockedAsset = {
+    id: "asset-1",
+    title: "USB-C Cables",
+    organizationId: "org-1",
+    type: "QUANTITY_TRACKED" as const,
+    quantity: 100,
+    consumptionType: "RETURNABLE" as const,
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    mockLock.mockResolvedValue(lockedAsset);
+    // why: earlier suites leave rejections on the asset write mocks;
+    // `clearAllMocks` drops call history but keeps implementations.
+    (db.asset.update as ReturnType<typeof vitest.fn>).mockResolvedValue({});
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+    (
+      db.asset.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ ...lockedAsset });
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      id: "custody-1",
+      quantity: 20,
+    });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 20 },
+    });
+  });
+
+  it("refuses a SELF_SERVICE actor releasing someone else's hold", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    let caught: unknown;
+    try {
+      await releaseQuantity({
+        assetId: "asset-1",
+        teamMemberId: "tm-colleague",
+        quantity: 5,
+        userId: "user-1",
+        organizationId: "org-1",
+        custodyAssign: "self",
+      });
+    } catch (e) {
+      caught = e;
+    }
+
+    const error = caught as ShelfError;
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(403);
+    expect(error.message).toBe(
+      "Self service users can only release custody they hold themselves."
+    );
+    // The refusal must land before the custody row is touched.
+    expect(mockCustodyUpdate).not.toHaveBeenCalled();
+    expect(mockCustodyDelete).not.toHaveBeenCalled();
+  });
+
+  it("allows a SELF_SERVICE actor releasing their own hold", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "user-1" } });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-self",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      custodyAssign: "self",
+    });
+
+    expect(mockCustodyUpdate).toHaveBeenCalled();
+  });
+
+  it("does not restrict the holder for a non-SELF_SERVICE actor", async () => {
+    mockTeamMemberFindFirst.mockResolvedValue({ user: { id: "other-user" } });
+
+    await releaseQuantity({
+      assetId: "asset-1",
+      teamMemberId: "tm-colleague",
+      quantity: 5,
+      userId: "user-1",
+      organizationId: "org-1",
+      custodyAssign: "anyone",
+    });
+
+    expect(mockCustodyUpdate).toHaveBeenCalled();
   });
 });
 
@@ -5347,6 +5662,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       });
 
       // The custody row is still written — only the status is protected.
@@ -5363,6 +5679,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.IN_CUSTODY);
@@ -5392,6 +5709,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
@@ -5406,6 +5724,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.AVAILABLE);

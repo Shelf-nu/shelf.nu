@@ -282,6 +282,15 @@ Two questions, both answered by `@shelf/permissions`:
 
 📖 Full documentation: [apps/docs/roles-and-permissions.md](./apps/docs/roles-and-permissions.md). Rule: [.claude/rules/role-checks-go-through-permissions.md](./.claude/rules/role-checks-go-through-permissions.md)
 
+### Scanner Blockers
+
+Every blocker a scanner drawer can raise must be derived in a pure builder with
+a stable `id` and covered by a test, including a manifest assertion over the id
+list. A missing blocker silently reports success while nothing moves, and no
+other check in this repo can see it.
+
+- 📖 Full rule: [.claude/rules/scanner-blockers-need-a-test.md](./.claude/rules/scanner-blockers-need-a-test.md)
+
 ### Silencing react-doctor findings
 
 `react-doctor` runs in CI on every PR for both the webapp (`pnpm webapp:doctor`)

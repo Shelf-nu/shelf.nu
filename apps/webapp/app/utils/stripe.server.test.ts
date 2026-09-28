@@ -1,15 +1,20 @@
 import type Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HARDCODED_DEFAULT_PREFS } from "~/utils/date-format";
+import type { CustomerWithSubscriptions } from "./stripe.server";
 
 // why: Stripe SDK makes external API calls that should not run in tests
 // Using vi.hoisted to ensure the mock function is available when vi.mock runs
 const {
+  mockCheckoutSessionsCreate,
   mockCustomersRetrieve,
+  mockProductsRetrieve,
   mockSubscriptionsList,
   mockSubscriptionsRetrieve,
 } = vi.hoisted(() => ({
+  mockCheckoutSessionsCreate: vi.fn(),
   mockCustomersRetrieve: vi.fn(),
+  mockProductsRetrieve: vi.fn(),
   mockSubscriptionsList: vi.fn(),
   mockSubscriptionsRetrieve: vi.fn(),
 }));
@@ -19,9 +24,11 @@ vi.mock("stripe", () => ({
   // arrow-function mock implementation cannot be called with `new`.
   default: vi.fn().mockImplementation(function () {
     return {
+      checkout: { sessions: { create: mockCheckoutSessionsCreate } },
       customers: {
         retrieve: mockCustomersRetrieve,
       },
+      products: { retrieve: mockProductsRetrieve },
       subscriptions: {
         list: mockSubscriptionsList,
         retrieve: mockSubscriptionsRetrieve,
@@ -31,14 +38,18 @@ vi.mock("stripe", () => ({
 }));
 
 // why: Database module tries to connect to Prisma during import
-const { mockUserFindUnique } = vi.hoisted(() => ({
-  mockUserFindUnique: vi.fn(),
-}));
+const { mockUserFindUnique, mockUserUpdate, mockOrganizationFindMany } =
+  vi.hoisted(() => ({
+    mockUserFindUnique: vi.fn(),
+    mockUserUpdate: vi.fn(),
+    mockOrganizationFindMany: vi.fn(),
+  }));
 
 vi.mock("~/database/db.server", () => ({
   db: {
+    organization: { findMany: mockOrganizationFindMany },
     user: {
-      update: vi.fn(),
+      update: mockUserUpdate,
       findUnique: mockUserFindUnique,
     },
   },
@@ -46,10 +57,14 @@ vi.mock("~/database/db.server", () => ({
 
 // Import after mocking
 import {
+  createStripeCheckoutSession,
+  customerHasOtherActiveAddonSubscription,
+  findWorkspaceOfPreviousTierSubscription,
   getCustomerNotificationData,
   getInvoiceNotificationData,
   getUserActiveSubscriptions,
   getOwnerSubscriptionInfo,
+  validateSubscriptionIsActive,
 } from "./stripe.server";
 
 describe("getCustomerNotificationData", () => {
@@ -560,5 +575,399 @@ describe("getOwnerSubscriptionInfo", () => {
 
     expect(result.hasActiveSubscription).toBe(false);
     expect(result.subscriptions).toEqual([]);
+  });
+});
+
+describe("customerHasOtherActiveAddonSubscription", () => {
+  const teamItem = {
+    price: { product: { id: "prod_team", metadata: { shelf_tier: "tier_2" } } },
+  };
+  const barcodesItem = {
+    price: {
+      product: {
+        id: "prod_barcodes",
+        metadata: { product_type: "addon", addon_type: "barcodes" },
+      },
+    },
+  };
+  const auditsItem = {
+    price: {
+      product: {
+        id: "prod_audits",
+        metadata: { product_type: "addon", addon_type: "audits" },
+      },
+    },
+  };
+
+  /** Serves the given subscriptions through the list-then-retrieve calls. */
+  function customerHas(subscriptions: Array<Record<string, unknown>>) {
+    mockSubscriptionsList.mockResolvedValue({
+      data: subscriptions.map(({ id }) => ({ id })),
+    });
+    mockSubscriptionsRetrieve.mockImplementation((id: string) =>
+      Promise.resolve(subscriptions.find((sub) => sub.id === id))
+    );
+  }
+
+  const args = {
+    customerId: "cus_1",
+    organizationId: "org_1",
+    addonType: "barcodes" as const,
+    exceptSubscriptionId: "sub_tier",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("finds the add-on on another live subscription linked to the same workspace", async () => {
+    customerHas([
+      {
+        id: "sub_tier",
+        status: "paused",
+        metadata: { organizationId: "org_1" },
+        items: { data: [teamItem, barcodesItem] },
+      },
+      {
+        id: "sub_addon",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      true
+    );
+    expect(mockSubscriptionsList).toHaveBeenCalledWith({
+      customer: "cus_1",
+      limit: 100,
+    });
+  });
+
+  it("finds a covering subscription on a later page of the list", async () => {
+    const pageOne = Array.from({ length: 10 }, (_, index) => ({
+      id: `sub_${index}`,
+      status: "active",
+      metadata: { organizationId: "org_1" },
+      items: { data: [teamItem] },
+    }));
+    const covering = {
+      id: "sub_addon",
+      status: "active",
+      metadata: { organizationId: "org_1" },
+      items: { data: [barcodesItem] },
+    };
+    mockSubscriptionsList
+      .mockResolvedValueOnce({
+        data: pageOne.map(({ id }) => ({ id })),
+        has_more: true,
+      })
+      .mockResolvedValueOnce({ data: [{ id: covering.id }], has_more: false });
+    const all = [...pageOne, covering];
+    mockSubscriptionsRetrieve.mockImplementation((id: string) =>
+      Promise.resolve(all.find((sub) => sub.id === id))
+    );
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      true
+    );
+    expect(mockSubscriptionsList).toHaveBeenNthCalledWith(2, {
+      customer: "cus_1",
+      limit: 100,
+      starting_after: "sub_9",
+    });
+  });
+
+  it("ignores the subscription that raised the event", async () => {
+    customerHas([
+      {
+        id: "sub_tier",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [teamItem, barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      false
+    );
+  });
+
+  it("ignores other workspaces, other add-ons and subscriptions that are not live", async () => {
+    customerHas([
+      {
+        id: "sub_other_workspace",
+        status: "active",
+        metadata: { organizationId: "org_2" },
+        items: { data: [barcodesItem] },
+      },
+      {
+        id: "sub_audits",
+        status: "active",
+        metadata: { organizationId: "org_1" },
+        items: { data: [auditsItem] },
+      },
+      {
+        id: "sub_lapsed",
+        status: "past_due",
+        metadata: { organizationId: "org_1" },
+        items: { data: [barcodesItem] },
+      },
+    ]);
+
+    await expect(customerHasOtherActiveAddonSubscription(args)).resolves.toBe(
+      false
+    );
+  });
+});
+
+describe("findWorkspaceOfPreviousTierSubscription", () => {
+  const PRODUCTS: Record<string, { metadata: Record<string, string> }> = {
+    prod_team: { metadata: { shelf_tier: "tier_2" } },
+    prod_audits: { metadata: { product_type: "addon", addon_type: "audits" } },
+  };
+
+  /** A subscription as the list endpoint returns it: products unexpanded. */
+  function listedSubscription({
+    id,
+    created,
+    productIds,
+    organizationId,
+  }: {
+    id: string;
+    created: number;
+    productIds: string[];
+    organizationId?: string;
+  }) {
+    return {
+      id,
+      created,
+      status: "paused",
+      metadata: organizationId ? { organizationId } : {},
+      items: {
+        data: productIds.map((product) => ({ price: { product } })),
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockProductsRetrieve.mockImplementation((productId: string) =>
+      Promise.resolve(PRODUCTS[productId])
+    );
+    mockOrganizationFindMany.mockImplementation(
+      ({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve(
+          where.id.in
+            .filter((id) => id !== "org-transferred")
+            .map((id) => ({ id }))
+        )
+    );
+  });
+
+  it("returns the workspace of the newest tier subscription the user still owns", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      has_more: false,
+      data: [
+        listedSubscription({
+          id: "sub_old",
+          created: 100,
+          productIds: ["prod_team"],
+          organizationId: "org-old",
+        }),
+        listedSubscription({
+          id: "sub_paused",
+          created: 200,
+          productIds: ["prod_team", "prod_audits"],
+          organizationId: "org-1",
+        }),
+        listedSubscription({
+          id: "sub_unlinked",
+          created: 300,
+          productIds: ["prod_team"],
+        }),
+      ],
+    });
+
+    await expect(
+      findWorkspaceOfPreviousTierSubscription({
+        customerId: "cus_1",
+        userId: "user-1",
+      })
+    ).resolves.toBe("org-1");
+
+    expect(mockSubscriptionsList).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_1", status: "all" })
+    );
+    expect(mockOrganizationFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: "user-1", type: "TEAM" }),
+      })
+    );
+  });
+
+  it("skips standalone add-on subscriptions and workspaces the user no longer owns", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      has_more: false,
+      data: [
+        listedSubscription({
+          id: "sub_addon",
+          created: 300,
+          productIds: ["prod_audits"],
+          organizationId: "org-addon",
+        }),
+        listedSubscription({
+          id: "sub_transferred",
+          created: 200,
+          productIds: ["prod_team"],
+          organizationId: "org-transferred",
+        }),
+      ],
+    });
+
+    await expect(
+      findWorkspaceOfPreviousTierSubscription({
+        customerId: "cus_1",
+        userId: "user-1",
+      })
+    ).resolves.toBeNull();
+  });
+
+  it("returns null without a database lookup when no subscription is linked", async () => {
+    mockSubscriptionsList.mockResolvedValue({
+      has_more: false,
+      data: [
+        listedSubscription({
+          id: "sub_1",
+          created: 1,
+          productIds: ["prod_team"],
+        }),
+      ],
+    });
+
+    await expect(
+      findWorkspaceOfPreviousTierSubscription({
+        customerId: "cus_1",
+        userId: "user-1",
+      })
+    ).resolves.toBeNull();
+    expect(mockOrganizationFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("createStripeCheckoutSession", () => {
+  const baseArgs = {
+    priceId: "price_team",
+    userId: "user-1",
+    domainUrl: "https://app.shelf.nu",
+    customerId: "cus_1",
+    intent: "subscribe" as const,
+    auditPriceId: "price_audits",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCheckoutSessionsCreate.mockResolvedValue({
+      url: "https://checkout.stripe.com/c/1",
+    });
+    mockProductsRetrieve.mockResolvedValue({
+      metadata: { shelf_tier: "tier_2" },
+    });
+    mockOrganizationFindMany.mockResolvedValue([{ id: "org-1" }]);
+    mockSubscriptionsList.mockResolvedValue({
+      has_more: false,
+      data: [
+        {
+          id: "sub_paused",
+          created: 1,
+          status: "paused",
+          metadata: { organizationId: "org-1" },
+          items: { data: [{ price: { product: "prod_team" } }] },
+        },
+      ],
+    });
+  });
+
+  it("links a returning Team subscription to the workspace of the previous one", async () => {
+    await createStripeCheckoutSession({ ...baseArgs, shelfTier: "tier_2" });
+
+    const params = mockCheckoutSessionsCreate.mock.calls[0][0];
+    expect(params.subscription_data).toEqual({
+      metadata: { organizationId: "org-1" },
+    });
+  });
+
+  it("sends no subscription data for a first subscription", async () => {
+    mockSubscriptionsList.mockResolvedValue({ has_more: false, data: [] });
+
+    await createStripeCheckoutSession({ ...baseArgs, shelfTier: "tier_2" });
+
+    const params = mockCheckoutSessionsCreate.mock.calls[0][0];
+    expect(params).not.toHaveProperty("subscription_data");
+  });
+
+  it("does not look for a workspace for a Plus subscription", async () => {
+    await createStripeCheckoutSession({ ...baseArgs, shelfTier: "tier_1" });
+
+    expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    const params = mockCheckoutSessionsCreate.mock.calls[0][0];
+    expect(params).not.toHaveProperty("subscription_data");
+  });
+});
+
+describe("validateSubscriptionIsActive", () => {
+  const teamUser = {
+    id: "user-1",
+    skipSubscriptionCheck: false,
+    tierId: "tier_2" as const,
+  };
+
+  function customerWith(...statuses: Stripe.Subscription.Status[]) {
+    return {
+      subscriptions: { data: statuses.map((status) => ({ status })) },
+    } as unknown as CustomerWithSubscriptions;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each(["active", "trialing", "past_due"] as const)(
+    "keeps the tier while a subscription is %s",
+    async (status) => {
+      await validateSubscriptionIsActive({
+        user: teamUser,
+        customer: customerWith(status),
+      });
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(["unpaid", "paused", "incomplete_expired"] as const)(
+    "downgrades to Free once the only subscription is %s",
+    async (status) => {
+      await validateSubscriptionIsActive({
+        user: teamUser,
+        customer: customerWith(status),
+      });
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "user-1" },
+          data: { tierId: "free" },
+        })
+      );
+    }
+  );
+
+  it("leaves a user exempt from the check alone", async () => {
+    await validateSubscriptionIsActive({
+      user: { ...teamUser, skipSubscriptionCheck: true },
+      customer: customerWith(),
+    });
+
+    expect(mockUserUpdate).not.toHaveBeenCalled();
   });
 });

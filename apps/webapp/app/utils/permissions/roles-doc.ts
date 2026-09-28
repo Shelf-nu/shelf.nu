@@ -49,7 +49,8 @@ export function renderEffectiveAccessMarkdown(
 ): string {
   const roles = ROLES_BY_RANK;
   const header = ["", ...roles.map((role) => ROLE_LABELS[role])];
-  const entities = Object.keys(snapshot.matrix[roles[0]]).sort();
+  // Every role's row lists the same entities, so any row supplies the keys.
+  const entities = Object.keys(Object.values(snapshot.matrix)[0] ?? {}).sort();
 
   const matrix = table(
     ["Entity", ...header.slice(1)],
