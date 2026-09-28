@@ -34,6 +34,30 @@ describe("maskEmailAddresses", () => {
     );
   });
 
+  it.each(["!", "$", "'", "*", "^", "`", "{", "|", "}", "~"])(
+    "masks the whole local part when it contains %s",
+    (character) => {
+      expect(maskEmailAddresses(`sent to jo${character}hn@acme.com`)).toBe(
+        `sent to ${MASKED_EMAIL_LOCAL_PART}@acme.com`
+      );
+    }
+  );
+
+  it("masks a percent-encoded local part that keeps an unreserved character", () => {
+    // encodeURIComponent leaves ' ! * ~ as they are.
+    expect(maskEmailAddresses("/join?email=o'connor%40acme.com")).toBe(
+      `/join?email=${MASKED_EMAIL_LOCAL_PART}%40acme.com`
+    );
+  });
+
+  it("keeps the page path when an address sits unencoded in a query", () => {
+    expect(
+      maskEmailAddresses("/forgot-password?email=jane@acme.com&next=/assets")
+    ).toBe(
+      `/forgot-password?email=${MASKED_EMAIL_LOCAL_PART}@acme.com&next=/assets`
+    );
+  });
+
   it.each([
     "@sentry/react-router",
     "/app/node_modules/.pnpm/@sentry+core@10.51.0/node_modules/@sentry/core",

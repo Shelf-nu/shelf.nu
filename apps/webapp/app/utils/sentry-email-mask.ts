@@ -28,6 +28,14 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * The domain must be dotted and end in letters, so an npm-style specifier in a
  * file path (`@sentry+core@10.51.0`) is never mistaken for an address.
  *
+ * The local part accepts every character the email standard allows except the
+ * five that delimit a URL (`/ ? = & #`), so an address such as
+ * `o'connor@acme.com` or `john!smith@acme.com` is masked whole. Those five stay
+ * out because an address in a URL follows them (`/otp?email=jane%40acme.com`),
+ * and taking them in would mask the page path along with the address. The
+ * trade-off: an address that itself contains one of them keeps the part before
+ * that character unmasked. Such addresses are valid but almost never issued.
+ *
  * Every repeat is bounded and the local part never runs across an encoded
  * separator, so the time to scan a string grows in line with its length. An
  * unbounded `+` makes each start position rescan the rest of a long run of
@@ -37,7 +45,7 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * when percent-encoded), 32 labels of up to 63 characters for a domain.
  */
 const EMAIL_ADDRESS =
-  /(?:(?!%40)[A-Z0-9._%+-]){1,256}(@|%40)((?:[A-Z0-9-]{1,63}\.){1,32}[A-Z]{2,63})/gi;
+  /(?:(?!%40)[A-Z0-9.!$%'*+^_`{|}~-]){1,256}(@|%40)((?:[A-Z0-9-]{1,63}\.){1,32}[A-Z]{2,63})/gi;
 
 /**
  * Stack traces and debug metadata describe code, not runtime data: file paths,
