@@ -269,6 +269,13 @@ function AssetsListContent() {
       const kitAccessibilityLabel = item.kit
         ? `, kit ${item.kit.name}${kitSuffix}`
         : "";
+      // The server resolves WHICH identifier this workspace shows; the SAM id
+      // is the fallback for servers that predate that.
+      const rowCode = item.displayCode?.value
+        ? item.displayCode
+        : item.sequentialId
+        ? { value: item.sequentialId, label: "SAM ID" }
+        : null;
 
       return (
         <TouchableOpacity
@@ -276,7 +283,7 @@ function AssetsListContent() {
           onPress={() => router.push(`/(tabs)/assets/${item.id}`)}
           activeOpacity={0.6}
           accessibilityLabel={`${item.title}, ${formatStatus(item.status)}${
-            item.sequentialId ? `, ${item.sequentialId}` : ""
+            rowCode ? `, ${rowCode.label} ${rowCode.value}` : ""
           }${quantityLabel ? `, quantity ${quantityLabel}` : ""}${
             item.category ? `, ${item.category.name}` : ""
           }${
@@ -301,13 +308,13 @@ function AssetsListContent() {
               {item.title}
             </Text>
             <View style={styles.assetMeta}>
-              {/* Search accepts a SAM ID, so a hit has to be able to show WHICH
-                  id it is — otherwise the row identifies itself by title only
-                  and the user has to open it to find out. Absent on older
-                  servers, where the row renders exactly as before. */}
-              {item.sequentialId ? (
+              {/* The identifier the workspace labels its assets with, so a row
+                  can be matched against a physical label without opening it.
+                  Falls back to the SAM ID on older servers that send no
+                  resolved code. */}
+              {rowCode ? (
                 <Text style={styles.assetSequentialId} numberOfLines={1}>
-                  {item.sequentialId}
+                  {rowCode.value}
                 </Text>
               ) : null}
               {item.category && (

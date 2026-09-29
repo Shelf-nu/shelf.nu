@@ -26,10 +26,11 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireOrganizationAccess,
+  resignAndShapeMobileAsset,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  shapeMobileAssetResponse,
   shapeMobileKitResponse,
+  type MobileAssetSelectRow,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { getParams } from "~/utils/http.server";
@@ -98,7 +99,7 @@ type MobileBarcodeMatch = {
   value: string;
   assetId: string | null;
   kitId: string | null;
-  asset: Parameters<typeof shapeMobileAssetResponse>[0] | null;
+  asset: MobileAssetSelectRow | null;
   kit: Parameters<typeof shapeMobileKitResponse>[0];
 };
 
@@ -171,7 +172,9 @@ async function resolveSamShapedBarcode({
       organizationId,
       // Flatten the pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects, exactly as the QR path does.
-      asset: barcode.asset ? shapeMobileAssetResponse(barcode.asset) : null,
+      asset: barcode.asset
+        ? await resignAndShapeMobileAsset(barcode.asset, organizationId)
+        : null,
       kit: shapeMobileKitResponse(barcode.kit),
     },
   };
@@ -246,7 +249,7 @@ export async function resolveMobileScannedCode({
         organizationId,
         // Flatten the new pivot shape (assetKits/assetLocations/custody) into
         // the legacy flat shape the companion expects (quantities restructure).
-        asset: shapeMobileAssetResponse(asset),
+        asset: await resignAndShapeMobileAsset(asset, organizationId),
         kit: null,
       },
     };
@@ -330,7 +333,10 @@ export async function resolveMobileScannedCode({
       organizationId: qr.organizationId,
       // Flatten the new pivot shape (assetKits/assetLocations/custody) into the
       // legacy flat shape the companion expects (quantities restructure).
-      asset: asset ? shapeMobileAssetResponse(asset) : null,
+      // Re-signed against the workspace that owns the code.
+      asset: asset
+        ? await resignAndShapeMobileAsset(asset, qr.organizationId)
+        : null,
       kit: shapeMobileKitResponse(kit),
     },
   };

@@ -16,10 +16,10 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import { scannerActionAtom } from "~/components/scanner/drawer/action-atom";
 import { ActionSwitcher } from "~/components/scanner/drawer/action-switcher";
 import { db } from "~/database/db.server";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useHapticFeedback } from "~/hooks/use-haptic-feedback";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import {
   getTeamMemberForCustodianFilter,
   resolveCustodianPickerScope,
@@ -148,6 +148,12 @@ export const meta: MetaFunction<typeof loader> = () => [
   { title: appendToMetaTitle("Qr code scanner") },
 ];
 
+/**
+ * Floor for the scanner pane, matching `CodeScanner`'s own `min-h-[400px]` so a
+ * mismeasurement can never collapse the viewfinder to nothing.
+ */
+const MIN_SCANNER_HEIGHT = 400;
+
 const QRScanner = () => {
   const navigate = useNavigate();
   const [paused, setPaused] = useState<boolean>(false);
@@ -156,8 +162,12 @@ const QRScanner = () => {
   );
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [errorTitle, setErrorTitle] = useState<string | undefined>(undefined);
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 102;
+  // The scanner fills everything below whatever chrome the layout puts above
+  // it — nothing here, a top bar below `md`, plus any account banner. Measuring
+  // that offset keeps the viewfinder flush with the bottom of the screen on
+  // every arrangement; a fixed subtraction only ever suits one of them.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>({ minHeight: MIN_SCANNER_HEIGHT });
   const isNavigating = useRef(false);
   const addItem = useSetAtom(addScannedItemAtom);
 
@@ -307,8 +317,9 @@ const QRScanner = () => {
     <>
       <Header title="QR code scanner" hidePageDescription hideBreadcrumbs />
       <div
+        ref={scannerContainerRef}
         className="-mx-4 flex flex-col overflow-hidden"
-        style={{ height: `${height}px` }}
+        style={height === undefined ? undefined : { height: `${height}px` }}
       >
         <CodeScanner
           onCodeDetectionSuccess={handleCodeDetectionSuccess}

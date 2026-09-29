@@ -11,6 +11,10 @@ import {
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
   isSelfServiceOrBaseRole,
   resolveCanSeeAllBookings,
   resolveMostPrivilegedRole,
@@ -453,6 +457,9 @@ export const MOBILE_ASSET_SELECT = {
   sequentialId: true,
   mainImage: true,
   thumbnailImage: true,
+  // Lets `resignAndShapeMobileAsset` tell a lapsed photo URL; the shaper drops
+  // it from the response.
+  mainImageExpiration: true,
   // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
   // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
   // so the companion inherits model images with no client release.
@@ -677,6 +684,12 @@ export function shapeMobileAssetResponse(asset: {
   sequentialId: string | null;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Dropped below, so the response shape does not change. Optional because
+   * some callers build this argument by hand; {@link MobileAssetSelectRow}
+   * makes it required where a photo is re-signed.
+   */
+  mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
@@ -693,7 +706,13 @@ export function shapeMobileAssetResponse(asset: {
     custodian: { id: string; name: string; userId: string | null };
   }>;
 }): MobileAssetResponse {
-  const { assetKits, assetLocations, custody, ...rest } = asset;
+  const {
+    assetKits,
+    assetLocations,
+    custody,
+    mainImageExpiration: _mainImageExpiration,
+    ...rest
+  } = asset;
   const kit = assetKits[0]?.kit ?? null;
   /**
    * Collapse the model-image cascade before the row leaves the server. The
@@ -739,6 +758,39 @@ export function shapeMobileAssetResponse(asset: {
     // Many-aware custody list (additive) — every holder + their summed quantity.
     custodyList,
   };
+}
+
+/**
+ * A row selected with `MOBILE_ASSET_SELECT`. Unlike the shaper's own parameter,
+ * `mainImageExpiration` is required, so a select that drops it fails to compile
+ * instead of silently skipping the photo re-sign.
+ */
+export type MobileAssetSelectRow = Parameters<
+  typeof shapeMobileAssetResponse
+>[0] & { mainImageExpiration: Date | null };
+
+/**
+ * Re-signs a `MOBILE_ASSET_SELECT` row's lapsed photo URL, then shapes the row
+ * for the companion.
+ *
+ * Every path that returns such a row goes through this one step: the scanner
+ * resolvers and the asset returned after a quantity or custody change.
+ *
+ * @param asset - A row selected with `MOBILE_ASSET_SELECT`.
+ * @param organizationId - The workspace that owns the asset. For a code
+ *   resolved in a sibling workspace, that workspace rather than the caller's.
+ * @returns The legacy flat mobile response shape.
+ * @see {@link file://./../asset/service.server.ts} refreshExpiredAssetImages
+ */
+export async function resignAndShapeMobileAsset(
+  asset: MobileAssetSelectRow,
+  organizationId: string
+): Promise<MobileAssetResponse> {
+  const [refreshed] = await refreshExpiredAssetImages([asset], {
+    organizationId,
+    ...ASSET_IMAGE_RESIGN_LIMITS,
+  });
+  return shapeMobileAssetResponse(refreshed);
 }
 
 /**
@@ -792,7 +844,7 @@ export async function getMobileAssetForViewer({
 
   if (!asset) return null;
 
-  const shaped = shapeMobileAssetResponse(asset);
+  const shaped = await resignAndShapeMobileAsset(asset, organizationId);
 
   const { custodyList, custodyListOthersCount } =
     filterMobileCustodyListForViewer({

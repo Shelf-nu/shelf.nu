@@ -58,6 +58,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       permissionResult;
 
     const { session } = await getAuditSessionDetails({
+      // Reads `session` only, so no photo is signed here.
+      refreshExpectedAssetImages: false,
       id: auditId,
       organizationId,
       userOrganizations,

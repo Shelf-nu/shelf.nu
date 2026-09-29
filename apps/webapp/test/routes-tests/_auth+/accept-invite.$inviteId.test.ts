@@ -61,6 +61,7 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("org-cookie"),
 }));
 
+import { signInWithEmail } from "~/modules/auth/service.server";
 import { updateInviteStatus } from "~/modules/invite/service.server";
 import { action } from "~/routes/_auth+/accept-invite.$inviteId";
 // The real secret, stubbed by test/setup-test-env.ts — signing with the same
@@ -142,5 +143,25 @@ describe("accept-invite action", () => {
     });
 
     expect(updateInviteStatus).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `updateInviteStatus` keys the account on the normalised address, so the
+   * sign-in has to use the same form. A stored invite can still hold the
+   * capitals of the CSV row it came from.
+   */
+  it("signs in with the normalised address when the stored invite holds capitals", async () => {
+    (updateInviteStatus as any).mockResolvedValue({
+      status: "ACCEPTED",
+      organizationId: "org-1",
+      inviteeEmail: "Invitee@Example.com",
+    });
+
+    await accept({ inviteId: "real-invite", token: tokenFor("real-invite") });
+
+    expect(signInWithEmail).toHaveBeenCalledWith(
+      "invitee@example.com",
+      expect.any(String)
+    );
   });
 });

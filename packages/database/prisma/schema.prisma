@@ -145,6 +145,11 @@ model User {
 
   @@unique([email, username])
   @@index([firstName, lastName])
+  // Invites and CSV import match an account without regard to letter case,
+  // comparing LOWER("email"), which the unique btree above cannot serve.
+  // Prisma has no syntax for an expression index, so it is created in
+  // migrations/20260921100000_add_user_email_lower_index.
+  // @@index([lower(email)])
   // Indexes for foreign keys
   @@index([tierId])
   @@index([lastSelectedOrganizationId])
@@ -192,6 +197,16 @@ model UserBusinessIntel {
   currentSolution      String? // How they currently track assets
   timeline             String? // When they need Shelf working
 
+  // Signup attribution: what the signup link asked for and where it came from.
+  // Read from `/join?plan=…&trial=…&utm_*=…`, written once when the user
+  // completes onboarding. Steers nothing after that; kept for reporting.
+  signupPlan  String? // Plan the link asked for: "team" | "plus"
+  signupTrial Boolean? // Whether the link asked to start with a trial
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String @unique
@@ -205,6 +220,8 @@ model UserBusinessIntel {
   @@index([companyName]) // For company-based analytics
   @@index([jobTitle]) // For role-based analytics
   @@index([teamSize]) // For team size analytics
+  @@index([utmSource]) // For campaign attribution
+  @@index([utmCampaign]) // For campaign attribution
 }
 
 model Asset {
@@ -1557,8 +1574,14 @@ model BookingAsset {
   quantity  Int     @default(1) // For quantity-tracked assets: how many booked
 
   // The model reservation this row discharged, when it came from one. `null`
-  // for assets added directly — picked, scanned onto the booking, or pulled in
-  // via a kit. That is most rows.
+  // for assets added directly — picked or scanned onto a booking with no
+  // matching reservation to answer. That is most rows.
+  //
+  // A kit-driven row carries it too: a unit sitting inside a kit answers a
+  // promise for units of its model exactly like a loose one, and the pool math
+  // counts it either way. At most ONE row per (booking, asset) is ever stamped
+  // — one physical unit discharges one reserved unit, however many rows the
+  // asset holds on the booking.
   //
   // Without it the link is narrative only: `materializeModelRequestForAsset`
   // writes a note ("assigned X (Model A) — 2 remaining") and then the
@@ -1797,6 +1820,9 @@ model BookingSettings {
 
   requireExplicitCheckinForAdmin      Boolean @default(false) // When true, admins must use explicit check-in (scanner) instead of quick check-in
   requireExplicitCheckinForSelfService Boolean @default(false) // When true, self-service users must use explicit check-in (scanner) instead of quick check-in
+
+  requireExplicitCheckoutForAdmin       Boolean @default(false) // When true, admins must use explicit check-out (scan or select) instead of quick check-out
+  requireExplicitCheckoutForSelfService Boolean @default(false) // When true, self-service users must use explicit check-out (scan or select) instead of quick check-out
 
   // Progressive check-in/out settings
   countKitsAsSingleUnit Boolean @default(false) // When true, the booking check-in progress bar treats each kit as one unit instead of counting the assets inside it

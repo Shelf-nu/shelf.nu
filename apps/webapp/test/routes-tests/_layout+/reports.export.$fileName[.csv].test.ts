@@ -345,6 +345,23 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       }
     );
 
+    it.each([
+      // A cutoff at or after now would mark every asset idle.
+      { days: "-5", expected: 1 },
+      { days: "0", expected: 1 },
+      // Unreadable is not the same as absent: it takes the default.
+      { days: "abc", expected: 30 },
+    ])(
+      "idle-assets reads days=$days as a threshold of $expected",
+      async ({ days, expected }) => {
+        await runLoaderWith(`reportId=idle-assets&days=${days}`);
+
+        expect(vi.mocked(idleAssetsReport)).toHaveBeenCalledWith(
+          expect.objectContaining({ idleThresholdDays: expected })
+        );
+      }
+    );
+
     it("reads the workspace currency rather than assuming the default", async () => {
       requirePermissionMock.mockResolvedValue({
         organizationId: "org-1",

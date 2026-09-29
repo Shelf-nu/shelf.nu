@@ -313,7 +313,9 @@ export const ImportContent = () => {
                 The first row is used as column headers — it won't be imported
               </li>
               <li>
-                If any data in the file is invalid, the whole import will fail
+                Your file is checked before anything is imported. If any row is
+                invalid, nothing is created and you'll get a list of every
+                problem to fix
               </li>
             </ul>
           </div>
@@ -357,6 +359,27 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const isSubmitting = useDisabled(fetcher);
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
+
+  /**
+   * Row-level import problems, narrowed out of the error payload.
+   *
+   * `additionalData` is typed as `SerializableValue`, which is wide enough to
+   * include objects, so its members cannot be rendered or compared until they
+   * have been checked here.
+   */
+  const rowErrors = Array.isArray(data?.error?.additionalData?.rowErrors)
+    ? (data.error.additionalData.rowErrors as {
+        row: number;
+        title: string;
+        message: string;
+      }[])
+    : null;
+
+  /** How many problems the file actually had, when more were found than sent. */
+  const totalRowErrors =
+    typeof data?.error?.additionalData?.totalErrors === "number"
+      ? data.error.additionalData.totalErrors
+      : null;
   //
 
   // Focus the "I AGREE" confirmation input when the dialog opens (replaces
@@ -570,6 +593,49 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
                     )}
                   </tbody>
                 </table>
+              ) : null}
+
+              {rowErrors ? (
+                <>
+                  <table className="mt-4 w-full rounded-md border text-left text-sm">
+                    <thead className="bg-error-100 text-xs">
+                      <tr>
+                        <th scope="col" className="px-2 py-1">
+                          Row
+                        </th>
+                        <th scope="col" className="px-2 py-1">
+                          Problem
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rowErrors.map((rowError) => (
+                        <tr
+                          // One row can carry more than one problem (a bad
+                          // quantity and a bad custom field), so the row
+                          // number alone is not a unique key.
+                          key={`${rowError.row}-${rowError.message}`}
+                        >
+                          <td className="px-2 py-1">
+                            {rowError.row > 0 ? rowError.row : "File"}
+                          </td>
+                          <td className="px-2 py-1">{rowError.message}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <When
+                    truthy={
+                      totalRowErrors !== null &&
+                      totalRowErrors > rowErrors.length
+                    }
+                  >
+                    <p className="mt-2 text-sm text-gray-600">
+                      Showing the first {rowErrors.length} of {totalRowErrors}{" "}
+                      problems. Fix these and upload again to see the rest.
+                    </p>
+                  </When>
+                </>
               ) : null}
 
               <p className="mt-2">

@@ -18,7 +18,7 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  shapeMobileAssetResponse,
+  resignAndShapeMobileAsset,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
@@ -210,8 +210,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
+        // Re-signed against the workspace that owns the barcode.
         asset: foundBarcode.asset
-          ? shapeMobileAssetResponse(foundBarcode.asset)
+          ? await resignAndShapeMobileAsset(
+              foundBarcode.asset,
+              foundOrganizationId
+            )
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.
