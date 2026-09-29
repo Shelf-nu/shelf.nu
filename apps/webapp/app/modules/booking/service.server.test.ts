@@ -2269,8 +2269,11 @@ describe("updateBasicBooking", () => {
     expect(result).toEqual(updatedBooking);
   });
 
-  it("should throw ShelfError when booking status is COMPLETE", async () => {
-    expect.assertions(1);
+  it("rejects a stale-state update as a handled 400, not a captured 500 (SHELF-WEBAPP-23M)", async () => {
+    // A stale tab resubmitting after the booking moved to COMPLETE is user
+    // input hitting a business rule, not a server fault, so it must be a 400
+    // kept out of the Sentry error pipeline.
+    expect.assertions(3);
 
     // Mock finding booking with COMPLETE status
     //@ts-expect-error missing vitest type
@@ -2280,9 +2283,19 @@ describe("updateBasicBooking", () => {
       custodianUserId: "user-1",
     });
 
-    await expect(updateBasicBooking(mockUpdateBookingParams)).rejects.toThrow(
-      ShelfError
-    );
+    let thrown: unknown;
+    try {
+      await updateBasicBooking(mockUpdateBookingParams);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    // The outer catch re-wraps, but ShelfError inherits status/shouldBeCaptured
+    // from the cause, so the handled-client classification survives.
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
   });
 
   it("should throw ShelfError when booking status is ARCHIVED", async () => {
@@ -3488,6 +3501,11 @@ type HeldKitSlice = {
  * resolves to {@link HELD_KIT}, which is what the org guard and the slice
  * provenance hop ask. Both implementations are restored when the test ends.
  *
+ * The other-bookings read reaches its target through a nested `booking: {...}`
+ * relation filter, never a flat `bookingId` scalar: that shape is reserved for
+ * a THIS-booking pre-existing-slice check (e.g. the scan path's idempotent
+ * re-scan guard), which must fall through to `answerOtherSliceReads` instead.
+ *
  * @param otherSlices - The kit's slices on other bookings in the window
  * @param answerOtherSliceReads - Answers every other `bookingAsset.findMany`
  */
@@ -3532,14 +3550,16 @@ function mockHeldKitElsewhere(
     db.bookingAsset.findMany
   );
   // why: the other bookings' slices are rows in the database; everything else
-  // this flow reads from the pivot is answered by the caller.
+  // this flow reads from the pivot is answered by the caller. Excludes a flat
+  // `bookingId` filter so a same-booking pre-existing-slice check (scoped to
+  // THIS booking, not "other bookings") falls through to the caller instead.
   bookingAsset.fn.mockImplementation(
     (args?: {
-      where?: { assetKitId?: { in?: string[] } | null };
+      where?: { assetKitId?: { in?: string[] } | null; bookingId?: string };
       select?: Record<string, unknown>;
     }) =>
       Promise.resolve(
-        args?.where?.assetKitId?.in
+        args?.where?.assetKitId?.in && !args?.where?.bookingId
           ? otherSlices.map((slice) => ({
               assetKitId: HELD_KIT.membershipId,
               ...slice,
@@ -3832,8 +3852,11 @@ describe("reserveBooking", () => {
     expect(result).toEqual(reservedBooking);
   });
 
-  it("should throw error when assets have booking conflicts", async () => {
-    expect.assertions(1);
+  it("rejects a booking conflict as a handled 400, not a captured 500", async () => {
+    // A concurrently checked-out asset is user/stale-state input hitting a
+    // business rule, not a server fault, so it must be a 400 kept out of the
+    // Sentry error pipeline.
+    expect.assertions(4);
 
     const mockBooking = {
       ...mockBookingData,
@@ -3868,9 +3891,20 @@ describe("reserveBooking", () => {
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
-    await expect(reserveBooking(mockReserveParams)).rejects.toThrow(
-      "Cannot reserve booking. Some assets are already booked or checked out: Asset 1. Please remove conflicted assets and try again."
+    let thrown: unknown;
+    try {
+      await reserveBooking(mockReserveParams);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    expect(err.message).toContain(
+      "Cannot reserve booking. Some assets are already booked or checked out: Asset 1"
     );
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
   });
 
   /**
@@ -4045,6 +4079,97 @@ describe("reserveBooking", () => {
     // The guard fires before any write happens — no status flip, no
     // booking.update call.
     expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  describe("date validation guards", () => {
+    /** A DRAFT booking with no assets: reaches the date guards untouched. */
+    const draftBookingNoAssets = {
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [],
+    };
+
+    it("rejects a reservation missing its dates as a handled 400, not a captured 500", async () => {
+      // A submission that lost its date fields is user input hitting a
+      // validation rule, not a server fault, so it must be a 400 kept out of
+      // the Sentry error pipeline.
+      expect.assertions(3);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draftBookingNoAssets);
+
+      let thrown: unknown;
+      try {
+        await reserveBooking({
+          ...mockReserveParams,
+          from: undefined,
+          to: undefined,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ShelfError);
+      const err = thrown as ShelfError;
+      expect(err.status).toBe(400);
+      expect(err.shouldBeCaptured).toBe(false);
+    });
+
+    it("rejects a start date in the past as a handled 400, not a captured 500 (SHELF-WEBAPP-23R)", async () => {
+      // Reserving with a stale/past start date (e.g. a form left open past
+      // the moment it was filled in) is user/stale-state input, not a server
+      // fault, so it must be a 400 kept out of the Sentry error pipeline.
+      expect.assertions(3);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draftBookingNoAssets);
+      const pastFromDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      let thrown: unknown;
+      try {
+        await reserveBooking({
+          ...mockReserveParams,
+          from: pastFromDate,
+          to: futureToDate,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ShelfError);
+      const err = thrown as ShelfError;
+      expect(err.status).toBe(400);
+      expect(err.shouldBeCaptured).toBe(false);
+    });
+
+    it("rejects an end date before the start date as a handled 400, not a captured 500", async () => {
+      // A malformed/edited submission with an end date before its start date
+      // is user input hitting a validation rule, not a server fault, so it
+      // must be a 400 kept out of the Sentry error pipeline.
+      expect.assertions(3);
+
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(draftBookingNoAssets);
+      const beforeFromDate = new Date(
+        futureFromDate.getTime() - 60 * 60 * 1000
+      );
+
+      let thrown: unknown;
+      try {
+        await reserveBooking({
+          ...mockReserveParams,
+          from: futureFromDate,
+          to: beforeFromDate,
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(ShelfError);
+      const err = thrown as ShelfError;
+      expect(err.status).toBe(400);
+      expect(err.shouldBeCaptured).toBe(false);
+    });
   });
 
   /**
@@ -8463,20 +8588,33 @@ describe("revertBookingToDraft", () => {
     expect(result).toEqual(draftBooking);
   });
 
-  it("should throw error when booking cannot be reverted", async () => {
-    expect.assertions(1);
+  it("rejects a revert from a non-RESERVED state as a handled 400, not a captured 500 (SHELF-WEBAPP-23W)", async () => {
+    // A stale tab (or a booking that already moved on) attempting to revert
+    // is user/stale-state input hitting a business rule, not a server fault,
+    // so it must be a 400 kept out of the Sentry error pipeline.
+    expect.assertions(3);
 
     const mockBooking = { ...mockBookingData, status: BookingStatus.COMPLETE };
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
 
-    await expect(
-      revertBookingToDraft({
+    let thrown: unknown;
+    try {
+      await revertBookingToDraft({
         id: "booking-1",
         organizationId: "org-1",
         hints: mockClientHints,
-      })
-    ).rejects.toThrow(ShelfError);
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ShelfError);
+    const err = thrown as ShelfError;
+    // The outer catch re-wraps, but ShelfError inherits status/shouldBeCaptured
+    // from the cause, so the handled-client classification survives.
+    expect(err.status).toBe(400);
+    expect(err.shouldBeCaptured).toBe(false);
   });
 
   // why: regression — reverting a reservation used to be silent. The custodian
@@ -14385,6 +14523,120 @@ describe("addScannedAssetsToBooking", () => {
         },
       })
     );
+  });
+
+  it("drops a kit slice already on the booking instead of re-inserting it", async () => {
+    // Re-scanning a kit the booking already holds resends the same
+    // `kitSlices` spec for its members. The `create` below is a plain insert
+    // with no upsert semantics, so writing an already-present slice a second
+    // time collides with `BookingAsset_kit_unique` (`bookingId`,
+    // `assetKitId`) and fails the whole scan.
+    expect.assertions(3);
+
+    // why: skips the overlap-conflict guard so the test can focus on the
+    // idempotent-rescan behavior, matching the sourceKitId-resolution test
+    // above.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+
+    // why: serves both the org-scope guard (only needs the returned count to
+    // match) and the scanned-asset metadata read (needs title/type).
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: null,
+            unitOfMeasure: null,
+          }))
+        )
+    );
+
+    // why: distinguishes the two `bookingAsset.findMany` reads this path
+    // makes on the same booking: the standalone check (`assetKitId: null`)
+    // finds nothing pre-existing, while the kit-driven check
+    // (`assetKitId: { in }`) finds the membership an earlier scan already
+    // wrote.
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockImplementation(
+      (args?: { where?: { assetKitId?: { in?: string[] } | null } }) => {
+        const assetKitId = args?.where?.assetKitId;
+        return Promise.resolve(
+          assetKitId && typeof assetKitId === "object" && "in" in assetKitId
+            ? [{ assetKitId: "ak-existing" }]
+            : []
+        );
+      }
+    );
+
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      id: "booking-scan",
+      name: "Scan Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    // why: the note builder reads the scanned kit's members to tell kit
+    // arrivals from standalone ones.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([
+      {
+        id: "kit-existing",
+        name: "Existing Kit",
+        assetKits: [{ assetId: "asset-kit-member" }],
+      },
+    ]);
+
+    await addScannedAssetsToBooking({
+      assetIds: ["asset-new"],
+      kitIds: ["kit-existing"],
+      bookingId: "booking-scan",
+      organizationId: "org-1",
+      userId: "user-1",
+      kitSlices: [
+        {
+          assetId: "asset-kit-member",
+          assetKitId: "ak-existing",
+          kitId: "kit-existing",
+        },
+      ],
+    });
+
+    // Only the genuinely new standalone scan reaches the write; the slice for
+    // the membership already on the booking is dropped rather than
+    // re-inserted.
+    expect(db.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          bookingAssets: {
+            create: [
+              expect.objectContaining({
+                assetId: "asset-new",
+                assetKitId: null,
+              }),
+            ],
+          },
+        },
+      })
+    );
+
+    // The re-scanned kit member gained nothing on this call, so it must not
+    // be narrated as "added".
+    const [emittedEvents] = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expect(
+      emittedEvents.map((event: { assetId: string }) => event.assetId)
+    ).toEqual(["asset-new"]);
+
+    // Nor is the kit: the booking note names only what arrived.
+    const noteContents = (
+      bookingNoteService.createSystemBookingNote as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(([note]) => String(note.content));
+    expect(noteContents.join("\n")).not.toContain("Existing Kit");
   });
 });
 
