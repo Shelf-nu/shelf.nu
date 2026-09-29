@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { cropImage } from "./crop-image";
+import { cropImage, isUnreadableImageError } from "./crop-image";
 
 // @vitest-environment node
 
@@ -47,5 +47,30 @@ describe("cropImage", () => {
       shouldBeCaptured: false,
       title: "Unsupported image format",
     });
+  });
+});
+
+describe("isUnreadableImageError", () => {
+  it.each([
+    "VipsJpeg: Premature end of JPEG file",
+    "Input buffer contains unsupported image format",
+    "Input buffer has corrupt header: VipsJpeg: bad marker",
+    "VipsForeignLoadPng: libspng read error: unexpected end of file",
+    "gifload: truncated file",
+  ])("treats a decoding failure as the user's file: %s", (message) => {
+    expect(isUnreadableImageError(new Error(message))).toBe(true);
+  });
+
+  it.each([
+    "VipsForeignSaveWebp: unable to encode",
+    "VipsImage: memory area too small --- should be 1024 bytes, you passed 512",
+    "vips_region_buffer: out of memory",
+    "Input image exceeds pixel limit",
+  ])("keeps a server-side failure a server error: %s", (message) => {
+    expect(isUnreadableImageError(new Error(message))).toBe(false);
+  });
+
+  it("is false for anything that is not an Error", () => {
+    expect(isUnreadableImageError("premature end")).toBe(false);
   });
 });

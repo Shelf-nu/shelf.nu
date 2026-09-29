@@ -12,12 +12,16 @@ import { isLikeShelfError, ShelfError } from "./error";
 import { detectImageFormat } from "./image-format.server";
 
 /**
- * Errors sharp raises while DECODING its input: a truncated or corrupt file.
- * The format check has already passed when sharp runs, so these describe the
- * uploaded bytes, not the server. Anything else (memory, output) stays a 500.
+ * Messages sharp raises when it cannot DECODE its input: sharp's own two
+ * buffer-input errors, and the decoder wording for a truncated or corrupt
+ * file. They describe the uploaded bytes, not the server.
+ *
+ * Matched on what the message says, never on a bare `Vips` prefix: libvips
+ * uses that prefix for every class, including the WebP encoder and memory or
+ * region failures, which must stay captured 500s.
  */
 const UNREADABLE_INPUT =
-  /^(?:Vips|Input buffer|Input file)|premature end|corrupt|bad (?:huffman|marker)/i;
+  /^Input buffer|premature end|corrupt|bad (?:huffman|marker)|unexpected end|truncated/i;
 
 /**
  * Whether a sharp failure means the uploaded image itself is unreadable.
@@ -25,7 +29,7 @@ const UNREADABLE_INPUT =
  * @param cause - What sharp threw
  * @returns True when the input could not be decoded
  */
-function isUnreadableImageError(cause: unknown): boolean {
+export function isUnreadableImageError(cause: unknown): boolean {
   return cause instanceof Error && UNREADABLE_INPUT.test(cause.message);
 }
 
