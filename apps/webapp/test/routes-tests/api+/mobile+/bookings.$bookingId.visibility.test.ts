@@ -27,6 +27,7 @@ import { loader } from "~/routes/api+/mobile+/bookings.$bookingId";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { mobileUserContext } from "@helpers/mobile-user-context";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 // @vitest-environment node
 
@@ -245,5 +246,68 @@ describe("GET /api/mobile/bookings/:bookingId — who may open it", () => {
 
     assertIsDataWithResponseInit(response);
     expect(response.init?.status).toBe(404);
+  });
+});
+
+describe("GET /api/mobile/bookings/:id — actions on a booking the caller only sees", () => {
+  /** The action flags the loader returned, wherever they sit in the payload. */
+  async function actionFlags() {
+    const response = await get();
+    assertIsDataWithResponseInit(response);
+    const body = response.data as Record<string, any>;
+    const root = body.booking?.bookingActions ? body.booking : body;
+    return {
+      ...root.bookingActions,
+      canCheckout: root.canCheckout,
+      canCheckin: root.canCheckin,
+      canCheckinAll: root.canCheckinAll,
+    } as Record<string, boolean>;
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "offers %s no actions on someone else's booking it can only see",
+    async (role) => {
+      // why: grant every matrix permission so only the ownership rule can
+      // take the actions away.
+      vi.mocked(hasPermission).mockResolvedValue(true);
+      getMobileUserContextMock.mockResolvedValue(
+        mobileUserContext({
+          roles: [role],
+          workspace: {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          },
+        })
+      );
+      findFirstMock.mockResolvedValue(
+        bookingRow({ custodianUserId: SOMEONE_ELSE })
+      );
+
+      const flags = await actionFlags();
+
+      expect(flags).toMatchObject({
+        canCancel: false,
+        canArchive: false,
+        canDuplicate: false,
+        canDelete: false,
+        canCheckout: false,
+        canCheckin: false,
+        canCheckinAll: false,
+      });
+    }
+  );
+
+  it("still offers the caller's actions on their own booking", async () => {
+    // why: grant every matrix permission; the booking is the caller's own.
+    vi.mocked(hasPermission).mockResolvedValue(true);
+    getMobileUserContextMock.mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+    findFirstMock.mockResolvedValue(bookingRow({ custodianUserId: CALLER }));
+
+    const flags = await actionFlags();
+
+    expect(flags.canCancel).toBe(true);
+    expect(flags.canDuplicate).toBe(true);
   });
 });

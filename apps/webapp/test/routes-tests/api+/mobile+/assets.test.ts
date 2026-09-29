@@ -799,3 +799,37 @@ describe("GET /api/mobile/assets — display code", () => {
     );
   });
 });
+
+describe("GET /api/mobile/assets — list scope", () => {
+  /** Runs the list as `role` and returns the where the query used. */
+  async function whereFor(role: "SELF_SERVICE" | "BASE" | "ADMIN", query = "") {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      access: accessFor([role]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    await loader(
+      createLoaderArgs({
+        request: new Request(`http://localhost:3000/api/mobile/assets${query}`),
+      })
+    );
+    return findManyMock.mock.calls[0]![0]!.where;
+  }
+
+  it("lists only bookable assets to SELF_SERVICE, as the web index does", async () => {
+    expect(await whereFor("SELF_SERVICE")).toMatchObject({
+      availableToBook: true,
+    });
+  });
+
+  it("still lists every asset SELF_SERVICE holds on the custody tab", async () => {
+    expect(
+      await whereFor("SELF_SERVICE", "?myCustody=true")
+    ).not.toHaveProperty("availableToBook");
+  });
+
+  it.each(["BASE", "ADMIN"] as const)(
+    "does not narrow the list for %s",
+    async (role) => {
+      expect(await whereFor(role)).not.toHaveProperty("availableToBook");
+    }
+  );
+});

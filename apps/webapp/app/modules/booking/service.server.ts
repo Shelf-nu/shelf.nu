@@ -86,7 +86,9 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
+  bookingAddableStatusClause,
   bookingWriteScopeClause,
+  assertCanAddBookingItems,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
@@ -198,6 +200,7 @@ import type {
 import {
   assertBookingIsCheckinable,
   assertBookingIsOpen,
+  assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
   getBulkBookingsWhereInput,
@@ -11901,6 +11904,15 @@ export async function getBookings(params: {
       if (writeScope) {
         andClauses.push(writeScope);
       }
+
+      // The picker also offers only the statuses the add action accepts.
+      const addableStatus = bookingAddableStatusClause({
+        access: writableBy.access,
+      });
+
+      if (addableStatus) {
+        andClauses.push(addableStatus);
+      }
     }
 
     /** The filter: independent, always AND-ed, never a restriction. */
@@ -13968,6 +13980,15 @@ export async function bulkDeleteBookings({
       }),
     ]);
 
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "delete",
+    });
+
     // Roles whose policy limits delete to drafts may not delete a selection
     // that contains anything else. The whole request is refused rather than
     // silently deleting part of it.
@@ -14186,6 +14207,15 @@ export async function bulkArchiveBookings({
         custodianUserId: true,
         activeSchedulerReference: true,
       },
+    });
+
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "archive",
     });
 
     /**
@@ -14407,6 +14437,15 @@ export async function bulkCancelBookings({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "cancel",
+    });
 
     /** Bookings with any of these statuses cannot be cancelled */
     const unavailableBookingStatus: BookingStatus[] = [
@@ -15795,6 +15834,13 @@ export async function processBooking(
       userId: auth.userId,
       access: auth.access,
       action: "add items to",
+    });
+
+    // Restricted roles add items only while the booking is a draft; the
+    // booking page applies the same rule to its manage-assets flow.
+    assertCanAddBookingItems({
+      access: auth.access,
+      bookingStatus: bookingInfo.status,
     });
 
     if (!finalAssetIds.length) {

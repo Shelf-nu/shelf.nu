@@ -235,4 +235,32 @@ describe("adding a kit to a booking from the kit page", () => {
     expect(response.init?.status).toBe(403);
     expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
   });
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "refuses %s adding kits to their own RESERVED booking",
+    async (role) => {
+      vi.mocked(requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role], organizationId: "org123" }) as never
+      );
+      vi.mocked(bookingService.getExistingBookingDetails).mockResolvedValue({
+        id: "booking123",
+        name: "Autumn Shoot",
+        status: BookingStatus.RESERVED,
+        creatorId: "user123",
+        custodianUserId: "user123",
+        bookingAssets: [],
+      } as any);
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          params: { kitId: "kit123" },
+          request: mockRequest,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(403);
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    }
+  );
 });

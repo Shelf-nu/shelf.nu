@@ -20,8 +20,10 @@ import { describe, expect, it } from "vitest";
 
 import { accessFor } from "@helpers/role-access";
 import {
+  assertCanAddBookingItems,
   assertCanDeleteBooking,
   assertCanDownloadBookingDocuments,
+  bookingAddableStatusClause,
   bookingWriteScopeClause,
   canSeeBooking,
   canSeeBookingCustodian,
@@ -632,4 +634,75 @@ describe("assertCanDownloadBookingDocuments", () => {
       })
     ).toThrow(expect.objectContaining({ status: 403 }));
   });
+});
+
+describe("assertCanAddBookingItems", () => {
+  const OPEN_AFTER_DRAFT = ["RESERVED", "ONGOING", "OVERDUE"] as const;
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lets %s add items to a DRAFT",
+    (role) => {
+      expect(() =>
+        assertCanAddBookingItems({
+          access: accessFor([role]),
+          bookingStatus: "DRAFT",
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each(
+    [OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE].flatMap((role) =>
+      OPEN_AFTER_DRAFT.map((status) => [role, status] as const)
+    )
+  )("refuses %s adding items to a %s booking with a 403", (role, status) => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([role]),
+        bookingStatus: status,
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+
+  it.each(
+    [OrganizationRoles.OWNER, OrganizationRoles.ADMIN].flatMap((role) =>
+      OPEN_AFTER_DRAFT.map((status) => [role, status] as const)
+    )
+  )("lets %s add items to a %s booking", (role, status) => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([role]),
+        bookingStatus: status,
+      })
+    ).not.toThrow();
+  });
+
+  it("refuses everyone on a closed booking", () => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([OrganizationRoles.OWNER]),
+        bookingStatus: "COMPLETE",
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+});
+
+describe("bookingAddableStatusClause", () => {
+  it.each([OrganizationRoles.OWNER, OrganizationRoles.ADMIN])(
+    "adds no filter for %s, who may add to every open status",
+    (role) => {
+      expect(
+        bookingAddableStatusClause({ access: accessFor([role]) })
+      ).toBeUndefined();
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "limits %s to drafts",
+    (role) => {
+      expect(bookingAddableStatusClause({ access: accessFor([role]) })).toEqual(
+        { status: { in: ["DRAFT"] } }
+      );
+    }
+  );
 });

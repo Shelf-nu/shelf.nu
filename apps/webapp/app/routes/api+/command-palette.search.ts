@@ -312,6 +312,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderBy: "title",
           orderDirection: "asc",
           perPage: 8,
+          // The same list scope as the asset index: roles limited to bookable
+          // assets never find the rest by searching.
+          availableToBookOnly: access.policy.assets.listScope === "bookable",
           extraInclude: {
             // Model cover image for assets with no image of their own
             ...ASSET_MODEL_IMAGE_SELECT,

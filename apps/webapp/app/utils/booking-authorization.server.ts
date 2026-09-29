@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { ShelfError } from "./error";
+import { canManageBookingItems } from "./permissions/role-access";
 import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
 import { resolveBookingHolderName, type UserNameFields } from "./user";
 
@@ -166,6 +167,29 @@ interface ValidateBookingOwnershipParams {
 }
 
 /**
+ * Whether the caller may write to this booking: every booking for roles with
+ * `bookings.writeAll`, otherwise only ones they created or hold through the
+ * user custody link. The non-throwing form of {@link validateBookingOwnership},
+ * for surfaces that decide which actions to offer.
+ *
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @returns `true` when writes to this booking are allowed
+ */
+export function canWriteBooking({
+  booking,
+  userId,
+  access,
+}: Omit<ValidateBookingOwnershipParams, "action">): boolean {
+  return (
+    access.bookings.writeAll ||
+    booking.creatorId === userId ||
+    booking.custodianUserId === userId
+  );
+}
+
+/**
  * Refuses a write to a booking the caller does not own.
  *
  * A caller whose access writes every booking passes. Everyone else must have
@@ -184,14 +208,7 @@ export function validateBookingOwnership({
   access,
   action,
 }: ValidateBookingOwnershipParams): void {
-  if (access.bookings.writeAll) {
-    return;
-  }
-
-  const isBookingOwner =
-    booking.creatorId === userId || booking.custodianUserId === userId;
-
-  if (!isBookingOwner) {
+  if (!canWriteBooking({ booking, userId, access })) {
     throw new ShelfError({
       cause: null,
       label: "Booking",
@@ -200,6 +217,75 @@ export function validateBookingOwnership({
       shouldBeCaptured: false,
     });
   }
+}
+
+/** The open statuses a booking can take new items in, for the most permissive role. */
+const OPEN_BOOKING_STATUSES = [
+  "DRAFT",
+  "RESERVED",
+  "ONGOING",
+  "OVERDUE",
+] as const satisfies readonly BookingStatusName[];
+
+/**
+ * Where-clause limiting an "add to existing booking" picker to the statuses the
+ * caller may add items in ({@link assertCanAddBookingItems}).
+ *
+ * Pickers AND this with {@link bookingWriteScopeClause} so the list offers only
+ * bookings the add action accepts; otherwise a restricted member picks a
+ * reserved booking and the action refuses it.
+ *
+ * @param params.access - The caller's access
+ * @returns `undefined` when every open status is addable, else a status filter
+ */
+export function bookingAddableStatusClause({
+  access,
+}: {
+  access: RoleAccess;
+}): Prisma.BookingWhereInput | undefined {
+  const addable = OPEN_BOOKING_STATUSES.filter((bookingStatus) =>
+    canManageBookingItems({ access, bookingStatus })
+  );
+  if (addable.length === OPEN_BOOKING_STATUSES.length) {
+    return undefined;
+  }
+  return { status: { in: [...addable] } };
+}
+
+/**
+ * Refuses adding items to a booking in a status the caller may not change.
+ *
+ * The manage-items rule (`canManageBookingItems`): every role adds items to a
+ * DRAFT, and only roles with `bookings.manageItemsAfterDraft` add them once the
+ * booking is reserved or under way. Every add path runs this after
+ * {@link validateBookingOwnership}: the manage-assets and manage-kits pages,
+ * and the "add to existing booking" flows for assets and kits, which would
+ * otherwise let a restricted member keep changing a reserved booking.
+ *
+ * @param params.access - The caller's access
+ * @param params.bookingStatus - The target booking's status
+ * @throws {ShelfError} 403 when the caller may not add items in this status
+ */
+export function assertCanAddBookingItems({
+  access,
+  bookingStatus,
+}: {
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): void {
+  if (canManageBookingItems({ access, bookingStatus })) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    label: "Booking",
+    message:
+      "You are unable to add items to this booking in its current status.",
+    additionalData: { bookingStatus },
+    status: 403,
+    shouldBeCaptured: false,
+  });
 }
 
 /**

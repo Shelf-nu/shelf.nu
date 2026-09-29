@@ -14,7 +14,7 @@ import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { PdfSnapshotKit } from "./helpers";
 import {
@@ -431,6 +431,9 @@ export async function fetchAllPdfRelatedData(
       modelRequests,
     };
   } catch (cause) {
+    // A refusal (the caller may not see this booking or its documents) keeps
+    // its own 4xx status; only unexpected failures become a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching booking data for PDF",

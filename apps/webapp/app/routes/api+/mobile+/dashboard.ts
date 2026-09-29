@@ -256,6 +256,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
           ...(canUseAudits ? {} : { id: { in: [] } }),
+          // Roles limited to assigned audits see only theirs, the same
+          // predicate `/api/mobile/audits` applies through `assignedOnly`.
+          ...(!access.audits.seeAll && {
+            assignments: { some: { userId: user.id } },
+          }),
         },
         select: {
           id: true,

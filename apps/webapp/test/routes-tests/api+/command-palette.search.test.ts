@@ -60,6 +60,7 @@ vi.mock("~/modules/booking/service.server", () => ({
 }));
 
 const { loader } = await import("~/routes/api+/command-palette.search");
+const { getAssets } = await import("~/modules/asset/service.server");
 
 async function search(roles: string[]) {
   state.roles = roles;
@@ -135,4 +136,21 @@ describe("command-palette search", () => {
     expect(JSON.stringify(where)).toContain('"contains":"kit"');
     expect(JSON.stringify(where)).toContain('"userId":"caller"');
   });
+
+  it("searches only bookable assets for SELF_SERVICE", async () => {
+    await search(["SELF_SERVICE"]);
+    expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
+      availableToBookOnly: true,
+    });
+  });
+
+  it.each([["BASE"], ["ADMIN"]])(
+    "searches every asset for %s",
+    async (role) => {
+      await search([role]);
+      expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
+        availableToBookOnly: false,
+      });
+    }
+  );
 });

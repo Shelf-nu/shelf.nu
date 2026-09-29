@@ -14740,6 +14740,38 @@ describe("processBooking — checked-out guard for active bookings", () => {
     });
   }
 
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "refuses %s adding to their own RESERVED booking with a 403",
+    async (role) => {
+      mockBooking(BookingStatus.RESERVED);
+      mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+      await expect(
+        processBooking("booking-1", ["asset-1"], "org-1", {
+          userId: "user-1",
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lets %s add to their own DRAFT booking",
+    async (role) => {
+      mockBooking(BookingStatus.DRAFT);
+      mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+      const { finalAssetIds } = await processBooking(
+        "booking-1",
+        ["asset-1"],
+        "org-1",
+        { userId: "user-1", access: accessFor([role]) }
+      );
+
+      expect(finalAssetIds).toEqual(["asset-1"]);
+    }
+  );
+
   it("blocks a CHECKED_OUT asset from being added to an ONGOING booking", async () => {
     mockBooking(BookingStatus.ONGOING);
     mockAssets([
@@ -14767,8 +14799,8 @@ describe("processBooking — checked-out guard for active bookings", () => {
     ).rejects.toThrow(/not authorized/i);
   });
 
-  it("allows a SELF_SERVICE user to add to a booking they own", async () => {
-    mockBooking(BookingStatus.RESERVED, [], { creatorId: "owner-user" });
+  it("allows a SELF_SERVICE user to add to a draft booking they own", async () => {
+    mockBooking(BookingStatus.DRAFT, [], { creatorId: "owner-user" });
     mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
 
     const { finalAssetIds } = await processBooking(

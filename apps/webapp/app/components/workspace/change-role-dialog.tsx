@@ -9,9 +9,13 @@ import {
 } from "@radix-ui/react-popover";
 import { useFetcher } from "react-router";
 import { ChevronRight, SuccessIcon } from "~/components/icons/library";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isFormProcessing } from "~/utils/form";
 import { handleActivationKeyPress } from "~/utils/keyboard";
-import { roleChangeTransfers } from "~/utils/permissions/membership-access";
+import {
+  canAssignRole,
+  roleChangeTransfers,
+} from "~/utils/permissions/membership-access";
 import type { OrganizationRole } from "~/utils/permissions/role-access";
 import { INVITABLE_ROLES, ROLE_LABELS } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
@@ -139,6 +143,11 @@ export function ChangeRoleDialog({
   const countsFetcher = useFetcher<EntityCounts>();
   const recipientsFetcher = useFetcher<TransferRecipient[]>();
   const disabled = isFormProcessing(fetcher.state);
+  const { ownsWorkspace } = useRoleAccess();
+  /** Roles this member may grant; only the owner may grant an owner-only role. */
+  const grantableRoles = INVITABLE_ROLES.filter((role) =>
+    canAssignRole({ actorOwnsWorkspace: ownsWorkspace, role })
+  );
 
   const [state, dispatch] = useReducer(dialogReducer, {
     selectedRole: currentRoleEnum as string,
@@ -292,7 +301,7 @@ export function ChangeRoleDialog({
                         "z-[999999] mt-2 w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-gray-200 bg-white"
                       )}
                     >
-                      {INVITABLE_ROLES.map((k) => (
+                      {grantableRoles.map((k) => (
                         <div
                           key={k}
                           role="option"

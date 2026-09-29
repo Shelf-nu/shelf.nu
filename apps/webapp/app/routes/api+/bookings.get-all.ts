@@ -6,7 +6,11 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
+
+/** The open statuses an "add to existing booking" picker can offer. */
+const ADDABLE_STATUSES = ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] as const;
 
 /**
  * Bookings the caller may add assets to, for the "add to existing booking"
@@ -42,10 +46,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { bookings } = await getMinimalBookings({
       organizationId,
       userId,
-      // Include active bookings so the dialog can target ONGOING/OVERDUE
-      // bookings too (added assets stay AVAILABLE — progressive checkout), not
-      // just DRAFT/RESERVED ones.
-      statuses: ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"],
+      // Open bookings the caller may still add items to. Roles with
+      // `bookings.manageItemsAfterDraft` also target RESERVED/ONGOING/OVERDUE
+      // (added assets stay AVAILABLE: progressive checkout); the rest see
+      // only drafts, the same rule the add actions enforce.
+      statuses: ADDABLE_STATUSES.filter((bookingStatus) =>
+        canManageBookingItems({ access, bookingStatus })
+      ),
       // This list feeds the add-to-existing-booking write picker, so it
       // follows the WRITE scope, not visibility. Custody may sit on the user
       // link or on a team-member link; the service resolves both.

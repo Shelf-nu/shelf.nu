@@ -52,7 +52,10 @@ import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-asse
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
+import {
+  canSeeBooking,
+  canWriteBooking,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -699,8 +702,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // this caller may. Both have to hold, or the app draws a button the server
     // then refuses — the endpoints gate on these same permissions regardless,
     // so without this the user meets the rule as a 403 instead of an absence.
-    const canCheckout = canCheckoutByState && canCheckoutPerm;
-    const canCheckin = canCheckinByState && canCheckinPerm;
+    // Seeing a booking (the workspace see-toggles) never grants writing it:
+    // every lifecycle endpoint runs `validateBookingOwnership`, so a booking
+    // this caller may only read offers no actions.
+    const writesBooking = canWriteBooking({
+      booking: {
+        creatorId: booking.creator?.id ?? null,
+        custodianUserId: booking.custodianUserId,
+      },
+      userId: user.id,
+      access,
+    });
+    const canCheckout = writesBooking && canCheckoutByState && canCheckoutPerm;
+    const canCheckin = writesBooking && canCheckinByState && canCheckinPerm;
     /**
      * Whether the quick "check in all" is offered.
      *
@@ -712,7 +726,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * added after check-out closable from a browser and from nowhere on the
      * phone.
      */
-    const canCheckinAll = isActiveBooking && canCheckinPerm && canQuickCheckin;
+    const canCheckinAll =
+      writesBooking && isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
@@ -720,22 +735,24 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         (booking.status === "RESERVED" ||
           booking.status === "ONGOING" ||
           booking.status === "OVERDUE") &&
+        writesBooking &&
         canCancelPerm,
       // Archive: shared web-parity rule (COMPLETE, or RESERVED already past
       // its end date) + archive permission.
       canArchive:
         isBookingArchivable({ status: booking.status, to: booking.to }) &&
+        writesBooking &&
         canArchivePerm,
-      // Duplicate: any status; gated by create permission (web's duplicate
-      // route enforces create — we hide it for those who lack it rather than
-      // 403 on tap).
-      canDuplicate: canCreatePerm,
+      // Duplicate: any status; gated by create permission and by writing this
+      // booking, the two checks the duplicate endpoint makes.
+      canDuplicate: writesBooking && canCreatePerm,
       // Delete: the delete permission, and drafts only for roles whose policy
       // says so, the same rule the endpoint enforces (`assertCanDeleteBooking`).
       // The companion reads this server-computed flag as is.
       canDelete:
         (!access.policy.bookings.deleteOnlyDrafts ||
           booking.status === "DRAFT") &&
+        writesBooking &&
         canDeletePerm,
     };
 

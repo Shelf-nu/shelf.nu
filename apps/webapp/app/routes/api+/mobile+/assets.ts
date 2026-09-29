@@ -110,6 +110,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const baseWhere: Prisma.AssetWhereInput = {
       organizationId,
+      // The same list scope as the web asset index: roles limited to bookable
+      // assets browse only those. Their own custody tab still lists every
+      // asset they hold, bookable or not.
+      ...(access.policy.assets.listScope === "bookable" &&
+        !myCustody && { availableToBook: true }),
       ...(myCustody
         ? {
             // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for

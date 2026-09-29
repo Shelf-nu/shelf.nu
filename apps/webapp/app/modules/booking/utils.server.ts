@@ -106,6 +106,48 @@ export function getBulkBookingsWhereInput({
   return { AND: [base, ownership] };
 }
 
+/**
+ * Refuses a bulk action whose explicit selection reaches outside the caller's
+ * own bookings.
+ *
+ * {@link getBulkBookingsWhereInput} already narrows the query to what the
+ * caller may act on, so a foreign id is simply not found. Without this check
+ * the action then succeeds on the rest and reports success for a selection it
+ * partly ignored. Select-all is scoped by its filters and is not checked here.
+ *
+ * @param bookingIds - The submitted ids, or `[ALL_SELECTED_KEY]`
+ * @param foundIds - The ids the scoped query returned
+ * @param access - The caller's access
+ * @param action - Verb for the refusal message ("delete", "archive", ...)
+ * @throws {ShelfError} 403 when an explicitly selected booking was filtered out by ownership
+ */
+export function assertBulkSelectionWithinOwnership({
+  bookingIds,
+  foundIds,
+  access,
+  action,
+}: {
+  bookingIds: Booking["id"][];
+  foundIds: Booking["id"][];
+  access: RoleAccess;
+  action: string;
+}): void {
+  if (access.bookings.writeAll || bookingIds.includes(ALL_SELECTED_KEY)) {
+    return;
+  }
+  const found = new Set(foundIds);
+  if (bookingIds.every((id) => found.has(id))) {
+    return;
+  }
+  throw new ShelfError({
+    cause: null,
+    message: `You can only ${action} bookings you created or hold.`,
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
 export function getBookingWhereInput({
   organizationId,
   currentSearchParams,

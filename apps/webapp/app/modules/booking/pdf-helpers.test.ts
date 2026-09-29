@@ -43,6 +43,7 @@ import type { QrIdDisplayPreference } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getQrCodeMaps } from "~/modules/qr/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { getBooking } from "./service.server";
 
@@ -303,5 +304,47 @@ describe("booking checklist PDF — the printed asset code", () => {
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
       "qr-visible-id"
     );
+  });
+});
+
+describe("booking checklist PDF — failures", () => {
+  it("keeps a refusal's 403 instead of reporting a server error", async () => {
+    vi.clearAllMocks();
+    // why: the booking read is where the ownership refusal is raised.
+    mockOf(getBooking).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("still reports an unexpected failure as a 500", async () => {
+    vi.clearAllMocks();
+    // why: an unclassified database failure during the read.
+    mockOf(getBooking).mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 500 });
   });
 });

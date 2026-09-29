@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
+  assertBulkSelectionWithinOwnership,
   getBookingOwnershipScope,
   getBulkBookingsWhereInput,
 } from "./utils.server";
@@ -175,5 +176,54 @@ describe("getBulkBookingsWhereInput — composition", () => {
 
     expect(Array.isArray(where.AND)).toBe(true);
     expect(where.OR).toBeUndefined();
+  });
+});
+
+describe("assertBulkSelectionWithinOwnership", () => {
+  it.each(RESTRICTED)(
+    "refuses %s when a selected booking was scoped out as someone else's",
+    (role) => {
+      expect(() =>
+        assertBulkSelectionWithinOwnership({
+          bookingIds: ["mine", "theirs"],
+          foundIds: ["mine"],
+          access: accessFor([role]),
+          action: "archive",
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each(RESTRICTED)("lets %s act on a selection of their own", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: ["mine", "also-mine"],
+        foundIds: ["also-mine", "mine"],
+        access: accessFor([role]),
+        action: "archive",
+      })
+    ).not.toThrow();
+  });
+
+  it.each(RESTRICTED)("leaves select-all to its filters for %s", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: [ALL_SELECTED_KEY],
+        foundIds: [],
+        access: accessFor([role]),
+        action: "cancel",
+      })
+    ).not.toThrow();
+  });
+
+  it.each(UNRESTRICTED)("never refuses %s", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: ["a", "b"],
+        foundIds: ["a"],
+        access: accessFor([role]),
+        action: "delete",
+      })
+    ).not.toThrow();
   });
 });

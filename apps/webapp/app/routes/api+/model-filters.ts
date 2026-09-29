@@ -9,7 +9,10 @@ import {
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
-import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
+import {
+  bookingAddableStatusClause,
+  bookingWriteScopeClause,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
@@ -333,6 +336,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       if (writeScope) {
         where.AND.push(writeScope);
+      }
+
+      // Same picker rule as the seeding loader: only statuses the add action
+      // accepts for this caller.
+      const addableStatus = bookingAddableStatusClause({ access });
+
+      if (addableStatus) {
+        where.AND.push(addableStatus);
       }
     }
 

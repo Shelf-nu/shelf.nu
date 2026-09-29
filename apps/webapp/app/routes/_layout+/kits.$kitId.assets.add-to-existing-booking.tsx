@@ -32,7 +32,10 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserByID } from "~/modules/user/service.server";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import {
+  assertCanAddBookingItems,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { setCookie } from "~/utils/cookies.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -162,6 +165,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       access,
       action: "add kits to",
     });
+
+    // Restricted roles add kits only while the booking is a draft, the same
+    // rule the booking page's manage-kits flow applies.
+    assertCanAddBookingItems({ access, bookingStatus: bookingInfo.status });
 
     // AssetKit ids already represented on this booking. We dedupe by AssetKit
     // membership (NOT by asset id): a QUANTITY_TRACKED asset can sit on the

@@ -21,7 +21,7 @@ import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
 import type {
@@ -470,6 +470,9 @@ export async function fetchCheckinReceiptData(
         .filter((name) => name !== ""),
     };
   } catch (cause) {
+    // A refusal (the caller may not see this booking or its documents) keeps
+    // its own 4xx status; only unexpected failures become a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching booking data for the check-in receipt",

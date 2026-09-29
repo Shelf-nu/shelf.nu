@@ -253,3 +253,42 @@ describe("GET /api/mobile/dashboard — booking visibility", () => {
     }
   );
 });
+
+describe("GET /api/mobile/dashboard — active audits", () => {
+  /** Runs the loader and returns the `where` handed to the audit query. */
+  async function captureAuditWhere() {
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/dashboard?orgId=${ORG_ID}`
+        ),
+      })
+    );
+    const call = vi.mocked(db.auditSession.findMany).mock.calls[0];
+    return (call[0] as { where: Prisma.AuditSessionWhereInput }).where;
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lists only the audits assigned to %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toEqual({
+        some: { userId: CALLER_USER_ID },
+      });
+    }
+  );
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lists every active audit for %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toBeUndefined();
+    }
+  );
+});
