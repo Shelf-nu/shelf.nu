@@ -65,6 +65,23 @@ It is: **ask whether zero is a legal answer for this field, then choose the
 bound.** Being wrong here is invisible, every number still renders, and the only
 symptom is a field that quietly refuses or accepts an answer it should not.
 
+## The bound lives in TWO places
+
+A numeric field is bounded by its zod schema **and** by the `min` on its `<input
+type="number">`. The browser enforces the attribute first, so a schema that
+accepts a value the attribute forbids is unreachable: constraint validation
+refuses the form before anything server-side runs, and nothing in this repo
+compares the two.
+
+`minQuantity` shipped exactly that way. The schema moved to `.nonnegative()`
+while the input kept `min={1}`, so the out-of-stock threshold stayed impossible
+to set and the tests were green throughout, because they parse the schema and
+never render the control.
+
+So when you change a numeric bound, grep the field name for its `min`, `max` and
+`step` and change them together. Tightening one and not the other is the silent
+half of this class.
+
 ## Sweep the file, not the diff
 
 Blank-to-zero is silent wherever the bound accepts 0, which is exactly where it
