@@ -84,7 +84,7 @@
     "detectrtc": "^1.4.1",
     "framer-motion": "^12.38.0",
     "fuse.js": "^7.3.0",
-    "hono": "^4.12.34",
+    "hono": "^4.13.5",
     "hono-rate-limiter": "^0.5.3",
     "html-to-image": "1.11.11",
     "iconv-lite": "^0.7.2",
@@ -147,7 +147,7 @@
     "zxing-wasm": "^3.0.2"
   },
   "devDependencies": {
-    "@faker-js/faker": "^10.4.0",
+    "@faker-js/faker": "^10.5.0",
     "@playwright/test": "^1.59.1",
     "@react-router/dev": "7.16.0",
     "@react-router/remix-routes-option-adapter": "7.16.0",
