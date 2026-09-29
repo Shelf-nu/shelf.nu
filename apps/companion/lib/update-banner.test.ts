@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 import { compareAppVersions } from "./server/contract";
 import {
+  laterDismissal,
   parseLatestCompanionVersion,
   shouldShowUpdateBanner,
 } from "./update-banner";
@@ -111,4 +112,21 @@ test("a dismissal of a newer version also covers an older advertised one", () =>
 
 test("an unreadable stored dismissal does not hide the banner", () => {
   assert.equal(show("1.5.0", "1.6.0", "garbage"), true);
+});
+
+// ── laterDismissal ───────────────────────────────────────
+
+test("laterDismissal keeps a dismissal made while a check was in flight", () => {
+  // The check read nothing from storage; the user tapped X on 1.6.0 meanwhile.
+  assert.equal(laterDismissal(null, "1.6.0"), "1.6.0");
+  assert.equal(laterDismissal("1.6.0", null), "1.6.0");
+  // The check read an older stored dismissal.
+  assert.equal(laterDismissal("1.5.5", "1.6.0"), "1.6.0");
+  assert.equal(laterDismissal("1.6.0", "1.5.5"), "1.6.0");
+});
+
+test("laterDismissal prefers the readable value over an unreadable one", () => {
+  assert.equal(laterDismissal("garbage", "1.6.0"), "1.6.0");
+  assert.equal(laterDismissal("1.6.0", "garbage"), "1.6.0");
+  assert.equal(laterDismissal(null, null), null);
 });

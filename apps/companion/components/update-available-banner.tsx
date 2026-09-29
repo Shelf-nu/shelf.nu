@@ -15,6 +15,7 @@ import {
   subscribeToServerChange,
 } from "@/lib/server";
 import {
+  laterDismissal,
   shouldShowUpdateBanner,
   UPDATE_BANNER_DISMISSED_KEY,
 } from "@/lib/update-banner";
@@ -103,7 +104,9 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
       ]).then(([latest, dismissed]) => {
         if (request !== latestRequest) return;
         setLatestVersion(latest);
-        setDismissedVersion(dismissed);
+        // Merge, never replace: the user may have tapped X while this check
+        // was waiting on the network, after it had already read storage.
+        setDismissedVersion((current) => laterDismissal(current, dismissed));
       });
     };
     check();

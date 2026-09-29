@@ -86,3 +86,26 @@ export function shouldShowUpdateBanner({
   }
   return true;
 }
+
+/**
+ * The later of two dismissals.
+ *
+ * A check reads the stored dismissal before its network request and applies
+ * both when the request finishes. A tap on X in between must survive that, so
+ * the result is merged with the dismissal already in memory, never swapped in.
+ *
+ * @param a - A dismissed version, or null.
+ * @param b - A dismissed version, or null.
+ * @returns Whichever is newer; the readable one when only one parses; `a` when
+ *   neither does.
+ */
+export function laterDismissal(
+  a: string | null,
+  b: string | null
+): string | null {
+  if (!a) return b;
+  if (!b) return a;
+  const order = compareAppVersions(a, b);
+  if (order === null) return compareAppVersions(b, b) === null ? a : b;
+  return order >= 0 ? a : b;
+}
