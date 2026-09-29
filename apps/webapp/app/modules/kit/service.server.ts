@@ -1743,7 +1743,9 @@ export async function getPaginatedAndFilterableKits<
     searchParams.get("status") === "ALL"
       ? null
       : (searchParams.get("status") as KitStatus | null);
-  const requestedTeamMember = searchParams.get("teamMember"); // custodian
+  // `getAll`: the custodian control is a multi-select, so the URL carries one
+  // value per chosen custodian.
+  const requestedTeamMembers = searchParams.getAll("teamMember"); // custodians
 
   const {
     page,
@@ -1766,13 +1768,12 @@ export async function getPaginatedAndFilterableKits<
    * an unmatchable id for that case rather than an empty list, which would read
    * as "no filter" and quietly list every kit.
    */
-  const [scopedTeamMember] = await scopeCustodianFilterIds({
-    teamMemberIds: requestedTeamMember ? [requestedTeamMember] : [],
+  const teamMemberIds = await scopeCustodianFilterIds({
+    teamMemberIds: requestedTeamMembers,
     canSeeAllCustody,
     userId,
     organizationId,
   });
-  const teamMember = scopedTeamMember ?? null;
 
   try {
     const skip = page > 1 ? (page - 1) * perPage : 0;
@@ -1798,9 +1799,9 @@ export async function getPaginatedAndFilterableKits<
       where.status = status;
     }
 
-    if (teamMember) {
+    if (teamMemberIds.length) {
       Object.assign(where, {
-        custody: { custodianId: teamMember },
+        custody: { custodianId: { in: teamMemberIds } },
       });
     }
 
