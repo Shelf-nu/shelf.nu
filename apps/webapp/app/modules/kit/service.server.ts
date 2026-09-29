@@ -32,6 +32,7 @@ import {
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { getClientHint } from "~/utils/client-hints";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -2798,14 +2799,15 @@ type KitBookingCustodian = {
 /**
  * Resolves, for each of `kitIds`, the booking that currently holds THAT kit.
  *
- * A booked slice belongs to a kit when it was booked under one of the kit's
- * live membership rows (`BookingAsset.assetKitId` → `AssetKit.id`) or under the
- * kit itself (`BookingAsset.sourceKitId`, which survives a detach). Both
- * columns are NULL on a standalone free-pool slice.
- *
- * That scoping is what makes the answer correct for `QUANTITY_TRACKED` assets:
- * one asset may sit in several kits at once, so "this asset is on an ongoing
- * booking" says nothing about which kit that booking took.
+ * Which slices hold which kit is decided by `resolveSliceKitIds`, the same
+ * rule that marks a kit checked out and releases it, so a kit this lookup
+ * reads as unheld is one nothing holds. A slice booked under one of the kit's
+ * membership rows (`assetKitId`) or under the kit itself (`sourceKitId`, which
+ * survives a detach) holds that kit and no other. A standalone slice holds the
+ * kits of its asset only when the asset is INDIVIDUAL: one physical unit out
+ * on its own leaves the kit incomplete. A standalone `QUANTITY_TRACKED` slice
+ * draws on the free pool and holds no kit, since one asset may sit in several
+ * kits at once.
  *
  * Costs two round-trips whatever the number of kits — the membership ids, then
  * the slices — so a page of checked-out kits does not fan out per row.
@@ -2834,6 +2836,14 @@ async function getBookingCustodiansHoldingKits(
       OR: [
         { sourceKitId: { in: kitIds } },
         { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
+        {
+          sourceKitId: null,
+          assetKitId: null,
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: { some: { kitId: { in: kitIds } } },
+          },
+        },
       ],
     },
     // Several live bookings can list one kit at once, and the first slice per
@@ -2857,6 +2867,8 @@ async function getBookingCustodiansHoldingKits(
       // `where` cannot express, so it is applied below.
       checkedOutAt: true,
       checkedInAt: true,
+      // What a standalone slice needs to name the kits it holds.
+      asset: { select: { type: true, assetKits: { select: { kitId: true } } } },
       booking: {
         select: {
           custodianTeamMember: { select: { name: true } },
@@ -2879,17 +2891,20 @@ async function getBookingCustodiansHoldingKits(
   for (const slice of bookedSlices) {
     if (!isSliceStillOut(slice)) continue;
 
-    // Live membership names the kit exactly; `sourceKitId` answers for slices
-    // whose membership row has since been removed.
-    const kitId =
-      (slice.assetKitId ? kitIdByAssetKitId.get(slice.assetKitId) : null) ??
-      slice.sourceKitId;
+    const heldKitIds = resolveSliceKitIds(
+      {
+        assetKitId: slice.assetKitId,
+        sourceKitId: slice.sourceKitId,
+        assetType: slice.asset.type,
+        assetKits: slice.asset.assetKits,
+      },
+      kitIdByAssetKitId
+    );
 
-    if (!kitId || !requestedKitIds.has(kitId) || custodianByKitId.has(kitId)) {
-      continue;
+    for (const kitId of heldKitIds) {
+      if (!requestedKitIds.has(kitId) || custodianByKitId.has(kitId)) continue;
+      custodianByKitId.set(kitId, slice.booking);
     }
-
-    custodianByKitId.set(kitId, slice.booking);
   }
 
   return custodianByKitId;
@@ -2978,9 +2993,10 @@ export async function updateKitsWithBookingCustodians<T extends Kit>(
         };
       }
 
-      // A booking always names a custodian, so reaching here means no booking
-      // holds this kit's slices. The kit's own custody row is then the only
-      // holder there is — and when that is empty too, nothing can name one.
+      // A booking always names a custodian, so reaching here means no live
+      // booking holds this kit by any slice. The kit's own custody row is then
+      // the only holder there is. When that is empty too, the kit is stuck as
+      // CHECKED_OUT with nothing holding it, which needs a data repair.
       if (!kitCarriesOwnCustodian(kit)) {
         Logger.error(
           new ShelfError({
@@ -3019,10 +3035,12 @@ type CurrentBookingType = {
 /**
  * The ongoing or overdue booking that currently holds a kit, if any.
  *
- * A kit goes out through the booking slices its member assets contribute, and
- * only slices booked under THIS kit count: `BookingAsset.assetKitId` names one
- * of the kit's live membership rows, and `sourceKitId` names the kit itself and
- * survives a detach. Both are NULL on a standalone free-pool slice.
+ * A kit goes out through the booking slices its member assets contribute. A
+ * slice counts when `resolveSliceKitIds` says it holds THIS kit: it was booked
+ * under one of the kit's live membership rows (`assetKitId`) or under the kit
+ * itself (`sourceKitId`, which survives a detach), or it is a standalone slice
+ * of an INDIVIDUAL member, whose absence leaves the kit incomplete. A
+ * standalone `QUANTITY_TRACKED` slice draws on the free pool and does not count.
  *
  * The slice must also still be out — see {@link isSliceStillOut}.
  *
@@ -3042,6 +3060,8 @@ export function getKitCurrentBooking(kit: {
   assetKits: {
     id: string;
     asset: {
+      /** Decides whether a standalone slice of this member holds the kit. */
+      type: AssetType;
       bookingAssets: {
         assetKitId: string | null;
         sourceKitId: string | null;
@@ -3052,24 +3072,26 @@ export function getKitCurrentBooking(kit: {
     };
   }[];
 }): CurrentBookingType | undefined {
-  const ownAssetKitIds = new Set(
-    kit.assetKits.map((membership) => membership.id)
+  const kitIdByAssetKitId = new Map(
+    kit.assetKits.map((membership) => [membership.id, kit.id])
   );
-
-  /** Whether this slice was booked under the kit being asked about. */
-  const belongsToKit = (slice: {
-    assetKitId: string | null;
-    sourceKitId: string | null;
-  }) =>
-    slice.sourceKitId === kit.id ||
-    (slice.assetKitId !== null && ownAssetKitIds.has(slice.assetKitId));
 
   const holdingSlices = kit.assetKits.flatMap((membership) =>
     membership.asset.bookingAssets.filter(
       (slice) =>
         (slice.booking.status === BookingStatus.ONGOING ||
           slice.booking.status === BookingStatus.OVERDUE) &&
-        belongsToKit(slice) &&
+        resolveSliceKitIds(
+          {
+            assetKitId: slice.assetKitId,
+            sourceKitId: slice.sourceKitId,
+            assetType: membership.asset.type,
+            // The slice's asset is this membership's asset, so this kit is
+            // the membership a standalone slice would answer from.
+            assetKits: [{ kitId: kit.id }],
+          },
+          kitIdByAssetKitId
+        ).has(kit.id) &&
         isSliceStillOut(slice)
     )
   );

@@ -11,7 +11,7 @@
  * @see {@link file://./timeframe.ts}
  */
 import { DateTime } from "luxon";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveTimeframe, toZonedBoundaryISO } from "./timeframe";
 
@@ -177,6 +177,18 @@ describe("resolveTimeframe - unrecognised preset", () => {
     timeZone: "Asia/Tokyo",
     dateFormat: "DD_MM_YYYY",
   } as unknown as ResolvedFormatPrefs;
+
+  // why: a preset range ends at "now", and these cases compare two ranges
+  // resolved one after the other. On a live clock the second call can land a
+  // millisecond later, so the clock is frozen for both.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-15T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("keeps the pref timezone when falling back from an unknown preset", () => {
     const unknown = resolveTimeframe(
