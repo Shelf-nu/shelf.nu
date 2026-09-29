@@ -5166,6 +5166,26 @@ async function findOrCreateLocationsByName({
   return locationIds;
 }
 
+/**
+ * Restores the assets of a workspace backup into a workspace.
+ *
+ * Relations travel by name, because ids only resolve in the workspace the
+ * backup came from. Locations, categories, tags, asset models, custodians and
+ * custom fields are matched regardless of case and created when missing.
+ *
+ * The restore is not atomic. Locations are resolved before any asset is
+ * created, and each asset is then created with its other relations one row at
+ * a time, so a failure part-way leaves everything already written in place.
+ * Running the file again reuses those relations by name, but creates the
+ * already-restored assets a second time. One transaction does not fit: a
+ * workspace-sized restore runs far past Prisma's interactive-transaction
+ * timeout.
+ *
+ * @param args.data - Rows parsed by `extractCSVDataFromBackupImport`.
+ * @param args.userId - The admin running the restore; owns what it creates.
+ * @param args.organizationId - The workspace restored into.
+ * @throws {ShelfError} Wrapping the first row that fails.
+ */
 export async function createAssetsFromBackupImport({
   data,
   userId,
