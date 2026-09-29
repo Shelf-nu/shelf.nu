@@ -6,6 +6,7 @@ import type {
 } from "./checkout-source-location";
 import {
   checkinPlacementSources,
+  checkinStockEvents,
   checkoutSourceOptions,
   defaultSourceLocationId,
   parseSourceLocationsFromFormData,
@@ -267,6 +268,71 @@ describe("submissions", () => {
     expect(
       submittedSourceForSlice(submission, { id: "ba-9", assetId: "asset-9" })
     ).toBeUndefined();
+  });
+});
+
+describe("checkinStockEvents", () => {
+  it("writes one event per used-up category, tried first at the slice's source", () => {
+    expect(
+      checkinStockEvents({
+        slice: { assetKitId: null, sourceLocationId: "loc-studio" },
+        disposition: { consumed: 6, lost: 1, damaged: 2 },
+        bookingId: "b-1",
+        bookingAssetId: "ba-1",
+      })
+    ).toEqual([
+      {
+        category: "CONSUME",
+        change: -6,
+        locationId: "loc-studio",
+        bookingId: "b-1",
+        bookingAssetId: "ba-1",
+      },
+      {
+        category: "LOSS",
+        change: -1,
+        locationId: "loc-studio",
+        bookingId: "b-1",
+        bookingAssetId: "ba-1",
+      },
+      {
+        category: "DAMAGE",
+        change: -2,
+        locationId: "loc-studio",
+        bookingId: "b-1",
+        bookingAssetId: "ba-1",
+      },
+    ]);
+  });
+
+  it("names no place for a kit slice or a slice with no source", () => {
+    for (const slice of [
+      { assetKitId: "ak-1", sourceLocationId: "loc-kit-shelf" },
+      { assetKitId: null, sourceLocationId: null },
+      null,
+    ]) {
+      expect(
+        checkinStockEvents({
+          slice,
+          disposition: { consumed: 3 },
+          bookingId: "b-1",
+          bookingAssetId: null,
+        })
+      ).toEqual([
+        expect.objectContaining({ category: "CONSUME", locationId: null }),
+      ]);
+    }
+  });
+
+  it("writes nothing when every unit came back", () => {
+    expect(
+      checkinStockEvents({
+        slice: null,
+        disposition: { consumed: 0 },
+        bookingId: "b-1",
+        bookingAssetId: null,
+      })
+    ).toEqual([]);
   });
 });
 

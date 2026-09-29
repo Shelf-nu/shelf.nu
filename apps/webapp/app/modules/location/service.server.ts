@@ -20,6 +20,10 @@ import {
 } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { lockAssetsForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockStates,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -2272,6 +2276,11 @@ export async function updateLocationAssets({
         tx,
         lockedPools.map((pool) => ({ id: pool.id, total: pool.quantity ?? 0 }))
       );
+      /** The pools' stock before the writes, for the ledger's MOVE rows. */
+      const stockBefore = await readStockStates(tx, {
+        assetIds: lockedPools.map((pool) => pool.id),
+        organizationId,
+      });
 
       // Drop the prior manual row for each INDIVIDUAL being moved
       // across locations, done BEFORE the createMany below so the
@@ -2431,6 +2440,20 @@ export async function updateLocationAssets({
             removedAssetIds.includes(assetId) ? null : locationId,
         }))
       );
+
+      /**
+       * Totals never change here, so every unit placed at, raised at,
+       * lowered at or removed from this location is a MOVE to or from the
+       * pool's unplaced units.
+       */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId,
+        changes: lockedPools.map((pool) => ({
+          assetId: pool.id,
+          before: stockBefore.get(pool.id),
+        })),
+      });
     });
 
     for (const { assetId, result } of rehomes) {

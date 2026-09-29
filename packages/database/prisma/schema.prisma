@@ -238,6 +238,11 @@ model Asset {
   // to/below minQuantity (alert sent), cleared when it recovers above. Prevents
   // re-alerting on every subsequent decrement while already low.
   lowStockNotifiedAt DateTime?
+  // When the stock ledger (`ConsumptionLog.stockChange`) started recording
+  // every change to this pool: its creation, or the first change for a pool
+  // that existed before (see `OPENING_BALANCE`). NULL until then, and always
+  // for INDIVIDUAL assets.
+  stockLedgerStartedAt DateTime?
 
   // Datetime
   createdAt DateTime @default(now())
@@ -336,6 +341,9 @@ enum ConsumptionCategory {
   LOSS // Items reported lost or missing (will not be returned)
   CONSUME // Items used as intended (ONE_WAY consumables — e.g. AA batteries, latex gloves)
   DAMAGE // Items returned but unusable — distinct from LOSS for reporting
+  MOVE // Units moved between locations, or between a location and the unplaced units. One row per side; the total does not change
+  INITIAL // Stock the asset was created with (create form, import, backup restore)
+  OPENING_BALANCE // Stock held at each location when the ledger started for a pool that existed before it
 }
 
 model AssetFilterPreset {
@@ -1525,7 +1533,7 @@ model ConsumptionLog {
   asset     Asset               @relation(fields: [assetId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   assetId   String
   category  ConsumptionCategory
-  quantity  Int // Always positive. Direction determined by category (Decision #9).
+  quantity  Int // Always positive (Decision #9). The direction is the sign of `stockChange`.
   note      String?
 
   performedBy User   @relation(fields: [userId], references: [id])
@@ -1563,6 +1571,18 @@ model ConsumptionLog {
   // the unplaced units and for rows written before the column existed.
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   locationId String?
+
+  // The signed change this row made to the stock held at `locationId`:
+  // positive when units arrived, negative when they left, 0 for a CHECKOUT or
+  // RETURN, which hands units out or takes them back without changing stock.
+  // Where it is non-zero, a NULL `locationId` means the unplaced units, never
+  // "unknown". From the asset's `stockLedgerStartedAt` on, the rows sum to the
+  // live stock: per location to the manual `AssetLocation.quantity`, with a
+  // NULL location to the unplaced units, and in total to `Asset.quantity`.
+  // Written only through `recordStockChanges`
+  // (`modules/consumption-log/stock-ledger.server.ts`). NULL on rows written
+  // before the ledger recorded every change.
+  stockChange Int?
 
   // Datetime
   createdAt DateTime @default(now())

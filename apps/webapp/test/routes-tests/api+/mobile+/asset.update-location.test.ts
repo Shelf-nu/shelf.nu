@@ -14,6 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // transaction; stubbing the client avoids the real Prisma client (no DB in
 // unit tests). `$transaction` runs its callback against a tx stub so the
 // pivot writes and the in-tx re-read stay observable.
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findUnique: vi.fn() },
@@ -56,6 +66,10 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
@@ -220,6 +234,41 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.deleteMany).toHaveBeenCalledWith({
       where: { assetId: "asset-1", assetKitId: null },
     });
+  });
+
+  it("hands the stock ledger the pool's stock from before the collapse", async () => {
+    const before = {
+      total: 10,
+      placed: new Map([["loc-store", 10]]),
+      ledgerStartedAt: null,
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(before);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(status).toBe(200);
+    expect(readStockState).toHaveBeenCalledWith(tx, {
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+    // Read before the collapse, recorded after it: the ledger diffs the two.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(tx.assetLocation.deleteMany).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      userId: expect.any(String),
+      changes: [{ assetId: "asset-1", before }],
+    });
+    expect(
+      vi.mocked(recordStockChanges).mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      vi.mocked(tx.assetLocation.create).mock.invocationCallOrder[0]
+    );
   });
 
   it("records the placed quantity on the event and in the note", async () => {

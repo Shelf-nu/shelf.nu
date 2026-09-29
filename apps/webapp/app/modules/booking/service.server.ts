@@ -83,6 +83,10 @@ import {
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
   bookingWriteScopeClause,
@@ -147,6 +151,7 @@ import {
 import type { SourceLocationSubmission } from "./checkout-source-location";
 import {
   checkinPlacementSources,
+  checkinStockEvents,
   parseSourceLocationsFromFormData,
   sliceForDisposition,
 } from "./checkout-source-location";
@@ -5429,6 +5434,15 @@ export async function checkinBooking({
             (disposition.lost ?? 0) +
             (disposition.damaged ?? 0);
 
+          /** The pool's stock before this slice's write, for the ledger. */
+          const stockBefore =
+            poolDecrement > 0
+              ? await readStockState(tx, {
+                  assetId: slice.assetId,
+                  organizationId,
+                })
+              : null;
+
           if (poolDecrement > 0) {
             const custodyAgg = await tx.custody.aggregate({
               where: { assetId: slice.assetId },
@@ -5457,48 +5471,6 @@ export async function checkinBooking({
               assetId: slice.assetId,
               category: "RETURN",
               quantity: disposition.returned!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.consumed ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "CONSUME",
-              quantity: disposition.consumed!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.lost ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "LOSS",
-              quantity: disposition.lost!,
-              userId: userId!,
-              bookingId: id,
-              bookingAssetId: dispBookingAssetId,
-              // The location the slice's units left from: returned units go
-              // back there, used-up ones come off it.
-              locationId: slice.sourceLocationId,
-              tx,
-            });
-          }
-          if ((disposition.damaged ?? 0) > 0) {
-            await createConsumptionLog({
-              assetId: slice.assetId,
-              category: "DAMAGE",
-              quantity: disposition.damaged!,
               userId: userId!,
               bookingId: id,
               bookingAssetId: dispBookingAssetId,
@@ -5558,6 +5530,28 @@ export async function checkinBooking({
               result: reconcile,
               context: "Check-in",
               additionalData: { assetId: slice.assetId, bookingId: id },
+            });
+
+            /**
+             * Ledger rows for the destroyed units, at the places the
+             * reconcile actually took them from: the slice's source first,
+             * then the unplaced units.
+             */
+            await recordStockChanges(tx, {
+              organizationId,
+              userId: userId!,
+              changes: [
+                {
+                  assetId: slice.assetId,
+                  before: stockBefore,
+                  events: checkinStockEvents({
+                    slice,
+                    disposition,
+                    bookingId: id,
+                    bookingAssetId: dispBookingAssetId,
+                  }),
+                },
+              ],
             });
           }
 
@@ -6917,6 +6911,15 @@ export async function partialCheckinBooking({
         const poolDecrement =
           (disp.consumed ?? 0) + (disp.lost ?? 0) + (disp.damaged ?? 0);
 
+        /** The pool's stock before this disposition's write, for the ledger. */
+        const stockBefore =
+          poolDecrement > 0
+            ? await readStockState(tx, {
+                assetId: disp.assetId,
+                organizationId,
+              })
+            : null;
+
         /**
          * Pool-drain guard: `Asset.quantity` must stay ≥ current custody
          * sum. Mirrors the invariant from `adjustQuantity` — we never let
@@ -6959,42 +6962,6 @@ export async function partialCheckinBooking({
             assetId: disp.assetId,
             category: "RETURN",
             quantity: disp.returned!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
-        if ((disp.consumed ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "CONSUME",
-            quantity: disp.consumed!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
-        if ((disp.lost ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "LOSS",
-            quantity: disp.lost!,
-            userId,
-            bookingId: id,
-            bookingAssetId: dispBookingAssetId,
-            locationId: sourceSlice?.sourceLocationId ?? null,
-            tx,
-          });
-        }
-        if ((disp.damaged ?? 0) > 0) {
-          await createConsumptionLog({
-            assetId: disp.assetId,
-            category: "DAMAGE",
-            quantity: disp.damaged!,
             userId,
             bookingId: id,
             bookingAssetId: dispBookingAssetId,
@@ -7048,6 +7015,24 @@ export async function partialCheckinBooking({
             result: reconcile,
             context: "Partial check-in",
             additionalData: { assetId: disp.assetId, bookingId: id },
+          });
+
+          /** Same ledger rows as the full check-in path above. */
+          await recordStockChanges(tx, {
+            organizationId,
+            userId,
+            changes: [
+              {
+                assetId: disp.assetId,
+                before: stockBefore,
+                events: checkinStockEvents({
+                  slice: sourceSlice,
+                  disposition: disp,
+                  bookingId: id,
+                  bookingAssetId: dispBookingAssetId,
+                }),
+              },
+            ],
           });
         }
 

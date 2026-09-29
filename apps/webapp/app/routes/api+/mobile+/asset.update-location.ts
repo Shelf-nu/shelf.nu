@@ -15,6 +15,10 @@ import {
 } from "~/modules/asset/custody-source.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -238,6 +242,10 @@ export async function action({ request }: ActionFunctionArgs) {
             total: locked.quantity ?? 0,
           })
         : null;
+      /** The pool's stock before the collapse, for the ledger's MOVE rows. */
+      const stockBefore = isQty
+        ? await readStockState(tx, { assetId, organizationId })
+        : null;
 
       // Clear MANUAL placements only: kit-driven rows
       // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
@@ -269,6 +277,13 @@ export async function action({ request }: ActionFunctionArgs) {
             destinationLocationId: locationId,
           })
         : null;
+
+      /** The total does not change: the collapse is a MOVE of every unit it shifted. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId: user.id,
+        changes: [{ assetId, before: stockBefore }],
+      });
 
       /**
        * A pivot replace collapses EVERY manual placement, not just the
