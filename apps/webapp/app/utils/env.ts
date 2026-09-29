@@ -80,6 +80,7 @@ declare global {
       COMPANION_SERVERS: string;
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
+      LATEST_COMPANION_VERSION: string;
     }
   }
 }
@@ -279,6 +280,22 @@ export const INSTANCE_NAME = getEnv("INSTANCE_NAME", {
  * @see {@link file://./../routes/api+/mobile+/config.ts}
  */
 export const MIN_COMPANION_VERSION = getEnv("MIN_COMPANION_VERSION", {
+  isSecret: false,
+  isRequired: false,
+});
+
+/**
+ * Newest companion-app version in the app stores, e.g. "1.6.0".
+ *
+ * Served on `/api/mobile/config`. An app older than this shows a dismissible
+ * "new version available" banner with a store link. Unlike
+ * `MIN_COMPANION_VERSION` it blocks nothing. Leave unset (the default) to show
+ * no banner. Set it only once that version is live in BOTH stores: an earlier
+ * value sends people to a store page with nothing new to install.
+ *
+ * @see {@link file://./../routes/api+/mobile+/config.ts}
+ */
+export const LATEST_COMPANION_VERSION = getEnv("LATEST_COMPANION_VERSION", {
   isSecret: false,
   isRequired: false,
 });
