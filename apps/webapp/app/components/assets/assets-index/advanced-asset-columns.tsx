@@ -48,6 +48,7 @@ import { type AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { getStatusClasses, isOneDayEvent } from "~/utils/calendar";
 import { formatCurrency } from "~/utils/currency";
+import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
 import { getCustomFieldDisplayValue } from "~/utils/custom-fields";
 import { cleanMarkdownFormatting } from "~/utils/markdown-cleaner";
 import { isLink } from "~/utils/misc";
@@ -137,7 +138,7 @@ export function AdvancedIndexColumn({
             variant="link"
             className="text-gray text-end font-normal underline hover:text-gray-600"
             target="_blank"
-            to={`${customFieldDisplayValue}?ref=shelf-webapp`}
+            to={buildCustomFieldLinkHref(customFieldDisplayValue as string)}
           >
             {customFieldDisplayValue as string}
           </Button>

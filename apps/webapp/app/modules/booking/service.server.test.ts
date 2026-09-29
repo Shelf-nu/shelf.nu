@@ -28,6 +28,7 @@ import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   assertModelUnitsNotReservedElsewhere,
   claimUnstampedBookingRows,
@@ -339,6 +340,13 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 // why: ensuring predictable ID generation for consistent test assertions
+// why: the kit-member scan guard has its own suite next to it. Its asset read
+// would otherwise answer from every scan fixture's `asset.findMany` stub, which
+// is staged for the reads the scan path itself makes.
+vitest.mock("~/modules/booking/kit-member-scan-guard.server", () => ({
+  assertScannedUnitsAreNotKitMembers: vitest.fn(),
+}));
+
 vitest.mock("~/utils/id/id.server", () => ({
   id: vitest.fn(() => "mock-id"),
 }));
@@ -14115,6 +14123,45 @@ describe("addScannedAssetsToBooking", () => {
 
     // The booking must be untouched — the guard runs before any write.
     expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
+  it("guards every loose scan against kit membership, with no kit exempt", async () => {
+    // A client that sends a scanned kit's members as plain asset ids, with no
+    // kit slices, would book them loose and split the kit. Members of a kit
+    // scanned in the same batch arrive as `kitSlices`, so naming the kit in
+    // `kitIds` must not wave its members through `assetIds`.
+    // why: the guard is mocked for this suite; here it refuses, as it does for
+    // a kit member not yet on the booking.
+    vitest.mocked(assertScannedUnitsAreNotKitMembers).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message: `"Sony A7S3" belongs to a kit, so it can't go out on its own.`,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const refused = addScannedAssetsToBooking({
+      assetIds: ["camera-1"],
+      kitIds: ["kit-1"],
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+    });
+
+    await expect(refused).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+    });
+    expect(assertScannedUnitsAreNotKitMembers).toHaveBeenCalledWith({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      looseAssetIds: ["camera-1"],
+      exemptKitIds: [],
+    });
+    // Refused before the transaction opens, so nothing is written.
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   describe("QUANTITY_TRACKED pool", () => {

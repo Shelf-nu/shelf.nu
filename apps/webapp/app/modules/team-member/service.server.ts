@@ -328,10 +328,21 @@ export async function scopeCustodianFilterIds(args: {
   userId: string;
   organizationId: Organization["id"];
 }): Promise<string[]> {
-  const requested = args.teamMemberIds ?? [];
-  const allowed = await narrowCustodianFilterIds(args);
+  /**
+   * A blank value is not a request. `?teamMember=` arrives as `[""]`, from a
+   * cleared filter or a stale link, and carrying it through turns "no filter"
+   * into a clause no row can satisfy.
+   *
+   * Cleaned before narrowing, not after: `narrowCustodianFilterIds` returns the
+   * requested ids untouched for a caller who may see all custody, so filtering
+   * only the count here would still hand an admin a blank id to query by.
+   */
+  const teamMemberIds = (args.teamMemberIds ?? []).filter(
+    (id) => id.trim() !== ""
+  );
+  const allowed = await narrowCustodianFilterIds({ ...args, teamMemberIds });
 
-  return requested.length > 0 && allowed.length === 0
+  return teamMemberIds.length > 0 && allowed.length === 0
     ? [CUSTODY_FILTER_REFUSED]
     : allowed;
 }

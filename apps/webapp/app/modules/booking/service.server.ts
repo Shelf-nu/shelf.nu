@@ -185,8 +185,10 @@ import {
   outranksReservations,
 } from "./helpers";
 import { findConflictingKits } from "./kit-conflicts.server";
+import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
+import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
   makeIsIndividualSliceOutstanding,
@@ -13737,19 +13739,10 @@ export async function getKitIdsBySlice({
 
   const kitIdsBySliceId = new Map<string, Set<string>>();
   for (const slice of slices) {
-    const kitIds = new Set<string>();
-    if (slice.sourceKitId || slice.assetKitId) {
-      const kitId =
-        slice.sourceKitId ??
-        (slice.assetKitId
-          ? kitIdByAssetKitId.get(slice.assetKitId)
-          : undefined);
-      if (kitId) kitIds.add(kitId);
-    } else if (slice.assetType === AssetType.INDIVIDUAL) {
-      for (const membership of slice.assetKits ?? []) {
-        if (membership?.kitId) kitIds.add(membership.kitId);
-      }
-    }
+    const kitIds = resolveSliceKitIds(
+      { ...slice, assetKits: slice.assetKits ?? [] },
+      kitIdByAssetKitId
+    );
     if (kitIds.size > 0) kitIdsBySliceId.set(slice.id, kitIds);
   }
 
@@ -15593,6 +15586,15 @@ export async function addScannedAssetsToBooking({
   kitSlices?: ScannedKitSliceSpec[];
 }) {
   try {
+    // A scanned kit's members arrive as `kitSlices`, never in `assetIds`, so no
+    // kit exempts a loose member here: one in `assetIds` would be booked alone.
+    await assertScannedUnitsAreNotKitMembers({
+      bookingId,
+      organizationId,
+      looseAssetIds: assetIds,
+      exemptKitIds: [],
+    });
+
     /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
