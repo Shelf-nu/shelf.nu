@@ -426,8 +426,8 @@ importers:
         specifier: ^3.7.2
         version: 3.7.2
       nodemailer:
-        specifier: ^8.0.9
-        version: 8.0.9
+        specifier: ^10.0.2
+        version: 10.0.2
       nprogress:
         specifier: ^0.2.0
         version: 0.2.0
@@ -677,7 +677,7 @@ importers:
         version: 2.14.2(@types/node@25.3.0)(typescript@6.0.3)
       nodemailer-mock:
         specifier: ^2.0.10
-        version: 2.0.11(nodemailer@8.0.9)
+        version: 2.0.11(nodemailer@10.0.2)
       npm-run-all:
         specifier: ^4.1.5
         version: 4.1.5
@@ -1028,6 +1028,11 @@ packages:
 
   '@babel/parser@7.29.8':
     resolution: {integrity: sha512-E8lTAYNB1KW+FH+VGJuZM1ioAx2E6oVlvQFRrf5P8ZZmsiJXYAD9vTFV7yyEURNzgh1dFqMZuO6tUwcARbqFCA==}
+    engines: {node: '>=6.0.0'}
+    hasBin: true
+
+  '@babel/parser@7.29.9':
+    resolution: {integrity: sha512-CjXrNHTnvqBVqHgdBysY3vk2T8tpJHb5/RMeHJBTyVa9xgugCB0CJTx/3oO8RV2QRQP391RWpB7D6hLjm8V9uA==}
     engines: {node: '>=6.0.0'}
     hasBin: true
 
@@ -8559,9 +8564,9 @@ packages:
     peerDependencies:
       nodemailer: ^6.x || ^7.x || ^8.x
 
-  nodemailer@8.0.9:
-    resolution: {integrity: sha512-5ofa7BUN8+C+Hckh5V2GjeeOGRQBx0CJQA6KxrvuZfC8iU4/q7sLn8XrtEEhJkjV6HdyIiQs7Bba6bTao8JhkA==}
-    engines: {node: '>=6.0.0'}
+  nodemailer@10.0.2:
+    resolution: {integrity: sha512-83mO0TnWXySiJXdMAIUYmlXYdJ2KUq/w8EJgc4ogKU2UssaHf7ZPeuHcb4YCxeNiM0DDshnm291U0/ClrSZZsg==}
+    engines: {node: '>=20.0.0'}
 
   normalize-package-data@2.5.0:
     resolution: {integrity: sha512-/5CMN3T0R4XTj4DcGaexo+roZSdSFW/0AOOTROrjxzCG1wrWXEsGbRKevjlIL+ZDE4sZlJr5ED4YW0yqmkK+eA==}
@@ -11119,7 +11124,7 @@ snapshots:
 
   '@babel/generator@7.29.8':
     dependencies:
-      '@babel/parser': 7.29.8
+      '@babel/parser': 7.29.9
       '@babel/types': 7.29.8
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
@@ -11261,6 +11266,10 @@ snapshots:
       '@babel/types': 7.29.0
 
   '@babel/parser@7.29.8':
+    dependencies:
+      '@babel/types': 7.29.8
+
+  '@babel/parser@7.29.9':
     dependencies:
       '@babel/types': 7.29.8
 
@@ -11686,7 +11695,7 @@ snapshots:
   '@babel/template@7.29.7':
     dependencies:
       '@babel/code-frame': 7.29.7
-      '@babel/parser': 7.29.8
+      '@babel/parser': 7.29.9
       '@babel/types': 7.29.8
 
   '@babel/traverse@7.29.0':
@@ -11706,7 +11715,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/generator': 7.29.8
       '@babel/helper-globals': 7.29.7
-      '@babel/parser': 7.29.8
+      '@babel/parser': 7.29.9
       '@babel/template': 7.29.7
       '@babel/types': 7.29.8
       debug: 4.4.3
@@ -19152,7 +19161,7 @@ snapshots:
 
   magicast@0.3.5:
     dependencies:
-      '@babel/parser': 7.29.8
+      '@babel/parser': 7.29.9
       '@babel/types': 7.29.8
       source-map-js: 1.2.1
     optional: true
@@ -19742,14 +19751,14 @@ snapshots:
 
   node-releases@2.0.27: {}
 
-  nodemailer-mock@2.0.11(nodemailer@8.0.9):
+  nodemailer-mock@2.0.11(nodemailer@10.0.2):
     dependencies:
       debug: 4.4.3
-      nodemailer: 8.0.9
+      nodemailer: 10.0.2
     transitivePeerDependencies:
       - supports-color
 
-  nodemailer@8.0.9: {}
+  nodemailer@10.0.2: {}
 
   normalize-package-data@2.5.0:
     dependencies:
