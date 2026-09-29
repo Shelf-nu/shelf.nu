@@ -98,6 +98,9 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
     let latestRequest = 0;
     const check = () => {
       const request = ++latestRequest;
+      // The answer belongs to the server that gave it: drop it while the
+      // active server is asked, so a switch never shows the last one's banner.
+      setLatestVersion(null);
       void Promise.all([
         fetchLatestCompanionVersion(),
         readDismissedVersion(),
