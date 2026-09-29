@@ -133,7 +133,85 @@ describe("releaseCustody status write", () => {
     // incidental: `assetId` is request input, so this delete proves org
     // ownership rather than relying on a later read to roll it back.
     expect(db.custody.deleteMany).toHaveBeenCalledWith({
-      where: { assetId: "asset-1", asset: { organizationId: "org-1" } },
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
     });
+  });
+});
+
+describe("releaseCustody kit-derived custody guard", () => {
+  beforeEach(() => {
+    // Same reason as the suite above: `clearAllMocks` clears calls but NOT
+    // implementations, so both defaults have to be re-established here or a
+    // `{ count: 0 }` left behind by the shortfall test models a CHECKED_OUT
+    // asset in every test below it. `mockResolvedValue` (not `...Once`) so no
+    // queued value can survive into the next test and answer its guard read.
+    vitest.clearAllMocks();
+    (db.custody.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      null
+    );
+    (db.asset.updateMany as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      count: 1,
+    });
+  });
+
+  it("aborts before the status write when a kit holds custody of the asset", async () => {
+    // why the name is about ORDERING, not rollback: `db.$transaction` is mocked
+    // as `(cb) => cb(db)`, so there is no transaction here and nothing to roll
+    // back. What this can prove — and what actually matters — is that the guard
+    // fires before anything marks the asset AVAILABLE. The rollback itself is
+    // Prisma's, guaranteed by the throw escaping `$transaction` in production.
+    vitest
+      .mocked(db.custody.findFirst)
+      .mockResolvedValue({ assetId: "asset-1" } as never);
+
+    await expect(
+      releaseCustody({
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        role: OrganizationRoles.ADMIN,
+      })
+    ).rejects.toThrow(/release the kit/i);
+
+    // The delete may run first, but only ever against operator rows...
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+    });
+    // ...and the guard aborts before any status write can mark the asset
+    // AVAILABLE while the kit still names a custodian.
+    expect(db.asset.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("releases operator-assigned custody untouched by any kit", async () => {
+    // why: the guard reads through the same mocked findFirst; null models an
+    // asset whose custody rows are all operator-assigned. The beforeEach
+    // already sets this — restated so the case under test is readable here.
+    vitest.mocked(db.custody.findFirst).mockResolvedValue(null as never);
+
+    await releaseCustody({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(db.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-1",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+    });
+    // ...and the release actually completes. Without this the test would still
+    // pass if the guard rejected the asset, since the delete above runs first.
+    expect(db.asset.updateMany).toHaveBeenCalled();
   });
 });

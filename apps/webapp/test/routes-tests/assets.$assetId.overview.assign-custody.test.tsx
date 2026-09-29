@@ -39,6 +39,10 @@ const dbMocks = vi.hoisted(() => {
     custody: {
       // why: action now clears stale custody before assignment
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      // why: the action refuses to assign over custody a KIT put on the asset,
+      // and reads this to detect it. Defaults to null — no kit-derived row —
+      // so every existing case exercises the ordinary assignment path.
+      findFirst: vi.fn().mockResolvedValue(null),
     },
   };
 });
@@ -62,11 +66,15 @@ vi.mock("~/database/db.server", () => ({
     },
     custody: {
       deleteMany: dbMocks.custody.deleteMany,
+      findFirst: dbMocks.custody.findFirst,
     },
     // why: action wraps custody cleanup + assignment in a transaction
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
-        custody: { deleteMany: dbMocks.custody.deleteMany },
+        custody: {
+          deleteMany: dbMocks.custody.deleteMany,
+          findFirst: dbMocks.custody.findFirst,
+        },
         asset: {
           update: dbMocks.asset.update,
           // why: `findFirst` runs only on the rejection path, to name the
@@ -182,6 +190,14 @@ beforeEach(() => {
   mockTeamMemberFindMany.mockReset();
   mockTeamMemberCount.mockReset();
   mockGetTeamMember.mockReset();
+
+  // `clearAllMocks` keeps implementations, so a test that models a kit-derived
+  // row would leave it answering every test after it. Re-establish the default
+  // — no kit custody — the same way the other mocks above are reset.
+  dbMocks.custody.findFirst.mockReset();
+  dbMocks.custody.findFirst.mockResolvedValue(null);
+  dbMocks.custody.deleteMany.mockReset();
+  dbMocks.custody.deleteMany.mockResolvedValue({ count: 0 });
 
   // Reset service mocks
   getAssetMock.mockReset();
@@ -326,6 +342,59 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       },
     });
 
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to assign over custody that a kit put on the asset", async () => {
+    // why this is a route test and not a service one: the guard lives in the
+    // action, and the hole it closes is reachable ONLY by posting here. The
+    // page hides itself when the asset already has custody, but the action is
+    // the boundary — a direct POST skips the page entirely, which is the same
+    // argument that made a disabled button insufficient for the release path.
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: "org-1" }],
+    } as any);
+
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+
+    // The asset's kit is in custody, so the asset carries a kit-derived row.
+    dbMocks.custody.findFirst.mockResolvedValue({ assetId: "asset-123" });
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+
+    const response = await action(
+      createActionArgs({
+        request: new Request(
+          "https://example.com/assets/asset-123/overview/assign-custody",
+          { method: "POST", body: formData }
+        ),
+      })
+    );
+
+    // 400, not a redirect: the assignment is refused outright.
+    expect((response as Response).status).toBe(400);
+
+    // The delete must never have been able to reach the kit's row — the scope
+    // is what keeps it alive for the guard to find.
+    expect(dbMocks.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: "asset-123",
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+    });
+
+    // ...and nothing downstream ran: no custodian written, no note.
     expect(mockAssetUpdate).not.toHaveBeenCalled();
     expect(createNoteMock).not.toHaveBeenCalled();
   });

@@ -9,7 +9,17 @@ const decodeHtmlEntities = (text: string): string =>
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">");
 
-const MARKDOC_TAG_REGEX = /{%\s*(\w+)\s*([^%]*?)\s*\/%}/g;
+/**
+ * A self-closing Markdoc tag, captured as `(name)(attributes)`.
+ *
+ * Attributes are matched one at a time, so a quoted value may hold any
+ * character but a quote. That matters most for `%`: it is ordinary text in the
+ * values these tags carry — a title like `Summer Sale 50% Off`, a description
+ * reading `Battery at 30% capacity` — and a pattern that treats it as part of
+ * the closing delimiter matches no such tag at all, leaving raw tag syntax in
+ * the CSV and PDF a customer downloads.
+ */
+const MARKDOC_TAG_REGEX = /{%\s*(\w+)((?:\s+\w+=(?:"[^"]*"|[^\s"]+))*)\s*\/%}/g;
 
 const parseMarkdocAttributes = (rawAttributes: string) => {
   const attributes: Record<string, string> = {};

@@ -24,6 +24,25 @@ export declare const ASSET_BOOKING_PSEUDO_STATUS_LABELS: {
   readonly PARTIALLY_CHECKED_OUT: "Partially checked out";
 };
 
+/**
+ * How a kit's state is named, on the website and on the phone.
+ *
+ * `AVAILABLE`, `IN_CUSTODY` and `CHECKED_OUT` are the persisted `KitStatus`
+ * enum; `PARTIALLY_CHECKED_IN` is derived by a booking for a kit whose every
+ * member it holds has been checked back in while the booking still runs.
+ *
+ * The three enum entries carry the same wording as {@link ASSET_STATUS_LABELS}
+ * without being spread from it — a booking shows a kit and the assets inside it
+ * on one screen, so the strings must agree, while the key set must keep
+ * tracking `KitStatus` alone.
+ */
+export declare const KIT_STATUS_LABELS: {
+  readonly AVAILABLE: "Available";
+  readonly IN_CUSTODY: "In custody";
+  readonly CHECKED_OUT: "Checked out";
+  readonly PARTIALLY_CHECKED_IN: "Already checked in";
+};
+
 export declare const BOOKING_STATUS_LABELS: {
   readonly DRAFT: "Draft";
   readonly RESERVED: "Reserved";
@@ -180,3 +199,28 @@ export declare const AUDIT_STATUS_TONES: Readonly<
 export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
   Record<AuditAssetStatusKey, StatusTone>
 >;
+
+export declare const ASSET_TYPE_LABELS: {
+  readonly INDIVIDUAL: "Individually tracked";
+  readonly QUANTITY_TRACKED: "Tracked by quantity";
+};
+
+export declare const CONSUMPTION_TYPE_LABELS: {
+  readonly ONE_WAY: "Used up (one-way)";
+  readonly TWO_WAY: "Returnable (two-way)";
+};
+
+export declare const CONSUMPTION_TYPE_DESCRIPTIONS: {
+  readonly ONE_WAY: "consumed and not returned";
+  readonly TWO_WAY: "checked out and returned";
+};
+
+export declare const ASSET_TYPE_ADJECTIVES: {
+  readonly INDIVIDUAL: "individually tracked";
+  readonly QUANTITY_TRACKED: "quantity-tracked";
+};
+
+export declare const CONSUMPTION_TYPE_ADJECTIVES: {
+  readonly ONE_WAY: "used up";
+  readonly TWO_WAY: "returnable";
+};

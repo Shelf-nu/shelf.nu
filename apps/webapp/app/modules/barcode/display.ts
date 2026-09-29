@@ -33,6 +33,34 @@ import type {
 } from "@prisma/client";
 
 /**
+ * Order for reading an entity's `qrCodes` relation whenever the result feeds
+ * {@link resolveDisplayCode}, which takes the first entry.
+ *
+ * `Qr.assetId` and `Qr.kitId` are indexed but not unique. Linking a code
+ * replaces the relation wholesale, so an entity normally carries one QR — but
+ * nothing in the schema guarantees it, and without an order two reads of the
+ * same entity can pick different codes. Oldest first, with `id` settling the
+ * ties that a batch of codes generated in one statement produces.
+ */
+export const QR_CODES_ORDER_BY: Prisma.QrOrderByWithRelationInput[] = [
+  { createdAt: "asc" },
+  { id: "asc" },
+];
+
+/**
+ * Order for reading an entity's `barcodes` relation whenever the result is
+ * offered as a list the reader can choose from.
+ *
+ * Nothing about a barcode row implies an order, so without one the codes come
+ * back in whatever order the database happens to return — which can differ
+ * between two reads of the same entity, moving the chips under a reader's
+ * thumb. Oldest first, with `id` settling ties, so the list an entity presents
+ * is the same every time.
+ */
+export const BARCODE_CODES_ORDER_BY: Prisma.BarcodeOrderByWithRelationInput[] =
+  [{ createdAt: "asc" }, { id: "asc" }];
+
+/**
  * Prisma `select` fragment for the asset fields a list-view loader must
  * include to call `resolveDisplayCode`. Designed to be spread into a
  * larger select clause:
@@ -46,14 +74,15 @@ import type {
  *     },
  *   });
  *
- * Tight by design: only fields the resolver reads. `qrCodes: { take: 1 }`
- * leverages the schema invariant that every asset has exactly one active
- * QR; older orphaned QRs (`assetId = null`) are excluded by the relation.
+ * Tight by design: only fields the resolver reads. One QR is enough because
+ * the resolver only ever shows the first; {@link QR_CODES_ORDER_BY} makes
+ * "first" the same row on every read. Orphaned QRs (`assetId = null`) are
+ * outside the relation and never appear.
  */
 export const ASSET_CODE_RESOLUTION_SELECT = {
   sequentialId: true,
   preferredBarcodeId: true,
-  qrCodes: { take: 1, select: { id: true } },
+  qrCodes: { take: 1, orderBy: QR_CODES_ORDER_BY, select: { id: true } },
   barcodes: { select: { id: true, type: true, value: true } },
 } as const satisfies Prisma.AssetSelect;
 
@@ -264,4 +293,100 @@ export function resolveDisplayCode({
         : qrFallback(true);
     }
   }
+}
+
+/** Why a resolved code is not the one its workspace prefers. */
+export type CodeFallbackExplanation = {
+  /** One sentence naming the preferred code and why it is not shown. */
+  text: string;
+  /**
+   * Whether the entity could ever carry the preferred code. False for a kit on
+   * a SAM ID workspace: `Kit` has no `sequentialId`, so advice to add one is
+   * advice nobody can follow.
+   */
+  fixable: boolean;
+};
+
+/**
+ * Words a fallback: which code the workspace prefers, and why this entity is
+ * not showing it.
+ *
+ * The one wording of a fallback. The web badge's tooltip and the mobile API's
+ * `displayCode` payload both read it, so the two apps explain a fallback in the
+ * same words.
+ *
+ * @param resolved - The output of {@link resolveDisplayCode}, or the fields of
+ *   it this reads
+ * @returns The explanation, or `null` when the resolved code is the preferred
+ *   one
+ */
+export function describeCodeFallback(
+  resolved: Pick<
+    ResolvedDisplayCode,
+    "type" | "isFallback" | "workspacePreference" | "entityKind"
+  >
+): CodeFallbackExplanation | null {
+  if (!resolved.isFallback) return null;
+
+  const preferredLabel = labelForPreference(resolved.workspacePreference);
+
+  // Only SAM_ID can make a kit fall back for want of a code it can never
+  // have. Kits carry their own QR and barcodes, so every other preference
+  // reads the same for a kit as for an asset.
+  if (
+    resolved.entityKind === "kit" &&
+    resolved.workspacePreference === "SAM_ID"
+  ) {
+    return {
+      text: `Your workspace prefers ${preferredLabel}, which kits do not have. Showing the ${labelForPreference(
+        resolved.type
+      )} instead.`,
+      fixable: false,
+    };
+  }
+
+  return {
+    text: `Your workspace prefers ${preferredLabel} but this item has no ${preferredLabel}.`,
+    fixable: true,
+  };
+}
+
+/** A resolved code as the mobile API sends it. */
+export type DisplayCodePayload = {
+  /** The code's value: a QR id, a SAM ID, or a barcode value. */
+  value: string;
+  /** Names the code that IS shown ("Code 128"), never the preference. */
+  label: string;
+  /** The type of the code shown, so the client can pick a renderer. */
+  type: QrIdDisplayPreference;
+  /** True when the workspace's preferred code could not be shown. */
+  isFallback: boolean;
+  /**
+   * The sentence explaining a fallback, from {@link describeCodeFallback}.
+   * `null` unless `isFallback`.
+   */
+  fallbackNote: string | null;
+};
+
+/**
+ * Shapes a resolved code for a mobile API response.
+ *
+ * Every mobile route that sends `displayCode` builds it here, so the contract
+ * the companion reads is the same on every endpoint.
+ *
+ * @param resolved - The output of {@link resolveDisplayCode}
+ * @returns The payload, or `null` when the entity has no code to show
+ */
+export function serializeDisplayCode(
+  resolved: ResolvedDisplayCode
+): DisplayCodePayload | null {
+  if (!resolved.value) return null;
+
+  return {
+    value: resolved.value,
+    label: labelForPreference(resolved.type),
+    type: resolved.type,
+    isFallback: resolved.isFallback,
+    fallbackNote: describeCodeFallback(resolved)?.text ?? null,
+  };
 }

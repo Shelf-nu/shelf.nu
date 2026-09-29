@@ -13,11 +13,26 @@
  * The sheet's explicit confirm button IS the confirmation step — callers must
  * not stack a second Alert on top of `onSubmit`.
  *
+ * Confirming does not close the sheet. The caller sends the request with the
+ * sheet still open and passes `isSubmitting` while it runs; the inputs lock,
+ * the confirm button shows a spinner, and the sheet cannot be dismissed until
+ * the request settles. It closes only once the server accepts the change, so
+ * a refusal keeps the entered numbers.
+ *
  * @see {@link file://../app/(tabs)/assets/[id].tsx} assign/release consumers
+ * @see {@link file://../app/(tabs)/bookings/[id].tsx} the check-out queue consumer
+ * @see {@link file://../app/(tabs)/bookings/add-assets.tsx} the reserve-model consumer
  * @see {@link file://./team-member-picker.tsx} the modal contract this mirrors
  */
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  Modal,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -34,7 +49,14 @@ type Props = {
   subtitle?: string;
   /** Upper bound for the quantity (inclusive). Submit is disabled above it. */
   max: number;
-  /** Initial value when the sheet opens (clamped to [1, max]). Defaults to 1. */
+  /**
+   * Lower bound for the quantity (inclusive). Defaults to 1, which is the
+   * floor for a plain count. Raise it when part of the quantity is already
+   * committed and cannot be taken back — editing a booking's model
+   * reservation cannot drop below the units already assigned to the booking.
+   */
+  min?: number;
+  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
@@ -59,11 +81,22 @@ type Props = {
    */
   destructive?: boolean;
   /**
+   * True while the confirmed action's request runs. Locks the inputs, shows a
+   * spinner on the confirm button, and blocks dismissal until the request
+   * settles.
+   */
+  isSubmitting?: boolean;
+  /**
    * Called with the validated quantity when the user confirms, plus the
-   * secondary value when a `secondary` field is configured.
+   * secondary value when a `secondary` field is configured. The caller
+   * performs the request with the sheet still open and closes it only once
+   * the server accepts the change.
    */
   onSubmit: (quantity: number, secondaryValue?: number) => void;
-  /** Called when the user dismisses the sheet without confirming. */
+  /**
+   * Called when the user dismisses the sheet without confirming. Never called
+   * while `isSubmitting`.
+   */
   onClose: () => void;
 };
 
@@ -82,11 +115,13 @@ export function QuantityInputSheet({
   title,
   subtitle,
   max,
+  min = 1,
   defaultValue,
   unitOfMeasure,
   secondary,
   confirmLabel,
   destructive,
+  isSubmitting = false,
   onSubmit,
   onClose,
 }: Props) {
@@ -110,7 +145,10 @@ export function QuantityInputSheet({
   // action (different member/holder), so stale values must not leak across.
   useEffect(() => {
     if (visible) {
-      const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
+      const seed = Math.min(
+        Math.max(defaultValue ?? min, min),
+        Math.max(max, min)
+      );
       setValue(String(seed));
       if (hasSecondaryField) {
         // Clamp the secondary seed to the primary seed — the two fields move
@@ -120,12 +158,20 @@ export function QuantityInputSheet({
         );
       }
     }
-  }, [visible, defaultValue, max, hasSecondaryField, secondaryDefaultValue]);
+  }, [
+    visible,
+    defaultValue,
+    max,
+    min,
+    hasSecondaryField,
+    secondaryDefaultValue,
+  ]);
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const overMax = hasValue && parsed > max;
-  const isValid = hasValue && parsed >= 1 && parsed <= max;
+  const underMin = hasValue && parsed < min;
+  const isValid = hasValue && parsed >= min && parsed <= max;
 
   const parsedSecondary = secondaryValue ? parseInt(secondaryValue, 10) : NaN;
   const hasSecondary = Number.isFinite(parsedSecondary);
@@ -136,7 +182,9 @@ export function QuantityInputSheet({
       parsedSecondary >= 0 &&
       hasValue &&
       parsedSecondary <= parsed);
-  const canConfirm = isValid && isSecondaryValid;
+  const canConfirm = isValid && isSecondaryValid && !isSubmitting;
+  const canDecrease = !isSubmitting && hasValue && parsed > min;
+  const canIncrease = !isSubmitting && !(hasValue && parsed >= max);
 
   /**
    * Pull the secondary value down when the primary quantity drops below it.
@@ -158,23 +206,34 @@ export function QuantityInputSheet({
     });
   };
 
-  /** Step the current value by `delta`, clamped to [1, max]. */
+  /** Step the current value by `delta`, clamped to [min, max]. */
   const step = (delta: number) => {
     const current = hasValue ? parsed : 0;
-    const next = Math.min(Math.max(current + delta, 1), Math.max(max, 1));
+    const next = Math.min(Math.max(current + delta, min), Math.max(max, min));
     setValue(String(next));
     clampSecondaryTo(next);
   };
 
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
+  const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
+
+  /**
+   * Every dismissal path goes through here. A request in flight decides
+   * whether the sheet closes, and a refusal must find the entered numbers
+   * still on screen, so dismissal waits for it to settle.
+   */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       // why: imperative focus once the sheet has actually presented — an
       // autoFocus prop fires before the modal animation and misses the
       // keyboard (and jsx-a11y/no-autofocus flags it).
@@ -185,10 +244,12 @@ export function QuantityInputSheet({
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{title}</Text>
           <TouchableOpacity
-            onPress={onClose}
-            style={styles.closeButton}
+            onPress={requestClose}
+            disabled={isSubmitting}
+            style={[styles.closeButton, isSubmitting && styles.dismissDisabled]}
             accessibilityLabel={`Close ${title.toLowerCase()}`}
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Ionicons name="close" size={24} color={colors.foreground} />
           </TouchableOpacity>
@@ -202,14 +263,14 @@ export function QuantityInputSheet({
             <TouchableOpacity
               style={[
                 styles.stepButton,
-                (!hasValue || parsed <= 1) && styles.stepButtonDisabled,
+                !canDecrease && styles.stepButtonDisabled,
               ]}
               onPress={() => step(-1)}
-              disabled={!hasValue || parsed <= 1}
+              disabled={!canDecrease}
               activeOpacity={0.7}
               accessibilityLabel="Decrease quantity"
               accessibilityRole="button"
-              accessibilityState={{ disabled: !hasValue || parsed <= 1 }}
+              accessibilityState={{ disabled: !canDecrease }}
             >
               <Ionicons name="remove" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -228,23 +289,28 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={`Max: ${max}`}
+              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
               placeholderTextColor={colors.placeholderText}
+              editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
-              accessibilityLabel={`Quantity, maximum ${maxLabel}`}
+              accessibilityLabel={
+                min > 1
+                  ? `Quantity, between ${minLabel} and ${maxLabel}`
+                  : `Quantity, maximum ${maxLabel}`
+              }
             />
             <TouchableOpacity
               style={[
                 styles.stepButton,
-                hasValue && parsed >= max && styles.stepButtonDisabled,
+                !canIncrease && styles.stepButtonDisabled,
               ]}
               onPress={() => step(1)}
-              disabled={hasValue && parsed >= max}
+              disabled={!canIncrease}
               activeOpacity={0.7}
               accessibilityLabel="Increase quantity"
               accessibilityRole="button"
-              accessibilityState={{ disabled: hasValue && parsed >= max }}
+              accessibilityState={{ disabled: !canIncrease }}
             >
               <Ionicons name="add" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -253,6 +319,8 @@ export function QuantityInputSheet({
           {/* Echo / bounds hint under the input */}
           {overMax ? (
             <Text style={styles.errorHint}>Only {maxLabel} available.</Text>
+          ) : underMin ? (
+            <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
               {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
@@ -271,6 +339,7 @@ export function QuantityInputSheet({
                 }}
                 placeholder="0"
                 placeholderTextColor={colors.placeholderText}
+                editable={!isSubmitting}
                 keyboardType="number-pad"
                 returnKeyType="done"
                 accessibilityLabel={secondary.label}
@@ -298,9 +367,16 @@ export function QuantityInputSheet({
             activeOpacity={0.7}
             accessibilityLabel={`${confirmLabel} ${echo ?? "quantity"}`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !canConfirm }}
+            accessibilityState={{ disabled: !canConfirm, busy: isSubmitting }}
           >
-            <Text style={styles.confirmText}>{confirmLabel}</Text>
+            {isSubmitting ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <Text style={styles.confirmText}>{confirmLabel}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -329,6 +405,9 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   closeButton: {
     padding: spacing.xs,
+  },
+  dismissDisabled: {
+    opacity: 0.5,
   },
   body: {
     paddingHorizontal: spacing.lg,

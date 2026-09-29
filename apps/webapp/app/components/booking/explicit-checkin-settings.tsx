@@ -1,12 +1,22 @@
-import { useFetcher } from "react-router";
-import { useZorm } from "react-zorm";
+/**
+ * Explicit Check-in Settings
+ *
+ * The "Explicit check-in requirement" card on Settings > Bookings. When a
+ * switch is on, that role cannot use the one-click quick check-in: the web
+ * check-in control links straight to the explicit check-in page, and the
+ * quick check-in is refused on the server (web and mobile).
+ *
+ * @see {@link file://./explicit-requirement-settings-card.tsx} - shared layout
+ * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the
+ *   `updateExplicitCheckin` action that persists it
+ */
 import z from "zod";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { tw } from "~/utils/tw";
-import FormRow from "../forms/form-row";
-import { Switch } from "../forms/switch";
-import { Card } from "../shared/card";
+import { ExplicitRequirementSettingsCard } from "./explicit-requirement-settings-card";
 
+/**
+ * Parses the explicit check-in switches. A checked switch submits `"on"` and an
+ * unchecked one submits nothing, so each field defaults to `false`.
+ */
 export const ExplicitCheckinSettingsSchema = z.object({
   requireExplicitCheckinForAdmin: z
     .string()
@@ -18,96 +28,42 @@ export const ExplicitCheckinSettingsSchema = z.object({
     .default("false"),
 });
 
+type ExplicitCheckinField = keyof z.infer<typeof ExplicitCheckinSettingsSchema>;
+
+/**
+ * Renders the explicit check-in card.
+ *
+ * @param props.header - Card title and sub-heading
+ * @param props.defaultValues - The persisted value of each switch
+ * @returns The settings card
+ */
 export function ExplicitCheckinSettings({
   header,
   defaultValues,
 }: {
   header: { title: string; subHeading?: string };
-  defaultValues: {
-    requireExplicitCheckinForAdmin: boolean;
-    requireExplicitCheckinForSelfService: boolean;
-  };
+  defaultValues: Record<ExplicitCheckinField, boolean>;
 }) {
-  const fetcher = useFetcher();
-  const { isOwner } = useUserRoleHelper();
-  const zo = useZorm("ExplicitCheckinForm", ExplicitCheckinSettingsSchema);
-
   return (
-    <Card className={tw("my-0")}>
-      <div className="mb-4 border-b pb-4">
-        <h3 className="text-text-lg font-semibold">{header.title}</h3>
-        <p className="text-sm text-gray-600">{header.subHeading}</p>
-      </div>
-      <div>
-        <fetcher.Form
-          ref={zo.ref}
-          method="post"
-          onChange={(e) => {
-            if (isOwner) {
-              void fetcher.submit(e.currentTarget);
-            }
-          }}
-        >
-          <FormRow
-            rowLabel="Require explicit check-in for Admins"
-            subHeading={
-              <div>
-                When enabled, administrators must use the scanner-based explicit
-                check-in flow instead of the one-click quick check-in.
-              </div>
-            }
-            className="border-b-0 pb-[10px] pt-0"
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={zo.fields.requireExplicitCheckinForAdmin()}
-                disabled={!isOwner}
-                defaultChecked={defaultValues.requireExplicitCheckinForAdmin}
-                title="Require explicit check-in for Admins"
-              />
-              <label
-                htmlFor={`requireExplicitCheckinForAdmin-${zo.fields.requireExplicitCheckinForAdmin()}`}
-                className="hidden text-gray-500"
-              >
-                Require explicit check-in for Admins
-              </label>
-            </div>
-          </FormRow>
-          <FormRow
-            rowLabel="Require explicit check-in for Self Service"
-            subHeading={
-              <div>
-                When enabled, self-service users must use the scanner-based
-                explicit check-in flow instead of the one-click quick check-in.
-              </div>
-            }
-            className="mt-4 border-b-0 pb-[10px] pt-0"
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Switch
-                name={zo.fields.requireExplicitCheckinForSelfService()}
-                disabled={!isOwner}
-                defaultChecked={
-                  defaultValues.requireExplicitCheckinForSelfService
-                }
-                title="Require explicit check-in for Self Service"
-              />
-              <label
-                htmlFor={`requireExplicitCheckinForSelfService-${zo.fields.requireExplicitCheckinForSelfService()}`}
-                className="hidden text-gray-500"
-              >
-                Require explicit check-in for Self Service
-              </label>
-            </div>
-          </FormRow>
-          {!isOwner && (
-            <p className="text-sm text-gray-500">
-              Only the workspace owner can change this setting.
-            </p>
-          )}
-          <input type="hidden" value="updateExplicitCheckin" name="intent" />
-        </fetcher.Form>
-      </div>
-    </Card>
+    <ExplicitRequirementSettingsCard
+      header={header}
+      intent="updateExplicitCheckin"
+      switches={[
+        {
+          name: "requireExplicitCheckinForAdmin" satisfies ExplicitCheckinField,
+          label: "Require explicit check-in for Admins",
+          description:
+            "When enabled, administrators must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
+          defaultChecked: defaultValues.requireExplicitCheckinForAdmin,
+        },
+        {
+          name: "requireExplicitCheckinForSelfService" satisfies ExplicitCheckinField,
+          label: "Require explicit check-in for Self Service",
+          description:
+            "When enabled, self-service users must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
+          defaultChecked: defaultValues.requireExplicitCheckinForSelfService,
+        },
+      ]}
+    />
   );
 }

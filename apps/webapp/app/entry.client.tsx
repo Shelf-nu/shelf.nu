@@ -5,7 +5,12 @@ import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
+import { isUnsupportedBrowser } from "~/utils/browser-support";
+import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
+
+// Must run before hydration so every React commit goes through the guard.
+installDomMutationGuard();
 
 if (window.env?.SENTRY_DSN) {
   Sentry.init({
@@ -61,22 +66,32 @@ if (window.env?.SENTRY_DSN) {
   });
 }
 
-React.startTransition(() => {
-  hydrateRoot(
-    document,
-    <React.StrictMode>
-      <JotaiProvider>
-        <HydratedRouter />
-      </JotaiProvider>
-    </React.StrictMode>,
-    {
-      onRecoverableError(error, errorInfo) {
-        if (window.env?.SENTRY_DSN) {
-          Sentry.captureException(error, {
-            extra: { componentStack: errorInfo.componentStack },
-          });
-        }
-      },
-    }
-  );
-});
+if (isUnsupportedBrowser()) {
+  // The inline check in `root.tsx` flagged a browser that cannot run this
+  // bundle. Leave the server-rendered "browser out of date" screen in place
+  // rather than hydrating an app that would crash behind it, and record the
+  // visit so the size of that audience stays visible.
+  if (window.env?.SENTRY_DSN) {
+    Sentry.captureMessage("Unsupported browser blocked", "info");
+  }
+} else {
+  React.startTransition(() => {
+    hydrateRoot(
+      document,
+      <React.StrictMode>
+        <JotaiProvider>
+          <HydratedRouter />
+        </JotaiProvider>
+      </React.StrictMode>,
+      {
+        onRecoverableError(error, errorInfo) {
+          if (window.env?.SENTRY_DSN) {
+            Sentry.captureException(error, {
+              extra: { componentStack: errorInfo.componentStack },
+            });
+          }
+        },
+      }
+    );
+  });
+}

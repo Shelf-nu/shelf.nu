@@ -5,7 +5,13 @@
  * Returns JSON that the client renders as a styled HTML preview,
  * then converts to PDF via react-to-print.
  *
- * @see {@link file://../../components/reports/compliance-report-pdf.tsx}
+ * Serves the three reports that ship a PDF — booking compliance, asset
+ * inventory and custody snapshot. `REPORTS_WITH_PDF` in
+ * `report-export-actions.tsx` gates which pages offer the button, and the
+ * switch below must cover exactly that list.
+ *
+ * @see {@link file://../../components/reports/report-pdf.tsx} the renderer this feeds
+ * @see {@link file://../../components/reports/report-export-actions.tsx} `REPORTS_WITH_PDF`
  */
 
 import { data } from "react-router";
@@ -18,7 +24,9 @@ import {
   bookingComplianceReport,
   assetInventoryReport,
   custodySnapshotReport,
+  type BookingComplianceSortColumn,
 } from "~/modules/reports/helpers.server";
+import { sumQuantityAwareValue } from "~/modules/reports/pdf-totals";
 import { getReportById } from "~/modules/reports/registry";
 import type {
   TimeframePreset,
@@ -99,8 +107,10 @@ export const loader = async ({
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.read,
+      entity: PermissionEntity.reports,
+      // PDF generation hands the data out of the app, like the CSV route:
+      // both are export surfaces and share the export action.
+      action: PermissionAction.export,
     });
 
     // Acting user's resolved prefs drive both the timeframe label ordering and
@@ -177,11 +187,21 @@ export const loader = async ({
         }),
     };
 
-    // Generate report data based on type
+    // Generate report data based on type. Each case parses the same filter
+    // params its page-loader counterpart honors (see reports.$reportId.tsx)
+    // and hands them to the same query function — the client forwards the
+    // page's full query string, so the PDF contains exactly the rows the
+    // filtered page shows.
     let pdfMeta: ReportPdfMeta;
 
     switch (reportId) {
       case "booking-compliance": {
+        // Sort params mirror the page so the PDF row order matches the table.
+        const sortBy = (searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
         const reportData = await bookingComplianceReport({
           organizationId,
           timeframe,
@@ -189,6 +209,8 @@ export const loader = async ({
           timeZone: prefs.timeZone,
           page: 1,
           pageSize: 10000, // PDF can handle large tables
+          sortBy,
+          sortOrder,
         });
 
         const overdueKpi = reportData.kpis.find(
@@ -243,6 +265,16 @@ export const loader = async ({
       case "asset-inventory": {
         const reportData = await assetInventoryReport({
           organizationId,
+          currency: organization.currency,
+          categoryIds:
+            searchParams.get("categories")?.split(",").filter(Boolean) ||
+            undefined,
+          locationIds:
+            searchParams.get("locations")?.split(",").filter(Boolean) ||
+            undefined,
+          statuses:
+            searchParams.get("statuses")?.split(",").filter(Boolean) ||
+            undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -253,14 +285,13 @@ export const loader = async ({
           inCustody: 0,
           checkedOut: 0,
         };
-        let totalValuation = 0;
-
         for (const row of reportData.rows) {
           if (row.status === "AVAILABLE") statusBreakdown.available++;
           else if (row.status === "IN_CUSTODY") statusBreakdown.inCustody++;
           else if (row.status === "CHECKED_OUT") statusBreakdown.checkedOut++;
-          if (row.valuation) totalValuation += row.valuation;
         }
+        // Per-unit valuation × workspace stock, matching the on-screen KPI.
+        const totalValuation = sumQuantityAwareValue(reportData.rows);
 
         pdfMeta = {
           ...monetaryMeta,
@@ -282,6 +313,7 @@ export const loader = async ({
             location: row.location,
             custodian: row.custodian,
             valuation: row.valuation,
+            quantity: row.quantity,
             qrId: row.qrId,
           })),
         } satisfies AssetInventoryPdfMeta;
@@ -291,6 +323,9 @@ export const loader = async ({
       case "custody-snapshot": {
         const reportData = await custodySnapshotReport({
           organizationId,
+          currency: organization.currency,
+          teamMemberId: searchParams.get("teamMember") || undefined,
+          locationId: searchParams.get("location") || undefined,
           page: 1,
           pageSize: 10000,
         });
@@ -299,10 +334,9 @@ export const loader = async ({
         const uniqueCustodians = new Set(
           reportData.rows.map((r) => r.custodianName)
         );
-        let totalValuation = 0;
-        for (const row of reportData.rows) {
-          if (row.valuation) totalValuation += row.valuation;
-        }
+        // Per-unit valuation × units held (`Custody.quantity`), matching
+        // the on-screen KPI.
+        const totalValuation = sumQuantityAwareValue(reportData.rows);
 
         pdfMeta = {
           ...monetaryMeta,
@@ -326,6 +360,7 @@ export const loader = async ({
             assignedAt: dateFormat.format(new Date(row.assignedAt)),
             daysInCustody: row.daysInCustody,
             valuation: row.valuation,
+            quantity: row.quantity,
           })),
         } satisfies CustodySnapshotPdfMeta;
         break;

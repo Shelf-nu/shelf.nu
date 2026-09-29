@@ -18,12 +18,13 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  shapeMobileAssetResponse,
+  resignAndShapeMobileAsset,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import { readRawLastPathSegment } from "~/utils/raw-path-param";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
@@ -74,8 +75,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // Decode the URL-encoded barcode value
-    const value = decodeURIComponent(encodedValue);
+    // Read the segment from the URL rather than the route param. React Router
+    // re-encodes a decoded `/` back to `%2F`, which makes a barcode containing
+    // a slash and one whose literal text is `%2F` indistinguishable by the time
+    // a loader sees them; the URL still has the difference.
+    const value = readRawLastPathSegment(request, encodedValue);
 
     // Look up barcode within the organization, including asset details
     // in a single query. getBarcodeByValue handles case-insensitive
@@ -206,8 +210,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
+        // Re-signed against the workspace that owns the barcode.
         asset: foundBarcode.asset
-          ? shapeMobileAssetResponse(foundBarcode.asset)
+          ? await resignAndShapeMobileAsset(
+              foundBarcode.asset,
+              foundOrganizationId
+            )
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.
