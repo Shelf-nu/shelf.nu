@@ -125,6 +125,21 @@ export const REPORTS: ReportDefinition[] = [
     exportable: true,
   },
   {
+    id: "stock-movement",
+    title: "Stock Movement",
+    description:
+      "Opening stock, what moved and why, and closing stock for every quantity-tracked asset.",
+    category: "assets",
+    icon: "ArrowUpDown",
+    enabled: true, // R11
+    filters: [
+      { type: "category", label: "Category", multi: true },
+      { type: "location", label: "Location", multi: true },
+    ],
+    hasChart: false,
+    exportable: true,
+  },
+  {
     id: "asset-activity",
     title: "Asset Activity Summary",
     description:

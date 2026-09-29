@@ -19,6 +19,7 @@ import {
   topBookedAssetsReport,
   topBookedKitsReport,
   assetInventoryReport,
+  stockMovementReport,
   assetUtilizationReport,
   assetActivityReport,
   assetDistributionReport,
@@ -34,6 +35,7 @@ import type {
   TopBookedAssetRow,
   TopBookedKitRow,
   AssetInventoryRow,
+  StockMovementRow,
   AssetUtilizationRow,
   AssetActivityRow,
   DistributionBreakdown,
@@ -201,6 +203,19 @@ export const loader = async ({
         });
         csvString = generateTopBookedKitsCsv(
           reportData.rows as TopBookedKitRow[]
+        );
+        break;
+      }
+
+      case "stock-movement": {
+        const reportData = await stockMovementReport({
+          organizationId,
+          timeframe,
+          page: 1,
+          pageSize: 10000,
+        });
+        csvString = generateStockMovementCsv(
+          reportData.rows as StockMovementRow[]
         );
         break;
       }
@@ -555,6 +570,50 @@ function generateTopBookedKitsCsv(rows: TopBookedKitRow[]): string {
     row.bookingCount > 0
       ? (row.totalDaysBooked / row.bookingCount).toFixed(1)
       : "0",
+  ]);
+
+  return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");
+}
+
+/**
+ * Generate CSV for the Stock Movement report.
+ *
+ * Column order follows the statement the numbers describe — opening, what came
+ * in, what went out, what remains — so the export drops straight into the kind
+ * of spreadsheet customers already keep. Movement figures are positive
+ * magnitudes except Adjustments, which is signed.
+ */
+function generateStockMovementCsv(rows: StockMovementRow[]): string {
+  const headers = [
+    "Asset ID",
+    "Item",
+    "Category",
+    "Unit",
+    "Opening",
+    "Restocked",
+    "Consumed",
+    "Lost",
+    "Damaged",
+    "Adjustments",
+    "Closing",
+    "Unit Value",
+    "Closing Value",
+  ];
+
+  const csvRows = rows.map((row) => [
+    escapeCsvField(row.assetId),
+    escapeCsvField(row.assetName),
+    escapeCsvField(row.category || ""),
+    escapeCsvField(row.unitOfMeasure || ""),
+    row.opening.toString(),
+    row.restocked.toString(),
+    row.consumed.toString(),
+    row.lost.toString(),
+    row.damaged.toString(),
+    row.adjustments.toString(),
+    row.closing.toString(),
+    row.unitValue !== null ? row.unitValue.toString() : "",
+    row.closingValue.toString(),
   ]);
 
   return [headers.join(","), ...csvRows.map((row) => row.join(","))].join("\n");

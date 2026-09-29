@@ -116,6 +116,7 @@ export { TopBookedAssetsContent } from "./top-booked-assets-content";
 export { TopBookedKitsContent } from "./top-booked-kits-content";
 export { AssetDistributionContent } from "./asset-distribution-content";
 export { AssetInventoryContent } from "./asset-inventory-content";
+export { StockMovementContent } from "./stock-movement-content";
 export { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
 export { AssetUtilizationContent } from "./asset-utilization-content";
 export { AssetActivityContent } from "./asset-activity-content";

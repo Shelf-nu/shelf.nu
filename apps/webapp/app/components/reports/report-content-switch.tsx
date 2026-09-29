@@ -16,6 +16,7 @@
 import type {
   AssetActivityRow,
   AssetInventoryRow,
+  StockMovementRow,
   AssetUtilizationRow,
   BookingComplianceRow,
   ChartSeries,
@@ -41,6 +42,7 @@ import { IdleAssetsContent } from "./idle-assets-content";
 import { MonthlyBookingTrendsContent } from "./monthly-booking-trends-content";
 import { OverdueItemsContent } from "./overdue-items-content";
 import { ReportEmptyState } from "./report-empty-state";
+import { StockMovementContent } from "./stock-movement-content";
 import { TopBookedAssetsContent } from "./top-booked-assets-content";
 import { TopBookedKitsContent } from "./top-booked-kits-content";
 import type { ReportRowHandlers } from "./use-report-row-handlers";
@@ -195,6 +197,17 @@ export function ReportContentSwitch({
         />
       );
 
+    case "stock-movement":
+      return (
+        <StockMovementContent
+          rows={rows as StockMovementRow[]}
+          kpis={kpis}
+          totalRows={totalRows}
+          timeframeLabel={timeframe.label}
+          onRowClick={handlers.onAssetRowClick}
+        />
+      );
+
     case "monthly-booking-trends":
       return (
         <MonthlyBookingTrendsContent
@@ -262,6 +275,8 @@ function getEmptyStateTitle(reportId: string): string {
       return "No assets";
     case "asset-inventory":
       return "No assets in inventory";
+    case "stock-movement":
+      return "No quantity-tracked items";
     case "monthly-booking-trends":
       return "No booking data";
     case "asset-utilization":
@@ -294,6 +309,8 @@ function getEmptyStateDescription(reportId: string): string {
       return "Add assets to your inventory to see distribution breakdowns by category, location, and status.";
     case "asset-inventory":
       return "Your inventory is empty. Add assets to see them listed here with filtering and export options.";
+    case "stock-movement":
+      return "This report covers items tracked by quantity, such as consumables and supplies. Create one to see its stock movement here.";
     case "monthly-booking-trends":
       return "No bookings have been created within the selected timeframe. Try selecting a longer period to see trends.";
     case "asset-utilization":

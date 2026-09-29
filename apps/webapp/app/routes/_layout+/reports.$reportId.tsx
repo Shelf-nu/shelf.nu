@@ -40,6 +40,7 @@ import {
   topBookedKitsReport,
   assetDistributionReport,
   assetInventoryReport,
+  stockMovementReport,
   monthlyBookingTrendsReport,
   assetUtilizationReport,
   assetActivityReport,
@@ -236,6 +237,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           undefined,
         statuses:
           url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
+          undefined,
+        page: parseInt(url.searchParams.get("page") || "1", 10),
+        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+      });
+      break;
+
+    case "stock-movement":
+      reportData = await stockMovementReport({
+        organizationId,
+        timeframe,
+        categoryIds:
+          url.searchParams.get("categories")?.split(",").filter(Boolean) ||
+          undefined,
+        locationIds:
+          url.searchParams.get("locations")?.split(",").filter(Boolean) ||
           undefined,
         page: parseInt(url.searchParams.get("page") || "1", 10),
         pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),

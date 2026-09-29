@@ -509,6 +509,57 @@ export type AssetInventoryKpiId =
   | "available_count"
   | "in_custody_count";
 
+/**
+ * One line of the Stock Movement statement, for a single quantity-tracked
+ * asset over the reporting period.
+ *
+ * Every row satisfies, exactly:
+ *
+ *   opening + restocked + adjustments − consumed − lost − damaged = closing
+ *
+ * All movement figures are POSITIVE magnitudes except `adjustments`, which is
+ * signed because a correction can go either way. See
+ * `stock-movement.server.ts` for why the adjustment figure is derived rather
+ * than summed.
+ */
+export interface StockMovementRow {
+  id: string;
+  assetId: string;
+  assetName: string;
+  category: string | null;
+  /** Optional unit label (e.g. "boxes"), shown alongside the counts. */
+  unitOfMeasure: string | null;
+  /** Stock held at the START of the period. */
+  opening: number;
+  /** Units added as new stock (`RESTOCK`). */
+  restocked: number;
+  /** Units used as intended (`CONSUME`). */
+  consumed: number;
+  /** Units reported lost (`LOSS`). */
+  lost: number;
+  /** Units returned unusable (`DAMAGE`). */
+  damaged: number;
+  /**
+   * Net of manual corrections, signed. Also absorbs any stock movement that
+   * happened without a matching ledger entry, so an unexplained change is
+   * visible here rather than silently missing from a category.
+   */
+  adjustments: number;
+  /** Stock held at the END of the period. */
+  closing: number;
+  /** Per-unit value, or null when the asset has no value set. */
+  unitValue: number | null;
+  /** `unitValue × closing`. */
+  closingValue: number;
+}
+
+/** KPI IDs for the Stock Movement report */
+export type StockMovementKpiId =
+  | "total_consumed"
+  | "total_restocked"
+  | "total_shrinkage"
+  | "closing_value";
+
 // -----------------------------------------------------------------------------
 // R9: Monthly Booking Trends Report Types
 // -----------------------------------------------------------------------------

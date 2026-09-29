@@ -63,6 +63,14 @@ import { refreshExpiredKitImages } from "../kit/service.server";
 // Re-export timeframe utilities for server use
 export { resolveTimeframe } from "./timeframe";
 
+/**
+ * Re-exported so route loaders can pull every report builder from one module,
+ * matching how the others are imported. The implementation lives in its own
+ * file because its derivation (see the balancing identity) needs enough
+ * explanation that inlining it here would bury it.
+ */
+export { stockMovementReport } from "./stock-movement.server";
+
 // -----------------------------------------------------------------------------
 // Name Formatting
 // -----------------------------------------------------------------------------
