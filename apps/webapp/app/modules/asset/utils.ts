@@ -113,3 +113,56 @@ export function getPrimaryLocation<TLoc>(
 ): TLoc | null {
   return asset?.assetLocations?.[0]?.location ?? null;
 }
+
+/**
+ * One placement row in the mobile JSON contract: where units of an asset
+ * sit, and whether the row is owned by a kit.
+ *
+ * `quantity` is the per-row `AssetLocation.quantity` (units placed at the
+ * location — NOT `Asset.quantity`, the workspace stock). `viaKit` is set for
+ * kit-driven rows, which the mobile placements editor renders read-only:
+ * they change through the kit (membership qty or kit location), never
+ * through the asset's own placement flows.
+ */
+export type MobileAssetPlacement = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+  viaKit: { id: string; name: string } | null;
+};
+
+/**
+ * Flattens `AssetLocation` pivot rows into the mobile `placements` array.
+ *
+ * Manual rows come first (they are the editable set), kit-driven rows after
+ * (read-only context). Rows whose location relation failed to load are
+ * dropped rather than shipped nameless.
+ *
+ * @param rows - Pivot rows selected with `quantity`, `assetKitId`, the
+ *   `location` (id + name) and, for kit-driven rows, `assetKit.kit`.
+ * @returns The flattened, ordered placement list for mobile payloads.
+ */
+export function shapeMobileAssetPlacements(
+  rows: Array<{
+    quantity: number;
+    assetKitId?: string | null;
+    location?: { id: string; name: string } | null;
+    assetKit?: { kit: { id: string; name: string } | null } | null;
+  }>
+): MobileAssetPlacement[] {
+  const shaped = rows.flatMap((row) => {
+    if (!row.location) return [];
+    return [
+      {
+        locationId: row.location.id,
+        locationName: row.location.name,
+        quantity: row.quantity,
+        viaKit: row.assetKitId ? row.assetKit?.kit ?? null : null,
+      },
+    ];
+  });
+  return [
+    ...shaped.filter((p) => p.viaKit === null),
+    ...shaped.filter((p) => p.viaKit !== null),
+  ];
+}

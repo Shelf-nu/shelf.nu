@@ -283,6 +283,13 @@ type SidebarAsset = SidebarAssetBase & {
   bookedQuantity: number;
   kit: NonNullable<SidebarAssetBase["assetKits"][number]["kit"]> | null;
   kitId: string | null;
+  /**
+   * Live kit-driven slice (`BookingAsset.assetKitId` set). Its units come
+   * out of the kit's allocation, not the loose pool, so the stock badges
+   * skip it. Read off the pivot row rather than `kitId`, which also stays
+   * null when the membership cannot be resolved for display.
+   */
+  isKitDriven: boolean;
 };
 
 /**
@@ -322,6 +329,7 @@ function groupAssets(bookingAssets: BookingWithAssets["bookingAssets"]) {
       bookedQuantity: ba.quantity,
       kit: sourceKit,
       kitId: sourceKit?.id ?? null,
+      isKitDriven: ba.assetKitId != null,
     };
     if (asset.kitId && asset.kit) {
       const kitId = asset.kitId;
@@ -479,6 +487,7 @@ function AssetTitleAndStatus({
     availability,
     contextStatus: effectiveStatus,
     bookingStatus,
+    isKitDriven: asset.isKitDriven,
   });
 
   return (
@@ -707,16 +716,15 @@ export function BookingAssetsSidebar({
   const hasItems = assetCount > 0 || outstandingModelRequestCount > 0;
 
   /**
-   * Scan-to-assign is offered whenever the booking is in a manage-eligible
-   * state. Mirrors the same gate in `ModelRequestRowActionsDropdown`; the
+   * Whether units can still be matched to physical assets on this booking.
+   *
+   * Drives both the section's copy and whether each row links to the scanner,
+   * so the two can never disagree — a row offering "Scan to assign" under a
+   * heading that says the units were never assigned reads as a bug. The
    * server-side guards in `booking-model-request/service.server` are what
    * actually enforce it.
    */
-  const canScanToAssign =
-    booking.status === "DRAFT" ||
-    booking.status === "RESERVED" ||
-    booking.status === "ONGOING" ||
-    booking.status === "OVERDUE";
+  const canAssignUnits = canAssignModelUnits(booking.status);
 
   const defaultTrigger = (
     <Button
@@ -754,10 +762,10 @@ export function BookingAssetsSidebar({
                 surface. */}
             <BookingModelReservationsSection
               modelRequests={booking.modelRequests}
-              canAssign={canAssignModelUnits(booking.status)}
+              canAssign={canAssignUnits}
               className="rounded-none border-x-0 border-t-0"
               renderAction={
-                canScanToAssign
+                canAssignUnits
                   ? () => (
                       <Link
                         to={`/bookings/${booking.id}/overview/scan-assets`}

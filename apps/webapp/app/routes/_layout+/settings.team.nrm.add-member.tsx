@@ -22,6 +22,11 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 export const meta = () => [{ title: appendToMetaTitle("Add team member") }];
 
+/**
+ * Opens the add-member modal for callers who may create team members.
+ *
+ * @throws {ShelfError} 403 when the caller lacks `teamMember: create`
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -43,10 +48,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/** Form schema for a non-registered team member's name. */
 export const NewOrEditMemberSchema = z.object({
-  name: z.string().min(1, "Name is required"),
+  // Trim BEFORE the length check: `" "` is one character, so it satisfies
+  // `min(1)` and is then stored as the empty string.
+  name: z.string().trim().min(1, "Name is required"),
 });
 
+/**
+ * Creates a non-registered team member in the caller's organization.
+ *
+ * @returns A redirect to the non-registered members list, or the failure with its status
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;

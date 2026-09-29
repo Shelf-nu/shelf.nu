@@ -30,8 +30,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * Both verbs wrap the SAME shared services the web route uses
  * (`upsertBookingModelRequest` / `removeBookingModelRequest`), so the
- * availability guard, the "DRAFT/RESERVED only" rule, the
- * can't-shrink-below-fulfilled rule and the activity notes all stay identical.
+ * availability guard, the live-booking rule, the can't-drop-below-assigned
+ * rule and the activity notes all stay identical.
  *
  * Security stack (mirrors `bookings.add-scanned-assets.ts` — the services do
  * NOT check custodian ownership, so a naive wrapper would be a cross-user

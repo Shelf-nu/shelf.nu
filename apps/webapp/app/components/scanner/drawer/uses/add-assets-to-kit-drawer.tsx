@@ -70,8 +70,10 @@ export default function AddAssetsToKitDrawer({
   defaultExpanded?: boolean;
 }) {
   const { kit } = useLoaderData<typeof loader>();
+  // The kit's members as this page loaded. Used only for the "already in this
+  // kit" hint below — a hint may be slightly behind, and the write does not
+  // depend on it.
   const kitAssets = kit.assetKits?.map((ak) => ak.asset) ?? [];
-  const kitAssetsIds = kitAssets.map((a) => a.id);
   // Get the scanned items from jotai
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
@@ -90,11 +92,9 @@ export default function AddAssetsToKitDrawer({
   // List of asset IDs for the form
   const assetIdsForKit = Array.from(new Set([...assetIds]));
 
-  // Per-asset qty for QUANTITY_TRACKED scans. The kit's existing
-  // assets are sent too (so updateKitAssets doesn't treat them as
-  // removed), but we DON'T include them in `assetQuantities` — that
-  // keeps their current `AssetKit.quantity` intact. Only newly-scanned
-  // ids are emitted.
+  // Per-asset qty for QUANTITY_TRACKED scans, restricted to the ids actually
+  // submitted. An existing member's `AssetKit.quantity` is left alone because
+  // nothing about it is sent.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
   const assetQuantitiesJson = JSON.stringify(
     Object.fromEntries(
@@ -254,10 +254,13 @@ export default function AddAssetsToKitDrawer({
     <ConfigurableDrawer
       schema={addScannedAssetsToKitSchema}
       /**
-       * We merge the existing assetIds(kitAssetsIds) with the ids of the scanned assets(assetIdsForKit).
-       * We have to do this because the manageAssets action expects both of them to be present in the formData sent */
+       * Only the scanned assets. The route adds them to whatever the kit holds
+       * at write time, so sending the membership this page loaded with would
+       * describe a kit that may no longer exist — and anything a colleague added
+       * meanwhile would be missing from it.
+       */
       formData={{
-        assetIds: [...kitAssetsIds, ...assetIdsForKit],
+        assetIds: assetIdsForKit,
         assetQuantities: assetQuantitiesJson,
       }}
       items={items}

@@ -98,7 +98,11 @@ export async function action({ request }: ActionFunctionArgs) {
     // why: siblings use raw `.parse`, which surfaces a ZodError as a 500
     // through makeShelfError's unknown-error branch. The web route returns
     // 400 via parseData — safeParse + a 400 ShelfError honors that parity.
-    const parsed = AssignQuantityCustodySchema.safeParse(await request.json());
+    // An unreadable body parses as `null` and fails the schema too, so it
+    // takes the same 400 instead of throwing a SyntaxError into the 500 branch.
+    const parsed = AssignQuantityCustodySchema.safeParse(
+      await request.json().catch(() => null)
+    );
     if (!parsed.success) {
       throw new ShelfError({
         cause: parsed.error,
@@ -106,6 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
         additionalData: { validationErrors: parsed.error.flatten() },
         label: "Assets",
         status: 400,
+        shouldBeCaptured: false,
       });
     }
     const { assetId, teamMemberId, quantity, note } = parsed.data;
@@ -150,6 +155,7 @@ export async function action({ request }: ActionFunctionArgs) {
       quantity,
       userId: user.id,
       organizationId,
+      role,
       note,
     });
 

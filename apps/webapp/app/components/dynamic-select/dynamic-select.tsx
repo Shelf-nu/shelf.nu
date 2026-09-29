@@ -429,6 +429,25 @@ export default function DynamicSelect({
               }}
               align="center"
               sideOffset={5}
+              // A modal Radix Dialog — every `Sheet`, so every route rendered
+              // through `ContextualSidebar` — mounts `react-remove-scroll`,
+              // which cancels any `wheel` whose target sits outside the dialog
+              // content. This popover is portalled to `document.body`, so the
+              // option list counts as outside and the wheel does nothing;
+              // dragging the scrollbar is a pointer interaction and still
+              // works, which is what makes the breakage look selective.
+              //
+              // React attaches portal listeners to the portal container, and
+              // `document.body` is a descendant of the `document` that
+              // remove-scroll listens on — so stopping here is what keeps the
+              // list scrollable. Removing these makes wheel scrolling dead
+              // inside every sheet.
+              onWheel={(event) => {
+                event.stopPropagation();
+              }}
+              onTouchMove={(event) => {
+                event.stopPropagation();
+              }}
             >
               <div className="flex items-center justify-between p-3">
                 <div className="text-xs font-semibold text-gray-700">

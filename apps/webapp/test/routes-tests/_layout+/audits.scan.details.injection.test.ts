@@ -52,20 +52,32 @@ vi.mock("~/utils/roles.server", () => ({
 // action uses the async one. A module mock that omits either makes the missing
 // export `undefined`, so the route 500s and every assertion fails for the
 // wrong reason rather than reporting a missing guard.
-vi.mock("~/modules/audit/service.server", () => ({
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
-  requireAuditAssignee: vi.fn(),
-}));
+// why: the assignee gates read assignments through the database. The rest of
+// the service stays real, including the finished-audit guards the upload path
+// runs — stubbing those would test the stub.
+vi.mock("~/modules/audit/service.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof AuditService>();
+  return {
+    ...actual,
+    requireAuditAssigneeForBaseSelfService: vi.fn(),
+    requireAuditAssignee: vi.fn(),
+  };
+});
 
 // why: external database — don't hit the real DB. $transaction runs the
 // callback with an opaque tx so we can assert on helpers called inside it.
-const { txNoteOps, dbNoteOps } = vi.hoisted(() => ({
+const { txNoteOps, dbNoteOps, txQueryRaw, dbAuditSession } = vi.hoisted(() => ({
   // The pre-check runs on `db` (outside the transaction); the update runs on
   // `tx`. Separate spies so a test can tell which layer refused.
   dbNoteOps: {
     findFirst: vi.fn().mockResolvedValue({ id: "note-1" }),
     deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
   },
+  // The audit read that refuses an upload before any file is stored.
+  dbAuditSession: { findFirst: vi.fn() },
+  // The locked audit-row read the finished-audit guard runs inside the
+  // transaction before writing a note.
+  txQueryRaw: vi.fn(),
   txNoteOps: {
     create: vi.fn(),
     findUnique: vi.fn(),
@@ -91,10 +103,15 @@ vi.mock("~/database/db.server", () => ({
     // given. `AuditNote` has no `organizationId` column, so that predicate is
     // the entire tenant boundary for the model.
     $transaction: vi.fn(
-      async (fn: (tx: { auditNote: typeof txNoteOps }) => unknown) =>
-        fn({ auditNote: txNoteOps })
+      async (
+        fn: (tx: {
+          auditNote: typeof txNoteOps;
+          $queryRaw: typeof txQueryRaw;
+        }) => unknown
+      ) => fn({ auditNote: txNoteOps, $queryRaw: txQueryRaw })
     ),
     auditNote: dbNoteOps,
+    auditSession: dbAuditSession,
   },
 }));
 
@@ -136,6 +153,7 @@ vi.mock("~/utils/error", () => ({
   },
 }));
 
+import type * as AuditService from "~/modules/audit/service.server";
 import { action } from "~/routes/_layout+/audits.$auditId.scan.$auditAssetId.details";
 import { requirePermission } from "~/utils/roles.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
@@ -199,6 +217,10 @@ describe("audits.$auditId.scan.$auditAssetId.details action — note scoping", (
     txNoteOps.findFirst.mockResolvedValue({ id: "note-1", content: "body" });
     txNoteOps.updateMany.mockResolvedValue({ count: 1 });
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
+    // An audit still open, read once before the files are stored and again on
+    // the locked row inside the note transaction.
+    dbAuditSession.findFirst.mockResolvedValue({ status: "ACTIVE" });
+    txQueryRaw.mockResolvedValue([{ status: "ACTIVE" }]);
   });
 
   it("scopes the add-images-to-note READ to the audit and the org", async () => {
@@ -332,6 +354,10 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
       isSelfServiceOrBase: false,
     } as any);
     (uploadAuditImage as any).mockResolvedValue({ id: "img-1" });
+    // An audit still open, read once before the files are stored and again on
+    // the locked row inside the note transaction.
+    dbAuditSession.findFirst.mockResolvedValue({ status: "ACTIVE" });
+    txQueryRaw.mockResolvedValue([{ status: "ACTIVE" }]);
   });
 
   it("forwards raw injection payload verbatim to createAuditImageEvidenceNote (single-file upload-image)", async () => {
@@ -427,6 +453,30 @@ describe("audits.$auditId.scan.$auditAssetId.details action — upload-image inj
 
     // The shared helper should NOT be called for multi-file (it's used only
     // for the single-file path per the fix spec).
+    expect(createAuditImageEvidenceNote).not.toHaveBeenCalled();
+  });
+
+  it("refuses an upload on a finished audit before storing the file", async () => {
+    // Evidence reaches the activity feed as a note, so a finished audit turns
+    // the whole upload away — and before the image is stored, since refusing
+    // after that would leave the file behind with nothing pointing at it.
+    dbAuditSession.findFirst.mockResolvedValue({ status: "COMPLETED" });
+
+    const result = await action(
+      createActionArgs({
+        request: makeUploadImageRequest({
+          intent: "upload-image",
+          content: "a late note",
+        }),
+        params: { auditId: "session-1", auditAssetId: "audit-asset-1" },
+        context: mockContext,
+      })
+    );
+
+    const status =
+      result instanceof Response ? result.status : (result as any).init?.status;
+    expect(status).toBe(400);
+    expect(uploadAuditImage).not.toHaveBeenCalled();
     expect(createAuditImageEvidenceNote).not.toHaveBeenCalled();
   });
 });
