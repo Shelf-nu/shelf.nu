@@ -912,7 +912,11 @@ export const AssetForm = ({
                 hideLabel
                 name="minQuantity"
                 disabled={disabled}
-                min={1}
+                // Zero is a real threshold here: "alert me when nothing is
+                // left". The schema accepts it, so the browser must too, or
+                // constraint validation rejects the value before submit and the
+                // bound in the schema is unreachable.
+                min={0}
                 step={1}
                 className="w-full"
                 defaultValue={minQuantity ?? ""}
