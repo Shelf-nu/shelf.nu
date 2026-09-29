@@ -90,6 +90,41 @@ describe("getKitsWhereInput", () => {
     });
   });
 
+  it("treats a blank teamMember value as no selection", () => {
+    // `?teamMember=` reaches here as `[""]`, from a cleared filter or a stale
+    // link. An unmatchable id would answer "no kits" where the operator asked
+    // for no filter at all.
+    const where = getKitsWhereInput({
+      organizationId,
+      currentSearchParams: "teamMember=",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.custody).toBeUndefined();
+  });
+
+  it("ignores a blank value alongside a real custodian", () => {
+    const where = getKitsWhereInput({
+      organizationId,
+      currentSearchParams: "teamMember=&teamMember=tm-1",
+      allowedTeamMemberIds: "all",
+    });
+
+    expect(where.custody).toEqual({ custodianId: { in: ["tm-1"] } });
+  });
+
+  it("does not refuse a blank value for a restricted viewer", () => {
+    // Refusal is for asking after someone else's custody. A blank asks for
+    // nobody, so it must fall through rather than return an empty list.
+    const where = getKitsWhereInput({
+      organizationId,
+      currentSearchParams: "teamMember=",
+      allowedTeamMemberIds: ["tm-self"],
+    });
+
+    expect(where.custody).toBeUndefined();
+  });
+
   it("still applies the search and status filters", () => {
     const where = getKitsWhereInput({
       organizationId,
