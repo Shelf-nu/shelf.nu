@@ -1469,6 +1469,8 @@ export async function updateBasicBooking({
         title: "Update failed",
         message: "Booking update is not allowed at this state of booking",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2036,6 +2038,7 @@ export async function reserveBooking({
           label,
           title: "Booking conflict",
           message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          status: 400,
           shouldBeCaptured: false,
         });
       }
@@ -2056,6 +2059,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking dates are missing.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2065,6 +2070,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking start date should be in future.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2074,6 +2081,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking end date should be after start date.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -10879,6 +10888,8 @@ export async function revertBookingToDraft({
         cause: null,
         label,
         message: "Booking can be reverted to draft only for reserved state.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -14479,7 +14490,7 @@ async function createNotesForScannedAssetsAndKits({
   // Fetch assets and kits in parallel for better performance.
   // type+unitOfMeasure widen the select so per-asset notes can prefix
   // a qty-tracked unit count via wrapAssetWithCountForNote.
-  const [assets, kits, bookedRows] = await Promise.all([
+  const [assets, scannedKits, bookedRows] = await Promise.all([
     db.asset.findMany({
       where: { id: { in: assetIds }, organizationId },
       select: {
@@ -14521,6 +14532,13 @@ async function createNotesForScannedAssetsAndKits({
     );
   }
   const assetById = new Map(assets.map((a) => [a.id, a]));
+
+  // A kit is named in the notes only when one of its members arrived on this
+  // call: re-scanning a kit the booking already holds adds nothing.
+  const arrivedAssetIds = new Set(assetIds);
+  const kits = scannedKits.filter((kit) =>
+    kit.assetKits.some((ak) => arrivedAssetIds.has(ak.assetId))
+  );
 
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
@@ -15075,10 +15093,11 @@ async function addScannedAssetsToBookingWithinTx(
 
   /**
    * `AssetKit` memberships among the scanned slices that this booking already
-   * holds. The create below is a plain insert, so a caller that re-sends one
-   * would hit `BookingAsset_kit_unique` — but a caller that filters them out
-   * client-side delivers nothing new either way, and a membership already on
-   * the booking has already had whatever effect it was going to have.
+   * holds. A membership already on the booking has already had whatever
+   * effect it was going to have, so re-scanning its kit is a no-op: its slice
+   * is dropped from `newKitSlices` below. The create is a plain insert, and a
+   * slice written twice collides with `BookingAsset_kit_unique`
+   * (`bookingId`, `assetKitId`).
    */
   const scannedAssetKitIds = [
     ...new Set(effectiveKitSlices.map((slice) => slice.assetKitId)),
@@ -15092,6 +15111,18 @@ async function addScannedAssetsToBookingWithinTx(
           })
         ).map((row: { assetKitId: string | null }) => row.assetKitId)
       : []
+  );
+
+  /**
+   * The kit slices this call will actually write: `effectiveKitSlices` minus
+   * any membership the booking already holds. Every downstream read of the
+   * scanned kit slices (fulfilment candidates, the `BookingAsset` create, the
+   * emitted events, the per-asset quantity summary) must use this set, not
+   * `effectiveKitSlices` directly, which still contains memberships the
+   * booking already holds.
+   */
+  const newKitSlices = effectiveKitSlices.filter(
+    (slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId)
   );
 
   /**
@@ -15110,8 +15141,7 @@ async function addScannedAssetsToBookingWithinTx(
    * is the one type whose standalone and kit rows legitimately coexist, so it
    * has no single arrival row to stamp.
    */
-  const newKitDrivenScans = effectiveKitSlices
-    .filter((slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId))
+  const newKitDrivenScans = newKitSlices
     .map((slice) => scannedAssetsMetaById.get(slice.assetId))
     .filter((meta): meta is ScannedAssetMeta => meta !== undefined)
     .filter((meta) => meta.type === AssetType.INDIVIDUAL);
@@ -15201,7 +15231,7 @@ async function addScannedAssetsToBookingWithinTx(
    * column whose FK accepts ANY kit — including another org's.
    */
   const referencedAssetKitIds = Array.from(
-    new Set(effectiveKitSlices.map((s) => s.assetKitId).filter(Boolean))
+    new Set(newKitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
   const assetKitById = new Map<string, { quantity: number; kitId: string }>(
     referencedAssetKitIds.length > 0
@@ -15278,7 +15308,7 @@ async function addScannedAssetsToBookingWithinTx(
           // the empty string — writing that would violate the FK, so it
           // normalizes to NULL. Both falling through is unreachable: a missing
           // `AssetKit` row means `assetKitId` below fails the FK first.
-          ...effectiveKitSlices.map((slice) => ({
+          ...newKitSlices.map((slice) => ({
             assetId: slice.assetId,
             quantity:
               slice.quantity ??
@@ -15317,17 +15347,18 @@ async function addScannedAssetsToBookingWithinTx(
    * The assets this call actually put on the booking.
    *
    * Not the raw scan. A scanned asset the booking already holds keeps the row
-   * it has, and a kit slice for a member already held loose is dropped, so
-   * neither gained anything here. An audit row and a note are claims about
-   * what happened, and "added X to booking" for a unit that was already on it
-   * is a false one: it shows up in the feed, in reports, and in the asset's
-   * own timeline with a quantity it never gained.
+   * it has, a kit slice for a member already held loose is dropped, and a kit
+   * slice whose membership the booking already holds is dropped too: none of
+   * these gained anything here. An audit row and a note are claims about what
+   * happened, and "added X to booking" for a unit that was already on it is a
+   * false one: it shows up in the feed, in reports, and in the asset's own
+   * timeline with a quantity it never gained.
    * @see {@link file://./../../../../../.claude/rules/bulk-event-parity.md}
    */
   const addedAssetIds = Array.from(
     new Set([
       ...newStandaloneScans.map((meta) => meta.id),
-      ...effectiveKitSlices.map((slice) => slice.assetId),
+      ...newKitSlices.map((slice) => slice.assetId),
     ])
   );
 
@@ -15339,7 +15370,7 @@ async function addScannedAssetsToBookingWithinTx(
         (addedQtyByAssetId.get(meta.id) ?? 0) + (quantities[meta.id] ?? 1)
       );
     }
-    for (const slice of effectiveKitSlices) {
+    for (const slice of newKitSlices) {
       const sliceQty =
         slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1;
       addedQtyByAssetId.set(
