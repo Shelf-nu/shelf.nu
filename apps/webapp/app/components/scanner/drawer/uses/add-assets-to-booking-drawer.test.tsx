@@ -349,6 +349,71 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
     expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
 
+  // Both a credited scan and a refused duplicate are "already on the
+  // booking", so that fact alone cannot label the row. Without this the two
+  // states render the same red badge, and the blocker's "Remove from list"
+  // then takes away whichever row the operator was not looking at.
+  it("labels a credited row with its model, and a refused duplicate as already added", () => {
+    renderDrawer({
+      expectedModelRequests: [
+        {
+          assetModelId: "model-1",
+          assetModelName: "Model One",
+          booked: 1,
+          remaining: 1,
+        },
+      ],
+      alreadyIncluded: [
+        {
+          id: "asset-1",
+          title: "Asset 1",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-1",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+        {
+          id: "asset-2",
+          title: "Asset 2",
+          mainImage: null,
+          thumbnailImage: null,
+          assetModelId: "model-1",
+          claimable: true,
+          kitId: null,
+          bookedQuantity: 1,
+          type: "INDIVIDUAL",
+        },
+      ],
+      bookingAssets: [{ assetId: "asset-1" }, { assetId: "asset-2" }],
+      // Only one unit is reserved, so exactly one of these two claims it and
+      // the other falls through to the duplicate blocker.
+      scannedAssets: {
+        "qr-1": {
+          id: "asset-1",
+          title: "Asset 1",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+        "qr-2": {
+          id: "asset-2",
+          title: "Asset 2",
+          type: AssetType.INDIVIDUAL,
+          assetModelId: "model-1",
+        },
+      },
+    });
+
+    expect(
+      screen.getAllByText("Already here, now counts toward Model One")
+    ).toHaveLength(1);
+    expect(screen.getAllByText("Already added to this booking")).toHaveLength(
+      1
+    );
+  });
+
   // `claimable: true` is structural only (standalone, unstamped, INDIVIDUAL);
   // it says nothing about whether an outstanding reservation matches. A
   // booking with no matching model has nothing for the rescan to answer, so

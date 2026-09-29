@@ -246,19 +246,22 @@ export default function AddAssetsToBookingDrawer({
    * on a booking with no reservations, which is most of them.
    *
    * Reading the matcher's tally is a prediction of what the server will do,
-   * not a guarantee of it: this client tallies scans in its own iteration
-   * order, the server claims rows in its own query order, and the two can
-   * diverge on which of several equally-claimable rows wins a single unit.
+   * not a guarantee of it: scans are held newest-first, so this client
+   * allocates a scarce unit to the most recent matching scan, while the
+   * server claims rows in its own query order. The two can therefore
+   * disagree on which of several equally-claimable rows wins a single unit.
    * That is fine here because the direction only ever fails closed: the
    * worst case is the blocker holding a scan the server would have accepted,
    * never the reverse, which is the failure mode this fix removes.
+   *
+   * The value is the model the row answers, which the badge names.
    */
-  const claimedAssetIds = useMemo(
+  const claimedModelNameByAssetId = useMemo(
     () =>
-      new Set(
+      new Map(
         scannedBuckets.rows
           .filter((row) => row.bucket === "claimed")
-          .map((row) => row.asset!.id)
+          .map((row) => [row.asset!.id, row.claimedModelName] as const)
       ),
     [scannedBuckets.rows]
   );
@@ -296,7 +299,7 @@ export default function AddAssetsToBookingDrawer({
   // a plain duplicate. The progress strip and pull list above already move
   // when this happens, so the operator sees the claim take effect there.
   //
-  // This must be `claimedAssetIds`, not the structural `claimableIncludedIds`
+  // This must be the matcher's verdict, not the structural `claimableIncludedIds`
   // a row is eligible on: eligibility alone says nothing about whether an
   // outstanding reservation actually matches, or whether this session's
   // other scans already used up what did. On a booking with no reservations,
@@ -307,7 +310,7 @@ export default function AddAssetsToBookingDrawer({
     .filter(
       (asset) =>
         booking.bookingAssets.some((ba) => ba.assetId === asset.id) &&
-        !claimedAssetIds.has(asset.id)
+        !claimedModelNameByAssetId.has(asset.id)
     )
     .map((a) => !!a && a.id);
 
@@ -519,7 +522,14 @@ export default function AddAssetsToBookingDrawer({
       )}
       renderItem={(data) => {
         if (item?.type === "asset") {
-          return <AssetRow asset={data as AssetFromQr} />;
+          const scannedAsset = data as AssetFromQr;
+          return (
+            <AssetRow
+              asset={scannedAsset}
+              isClaimed={claimedModelNameByAssetId.has(scannedAsset.id)}
+              claimedModelName={claimedModelNameByAssetId.get(scannedAsset.id)}
+            />
+          );
         } else if (item?.type === "kit") {
           return <KitRow kit={data as KitFromQr} />;
         }
@@ -645,7 +655,17 @@ function PendingModelRowItem({ assetModelName }: { assetModelName: string }) {
 }
 
 // Implement item renderers if they're not already defined elsewhere
-export function AssetRow({ asset }: { asset: AssetFromQr }) {
+export function AssetRow({
+  asset,
+  isClaimed = false,
+  claimedModelName,
+}: {
+  asset: AssetFromQr;
+  /** The matcher credited this scan against an outstanding reserved unit. */
+  isClaimed?: boolean;
+  /** Name of the model that unit belongs to, when known. */
+  claimedModelName?: string;
+}) {
   const { booking } = useLoaderData<typeof loader>();
   // Whether the booking is in a checked-out state and the asset is checked out.
   // INDIVIDUAL only — a QUANTITY_TRACKED row reads CHECKED_OUT while free stock
@@ -671,9 +691,27 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
       asset.assetKits.length > 0,
       isQuantityTracked(asset)
     ),
+    // A scan the matcher credited against an outstanding reserved unit. The
+    // row is on the booking, same as the badge below reports, but here that
+    // is the point rather than the problem: submitting stamps this row as
+    // the answer to a reservation. It reads green and names the model, so an
+    // operator can tell it apart from a rescan that does nothing.
+    {
+      condition: isClaimed,
+      badgeText: claimedModelName
+        ? `Already here, now counts toward ${claimedModelName}`
+        : "Already here, now counts",
+      tooltipTitle: "Counts toward a reserved unit",
+      tooltipContent:
+        "This asset was already on the booking without answering a reservation. Submitting assigns it to one.",
+      priority: 75,
+      className: "bg-green-50 border-green-200 text-green-700",
+    },
     // Custom preset for "already in this booking"
     {
-      condition: booking.bookingAssets.some((ba) => ba.assetId === asset.id),
+      condition:
+        !isClaimed &&
+        booking.bookingAssets.some((ba) => ba.assetId === asset.id),
       badgeText: "Already added to this booking",
       tooltipTitle: "Asset is part of booking",
       tooltipContent: "This asset is already added to the current booking.",
