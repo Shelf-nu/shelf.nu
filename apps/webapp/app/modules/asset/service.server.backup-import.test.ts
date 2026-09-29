@@ -382,6 +382,28 @@ describe("createAssetsFromBackupImport shared relations", () => {
     expect(teamMemberCreate).toHaveBeenCalledTimes(1);
   });
 
+  it("matches a custodian regardless of case and merges rows that resolve to one", async () => {
+    teamMembers.rows.push({ id: "tm-existing", name: "Ada" });
+
+    await restore([
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "50",
+        custody: [
+          { quantity: 5, custodian: { name: "ada" } },
+          { quantity: 3, custodian: { name: "ADA" } },
+        ],
+      }),
+    ]);
+
+    expect(teamMemberCreate).not.toHaveBeenCalled();
+    // One row per team member: the custody unique index allows no more.
+    expect(assetDataByTitle().Pens.custody).toEqual({
+      create: [{ teamMemberId: "tm-existing", quantity: 8 }],
+    });
+  });
+
   it("links custom field values to the upserted definitions", async () => {
     vitest.mocked(upsertCustomField).mockResolvedValue({
       customFields: {

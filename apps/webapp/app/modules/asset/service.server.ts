@@ -5374,22 +5374,28 @@ export async function createAssetsFromBackupImport({
         Object.assign(d.data, { assetLocations: { create: placements } });
       }
 
-      /** Custody. Custodians travel by name; one missing from the workspace
-       * is created as a team member without an account. */
+      /** Custody. Custodians travel by name, matched regardless of case like
+       * the other restored relations; one missing from the workspace is
+       * created as a team member without an account. */
       const custodies = custodiesForRestore({
         type: asset.type,
         custody: asset.custody,
       });
       if (custodies.length > 0) {
-        const custodyCreates: Prisma.CustodyUncheckedCreateWithoutAssetInput[] =
-          [];
+        /** Team member id -> units held. Names that differ only in case
+         * resolve to one team member, and the custody unique index allows
+         * one operator row per (asset, team member), so their units add up. */
+        const unitsByTeamMemberId = new Map<string, number>();
         for (const custody of custodies) {
+          // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+          // Team member names are not unique, so the oldest match wins.
           const existingCustodian = await db.teamMember.findFirst({
             where: {
               deletedAt: null,
               organizationId,
-              name: custody.custodianName,
+              name: { in: [custody.custodianName], mode: "insensitive" },
             },
+            orderBy: { createdAt: "asc" },
             select: { id: true },
           });
           const custodian =
@@ -5403,11 +5409,16 @@ export async function createAssetsFromBackupImport({
               },
               select: { id: true },
             }));
-          custodyCreates.push({
-            teamMemberId: custodian.id,
-            quantity: custody.quantity,
-          });
+          unitsByTeamMemberId.set(
+            custodian.id,
+            (unitsByTeamMemberId.get(custodian.id) ?? 0) + custody.quantity
+          );
         }
+        const custodyCreates: Prisma.CustodyUncheckedCreateWithoutAssetInput[] =
+          [...unitsByTeamMemberId].map(([teamMemberId, quantity]) => ({
+            teamMemberId,
+            quantity,
+          }));
         Object.assign(d.data, { custody: { create: custodyCreates } });
       }
 
