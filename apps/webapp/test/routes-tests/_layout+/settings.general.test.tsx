@@ -641,3 +641,53 @@ describe("settings.general transfer-ownership authorization", () => {
     );
   });
 });
+
+describe("settings.general SSO settings refusals", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  /** Posts the SSO group-mapping form as the given role. */
+  async function postSso(role: OrganizationRoles) {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: baseOrganization(),
+      role,
+      access: accessFor([role]),
+      organizations: [baseOrganization()],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+
+    const body = new URLSearchParams({
+      intent: "sso",
+      id: "sso-1",
+      adminGroupId: "grp-admin",
+    });
+
+    return (await action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    )) as { init?: { status?: number } };
+  }
+
+  it("answers an ADMIN with 403: only the owner edits SSO settings", async () => {
+    const response = await postSso(OrganizationRoles.ADMIN);
+
+    expect(response.init?.status).toBe(403);
+  });
+
+  it("answers the OWNER of a workspace without SSO with 400", async () => {
+    const response = await postSso(OrganizationRoles.OWNER);
+
+    expect(response.init?.status).toBe(400);
+  });
+});

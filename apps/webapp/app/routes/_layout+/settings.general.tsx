@@ -285,6 +285,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -368,6 +369,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -398,6 +400,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
             label: "Settings",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -406,6 +410,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "SSO is not enabled for this organization.",
             label: "Settings",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
         const schema = EditWorkspaceSSOSettingsFormSchema(
@@ -425,6 +431,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -507,6 +514,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             title: "Permission denied",
             message: "You are not allowed to manage SCIM tokens.",
             label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -515,6 +524,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "SSO is not enabled for this organization.",
             label: "SCIM",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
 
@@ -555,6 +566,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             title: "Permission denied",
             message: "You are not allowed to manage SCIM tokens.",
             label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
