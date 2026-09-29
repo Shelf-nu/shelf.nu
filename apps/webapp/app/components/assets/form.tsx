@@ -33,7 +33,6 @@ import type {
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
 import { resolveCancelTo } from "~/utils/cancel-destination";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
@@ -41,6 +40,10 @@ import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { tw } from "~/utils/tw";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "~/utils/zod-numeric";
 import { AssetImage } from "./asset-image";
 import { AssetModelFormRow } from "./asset-model-form-row";
 import {
@@ -54,6 +57,10 @@ import { Form } from "../custom-form";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import BarcodesInput, { type BarcodesInputRef } from "../forms/barcodes-input";
 import FormRow from "../forms/form-row";
+import {
+  IMAGE_FIELD_PICTURE_CLASSES,
+  ImageFileField,
+} from "../forms/image-file-field";
 import Input from "../forms/input";
 import { RefererRedirectInput } from "../forms/referer-redirect-input";
 import ImageWithPreview from "../image-with-preview/image-with-preview";
@@ -62,11 +69,6 @@ import { Button } from "../shared/button";
 import { ButtonGroup } from "../shared/button-group";
 import { Card } from "../shared/card";
 import { DisabledReasonHoverCard } from "../shared/disabled-reason-hover-card";
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "../shared/hover-card";
 import {
   Tooltip,
   TooltipContent,
@@ -115,10 +117,10 @@ export const NewAssetFormSchema = z.object({
     .string()
     .optional()
     .transform((val) => (val && val.length > 0 ? val : null)),
-  valuation: z
-    .string()
-    .optional()
-    .transform((val) => (val ? +val : null)),
+  valuation: optionalNumberFromString({
+    blank: null,
+    fieldName: "Valuation",
+  }),
   addAnother: z
     .string()
     .optional()
@@ -127,9 +129,19 @@ export const NewAssetFormSchema = z.object({
 
   // Tracking method & quantity fields
   type: z.nativeEnum(AssetType).default(AssetType.INDIVIDUAL),
+  /**
+   * Deliberately NOT on `optionalNumberFromString`.
+   *
+   * This field needs absent and present-but-blank to differ: the input is not
+   * rendered for an INDIVIDUAL asset, so an absent key must pass, while a blank
+   * one on a QUANTITY_TRACKED asset must not. The shared builders map both to the
+   * same value and cannot express that, so the coercion stays local, and the `0`
+   * a blank produces is load-bearing: `.positive()` below is what rejects it.
+   */
   quantity: z
     .string()
     .optional()
+    // eslint-disable-next-line local-rules/no-hand-coerced-numeric-transform -- see the note above
     .transform((val) => (val === "" || val === undefined ? undefined : +val))
     .pipe(
       z
@@ -138,17 +150,21 @@ export const NewAssetFormSchema = z.object({
         .positive("Quantity is required and must be at least 1")
         .optional()
     ),
-  minQuantity: z
-    .string()
-    .optional()
-    .transform((val) => (val === "" || val === undefined ? null : +val))
-    .pipe(
-      z
-        .number({ invalid_type_error: "Min quantity must be a number" })
-        .int("Min quantity must be a whole number")
-        .positive("Min quantity must be at least 1")
-        .nullable()
-    ),
+  // Zero is a real threshold, not a missing one: it means "alert when nothing is
+  // left". `low-stock.server.ts` documents that semantics and tests
+  // `minQuantity != null` rather than truthiness, and the CSV importer accepts
+  // any non-negative whole number, so the bound here is non-negative while
+  // "no threshold" is carried by the null a blank input becomes.
+  minQuantity: optionalNumberFromString({
+    blank: null,
+    fieldName: "Min quantity",
+  }).pipe(
+    z
+      .number({ invalid_type_error: "Min quantity must be a number" })
+      .int("Min quantity must be a whole number")
+      .nonnegative("Min quantity cannot be negative")
+      .nullable()
+  ),
   consumptionType: z
     .nativeEnum(ConsumptionType, {
       errorMap: () => ({ message: "Please select a consumption type" }),
@@ -185,18 +201,13 @@ export const NewAssetBulkFormSchema = NewAssetFormSchema.extend({
     .string()
     .min(1, "Name template is required")
     .transform((val) => val.trim()),
-  count: z
-    .string()
-    .transform((val) =>
-      val === "" || val === undefined ? Number.NaN : Number(val)
-    )
-    .pipe(
-      z
-        .number({ invalid_type_error: "Count must be a number" })
-        .int("Count must be a whole number")
-        .min(2, "Count must be at least 2")
-        .max(100, "Count must be at most 100")
-    ),
+  count: requiredNumberFromString({ fieldName: "Count" }).pipe(
+    z
+      .number({ invalid_type_error: "Count must be a number" })
+      .int("Count must be a whole number")
+      .min(2, "Count must be at least 2")
+      .max(100, "Count must be at most 100")
+  ),
 });
 
 /** Pass props of the values to be used as default for the form fields */
@@ -370,7 +381,6 @@ export const AssetForm = ({
   );
 
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(assetImageValidateFileAtom);
   const [, updateDynamicTitle] = useAtom(updateDynamicTitleAtom);
 
   const { currency, asset } = useLoaderData<AssetEditLoaderData>();
@@ -522,6 +532,13 @@ export const AssetForm = ({
    * model's again.
    */
   const [clearMainImage, setClearMainImage] = useState(false);
+
+  /**
+   * True while the image input holds a valid picked file. A picked file wins
+   * over `clearMainImage` in the edit action, so while one is picked the
+   * image-source controls give way to a note saying the pick is what saves.
+   */
+  const [hasPickedImage, setHasPickedImage] = useState(false);
 
   /**
    * True when the asset currently stores an image of its own.
@@ -966,134 +983,142 @@ export const AssetForm = ({
         </When>
 
         <FormRow rowLabel={"Main image"} className="pt-[10px]">
-          <div className="flex items-center gap-2">
-            {/*
-              One preview for both tiers of the cascade. `clearMainImage` makes
+          <ImageFileField
+            name="mainImage"
+            label="Main image"
+            /*
+              One picture for both tiers of the cascade. `clearMainImage` makes
               the row behave as though the asset's own image were already gone,
-              so the user sees exactly what saving will produce — the model's
-              picture, or the placeholder.
-            */}
-            {id && showOwnImagePreview ? (
-              <AssetImage
-                className="size-16 shrink-0 rounded border object-cover"
-                asset={{
-                  id,
-                  // Null-safe: an asset can own an image without a thumbnail
-                  // (lazy generation) or without an expiration.
-                  thumbnailImage: thumbnailImage ?? null,
-                  mainImage: mainImage ?? null,
-                  mainImageExpiration: mainImageExpiration
-                    ? new Date(mainImageExpiration)
-                    : null,
-                  assetModel: inheritableAssetModelImage,
-                }}
-                alt={`${title} main image`}
-              />
-            ) : inheritableAssetModelImage ? (
-              <AssetImage
-                className="size-16 shrink-0 rounded border object-cover"
-                asset={{
-                  id: id ?? "new-asset",
-                  mainImage: null,
-                  thumbnailImage: null,
-                  mainImageExpiration: null,
-                  assetModel: inheritableAssetModelImage,
-                }}
-                alt={`Image from asset model ${
-                  selectedAssetModel?.name ?? "selected model"
-                }`}
-              />
-            ) : null}
-            <div>
-              <When truthy={Boolean(inheritableAssetModelImage)}>
-                <p className="mb-1 text-sm text-gray-600">
-                  {showOwnImagePreview ? (
-                    <>
-                      This asset uses its own image.{" "}
-                      <Button
-                        type="button"
-                        variant="link"
-                        className="!p-0 text-sm"
-                        onClick={() => setClearMainImage(true)}
-                      >
-                        Use the model's image instead
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      Using the image from{" "}
-                      <span className="font-medium text-gray-700">
-                        {selectedAssetModel?.name ?? "the selected model"}
-                      </span>
-                      . Upload one below to override it for this asset.
-                      <When truthy={clearMainImage}>
-                        {" "}
+              so the user sees exactly what saving will produce: the model's
+              picture, or nothing.
+            */
+            currentImage={
+              id && showOwnImagePreview ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id,
+                    // Null-safe: an asset can own an image without a thumbnail
+                    // (lazy generation) or without an expiration.
+                    thumbnailImage: thumbnailImage ?? null,
+                    mainImage: mainImage ?? null,
+                    mainImageExpiration: mainImageExpiration
+                      ? new Date(mainImageExpiration)
+                      : null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`${title} main image`}
+                />
+              ) : inheritableAssetModelImage ? (
+                <AssetImage
+                  className={IMAGE_FIELD_PICTURE_CLASSES}
+                  asset={{
+                    id: id ?? "new-asset",
+                    mainImage: null,
+                    thumbnailImage: null,
+                    mainImageExpiration: null,
+                    assetModel: inheritableAssetModelImage,
+                  }}
+                  alt={`Image from asset model ${
+                    selectedAssetModel?.name ?? "selected model"
+                  }`}
+                />
+              ) : null
+            }
+            previewAlt="Asset main image"
+            validateFileAtom={assetImageValidateFileAtom}
+            hint={
+              <>
+                Accepts PNG, JPG, JPEG, or WebP (max.8 MB). Resized to 1200px
+                wide on upload.
+              </>
+            }
+            onFileChange={(file) => setHasPickedImage(Boolean(file))}
+            aboveInput={
+              <>
+                <When
+                  truthy={
+                    hasPickedImage &&
+                    Boolean(inheritableAssetModelImage || hasOwnImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    The picked image becomes this asset's own image when you
+                    save.
+                  </p>
+                </When>
+                <When
+                  truthy={
+                    !hasPickedImage && Boolean(inheritableAssetModelImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    {showOwnImagePreview ? (
+                      <>
+                        This asset uses its own image.{" "}
                         <Button
                           type="button"
                           variant="link"
                           className="!p-0 text-sm"
-                          onClick={() => setClearMainImage(false)}
+                          onClick={() => setClearMainImage(true)}
                         >
-                          Undo
+                          Use the model's image instead
                         </Button>
-                      </When>
-                    </>
-                  )}
-                </p>
-              </When>
-              {/*
-                Signals the intent to drop the asset's own image so it falls
-                back down the cascade. Read by the edit action; a create has no
-                image to clear, so it is inert there.
-              */}
-              <input
-                type="hidden"
-                name="clearMainImage"
-                value={clearMainImage ? "true" : "false"}
-              />
-              <When
-                truthy={Boolean(hasOwnImage && !inheritableAssetModelImage)}
-              >
-                <p className="mb-1 text-sm text-gray-600">
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="!p-0 text-sm"
-                    onClick={() => setClearMainImage(!clearMainImage)}
-                  >
-                    {clearMainImage ? "Undo remove image" : "Remove image"}
-                  </Button>
-                </p>
-              </When>
-              <p className="hidden lg:block">
-                <HoverCard openDelay={50} closeDelay={50}>
-                  <HoverCardTrigger className={tw("inline-flex w-full  ")}>
-                    Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-                  </HoverCardTrigger>
-                  <HoverCardContent side="left">
-                    Images will be automatically resized on upload. Width will
-                    be set at 1200px and height will be adjusted accordingly to
-                    keep the aspect ratio.
-                  </HoverCardContent>
-                </HoverCard>
-              </p>
-              <Input
-                disabled={disabled}
-                accept={ACCEPT_SUPPORTED_IMAGES}
-                name="mainImage"
-                type="file"
-                onChange={validateFile}
-                label={"Main image"}
-                hideLabel
-                error={mainImageError}
-                className="mt-2"
-                inputClassName="border-0 shadow-none p-0 rounded-none"
-              />
-              <p className="mt-2 lg:hidden">
-                Accepts PNG, JPG, JPEG, or WebP (max.8 MB)
-              </p>
-            </div>
-          </div>
+                      </>
+                    ) : (
+                      <>
+                        Using the image from{" "}
+                        <span className="font-medium text-gray-700">
+                          {selectedAssetModel?.name ?? "the selected model"}
+                        </span>
+                        . Upload one below to override it for this asset.
+                        <When truthy={clearMainImage}>
+                          {" "}
+                          <Button
+                            type="button"
+                            variant="link"
+                            className="!p-0 text-sm"
+                            onClick={() => setClearMainImage(false)}
+                          >
+                            Undo
+                          </Button>
+                        </When>
+                      </>
+                    )}
+                  </p>
+                </When>
+                {/*
+                  Signals the intent to drop the asset's own image so it falls
+                  back down the cascade. Read by the edit action; a create has no
+                  image to clear, so it is inert there.
+                */}
+                <input
+                  type="hidden"
+                  name="clearMainImage"
+                  value={clearMainImage ? "true" : "false"}
+                />
+                <When
+                  truthy={
+                    !hasPickedImage &&
+                    Boolean(hasOwnImage && !inheritableAssetModelImage)
+                  }
+                >
+                  <p className="mb-1 text-sm text-gray-600">
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="!p-0 text-sm"
+                      onClick={() => setClearMainImage(!clearMainImage)}
+                    >
+                      {clearMainImage ? "Undo remove image" : "Remove image"}
+                    </Button>
+                  </p>
+                </When>
+              </>
+            }
+            error={mainImageError}
+            disabled={disabled}
+          />
         </FormRow>
 
         <div>
