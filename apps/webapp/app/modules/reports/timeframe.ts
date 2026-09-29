@@ -186,8 +186,11 @@ export function resolveTimeframe(
     }
 
     default:
-      // Default to last 30 days
-      return resolveTimeframe("last_30d");
+      // An unrecognised preset, which the query string can carry. Carry `prefs`
+      // into the fallback for the same reason the unreadable-boundary case does:
+      // without it the window is anchored at UTC midnight, so a report covers a
+      // different set of rows than the range it claims.
+      return resolveTimeframe("last_30d", undefined, undefined, prefs);
   }
 }
 
@@ -263,11 +266,4 @@ export function toZonedBoundaryISO(
   );
   const bounded = boundary === "start" ? day.startOf("day") : day.endOf("day");
   return bounded.toJSDate().toISOString();
-}
-
-/**
- * Get the default timeframe (last 30 days).
- */
-export function getDefaultTimeframe(): ResolvedTimeframe {
-  return resolveTimeframe("last_30d");
 }
