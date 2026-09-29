@@ -218,7 +218,10 @@ import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
-import { emptyStockState } from "../consumption-log/stock-ledger";
+import {
+  emptyStockState,
+  initialStockRows,
+} from "../consumption-log/stock-ledger";
 import {
   readStockState,
   recordStockChanges,
@@ -5591,26 +5594,26 @@ export async function createAssetsFromBackupImport({
         }
 
         /**
-         * Create the Asset, and for a quantity-tracked one the ledger rows
-         * for the stock it is restored with, in the same transaction.
+         * A quantity-tracked asset's stock ledger starts with the stock it
+         * is restored with, written in the same statement as the asset.
+         * Rows are restored concurrently, so no interactive transaction per
+         * row: that would hold a connection each.
          */
-        const { id: assetId } = await db.$transaction(async (tx) => {
-          const created = await tx.asset.create(d);
-          if (backupType === AssetType.QUANTITY_TRACKED && backupQuantity) {
-            await recordStockChanges(tx, {
-              organizationId,
-              userId,
-              changes: [
-                {
-                  assetId: created.id,
-                  before: emptyStockState(),
-                  events: [{ category: "INITIAL", change: backupQuantity }],
-                },
-              ],
-            });
-          }
-          return created;
-        });
+        if (backupType === AssetType.QUANTITY_TRACKED && backupQuantity) {
+          const rows = initialStockRows({
+            total: backupQuantity,
+            placed: new Map(),
+          });
+          Object.assign(d.data, {
+            stockLedgerStartedAt: new Date(),
+            consumptionLogs: {
+              create: rows.map((row) => ({ ...row, userId })),
+            },
+          });
+        }
+
+        /** Create the Asset */
+        const { id: assetId } = await db.asset.create(d);
 
         // Activity event: ASSET_CREATED at the moment of creation.
         // The per-note createMany below restores HISTORICAL notes with

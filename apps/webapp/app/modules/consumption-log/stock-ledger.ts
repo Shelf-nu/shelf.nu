@@ -243,6 +243,27 @@ export function planStockLedgerRows({
 }
 
 /**
+ * The ledger rows of a pool created with `state` in one write: `INITIAL`
+ * rows where its units land. For a create that cannot run
+ * `recordStockChanges` (no interactive transaction), written in the same
+ * statement as the asset, which must also set `stockLedgerStartedAt`.
+ *
+ * @param state - The pool's stock as the create writes it
+ * @returns The rows, without asset and user ids
+ */
+export function initialStockRows(
+  state: Pick<StockState, "total" | "placed">
+): PlannedLedgerRow[] {
+  return planStockLedgerRows({
+    changes: diffStockStates(emptyStockState(), {
+      ...state,
+      ledgerStartedAt: null,
+    }),
+    events: [{ category: "INITIAL", change: state.total }],
+  }).rows;
+}
+
+/**
  * Sums ledger rows back into a stock: what a report does, and what the
  * rows of a pool must reach from its `stockLedgerStartedAt` on.
  *
