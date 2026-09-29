@@ -388,9 +388,17 @@ function AdvancedFilter() {
                   lowStockActive ? "text-primary" : "text-white"
                 )}
               />
-              Low stock only
+              {/* Deliberately NOT "Low stock". The Stock status column emits a
+                  badge literally reading "Running low", and filtering on that
+                  badge is a NARROWER question: it excludes items that have run
+                  out entirely, because "None free" outranks "Running low" on
+                  the verdict ladder. Two controls both called low stock,
+                  returning different counts, is the kind of thing that makes
+                  people stop trusting both. This one owns the broader
+                  reorder question and says so. */}
+              Needs reordering
               <span className="text-gray-500">
-                — at or below reorder threshold
+                : at or below the min quantity you set
               </span>
             </button>
 

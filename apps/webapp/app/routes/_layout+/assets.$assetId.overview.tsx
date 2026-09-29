@@ -5,6 +5,7 @@ import {
   CustomFieldType,
   OrganizationRoles,
 } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -57,6 +58,7 @@ import {
   MOVE_UNITS_INTENT_FIELD,
   type MoveAxis,
 } from "~/modules/asset/move-units.types";
+import { resolveOverCommitment } from "~/modules/asset/over-commitment";
 import {
   buildQuantityData,
   type QuantityData,
@@ -87,6 +89,7 @@ import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import { formatCurrency } from "~/utils/currency";
@@ -152,6 +155,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       canUseBarcodes,
       role,
       canSeeAllCustody,
+      canSeeAllBookings,
     } = await requirePermission({
       userId,
       request,
@@ -291,6 +295,90 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // `bookingAssets` is already the asset's current booking: the query keeps
     // only the slice that is out (`CURRENT_BOOKING_SLICE_FILTER`), so the first
     // row is the one the page shows. Nothing further is derived from it here.
+
+    /**
+     * Is this pool promised beyond its size at any point ahead, and which
+     * booking is the biggest part of it?
+     *
+     * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
+     * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it.
+     * The peak comes from the same primitive the booking engine consults,
+     * windowed from now onwards so it is the future peak, not a sum.
+     *
+     * The culprit is ONE grouped row, never a list: an asset can carry
+     * hundreds of future bookings and this page must not pay for all of them
+     * to name one. Standalone slices only, a kit's slices are its `inKits`
+     * units, and the primitive excludes them for the same reason.
+     */
+    const availabilityAhead = isQuantityTracked(asset)
+      ? await getAssetAvailability({
+          assetId: asset.id,
+          organizationId,
+          window: { from: new Date(), to: AVAILABILITY_HORIZON },
+        })
+      : null;
+
+    const topReservedBooking = isQuantityTracked(asset)
+      ? (
+          await db.bookingAsset.groupBy({
+            by: ["bookingId"],
+            where: {
+              assetId: asset.id,
+              assetKitId: null,
+              booking: {
+                status: BookingStatus.RESERVED,
+                to: { gt: new Date() },
+              },
+            },
+            _sum: { quantity: true },
+            orderBy: { _sum: { quantity: "desc" } },
+            take: 1,
+          })
+        )[0] ?? null
+      : null;
+
+    /**
+     * The booking is named and linked only for a viewer who may open it, by
+     * the same `canSeeBooking` rule the booking page enforces. Anyone else
+     * still reads the shortfall, without a name or a link that would 403.
+     */
+    const topReservedBookingRow = topReservedBooking
+      ? await db.booking.findFirst({
+          where: { id: topReservedBooking.bookingId, organizationId },
+          select: {
+            name: true,
+            custodianUserId: true,
+            custodianTeamMember: { select: { userId: true } },
+          },
+        })
+      : null;
+    const topReservedBookingName =
+      topReservedBookingRow &&
+      canSeeBooking({
+        canSeeAllBookings,
+        booking: topReservedBookingRow,
+        userId,
+      })
+        ? topReservedBookingRow.name
+        : null;
+
+    const overCommitment = availabilityAhead
+      ? resolveOverCommitment({
+          total: availabilityAhead.total,
+          inCustody: availabilityAhead.inCustody,
+          inKits: availabilityAhead.inKits,
+          peakBooked: availabilityAhead.reserved,
+          topBooking:
+            topReservedBooking && topReservedBookingName !== null
+              ? {
+                  id: topReservedBooking.bookingId,
+                  name: topReservedBookingName,
+                  units: topReservedBooking._sum.quantity ?? 0,
+                }
+              : null,
+        })
+      : null;
+
     /** We only need customField with same category of asset or without any category */
     const customFields = asset.categoryId
       ? asset.customFields.filter(
@@ -403,6 +491,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       qrObj,
       reminders,
       quantityData,
+      overCommitment,
       teamMembers,
       totalTeamMembers,
       categories,
@@ -418,6 +507,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     throw data(error(reason), { status: reason.status });
   }
 }
+
+/**
+ * "From now on" for the over-commitment peak. A window end the booking
+ * engine's filter can hold: Prisma refuses to serialise the package's
+ * `FAR_FUTURE_SENTINEL` (the JS max date) as a DateTime argument.
+ */
+const AVAILABILITY_HORIZON = new Date("9999-12-31T00:00:00.000Z");
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -765,6 +861,7 @@ export default function AssetOverview() {
     currentOrganization,
     userId,
     quantityData,
+    overCommitment,
     allCustomFieldDefs,
     moveDestinations,
     unplacedQuantity,
@@ -1786,6 +1883,7 @@ export default function AssetOverview() {
               inLocationsQuantity={quantityData?.inLocations}
               inLocationsManualQuantity={quantityData?.inLocationsManual}
               reservedQuantity={quantityData?.reserved}
+              overCommitment={overCommitment}
               reservingBookingCount={quantityData?.reservingBookingCount}
               checkedOutQuantity={quantityData?.checkedOut}
               canUpdate={canUpdateAvailability}

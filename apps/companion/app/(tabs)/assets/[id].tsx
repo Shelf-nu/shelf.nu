@@ -1,4 +1,7 @@
-import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_QTY_STATUS_LABELS,
+  ASSET_QUANTITY_FIGURE_LABELS,
+} from "@shelf/labels";
 import { useMemo, useState } from "react";
 import {
   View,
@@ -554,7 +557,7 @@ export default function AssetDetailScreen() {
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
+                      label={ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW}
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { m } from "framer-motion";
 import { Package } from "lucide-react";
 import { useFetcher, useFetchers, useLoaderData } from "react-router";
@@ -107,7 +108,9 @@ export const AssetsList = ({
         </Th>
       </When>
       <Th>Location</Th>
-      <Th>Quantity</Th>
+      <Th className="whitespace-nowrap">
+        {ASSET_QUANTITY_FIGURE_LABELS.TOTAL}
+      </Th>
       <Th>Actions</Th>
     </>
   ) : (
