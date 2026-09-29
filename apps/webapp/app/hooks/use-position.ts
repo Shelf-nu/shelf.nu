@@ -25,7 +25,9 @@ export const usePosition = () => {
   const [searchParams] = useSearchParams();
   const [fix, setFix] = useAtom(positionAtom);
   const fetcher = useFetcher();
-  const scanId = searchParams.get("scanId") as string;
+  // Absent when the page recorded no scan (a QR no workspace has claimed):
+  // then there is nothing to attach a position to, so none is asked for.
+  const scanId = searchParams.get("scanId");
 
   if (!qrId) {
     // If we don't have a qrId, we get it from the search params
@@ -73,7 +75,9 @@ export const usePosition = () => {
 
   /** Records a fix for the scan currently in the URL. */
   const setPosition = useCallback(
-    (coords: GeolocationCoordinates) => setFix({ scanId, coords }),
+    (coords: GeolocationCoordinates) => {
+      if (scanId) setFix({ scanId, coords });
+    },
     [scanId, setFix]
   );
 

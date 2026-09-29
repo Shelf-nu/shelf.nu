@@ -346,20 +346,15 @@ describe("recordScan: the note on the asset", () => {
     expect(mocks.createNote).not.toHaveBeenCalled();
   });
 
-  it("writes no note for a QR nobody has claimed", async () => {
-    await recordScan(
-      scanArgs({
-        codeType: "QR",
-        code: "qr-1",
-        qrId: "qr-1",
-        source: "QR_LINK",
-        organizationId: null,
-        assetId: null,
-        writeNote: true,
-      })
-    );
-
-    expect(mocks.createNote).not.toHaveBeenCalled();
+  it("cannot be called without the workspace the code resolved in", () => {
+    // A scan with no workspace (an unclaimed QR) is never recorded: nobody
+    // could read it. The type is the guard, so this pins it at compile time.
+    const args: RecordScanArgs = {
+      ...scanArgs(),
+      // @ts-expect-error organizationId is required and never null
+      organizationId: null,
+    };
+    expect(args.organizationId).toBeNull();
   });
 });
 

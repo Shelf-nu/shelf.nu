@@ -64,11 +64,12 @@ export type RecordScanArgs = {
   /** The scanning device's User-Agent */
   userAgent?: string | null;
   /**
-   * The workspace the code resolved in. Null only for a QR nobody has claimed.
-   * The note is written against this org, so it must come from the code's own
-   * resolution, never from request input (cross-org IDOR guard).
+   * The workspace the code resolved in. Required: a scan nobody can read (a QR
+   * no workspace has claimed) is not recorded at all. The note is written
+   * against this org, so it must come from the code's own resolution, never
+   * from request input (cross-org IDOR guard).
    */
-  organizationId: string | null;
+  organizationId: string;
   /** The asset the code resolved to */
   assetId?: string | null;
   /** The kit the code resolved to */
@@ -180,7 +181,7 @@ export async function recordScan(args: RecordScanArgs): Promise<Scan> {
       },
     });
 
-    if (writeNote && assetId && organizationId) {
+    if (writeNote && assetId) {
       await createScanNote({
         userId: scannerId,
         assetId,

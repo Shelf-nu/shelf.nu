@@ -101,18 +101,31 @@ describe("GET /qr/:qrId records the scan", () => {
     );
   });
 
-  it("records a scan of a QR nobody has claimed, with no workspace", async () => {
-    mockGetQr.mockResolvedValue({
-      id: "qr-1",
-      assetId: null,
-      kitId: null,
-      organizationId: null,
+  describe("a QR no workspace has claimed", () => {
+    beforeEach(() => {
+      mockGetQr.mockResolvedValue({
+        id: "qr-1",
+        assetId: null,
+        kitId: null,
+        organizationId: null,
+      });
     });
 
-    await open({ signedIn: true });
+    it("records nothing and opens the claim page with no scanId", async () => {
+      const response = await open({ signedIn: true });
 
-    expect(mockRecordScan).toHaveBeenCalledWith(
-      expect.objectContaining({ organizationId: null, assetId: null })
-    );
+      expect(mockRecordScan).not.toHaveBeenCalled();
+      expect(mockUpdateScan).not.toHaveBeenCalled();
+      expect(response.headers.get("Location")).toBe("claim");
+    });
+
+    it("sends a signed-out visitor to log in with no scanId", async () => {
+      const response = await open({ signedIn: false });
+
+      expect(mockRecordScan).not.toHaveBeenCalled();
+      expect(response.headers.get("Location")).toBe(
+        "not-logged-in?redirectTo=%2Fqr%2Fqr-1"
+      );
+    });
   });
 });
