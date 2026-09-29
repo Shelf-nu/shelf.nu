@@ -34,6 +34,7 @@ import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
+import type { ImportPreflightResult } from "~/utils/import-row-errors";
 import { getParamsValues } from "~/utils/list";
 import { validEmail } from "~/utils/misc";
 import { organizationRolesMap } from "~/utils/organization-roles";
@@ -47,6 +48,7 @@ import {
 } from "./helpers";
 import {
   type ImportUserCsvRow,
+  MAX_IMPORT_USERS_ROWS,
   validateImportUserRows,
 } from "./import-users-preflight.server";
 import { processInvitationMessage } from "./message-validator.server";
@@ -61,6 +63,13 @@ const INVITE_EMAIL_BATCH_DELAY_MS = 1_000;
 const INVITE_EMAIL_SPACING_MS = Math.ceil(
   INVITE_EMAIL_BATCH_DELAY_MS / INVITE_EMAIL_BATCH_SIZE
 );
+
+/**
+ * How many email domains a bulk import checks against SSO at once. Each check
+ * holds a database connection, so an unbounded fan-out over a file with many
+ * domains would starve the pool for every other request.
+ */
+export const SSO_DOMAIN_CHECK_CONCURRENCY = 5;
 
 /** Why an address on a domain this workspace manages through SCIM is refused. */
 const SCIM_MANAGED_DOMAIN_MESSAGE =
@@ -101,28 +110,39 @@ async function resolveSsoInviteRefusals({
   }
 
   const pureSsoEmails: string[] = [];
-  await Promise.all(
-    [...emailsByDomain.values()].map(async (domainEmails) => {
-      // Any address on the domain answers for all of them.
-      const domainStatus = await checkDomainSSOStatus(domainEmails[0]);
-      if (!domainStatus.isConfiguredForSSO) return;
+  const checkDomain = async (domainEmails: string[]) => {
+    // Any address on the domain answers for all of them.
+    const domainStatus = await checkDomainSSOStatus(domainEmails[0]);
+    if (!domainStatus.isConfiguredForSSO) return;
 
-      // Tested against every owner: a domain can be claimed by several
-      // organizations, and matching only one exempts the rest from the rule.
-      if (
-        domainStatus.linkedOrganizations.some(
-          (org) => org.id === organizationId
-        )
-      ) {
-        for (const email of domainEmails) {
-          refusals.set(email, SCIM_MANAGED_DOMAIN_MESSAGE);
-        }
-        return;
+    // Tested against every owner: a domain can be claimed by several
+    // organizations, and matching only one exempts the rest from the rule.
+    if (
+      domainStatus.linkedOrganizations.some((org) => org.id === organizationId)
+    ) {
+      for (const email of domainEmails) {
+        refusals.set(email, SCIM_MANAGED_DOMAIN_MESSAGE);
       }
+      return;
+    }
 
-      pureSsoEmails.push(...domainEmails);
-    })
-  );
+    pureSsoEmails.push(...domainEmails);
+  };
+
+  // A few domains at a time: each check holds a database connection, and a
+  // file can name hundreds of domains.
+  const domainGroups = [...emailsByDomain.values()];
+  for (
+    let start = 0;
+    start < domainGroups.length;
+    start += SSO_DOMAIN_CHECK_CONCURRENCY
+  ) {
+    await Promise.all(
+      domainGroups
+        .slice(start, start + SSO_DOMAIN_CHECK_CONCURRENCY)
+        .map(checkDomain)
+    );
+  }
 
   if (pureSsoEmails.length > 0) {
     const ssoUsers = await db.user.findMany({
@@ -747,6 +767,36 @@ export async function getPaginatedAndFilterableSettingInvites({
   }
 }
 
+/**
+ * Refuses a users CSV with the problems its pre-flight found, as the 400 the
+ * import dialog renders as a row list.
+ *
+ * @param args.preflight - The pre-flight result, with at least one error
+ * @param args.organizationId - The importing workspace, for the log line
+ * @throws {ShelfError} Always: 400, not captured, row errors in additionalData
+ */
+function throwImportFileErrors({
+  preflight,
+  organizationId,
+}: {
+  preflight: ImportPreflightResult;
+  organizationId: string;
+}): never {
+  throw new ShelfError({
+    cause: null,
+    title: "Import file has errors",
+    message: `Found ${preflight.totalErrors} problem(s) in your file. Nothing was imported. Fix the rows below and upload again.`,
+    additionalData: {
+      organizationId,
+      rowErrors: preflight.errors,
+      totalErrors: preflight.totalErrors,
+    },
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
 export async function bulkInviteUsers({
   users,
   userId,
@@ -785,6 +835,19 @@ export async function bulkInviteUsers({
      * once for the whole file, so the cost does not grow per row: one team
      * member lookup, and the SSO checks, which run once per email domain.
      */
+    // An oversized file is refused before anything is read, so its size
+    // cannot drive the lookups below.
+    if (users.length > MAX_IMPORT_USERS_ROWS) {
+      throwImportFileErrors({
+        preflight: validateImportUserRows({
+          rows: users,
+          workspaceTeamMemberIds: new Set(),
+          ssoRefusalByEmail: new Map(),
+        }),
+        organizationId,
+      });
+    }
+
     const csvTeamMemberIds = [
       ...new Set(
         users
@@ -819,19 +882,7 @@ export async function bulkInviteUsers({
     });
 
     if (preflight.totalErrors > 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Import file has errors",
-        message: `Found ${preflight.totalErrors} problem(s) in your file. Nothing was imported. Fix the rows below and upload again.`,
-        additionalData: {
-          organizationId,
-          rowErrors: preflight.errors,
-          totalErrors: preflight.totalErrors,
-        },
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
+      throwImportFileErrors({ preflight, organizationId });
     }
 
     const uniquePayloads = preflight.validRows;

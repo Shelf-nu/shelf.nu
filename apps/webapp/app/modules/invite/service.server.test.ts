@@ -20,7 +20,9 @@ import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { caseInsensitiveEmailFilter, normalizeInviteEmail } from "./helpers";
+import { MAX_IMPORT_USERS_ROWS } from "./import-users-preflight.server";
 import {
+  SSO_DOMAIN_CHECK_CONCURRENCY,
   bulkInviteUsers,
   checkUserAndInviteMatch,
   createInvite,
@@ -435,6 +437,45 @@ describe("bulkInviteUsers", () => {
         }),
       });
       expect(dbMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("refuses a file over the row cap before reading anything", async () => {
+      const users = Array.from(
+        { length: MAX_IMPORT_USERS_ROWS + 1 },
+        (_, i) => ({ email: `user${i}@domain${i}.com`, role: "BASE" })
+      ) as BulkUsers;
+
+      await expect(importRows(users)).rejects.toMatchObject({
+        status: 400,
+        additionalData: expect.objectContaining({
+          rowErrors: [
+            expect.objectContaining({ row: 0, title: "File too large" }),
+          ],
+        }),
+      });
+      expect(dbMock.teamMember.findMany).not.toHaveBeenCalled();
+      expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
+    });
+
+    it("runs the per-domain SSO checks a few at a time", async () => {
+      let running = 0;
+      let peak = 0;
+      // why: each check holds a database connection; the stub records how
+      // many are in flight at once.
+      ssoMock.checkDomainSSOStatus.mockImplementation(async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        running -= 1;
+        return { isConfiguredForSSO: false, linkedOrganizations: [] };
+      });
+
+      await importRows(
+        rows(...Array.from({ length: 12 }, (_, i) => `a@domain${i}.com`))
+      );
+
+      expect(ssoMock.checkDomainSSOStatus).toHaveBeenCalledTimes(12);
+      expect(peak).toBeLessThanOrEqual(SSO_DOMAIN_CHECK_CONCURRENCY);
     });
 
     it("checks SSO once per domain, not once per row", async () => {
