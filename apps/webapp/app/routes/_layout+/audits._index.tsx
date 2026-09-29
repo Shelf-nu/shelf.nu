@@ -40,8 +40,8 @@ import { getParamsValues } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
@@ -119,12 +119,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         totalPages,
         perPage,
         modelName,
-        canCreateAudits: userHasPermission({
+        canCreateAudits: roleHasPermission({
           roles,
           entity: PermissionEntity.audit,
           action: PermissionAction.create,
         }),
-        canBulkActAudits: userHasPermission({
+        canBulkActAudits: roleHasPermission({
           roles,
           entity: PermissionEntity.audit,
           action: [PermissionAction.archive, PermissionAction.delete],

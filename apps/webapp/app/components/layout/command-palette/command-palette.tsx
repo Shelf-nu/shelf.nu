@@ -39,8 +39,8 @@ import { canSeeAdminArea } from "~/utils/permissions/admin-areas";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import {
   visibleSettingsTabs,
   visibleTeamTabs,
@@ -543,7 +543,10 @@ export function CommandPalette() {
         roles,
         isPersonalOrg: isPersonalWorkspace,
       }).some((t) => t.to === "users"),
-      canInviteUsers: userHasPermission({
+      // The palette renders during SSR, outside the layout's hydration gate,
+      // so it reads the pure resolver: `permission.validator.client` has its
+      // exports stubbed to undefined in the server bundle.
+      canInviteUsers: roleHasPermission({
         roles,
         entity: PermissionEntity.teamMember,
         action: PermissionAction.create,
