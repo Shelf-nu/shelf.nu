@@ -63,7 +63,9 @@ export async function lockAssetForQuantityUpdate(
  * The order is the one every multi-asset locker uses (the booking check-out
  * and check-in paths lock asset by asset in sorted id order), so two
  * transactions touching the same assets can never deadlock. `FOR UPDATE`
- * locks rows as the sorted result is produced. Org-scoped like
+ * locks rows as the sorted result is produced. `COLLATE "C"` makes the
+ * database order byte order, which is what JavaScript's `sort()` gives for
+ * these ASCII ids, whatever collation the database was created with. Org-scoped like
  * {@link lockAssetForQuantityUpdate}: foreign ids match nothing and are not
  * locked. Missing ids are simply absent from the result.
  *
@@ -84,7 +86,7 @@ export function lockAssetsForQuantityUpdate(
   return tx.$queryRaw`
     SELECT id, type, quantity FROM "Asset"
     WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
-    ORDER BY id
+    ORDER BY id COLLATE "C"
     FOR UPDATE
   `;
 }
