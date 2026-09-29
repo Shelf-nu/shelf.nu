@@ -11824,6 +11824,12 @@ export async function getBookings(params: {
             bookingAssets: {
               some: {
                 asset: {
+                  // The workspace on the asset itself, not only on the
+                  // booking: without it Postgres evaluates the OR below
+                  // against every workspace's assets before joining back to
+                  // these bookings. With it, the match starts from this
+                  // workspace's asset index.
+                  organizationId,
                   OR: [
                     { title: { contains: term, mode: "insensitive" } },
                     {
