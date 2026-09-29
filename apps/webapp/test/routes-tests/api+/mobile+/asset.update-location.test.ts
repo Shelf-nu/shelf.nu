@@ -14,6 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // transaction; stubbing the client avoids the real Prisma client (no DB in
 // unit tests). `$transaction` runs its callback against a tx stub so the
 // pivot writes and the in-tx re-read stay observable.
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findUnique: vi.fn() },
@@ -56,6 +66,10 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
@@ -92,6 +106,19 @@ const tx = {
     create: vi.fn(),
   },
   asset: { findUniqueOrThrow: vi.fn() },
+  // The collapse re-homes custody taken from a dropped placement: the route
+  // reads the operator custody rows before and after the pivot write and
+  // re-points any row whose location no longer holds its units.
+  custody: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
+  },
+  // The custody source read also counts units out on bookings per location;
+  // none are out in these tests.
+  bookingAsset: { findMany: vi.fn() },
 };
 
 /**
@@ -143,6 +170,10 @@ beforeEach(() => {
   // because the route derives the collapse events, the primary event and the
   // note from THIS read rather than from the pre-transaction one.
   tx.assetLocation.findMany.mockResolvedValue(qtyAsset().assetLocations);
+  // No custody out by default, so the re-home has nothing to move.
+  tx.custody.findMany.mockResolvedValue([]);
+  tx.bookingAsset.findMany.mockResolvedValue([]);
+  tx.custody.findFirst.mockResolvedValue(null);
   tx.asset.findUniqueOrThrow.mockResolvedValue({
     id: "asset-1",
     title: "Cords",
@@ -151,6 +182,35 @@ beforeEach(() => {
 });
 
 describe("POST /api/mobile/asset/update-location", () => {
+  it("takes custody from the collapsed placement along to the new location", async () => {
+    // Read order under the lock: the route's own placements read, then the
+    // custody sources before the write, then after it.
+    tx.assetLocation.findMany
+      .mockResolvedValueOnce(qtyAsset().assetLocations)
+      .mockResolvedValueOnce([{ locationId: "loc-storage", quantity: 10 }])
+      .mockResolvedValueOnce([{ locationId: "loc-van", quantity: 10 }]);
+    tx.custody.findMany.mockResolvedValue([
+      {
+        id: "custody-1",
+        teamMemberId: "tm-1",
+        locationId: "loc-storage",
+        quantity: 3,
+        createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      },
+    ]);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(200);
+    expect(tx.custody.update).toHaveBeenCalledWith({
+      where: { id: "custody-1" },
+      data: { locationId: "loc-van" },
+    });
+  });
+
   it("places a partial quantity and reports it back", async () => {
     const { body, status } = await callAction({
       assetId: "asset-1",
@@ -174,6 +234,41 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.deleteMany).toHaveBeenCalledWith({
       where: { assetId: "asset-1", assetKitId: null },
     });
+  });
+
+  it("hands the stock ledger the pool's stock from before the collapse", async () => {
+    const before = {
+      total: 10,
+      placed: new Map([["loc-store", 10]]),
+      ledgerStartedAt: null,
+    };
+    vi.mocked(readStockState).mockResolvedValueOnce(before);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+      quantity: 4,
+    });
+
+    expect(status).toBe(200);
+    expect(readStockState).toHaveBeenCalledWith(tx, {
+      assetId: "asset-1",
+      organizationId: "org-1",
+    });
+    // Read before the collapse, recorded after it: the ledger diffs the two.
+    expect(vi.mocked(readStockState).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(tx.assetLocation.deleteMany).mock.invocationCallOrder[0]
+    );
+    expect(recordStockChanges).toHaveBeenCalledWith(tx, {
+      organizationId: "org-1",
+      userId: expect.any(String),
+      changes: [{ assetId: "asset-1", before }],
+    });
+    expect(
+      vi.mocked(recordStockChanges).mock.invocationCallOrder[0]
+    ).toBeGreaterThan(
+      vi.mocked(tx.assetLocation.create).mock.invocationCallOrder[0]
+    );
   });
 
   it("records the placed quantity on the event and in the note", async () => {

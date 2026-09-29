@@ -51,6 +51,7 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
+import { releaseSourceNoteSuffix } from "~/modules/asset/custody-source.server";
 import { releaseQuantity } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
@@ -90,6 +91,13 @@ const ReleaseQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Release only the units taken from this source: a location id, or
+   * `null` / `""` for the unplaced units. Optional and additive: an app
+   * build that does not send it has the holder's rows drawn in the
+   * service's fixed order.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -139,7 +147,8 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, consumed, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, consumed, note, locationId } =
+      parsed.data;
 
     /**
      * Validate that the team member belongs to the same organization.
@@ -189,17 +198,22 @@ export async function action({ request }: ActionFunctionArgs) {
      * here. App builds predating the field simply omit it and keep the
      * server-derived outcome they always had.
      */
-    const { consumed: consumedUnits, returned: returnedUnits } =
-      await releaseQuantity({
-        assetId,
-        teamMemberId,
-        quantity,
-        consumed,
-        userId: user.id,
-        organizationId,
-        role,
-        note,
-      });
+    const {
+      consumed: consumedUnits,
+      returned: returnedUnits,
+      lines,
+      multiSource,
+    } = await releaseQuantity({
+      assetId,
+      teamMemberId,
+      quantity,
+      consumed,
+      userId: user.id,
+      organizationId,
+      role,
+      note,
+      locationId,
+    });
 
     /** Best-effort audit note — don't fail the action if note creation fails */
     try {
@@ -231,12 +245,13 @@ export async function action({ request }: ActionFunctionArgs) {
        * Same three shapes the web route writes, so an activity feed reads the
        * same whichever client performed the release.
        */
+      const fromSources = releaseSourceNoteSuffix({ lines, multiSource });
       const baseLine =
         consumedUnits > 0 && returnedUnits > 0
-          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
+          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s)${fromSources}: **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
           : consumedUnits > 0
-          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
-          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
+          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed${fromSources}. Stock reduced permanently.`
+          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody${fromSources}.`;
       const noteContent = appendUserTextToNote(baseLine, note);
 
       await createNote({

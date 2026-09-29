@@ -51,7 +51,27 @@ const dbMocks = vi.hoisted(() => ({
   location: {
     findFirst: vi.fn(),
   },
+  // why: the collapse reads the operator custody rows to re-home custody
+  // taken from a dropped placement; none are out in these tests.
+  custody: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+  // why: the same read also counts units out on bookings per location; none
+  // are out in these tests.
+  bookingAsset: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   $transaction: vi.fn(),
+}));
+
+// why: the stock ledger's rows come from real placement reads and have their
+// own tests (`consumption-log/stock-ledger.test.ts`, the in-memory
+// `asset/service.custody-source.test.ts`); this suite is about placements,
+// events and notes.
+vi.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vi.fn().mockResolvedValue(null),
+  readStockStates: vi.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("~/database/db.server", () => ({

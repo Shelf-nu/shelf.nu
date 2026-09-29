@@ -43,6 +43,16 @@ vitest.mock("./quantity-lock.server", () => ({
     lockAssetForQuantityUpdateMock(...args),
 }));
 
+// why: the ledger rows are derived from real placement reads; the stock
+// ledger has its own tests (`stock-ledger.test.ts` and the in-memory
+// `asset/service.custody-source.test.ts`). Here only the events adjustQuantity
+// hands it are asserted.
+const recordStockChangesMock = vitest.fn();
+vitest.mock("./stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue(null),
+  recordStockChanges: (...args: unknown[]) => recordStockChangesMock(...args),
+}));
+
 // why: isolating adjustQuantity from real database operations. `$transaction`
 // routes its callback through this same mocked `db` object so inner `tx.*`
 // calls hit the stubs below (mirrors `asset/service.server.test.ts`'s
@@ -175,7 +185,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
     });
 
     expect(db.asset.update).not.toHaveBeenCalled();
-    expect(db.consumptionLog.create).not.toHaveBeenCalled();
+    expect(recordStockChangesMock).not.toHaveBeenCalled();
   });
 
   it("refuses a subtraction that would strand units already placed at locations", async () => {
@@ -203,7 +213,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
     });
 
     expect(db.asset.update).not.toHaveBeenCalled();
-    expect(db.consumptionLog.create).not.toHaveBeenCalled();
+    expect(recordStockChangesMock).not.toHaveBeenCalled();
   });
 
   it("allows a subtraction the unplaced residual covers", async () => {
@@ -223,7 +233,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
       })
-    ).resolves.toMatchObject({ id: ASSET_ID });
+    ).resolves.toMatchObject({ asset: { id: ASSET_ID } });
   });
 
   it("allows a safe subtraction that stays at or above what's committed", async () => {
@@ -238,7 +248,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
       })
-    ).resolves.toMatchObject({ id: ASSET_ID });
+    ).resolves.toMatchObject({ asset: { id: ASSET_ID } });
 
     expect(db.asset.update).toHaveBeenCalled();
   });
@@ -271,13 +281,25 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
       organizationId: ORG_ID,
     });
 
-    // The direction-agnostic ConsumptionLog stores the positive delta (3)…
-    expect(db.consumptionLog.create).toHaveBeenCalledWith(
+    // The ledger gets the signed change (-3) at the unplaced units…
+    expect(recordStockChangesMock).toHaveBeenCalledWith(
+      db,
       expect.objectContaining({
-        data: expect.objectContaining({ quantity: 3 }),
+        changes: [
+          expect.objectContaining({
+            assetId: ASSET_ID,
+            events: [
+              expect.objectContaining({
+                category: ConsumptionCategory.ADJUSTMENT,
+                change: -3,
+                locationId: null,
+              }),
+            ],
+          }),
+        ],
       })
     );
-    // …while the activity event captures the true 10 → 7 decrease.
+    // …and the activity event captures the same 10 → 7 decrease.
     expect(db.activityEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

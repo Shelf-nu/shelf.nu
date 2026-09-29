@@ -181,6 +181,9 @@ describe("POST /api/mobile/bookings/checkout", () => {
       userId: "user-1",
       from: BOOKING_FROM,
       to: BOOKING_TO,
+      // An app that sends no `sourceLocations` reaches the service with no
+      // answers, so every pool gets the default source.
+      sourceLocations: new Map(),
     });
   });
 

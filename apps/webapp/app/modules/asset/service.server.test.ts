@@ -18,6 +18,7 @@ import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "~/modules/consumption-log/service.server";
+import { recordStockChanges } from "~/modules/consumption-log/stock-ledger.server";
 import { getActiveCustomFields } from "~/modules/custom-field/service.server";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import {
@@ -138,6 +139,10 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       findFirst: vitest.fn().mockResolvedValue(null),
+      // why: checkOutQuantity / releaseQuantity read a pool's operator custody
+      // rows (one per holder per source location) to resolve and cap the
+      // source; release suites describe the holder through `stubHolderRows`.
+      findMany: vitest.fn().mockResolvedValue([]),
       create: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -154,6 +159,9 @@ vitest.mock("~/database/db.server", () => ({
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: a pool's units left at each location also subtract units out on
+      // bookings from there; no test here books a pool out, so none are.
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
     // AssetLocation pivot for the manual placement rows. `findFirst` is
@@ -204,6 +212,28 @@ vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
 }));
 
+/**
+ * Stubs the operator custody rows `releaseQuantity` reads for the pool, one
+ * row per holder per source location. Rows default to no recorded source.
+ */
+function stubHolderRows(
+  ...rows: Array<{
+    id: string;
+    teamMemberId: string;
+    quantity: number;
+    locationId?: string | null;
+    createdAt?: Date;
+  }>
+) {
+  (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+    rows.map((row) => ({
+      locationId: null,
+      createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      ...row,
+    }))
+  );
+}
+
 // why: the stock-lowering guard's own committed-peak math (custody + kits +
 // peak-concurrent bookings) is exhaustively unit-tested in
 // `availability.server.test.ts`. Here we only verify updateAsset's WIRING —
@@ -228,6 +258,28 @@ vitest.mock(
 vitest.mock("~/modules/consumption-log/service.server", () => ({
   createConsumptionLog: vitest.fn().mockResolvedValue({}),
 }));
+
+// why: the ledger rows are derived from real placement reads, covered by
+// `stock-ledger.test.ts` and the in-memory `service.custody-source.test.ts`.
+// These suites assert the events each service hands the ledger.
+vitest.mock("~/modules/consumption-log/stock-ledger.server", () => ({
+  readStockState: vitest.fn().mockResolvedValue({
+    total: 0,
+    placed: new Map(),
+    ledgerStartedAt: null,
+  }),
+  readStockStates: vitest.fn().mockResolvedValue(new Map()),
+  recordStockChanges: vitest.fn().mockResolvedValue(undefined),
+}));
+
+/** Every ledger event the mocked `recordStockChanges` was handed, in order. */
+function recordedStockEvents() {
+  return vitest
+    .mocked(recordStockChanges)
+    .mock.calls.flatMap(([, { changes }]) =>
+      changes.flatMap((change) => change.events ?? [])
+    );
+}
 
 // why: wiring-only — assert that updateAsset invokes the low-stock notifier on
 // a quantity DROP without running the real debounce/email logic (that logic is
@@ -1287,6 +1339,7 @@ describe("releaseQuantity — activity events", () => {
       teamMemberId: "tm-1",
       quantity: 10,
     });
+    stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 10 });
   });
 
   it("emits CUSTODY_RELEASED with quantity + viaQuantity meta on partial release", async () => {
@@ -1430,6 +1483,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       teamMemberId: "tm-1",
       quantity: 40,
     });
+    stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 40 });
     (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
     // why: the `refreshExpiredAssetImages` suite earlier in this file leaves a
     // rejection implementation on the asset write mocks that `clearAllMocks`
@@ -1460,17 +1514,17 @@ describe("releaseQuantity — consumptionType disposition", () => {
       role: OrganizationRoles.ADMIN,
     });
 
-    // Exactly one log, classified as consumption. Writing RETURN here is the
-    // shipped bug: consumption reporting counts the units as back on the shelf.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
+    // Exactly one ledger event, classified as consumption, and no RETURN.
+    // Writing RETURN here is the shipped bug: consumption reporting counts
+    // the units as back on the shelf.
+    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    expect(recordedStockEvents()).toEqual([
       expect.objectContaining({
-        assetId: "asset-1",
         category: "CONSUME",
-        quantity: 10,
+        change: -10,
         custodianId: "tm-1",
-      })
-    );
+      }),
+    ]);
     expect(mockAssetUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "asset-1" },
@@ -1499,10 +1553,10 @@ describe("releaseQuantity — consumptionType disposition", () => {
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
     // is the over-correction this split exists to prevent.
-    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(2);
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "CONSUME", quantity: 10 })
-    );
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "CONSUME", change: -10 }),
+    ]);
+    expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
       expect.objectContaining({ category: "RETURN", quantity: 30 })
     );
@@ -3094,17 +3148,16 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // ConsumptionLog stores the positive delta (|4 − 10| = 6) as an ADJUSTMENT,
-    // written inside the quantity tx (tx threaded through).
-    expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assetId: "asset-1",
-        category: "ADJUSTMENT",
-        quantity: 6,
-        userId: "user-1",
-      })
+    // The ledger gets the signed change (4 − 10 = −6) as an ADJUSTMENT,
+    // inside the quantity tx (tx threaded through).
+    expect(recordStockChanges).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ organizationId: "org-1", userId: "user-1" })
     );
-    // The direction the log can't carry is captured by the event's from/to.
+    expect(recordedStockEvents()).toEqual([
+      expect.objectContaining({ category: "ADJUSTMENT", change: -6 }),
+    ]);
+    // The activity event records the same change as from/to.
     expect(mockRecordEvents).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -3211,8 +3264,8 @@ describe("updateAsset quantity audit trail", () => {
       request: new Request("http://localhost"),
     } as any);
 
-    // delta 0 → no stock-movement audit (createConsumptionLog rejects qty 0).
-    expect(mockCreateConsumptionLog).not.toHaveBeenCalled();
+    // delta 0 → no stock-movement event for the ledger.
+    expect(recordedStockEvents()).toEqual([]);
     // No field actually changed, so no quantity event is recorded.
     const emittedQuantityEvent = mockRecordEvents.mock.calls.some(([events]) =>
       (events as Array<{ action: string }>).some(
@@ -3516,6 +3569,10 @@ describe("releaseQuantity: SELF_SERVICE guard", () => {
       id: "custody-1",
       quantity: 20,
     });
+    stubHolderRows(
+      { id: "custody-self", teamMemberId: "tm-self", quantity: 20 },
+      { id: "custody-colleague", teamMemberId: "tm-colleague", quantity: 20 }
+    );
     (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
       _sum: { quantity: 20 },
     });
@@ -5695,6 +5752,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         teamMemberId: "tm-1",
         quantity: 20,
       });
+      stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 20 });
       // Zero rows left → the flip-to-AVAILABLE branch fires.
       mockCustodyCount.mockResolvedValue(0);
     });

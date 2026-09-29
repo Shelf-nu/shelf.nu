@@ -91,6 +91,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     currentOrganization,
     booking: loaderBooking,
     lifecycleProgress,
+    checkoutSourceQuestions,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
@@ -423,6 +424,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
+                    sourceQuestions={checkoutSourceQuestions}
                     booking={{ id, name: name!, from: startDateAsDate }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}

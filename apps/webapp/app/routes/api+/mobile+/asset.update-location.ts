@@ -8,8 +8,17 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import {
+  createCustodyRehomeNote,
+  loadCustodySources,
+  rehomeCustodyForPlacementChange,
+} from "~/modules/asset/custody-source.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
+import {
+  readStockState,
+  recordStockChanges,
+} from "~/modules/consumption-log/stock-ledger.server";
 import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -160,6 +169,7 @@ export async function action({ request }: ActionFunctionArgs) {
       placedQuantity,
       previousLocation,
       previousQuantity,
+      rehome,
     } = await db.$transaction(async (tx) => {
       /**
        * Row-lock the asset before writing the pivot, the same lock every
@@ -225,7 +235,19 @@ export async function action({ request }: ActionFunctionArgs) {
         placementsBefore.find((al) => al.location?.id === primaryBefore?.id)
           ?.quantity ?? null;
 
-      // Clear MANUAL placements only — kit-driven rows
+      /** Custody sources before the collapse, for the re-home below. */
+      const custodyBefore = isQty
+        ? await loadCustodySources(tx, {
+            assetId,
+            total: locked.quantity ?? 0,
+          })
+        : null;
+      /** The pool's stock before the collapse, for the ledger's MOVE rows. */
+      const stockBefore = isQty
+        ? await readStockState(tx, { assetId, organizationId })
+        : null;
+
+      // Clear MANUAL placements only: kit-driven rows
       // (`assetKitId IS NOT NULL`) are owned by the kit's flow. The kit
       // guard above rejects kit members outright, so this filter mirrors
       // the web service's pivot write rather than changing behavior.
@@ -239,6 +261,28 @@ export async function action({ request }: ActionFunctionArgs) {
           organizationId,
           quantity: pivotQuantity,
         },
+      });
+
+      /**
+       * Custody follows the units: what was in custody from a collapsed
+       * placement now belongs at the requested location, as far as it holds
+       * them, and becomes unplaced beyond that. Same rule as the web edit
+       * form's collapse in `updateAsset`. Never refused.
+       */
+      const rehomeResult = custodyBefore
+        ? await rehomeCustodyForPlacementChange(tx, {
+            assetId,
+            total: locked.quantity ?? 0,
+            before: custodyBefore,
+            destinationLocationId: locationId,
+          })
+        : null;
+
+      /** The total does not change: the collapse is a MOVE of every unit it shifted. */
+      await recordStockChanges(tx, {
+        organizationId,
+        userId: user.id,
+        changes: [{ assetId, before: stockBefore }],
       });
 
       /**
@@ -309,8 +353,22 @@ export async function action({ request }: ActionFunctionArgs) {
         placedQuantity: pivotQuantity,
         previousLocation: primaryBefore,
         previousQuantity: primaryQuantityBefore,
+        rehome: rehomeResult,
       };
     });
+
+    if (rehome) {
+      await createCustodyRehomeNote({
+        result: rehome,
+        asset: {
+          id: asset.id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId: user.id,
+        organizationId,
+      });
+    }
 
     const { assetLocations: _, ...updatedAssetRest } = refreshedAsset;
     const updatedAssetWithLocation = {

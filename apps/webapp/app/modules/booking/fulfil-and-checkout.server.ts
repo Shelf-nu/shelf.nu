@@ -528,6 +528,7 @@ async function checkOutScannedUnits(
     userId,
     hints: args.hints,
     intentChoice: args.checkoutIntentChoice,
+    sourceLocations: args.sourceLocations,
   });
 
   return {
