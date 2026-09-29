@@ -608,7 +608,7 @@ export type AllowedCustodianFilterIds = string[] | "all";
  * instead of refusing it would widen the query to every row, which is the
  * opposite of what a refusal should do.
  */
-function applyCustodianAllowList(
+export function applyCustodianAllowList(
   requestedIds: string[],
   allowedTeamMemberIds: AllowedCustodianFilterIds
 ): string[] {
