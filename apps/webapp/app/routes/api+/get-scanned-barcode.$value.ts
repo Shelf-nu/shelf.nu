@@ -1,10 +1,12 @@
 import type { Prisma } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import {
   getScannerPickerMeta,
   ScannerPickerContextSchema,
@@ -41,6 +43,20 @@ import {
 // Export types for barcode scanning
 export type AssetFromBarcode = AssetFromScanner;
 export type KitFromBarcode = KitFromScanner;
+
+/**
+ * GET /api/get-scanned-barcode/:value
+ *
+ * Resolves a camera-scanned barcode to its asset or kit in the caller's
+ * workspace. Every web scanner drawer calls it once per scanned barcode.
+ *
+ * Each resolve records the scan as `WEB_DRAWER`, with no note on the asset: a
+ * drawer row is a list entry, and the action the drawer performs keeps its
+ * own trail. A resolve carrying `auditSessionId` records nothing, because the
+ * audit's own writer (`recordAuditScan`) records that scan.
+ *
+ * @see {@link file://./get-scanned-item.$qrId.ts} the QR / SAM ID twin
+ */
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -183,6 +199,22 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         additionalData: { value, shouldSendNotification: false },
         shouldBeCaptured: false,
         label: "Barcode",
+      });
+    }
+
+    if (!auditSessionId) {
+      // Non-fatal: a failed record never fails the resolve.
+      await recordScanNonFatal({
+        codeType: ScanCodeType.BARCODE,
+        code: value,
+        source: ScanSource.WEB_DRAWER,
+        userAgent: request.headers.get("user-agent"),
+        userId,
+        barcodeId: barcode.id,
+        assetId: barcode.assetId,
+        kitId: barcode.kitId,
+        organizationId,
+        writeNote: false,
       });
     }
 

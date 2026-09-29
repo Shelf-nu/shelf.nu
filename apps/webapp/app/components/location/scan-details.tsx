@@ -7,6 +7,38 @@ import { HelpIcon } from "../icons/library";
 import { DateS } from "../shared/date";
 import { InfoTooltip } from "../shared/info-tooltip";
 
+/** The card's payload, as the loader's `parseScanData` returns it. */
+type LastScan = NonNullable<ReturnType<typeof parseScanData>>;
+
+/**
+ * Names how the last scan was made, including the scanned value for a barcode
+ * or SAM ID so the reader can tell which label it was.
+ *
+ * @param lastScan - The card payload
+ * @returns The text for the card's "Source" row
+ */
+export function describeScanSource(
+  lastScan: Pick<LastScan, "manuallyGenerated" | "codeType" | "code">
+) {
+  if (lastScan.manuallyGenerated) {
+    return "Manually updated";
+  }
+  switch (lastScan.codeType) {
+    case "BARCODE":
+      return lastScan.code ? `Barcode scan: ${lastScan.code}` : "Barcode scan";
+    case "SAM_ID":
+      return lastScan.code ? `SAM ID scan: ${lastScan.code}` : "SAM ID scan";
+    default:
+      return "QR code scan";
+  }
+}
+
+/**
+ * The "Last scan" card on the asset overview and the kit page: a map of the
+ * scan's coordinates and who scanned it, when, from which device and how.
+ *
+ * @param props.lastScan - The parsed last scan, or null when never scanned
+ */
 export function ScanDetails({
   lastScan,
 }: {
@@ -78,9 +110,7 @@ export function ScanDetails({
             <div className="flex justify-between pt-2">
               <p>Source</p>
               <p>
-                {lastScan.manuallyGenerated
-                  ? "Manually updated"
-                  : "QR code scan"}{" "}
+                {describeScanSource(lastScan)}{" "}
                 <InfoTooltip
                   icon={<HelpIcon />}
                   content={
@@ -97,8 +127,8 @@ export function ScanDetails({
                           updated the location data.
                         </li>
                         <li>
-                          <strong>2. QR code scan:</strong> User scanned the QR
-                          code of the asset.
+                          <strong>2. Scan:</strong> User scanned the QR code, a
+                          barcode or the SAM ID of the asset.
                         </li>
                       </ul>
                     </>

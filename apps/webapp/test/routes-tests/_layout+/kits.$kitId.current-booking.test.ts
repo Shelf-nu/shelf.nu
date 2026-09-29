@@ -39,7 +39,7 @@ vi.mock("~/utils/roles.server", () => ({
 // suite (`kits.$kitId.last-scan.test.ts`).
 vi.mock("~/modules/scan/service.server", () => ({
   getLastScanForViewer: vi.fn().mockResolvedValue(null),
-  getScanByQrId: vi.fn(),
+  getLastScanForTarget: vi.fn(),
 }));
 
 const { mockGetKit } = vi.hoisted(() => ({ mockGetKit: vi.fn() }));

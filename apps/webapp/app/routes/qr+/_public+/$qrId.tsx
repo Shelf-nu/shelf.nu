@@ -1,4 +1,5 @@
 import type { Organization } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { redirect, data } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import {
-  createScan,
+  recordScan,
   updateScan,
   updateScanGeolocation,
 } from "~/modules/scan/service.server";
@@ -40,15 +41,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * If the QR doesn't exist, getQR will throw a 404
      */
 
-    /** Record the scan in the DB using the QR id
-     * if the QR doesn't exist, we still record the scan
-     * and we still save the id in a field specifically for deleted QRs
+    /**
+     * Record the scan against the asset or kit the QR points at. An unclaimed
+     * QR is still recorded, with no workspace. The row's id is handed to the
+     * pages below for the follow-up geolocation post.
      */
-    const scan = await createScan({
-      userAgent: request.headers.get("user-agent") as string,
+    const scan = await recordScan({
+      codeType: ScanCodeType.QR,
+      code: id,
+      source: ScanSource.QR_LINK,
+      userAgent: request.headers.get("user-agent"),
       userId,
-      qrId: id,
-      deleted: !qr,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+      organizationId: qr.organizationId,
+      writeNote: true,
     });
 
     /**

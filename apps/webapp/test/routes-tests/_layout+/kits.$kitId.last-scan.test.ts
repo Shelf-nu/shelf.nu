@@ -4,20 +4,15 @@
  *
  * `parseScanData` returns the scanner's display name and EMAIL, the scan's GPS
  * COORDINATES and the device user-agent. BASE and SELF_SERVICE hold `scan: []`,
- * and the page hides `<ScanDetails>` behind a client-side check — which hides
- * the data without withholding it. It was still in the page payload, readable
- * from the network response.
+ * and the page hides `<ScanDetails>` behind a client-side check, which hides
+ * the data without withholding it. The loader must not put it in the payload
+ * at all, so it reads the last scan only through the gated
+ * `getLastScanForViewer`.
  *
- * The asset overview loader was moved onto the gated `getLastScanForViewer` in
- * `109d02857`; the kit loader kept calling `parseScanData` directly and was the
- * last route doing so.
- *
- * This asserts the WIRING — that the loader delegates to the gated helper and
- * forwards the viewer's full role list. The helper's own gate is pinned
- * separately, against the live permission matrix, in
- * `app/modules/scan/last-scan-for-viewer.test.ts`.
- *
- * detail.dev finding D060.
+ * This asserts the WIRING: the loader delegates to the gated helper, reads by
+ * the kit (whichever of its codes was scanned), and forwards the viewer's full
+ * role list. The helper's own gate is pinned separately, against the live
+ * permission matrix, in `app/modules/scan/last-scan-for-viewer.test.ts`.
  *
  * @see {@link file://./../../../app/routes/_layout+/kits.$kitId.tsx}
  */
@@ -50,7 +45,7 @@ const { mockGetLastScanForViewer } = vi.hoisted(() => ({
 // the gate itself.
 vi.mock("~/modules/scan/service.server", () => ({
   getLastScanForViewer: mockGetLastScanForViewer,
-  getScanByQrId: vi.fn(),
+  getLastScanForTarget: vi.fn(),
 }));
 
 // why: the loader's data fetch; irrelevant to scan gating and would need a DB.
@@ -115,8 +110,8 @@ describe("kit detail loader — last scan", () => {
     // loader never actually completed.
     const result = await loader(loaderArgs());
 
-    // The defect was that this route called `parseScanData` directly, skipping
-    // the `scan:read` gate the helper applies.
+    // Calling `parseScanData` directly would skip the `scan:read` gate the
+    // helper applies.
     expect(mockGetLastScanForViewer).toHaveBeenCalledTimes(1);
     // …and the loader really did produce a payload carrying the gated value.
     expect(result).toHaveProperty("lastScan", null);
@@ -132,7 +127,7 @@ describe("kit detail loader — last scan", () => {
 
     expect(mockGetLastScanForViewer).toHaveBeenCalledWith(
       expect.objectContaining({
-        qrId: "qr-1",
+        target: { kitId: "kit-1" },
         userId: "user-1",
         organizationId: ORG,
         roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],

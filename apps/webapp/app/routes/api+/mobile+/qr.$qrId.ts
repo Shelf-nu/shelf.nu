@@ -1,88 +1,26 @@
+import { ScanSource } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { resolveMobileScannedCode } from "~/modules/api/mobile-code-resolve.server";
-import { createScan } from "~/modules/scan/service.server";
-import { ShelfError, makeShelfError } from "~/utils/error";
-import { Logger } from "~/utils/logger";
-
-/**
- * Optional scan geolocation carried on the resolve request's query string.
- *
- * Coordinates only make sense as a pair, so both must be present and valid for
- * either to be used. Each must be a non-empty, finite decimal within its
- * coordinate range (lat −90..90, lng −180..180). `z.coerce.number()` is
- * deliberately avoided: it coerces `""` to `0`, which would turn an empty
- * `?latitude=&longitude=` into a plausible-looking scan at 0,0 ("Null Island").
- */
-const ScanGeolocationSchema = z.object({
-  latitude: z
-    .string()
-    .trim()
-    .min(1)
-    .transform(Number)
-    .refine((v) => Number.isFinite(v) && v >= -90 && v <= 90),
-  longitude: z
-    .string()
-    .trim()
-    .min(1)
-    .transform(Number)
-    .refine((v) => Number.isFinite(v) && v >= -180 && v <= 180),
-});
-
-/**
- * Parses the optional `X-Scan-Latitude`/`X-Scan-Longitude` headers into the string
- * format the `Scan` model stores (`String(number)` — identical to the web
- * flow, which posts `position.coords.latitude.toString()` with no rounding).
- *
- * Invalid or partial coordinates are IGNORED, never an error: geolocation is
- * best-effort provenance and must not be able to break a resolve (matching the
- * non-fatal `createScan` catch below).
- *
- * Headers, deliberately NOT query params: URL query strings are captured
- * verbatim by access logs, proxies, and Sentry's request breadcrumbs, which
- * would write precise user GPS into every log pipeline. Headers keep the
- * coordinates out of every URL-shaped capture surface.
- *
- * @param headers - The resolve request's headers.
- * @returns Normalized coordinate strings, or `null` when absent/invalid.
- */
-function parseScanGeolocation(
-  headers: Headers
-): { latitude: string; longitude: string } | null {
-  const latitude = headers.get("x-scan-latitude");
-  const longitude = headers.get("x-scan-longitude");
-
-  // Both absent is the common no-GPS case — skip the parse entirely.
-  if (latitude === null && longitude === null) {
-    return null;
-  }
-
-  const parsed = ScanGeolocationSchema.safeParse({
-    latitude,
-    longitude,
-  });
-  if (!parsed.success) return null;
-
-  return {
-    latitude: String(parsed.data.latitude),
-    longitude: String(parsed.data.longitude),
-  };
-}
+import { parseScanGeolocation } from "~/modules/scan/geolocation.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
+import { makeShelfError } from "~/utils/error";
+import { getParams } from "~/utils/http.server";
 
 /**
  * GET /api/mobile/qr/:qrId
  *
- * The **recording** mobile code resolve. Resolves a scanned QR id or SAM id to
- * its linked asset/kit (via {@link resolveMobileScannedCode}) and records scan
- * provenance (who + when + optional where) for a real QR field scan, mirroring
+ * The **recording** mobile code resolve. Resolves a scanned QR id or SAM id
+ * (with a SAM-shaped barcode fallback) to its linked asset/kit (via
+ * {@link resolveMobileScannedCode}) and records the scan (who + when +
+ * optional where) as `COMPANION`, with a note on a scanned asset, mirroring
  * the public web QR resolver (`qr+/_public+/$qrId.tsx`).
  *
  * Recording is unconditional here: it is an endpoint-level property, NOT a
  * client-supplied flag. Callers that only need to identify a code without
  * recording use the sibling non-recording route instead (the audit scanner),
- * mirroring the web's `get-scanned-item` split. SAM resolves have no backing QR
- * id, so nothing is recorded (matching web).
+ * whose scans the audit writer records.
  *
  * Optional headers:
  * - `X-Scan-Latitude` / `X-Scan-Longitude` — best-effort GPS coordinates captured by the
@@ -91,7 +29,7 @@ function parseScanGeolocation(
  *   needs a separate authenticated follow-up POST (`updateScanGeolocation`)
  *   because its scan is created before the browser can ask for position; the
  *   companion already has a cached position when it fires the resolve, so the
- *   coordinates ride along and are persisted atomically via `createScan`.
+ *   coordinates ride along and are persisted with the scan row.
  *   Invalid or partial coordinates are silently ignored — provenance must
  *   never break a resolve.
  *
@@ -122,35 +60,21 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       );
     }
 
-    // Record scan provenance for a real QR field scan. SAM resolves expose no
-    // QR id (`recordableQrId === null`), so there is nothing to record.
-    // Non-fatal: a provenance failure must never turn a successful resolve into
-    // an error response for the scanner.
-    if (result.recordableQrId) {
-      // Best-effort GPS from the companion; null when absent or invalid.
-      const geolocation = parseScanGeolocation(request.headers);
-
-      try {
-        await createScan({
-          userAgent: request.headers.get("user-agent") ?? "mobile-companion",
-          userId: user.id,
-          qrId: result.recordableQrId,
-          deleted: false,
-          ...(geolocation ?? {}),
-        });
-      } catch (cause) {
-        Logger.error(
-          new ShelfError({
-            cause,
-            message: "Failed to record mobile scan provenance",
-            // why: qrId is enough to trace the failing scan; avoid putting a
-            // raw user identifier into the log pipeline.
-            additionalData: { qrId: result.recordableQrId },
-            label: "Scan",
-          })
-        );
-      }
-    }
+    // Record the scan against what the code resolved to. Non-fatal: a
+    // provenance failure must never turn a successful resolve into an error
+    // response for the scanner.
+    await recordScanNonFatal({
+      ...result.scanToRecord,
+      // The value exactly as scanned: a SAM ID is normalized and a barcode
+      // matched case-insensitively, and the row records what the label says.
+      code: getParams(params, z.object({ qrId: z.string() })).qrId,
+      source: ScanSource.COMPANION,
+      userAgent: request.headers.get("user-agent") ?? "mobile-companion",
+      userId: user.id,
+      // Best-effort GPS from the companion; absent when missing or invalid.
+      ...(parseScanGeolocation(request.headers) ?? {}),
+      writeNote: true,
+    });
 
     return data({ qr: result.qr });
   } catch (cause) {
