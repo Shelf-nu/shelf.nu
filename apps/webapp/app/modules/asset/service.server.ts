@@ -193,6 +193,7 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
+  resolveImportedAssetModel,
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -4970,9 +4971,12 @@ export async function createAssetsFromContentImport({
       }
 
       // ── AssetModel column → resolved model id ──────────────────────
-      const modelKey = asset.assetModel?.trim();
-      const assetModelId =
-        modelKey && assetModels?.[modelKey] ? assetModels[modelKey] : undefined;
+      // The pre-resolve keys its result by the original cell, so the lookup goes
+      // through the shared resolver rather than trimming first.
+      const { name: modelKey, id: assetModelId } = resolveImportedAssetModel({
+        cell: asset.assetModel,
+        models: assetModels,
+      });
       if (modelKey && !assetModelId) {
         // The createAssetModelsIfNotExists pre-resolve should have
         // populated every non-empty key. If we land here, something

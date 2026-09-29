@@ -552,6 +552,39 @@ export async function deleteAssetModel({
  *   skipped — callers should null-coalesce when looking up.
  * @throws {ShelfError} Wrapped error if a create / read fails
  */
+/**
+ * The asset model one imported row refers to.
+ *
+ * Reads {@link createAssetModelsIfNotExists}'s result, which is keyed by the
+ * ORIGINAL cell, padding included, so the lookup uses the raw cell and only the
+ * reported name is trimmed. Trimming before the lookup misses every padded row,
+ * and the caller then raises "could not be resolved", which blames the CSV for
+ * something the pre-resolve handled correctly.
+ *
+ * @param args.cell - The row's `assetModel` cell, exactly as the CSV had it.
+ * @param args.models - The pre-resolved map from `createAssetModelsIfNotExists`.
+ * @returns `name` is the trimmed model name for messages, or `null` when the row
+ *   named no model. `id` is the resolved model id, or `undefined` when there is
+ *   none, which for a non-null `name` means the pre-resolve missed the row.
+ */
+export function resolveImportedAssetModel({
+  cell,
+  models,
+}: {
+  cell?: string | null;
+  models?: Record<string, string>;
+}): { name: string | null; id: string | undefined } {
+  const name = cell?.trim() || null;
+
+  if (!name) {
+    return { name: null, id: undefined };
+  }
+
+  // The raw cell is the key. A blank cell resolves to an empty id by design, and
+  // `|| undefined` keeps that out of the caller's "unresolved" branch.
+  return { name, id: (cell ? models?.[cell] : undefined) || undefined };
+}
+
 export async function createAssetModelsIfNotExists({
   data,
   userId,
