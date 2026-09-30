@@ -29,6 +29,7 @@ import {
   createUserOrAttachOrg,
   defaultUserCategories,
   findUserByEmail,
+  findUserById,
 } from "./service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 
@@ -910,5 +911,36 @@ describe(findUserByEmail.name, () => {
     findManyMock.mockResolvedValueOnce([]);
 
     expect(await findUserByEmail("nobody@school.org")).toBeNull();
+  });
+});
+
+describe(findUserById.name, () => {
+  const findUniqueMock = db.user.findUnique as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reads only what sign-in needs, by id", async () => {
+    // why: the row exists for this auth id.
+    findUniqueMock.mockResolvedValueOnce({ id: "user-1", onboarded: true });
+
+    expect(await findUserById("user-1")).toEqual({
+      id: "user-1",
+      onboarded: true,
+    });
+    expect(findUniqueMock).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: { id: true, onboarded: true },
+    });
+  });
+
+  it("returns null instead of throwing when there is no account", async () => {
+    // why: no row for this auth id yet.
+    findUniqueMock.mockResolvedValueOnce(null);
+
+    expect(await findUserById("user-new")).toBeNull();
   });
 });

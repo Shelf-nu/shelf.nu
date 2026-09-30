@@ -185,6 +185,33 @@ export async function getUserWithContact<T extends Prisma.UserInclude>(
 }
 
 /**
+ * Finds a user by id without throwing when there is none.
+ *
+ * Sign-in uses this to decide whether the authenticated person already has an
+ * account, keyed on the auth id rather than the address they typed, so neither
+ * letter case nor an out-of-date stored email can make it create a second one.
+ *
+ * @param id - The auth user id
+ * @returns The user's id and onboarding state, or null when there is no row
+ * @throws {ShelfError} If the lookup fails
+ */
+export async function findUserById(id: User["id"]) {
+  try {
+    return await db.user.findUnique({
+      where: { id },
+      select: { id: true, onboarded: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to find user",
+      additionalData: { id },
+      label,
+    });
+  }
+}
+
+/**
  * Picks the account an email address resolves to among rows that match it
  * without regard to letter case.
  *
