@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   scanFindFirst: vi.fn(),
   scanCreate: vi.fn(),
   scanUpdate: vi.fn(),
+  executeRaw: vi.fn(),
   userOrgCount: vi.fn(),
   qrFindFirst: vi.fn(),
   barcodeFindFirst: vi.fn(),
@@ -23,19 +24,23 @@ const mocks = vi.hoisted(() => ({
 }));
 
 // why: the database is the external boundary; every query the helper makes is
-// asserted through these.
-vi.mock("~/database/db.server", () => ({
-  db: {
+// asserted through these. The transaction runs its callback against the same
+// client, as Prisma's interactive transaction does.
+vi.mock("~/database/db.server", () => {
+  const db = {
     scan: {
       findFirst: mocks.scanFindFirst,
       create: mocks.scanCreate,
       update: mocks.scanUpdate,
     },
+    $executeRaw: mocks.executeRaw,
     userOrganization: { count: mocks.userOrgCount },
     qr: { findFirst: mocks.qrFindFirst },
     barcode: { findFirst: mocks.barcodeFindFirst },
-  },
-}));
+    $transaction: (callback: (tx: unknown) => unknown) => callback(db),
+  };
+  return { db };
+});
 
 // why: createNote writes to the database and runs its own org guard, which
 // has its own tests; here we assert what the scan asks it to write.
@@ -199,6 +204,20 @@ describe("recordScan: repeated scans", () => {
     );
     expect(SCAN_DEDUPE_WINDOW_MS).toBe(30_000);
     vi.useRealTimers();
+  });
+
+  it("takes one lock per user, code and entity before looking", async () => {
+    // Concurrent requests for one scan must run one after the other, or both
+    // miss each other's row and insert twice.
+    await recordScan(scanArgs());
+
+    expect(mocks.executeRaw).toHaveBeenCalledTimes(1);
+    const [sql, lockKey] = mocks.executeRaw.mock.calls[0];
+    expect(sql.join("?")).toContain("pg_advisory_xact_lock(hashtext(?))");
+    expect(lockKey).toBe("scan:user-1:BC-0042:asset-1:");
+    expect(mocks.executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.scanFindFirst.mock.invocationCallOrder[0]
+    );
   });
 
   it("folds a repeat into the recent row: no insert, no second note", async () => {

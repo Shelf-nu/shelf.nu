@@ -135,52 +135,27 @@ export async function recordScan(args: RecordScanArgs): Promise<Scan> {
 
   const scannerId = authenticatedUserIdOf(userId);
 
-  try {
-    if (scannerId && !SOURCES_NEVER_DEDUPED.has(source)) {
-      const recent = await db.scan.findFirst({
-        where: {
-          userId: scannerId,
-          code,
-          assetId,
-          kitId,
-          createdAt: { gte: new Date(Date.now() - SCAN_DEDUPE_WINDOW_MS) },
-        },
-        orderBy: { createdAt: "desc" },
-      });
+  const data = {
+    codeType,
+    code,
+    source,
+    userAgent,
+    latitude,
+    longitude,
+    manuallyGenerated,
+    // why: rawQrId outlives the QR (the FK is SET NULL on delete); it only
+    // means something for a QR scan.
+    rawQrId: codeType === ScanCodeType.QR ? qrId ?? code : null,
+    userId: scannerId,
+    qrId: codeType === ScanCodeType.QR ? qrId : null,
+    barcodeId: codeType === ScanCodeType.BARCODE ? barcodeId : null,
+    assetId,
+    kitId,
+    organizationId,
+  } satisfies Prisma.ScanUncheckedCreateInput;
 
-      if (recent) {
-        if (source === ScanSource.AUDIT && recent.source !== ScanSource.AUDIT) {
-          return await db.scan.update({
-            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `recent.id` comes from the query just above, scoped to this user, code and entity; it is never request input.
-            where: { id: recent.id },
-            data: { source: ScanSource.AUDIT },
-          });
-        }
-        return recent;
-      }
-    }
-
-    const scan = await db.scan.create({
-      data: {
-        codeType,
-        code,
-        source,
-        userAgent,
-        latitude,
-        longitude,
-        manuallyGenerated,
-        // why: rawQrId outlives the QR (the FK is SET NULL on delete); it only
-        // means something for a QR scan.
-        rawQrId: codeType === ScanCodeType.QR ? qrId ?? code : null,
-        userId: scannerId,
-        qrId: codeType === ScanCodeType.QR ? qrId : null,
-        barcodeId: codeType === ScanCodeType.BARCODE ? barcodeId : null,
-        assetId,
-        kitId,
-        organizationId,
-      },
-    });
-
+  /** Leaves the note on the asset, when this scan writes one. */
+  const writeScanNote = async () => {
     if (writeNote && assetId) {
       await createScanNote({
         userId: scannerId,
@@ -193,8 +168,62 @@ export async function recordScan(args: RecordScanArgs): Promise<Scan> {
         manuallyGenerated,
       });
     }
+  };
 
+  /** Inserts the row with no fold check: see SOURCES_NEVER_DEDUPED. */
+  const insertScanAndNote = async () => {
+    const scan = await db.scan.create({ data });
+    await writeScanNote();
     return scan;
+  };
+
+  try {
+    if (!scannerId || SOURCES_NEVER_DEDUPED.has(source)) {
+      return await insertScanAndNote();
+    }
+
+    const folded = await db.$transaction(async (tx) => {
+      // Two requests for one scan can arrive together (a drawer row fetching
+      // twice, an audit writer racing its resolve). A read-then-insert would
+      // let both miss each other and insert twice, so the same user, code and
+      // entity take one lock and run one after the other: the second sees the
+      // first's row. The lock is released when the transaction ends.
+      const lockKey = `scan:${scannerId}:${code}:${assetId ?? ""}:${
+        kitId ?? ""
+      }`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+      const recent = await tx.scan.findFirst({
+        where: {
+          userId: scannerId,
+          code,
+          assetId,
+          kitId,
+          createdAt: { gte: new Date(Date.now() - SCAN_DEDUPE_WINDOW_MS) },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (!recent) {
+        return { scan: await tx.scan.create({ data }), inserted: true };
+      }
+      if (source === ScanSource.AUDIT && recent.source !== ScanSource.AUDIT) {
+        const relabelled = await tx.scan.update({
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `recent.id` comes from the query just above, scoped to this user, code and entity; it is never request input.
+          where: { id: recent.id },
+          data: { source: ScanSource.AUDIT },
+        });
+        return { scan: relabelled, inserted: false };
+      }
+      return { scan: recent, inserted: false };
+    });
+
+    // The note is written outside the lock: it reads other tables, and a
+    // folded repeat already had its note written by the row it folded into.
+    if (folded.inserted) {
+      await writeScanNote();
+    }
+    return folded.scan;
   } catch (cause) {
     throw new ShelfError({
       cause,
