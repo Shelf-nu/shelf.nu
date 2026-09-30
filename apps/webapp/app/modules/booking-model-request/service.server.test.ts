@@ -1,5 +1,5 @@
 /**
- * Unit tests for the booking-model-request service (Phase 3d).
+ * Unit tests for the booking-model-request service.
  *
  * Shape of the mocks mirrors the existing booking/consumption-log
  * test files — inline `db` mock with `$transaction` routing the
@@ -24,8 +24,11 @@ import {
   getAssetModelAvailability,
   getBookingModelTabData,
   materializeModelRequestForAsset,
+  MAX_MODELS_PER_RESERVATION_BATCH,
   removeBookingModelRequest,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
   upsertBookingModelRequest,
+  upsertBookingModelRequests,
 } from "./service.server";
 
 vitest.mock("~/database/db.server", () => ({
@@ -987,6 +990,36 @@ describe("upsertBookingModelRequest", () => {
     expect(db.bookingModelRequest.upsert).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-integer or sub-1 quantity before opening a transaction", async () => {
+    expect.assertions(3);
+
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 0,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(/positive integer/i);
+
+    await expect(
+      upsertBookingModelRequest({
+        bookingId: BOOKING_ID,
+        assetModelId: MODEL_ID,
+        quantity: 1.5,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+      })
+    ).rejects.toThrow(/positive integer/i);
+
+    // why: the guard belongs in front of the transaction, not inside it.
+    // Opening one to reject input that was never going to succeed takes the
+    // pool lock — and holds every other reservation on that model behind it —
+    // for a write that never happens.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
   describe("activity events", () => {
     it("records BOOKING_MODEL_REQUESTED when the reservation is created", async () => {
       expect.assertions(2);
@@ -1361,6 +1394,398 @@ describe("upsertBookingModelRequest", () => {
         (node) => !/^javascript:/i.test(String(node.attributes?.to ?? ""))
       )
     ).toBe(true);
+  });
+});
+
+describe("upsertBookingModelRequests", () => {
+  const SECOND_MODEL_ID = "model-2";
+  const MODEL_NAME = "Dell Latitude 5550";
+  const SECOND_MODEL_NAME = "Arterial Puncture Simulator";
+
+  /** One call to the reservation upsert, as the write core issues it. */
+  type UpsertArgs = {
+    where: { bookingId_assetModelId: { assetModelId: string } };
+    create: { quantity: number };
+  };
+
+  /** Quantities actually written, in write order. */
+  function writtenQuantities() {
+    return (
+      db.bookingModelRequest.upsert as unknown as {
+        mock: { calls: Array<[UpsertArgs]> };
+      }
+    ).mock.calls.map(([args]) => ({
+      assetModelId: args.where.bookingId_assetModelId.assetModelId,
+      quantity: args.create.quantity,
+    }));
+  }
+
+  /**
+   * Stages what the booking already reserves of each model.
+   *
+   * why: several reads in this module share this spy and ask it different
+   * questions — what OTHER bookings are still owed, what this booking is
+   * still owed, and (here) what it currently reserves. Only the last omits
+   * `fulfilledAt`, so the stub routes on the `where` rather than answering
+   * all three from one `mockResolvedValue`. Implementations also outlive
+   * `clearAllMocks`, so a blanket one would follow this block into the next.
+   */
+  function stageExistingReservations(
+    rows: Array<{ assetModelId: string; quantity: number }>
+  ) {
+    (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: { where?: { fulfilledAt?: unknown } }) =>
+      Promise.resolve(args?.where?.fulfilledAt === undefined ? rows : [])
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    installClaimSimulator();
+    // Default to a DRAFT booking so the status guard passes.
+    // @ts-expect-error mocked
+    db.booking.findUnique.mockResolvedValue({
+      id: BOOKING_ID,
+      name: "Test",
+      status: BookingStatus.DRAFT,
+      from,
+      to,
+    });
+    // why: clearAllMocks only resets call history — `mockResolvedValue`
+    // implementations leak in from earlier describe blocks. Re-default the
+    // pool, the reads and the write so each test states its own scenario.
+    // Twelve units of every model, nobody else claiming any: enough headroom
+    // that a test refusing a write is refusing it for the reason it names.
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(12);
+    // @ts-expect-error mocked
+    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // @ts-expect-error mocked
+    db.bookingAsset.aggregate.mockResolvedValue({ _sum: { quantity: 0 } });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue(null);
+    // why: the reservation guard also asks what this booking already holds by
+    // name; default to holding nothing so each test states its own.
+    // @ts-expect-error mocked
+    db.asset.findMany.mockResolvedValue([]);
+    // why: a batch names several models, and each write resolves its own —
+    // one fixed row would let a two-model test measure the same model twice.
+    (
+      db.assetModel.findUnique as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args: { where: { id: string } }) =>
+      Promise.resolve({
+        id: args.where.id,
+        name:
+          args.where.id === SECOND_MODEL_ID ? SECOND_MODEL_NAME : MODEL_NAME,
+      })
+    );
+    stageExistingReservations([]);
+    // why: the write core reads `createdAt`/`updatedAt` off the row it wrote
+    // to tell a create from an update, so the stub answers with the row each
+    // call asked for. Equal timestamps = the CREATE branch ran.
+    (
+      db.bookingModelRequest.upsert as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args: UpsertArgs) =>
+      Promise.resolve({
+        id: `req-${args.where.bookingId_assetModelId.assetModelId}`,
+        bookingId: BOOKING_ID,
+        assetModelId: args.where.bookingId_assetModelId.assetModelId,
+        quantity: args.create.quantity,
+        createdAt: new Date("2026-01-01T00:00:00Z"),
+        updatedAt: new Date("2026-01-01T00:00:00Z"),
+      })
+    );
+  });
+
+  it("adds to an existing reservation instead of replacing it", async () => {
+    expect.assertions(1);
+    // The write it delegates to takes a NEW TARGET, not a delta. A booking
+    // already reserving 5 that is asked to add 3 must end at 8: sending 3
+    // would cut the reservation, and the write would still succeed, so
+    // nothing anywhere would report it.
+    stageExistingReservations([{ assetModelId: MODEL_ID, quantity: 5 }]);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      quantity: 5,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+    });
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: MODEL_ID, quantity: 3 }],
+    });
+
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 8 },
+    ]);
+  });
+
+  it("takes both locks before reading the quantities it sums onto", async () => {
+    stageExistingReservations([{ assetModelId: MODEL_ID, quantity: 5 }]);
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: MODEL_ID, quantity: 3 }],
+    });
+
+    // The read is the operand of the absolute target, so it has to happen
+    // under the locks that hold until commit. Taken after them, it is a READ
+    // COMMITTED snapshot a competing transaction can supersede: two callers
+    // each adding 3 to a booking holding 5 would both target 8, and the write
+    // that lands second takes the reduction path, so the lost units are never
+    // reported. Asserted as an ordering rather than a call count, which is why
+    // `rawStatements` exposes `order`.
+    const poolLock = lockOn("AssetModel");
+    const rowLock = lockOn("BookingModelRequest");
+    const readOrder = (
+      db.bookingModelRequest.findMany as ReturnType<typeof vitest.fn>
+    ).mock.invocationCallOrder[0];
+
+    expect(poolLock).toBeDefined();
+    expect(rowLock).toBeDefined();
+    expect(poolLock!.order).toBeLessThan(readOrder);
+    expect(rowLock!.order).toBeLessThan(readOrder);
+  });
+
+  it("writes the addition as-is when the model is not reserved yet", async () => {
+    expect.assertions(1);
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: SECOND_MODEL_ID, quantity: 4 }],
+    });
+
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: SECOND_MODEL_ID, quantity: 4 },
+    ]);
+  });
+
+  it("sums repeated entries for the same model into one write", async () => {
+    expect.assertions(1);
+    stageExistingReservations([{ assetModelId: MODEL_ID, quantity: 2 }]);
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findUnique.mockResolvedValue({
+      id: "req-1",
+      quantity: 2,
+      fulfilledQuantity: 0,
+      fulfilledAt: null,
+    });
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [
+        { assetModelId: MODEL_ID, quantity: 3 },
+        { assetModelId: MODEL_ID, quantity: 1 },
+      ],
+    });
+
+    // Both entries land in one write. Written separately, the second target
+    // would be computed from the same pre-batch quantity as the first and
+    // would replace it rather than add to it.
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 6 },
+    ]);
+  });
+
+  it("aborts the whole batch when one model does not fit", async () => {
+    expect.assertions(5);
+    // All-or-nothing: a half-applied batch leaves the user to work out which
+    // half landed, which is worse than a clear failure. Twelve units exist,
+    // so the second model's 99 cannot fit — the pool guard refuses it after
+    // the first model has already been written.
+    const error = await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [
+        { assetModelId: MODEL_ID, quantity: 1 },
+        { assetModelId: SECOND_MODEL_ID, quantity: 99 },
+      ],
+    }).catch((cause) => cause);
+
+    // The failure names the model that was short and stays a 4xx: that
+    // message is what the dialog shows, and what the user acts on.
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(error.message).toContain(`Cannot reserve 99 × ${SECOND_MODEL_NAME}`);
+
+    // The first model's write was already issued when the second was
+    // refused — which is exactly why the batch has to be one transaction.
+    expect(writtenQuantities()).toEqual([
+      { assetModelId: MODEL_ID, quantity: 1 },
+    ]);
+    // The mocked client commits everything it is handed, so "nothing was
+    // written" is asserted as the thing that makes the rollback happen:
+    // every write went into ONE interactive transaction, and it threw.
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an empty addition list before opening a transaction", async () => {
+    expect.assertions(2);
+
+    await expect(
+      upsertBookingModelRequests({
+        bookingId: BOOKING_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        additions: [],
+      })
+    ).rejects.toThrow(/at least one/i);
+
+    // why: opening a transaction to reject input holds locks for a request
+    // that was never going to succeed.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-integer or sub-1 addition before opening a transaction", async () => {
+    expect.assertions(3);
+
+    await expect(
+      upsertBookingModelRequests({
+        bookingId: BOOKING_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        additions: [{ assetModelId: MODEL_ID, quantity: 0 }],
+      })
+    ).rejects.toThrow(/positive integer/i);
+
+    await expect(
+      upsertBookingModelRequests({
+        bookingId: BOOKING_ID,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        additions: [{ assetModelId: MODEL_ID, quantity: 1.5 }],
+      })
+    ).rejects.toThrow(/positive integer/i);
+
+    // The write it delegates to takes the quantity as already checked, so a
+    // fractional or zero target would reach the database unexamined.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * One addition per model, `count` models, every quantity 1.
+   *
+   * Sized off the exported limit rather than a literal, so raising or lowering
+   * the limit moves these cases with it instead of leaving them asserting a
+   * number the service no longer uses.
+   */
+  function additionsForModels(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      assetModelId: `batch-model-${index}`,
+      quantity: 1,
+    }));
+  }
+
+  it("refuses a batch over the model limit before opening a transaction", async () => {
+    expect.assertions(4);
+
+    const error = await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: additionsForModels(MAX_MODELS_PER_RESERVATION_BATCH + 1),
+    }).catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    // A 4xx the dialog renders beside the rows, not a 500 that reaches Sentry:
+    // an oversized selection is a user decision, not a fault.
+    expect(error.status).toBe(400);
+    // The message has to carry the limit and the count, because the operator's
+    // only way forward is to select fewer and they need to know how many fewer.
+    expect(error.message).toContain(
+      `at most ${MAX_MODELS_PER_RESERVATION_BATCH} models`
+    );
+    // The point of the guard. Every model costs fourteen statements inside the
+    // one interactive transaction the batch commits in, and a batch that runs
+    // past the budget aborts with P2028 after doing all of that work: the
+    // selection was valid, the pool had the units, and nothing was reserved.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("accepts a batch at exactly the model limit", async () => {
+    expect.assertions(2);
+
+    const { requests } = await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: additionsForModels(MAX_MODELS_PER_RESERVATION_BATCH),
+    });
+
+    // The limit is inclusive: a cap that refused the number it advertises
+    // would leave the message telling the operator to do something it rejects.
+    expect(requests).toHaveLength(MAX_MODELS_PER_RESERVATION_BATCH);
+    expect(writtenQuantities()).toHaveLength(MAX_MODELS_PER_RESERVATION_BATCH);
+  });
+
+  it("counts distinct models against the limit, not submitted entries", async () => {
+    expect.assertions(1);
+
+    // why: the folded target is larger than the block's default pool of 12, so
+    // without this the pool guard refuses the batch and the test would pass on
+    // the wrong refusal. Enough units that the only thing left to refuse it is
+    // the limit under test.
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(100);
+
+    // Well past the limit in entries, one model in writes. Repeats are summed
+    // into a single write before the transaction opens, so they cost the
+    // transaction nothing extra and must not be what the limit measures.
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: Array.from(
+        { length: MAX_MODELS_PER_RESERVATION_BATCH + 5 },
+        () => ({ assetModelId: MODEL_ID, quantity: 1 })
+      ),
+    });
+
+    expect(writtenQuantities()).toEqual([
+      {
+        assetModelId: MODEL_ID,
+        quantity: MAX_MODELS_PER_RESERVATION_BATCH + 5,
+      },
+    ]);
+  });
+
+  it("runs the batch on a raised transaction budget, not Prisma's default", async () => {
+    expect.assertions(2);
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: MODEL_ID, quantity: 1 }],
+    });
+
+    // The limit alone cannot bound this transaction. Two of the availability
+    // aggregates filter through the model's `Asset` relation, so their cost
+    // nests over that model's units and each unit's booking rows: workspace
+    // data, not anything the caller passes. Capping the number of models says
+    // nothing about the cost of one, so the budget has to be stated.
+    expect(db.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
+    // Prisma's default is five seconds, meant for a single write. Reverting to
+    // it silently puts a multi-model loop back on a single-write budget.
+    expect(RESERVATION_BATCH_TX_TIMEOUT_MS).toBeGreaterThan(5_000);
   });
 });
 
