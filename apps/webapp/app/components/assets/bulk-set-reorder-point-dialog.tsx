@@ -11,7 +11,7 @@
  * set by mistake should not require editing assets one at a time either.
  *
  * @see {@link file://../../modules/asset/service.server.ts} - `bulkUpdateAssetMinQuantity`
- * @see {@link file://../../routes/api+/assets.bulk-set-reorder-point.ts}
+ * @see {@link file://../../routes/api+/assets.bulk-update-reorder-point.ts}
  */
 
 import { useZorm } from "react-zorm";
@@ -26,6 +26,9 @@ import { Button } from "../shared/button";
  * is left" threshold, and the shared `isLowStock` predicate treats only `null`
  * as "no threshold set".
  */
+/** Min quantity is stored in a 32-bit integer column; larger values cannot be saved. */
+const MAX_MIN_QUANTITY = 2_147_483_647;
+
 export const BulkSetReorderPointSchema = z.object({
   assetIds: z.array(z.string()).min(1),
   minQuantity: z
@@ -34,6 +37,10 @@ export const BulkSetReorderPointSchema = z.object({
     .refine(
       (value) => value === "" || /^\d+$/.test(value),
       "Enter a whole number, or leave empty to clear the min quantity"
+    )
+    .refine(
+      (value) => value === "" || Number(value) <= MAX_MIN_QUANTITY,
+      "Enter a number no larger than 2,147,483,647"
     )
     .transform((value) => (value === "" ? null : Number(value))),
 });

@@ -349,7 +349,7 @@ export function QuantityOverviewCard({
             {overCommitment.booking ? (
               <>
                 {" "}
-                The biggest,{" "}
+                The biggest upcoming booking,{" "}
                 <span className="font-medium text-gray-900">
                   {overCommitment.booking.name}
                 </span>

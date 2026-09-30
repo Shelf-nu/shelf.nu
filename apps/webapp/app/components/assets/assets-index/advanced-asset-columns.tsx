@@ -518,7 +518,7 @@ function ReservedCell({ item }: { item: AdvancedIndexAsset }) {
           of a bare table cell was borrowing a token for something it does not
           govern, and it hard-codes a value the design system cannot restyle. */}
       <span
-        className={tw(isOversold && "font-medium text-amber-600")}
+        className={tw(isOversold && "font-medium text-violet-700")}
         title={title ?? undefined}
       >
         {text}

@@ -298,44 +298,45 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * Is this pool promised beyond its size at any point ahead, and which
-     * booking is the biggest part of it?
+     * upcoming booking asks for the most units?
      *
      * `asset.bookingAssets` cannot answer it: `getAssetOverviewFields` filters
      * that relation to ONGOING/OVERDUE, so no upcoming booking is ever in it.
      * The peak comes from the same primitive the booking engine consults,
      * windowed from now onwards so it is the future peak, not a sum.
      *
-     * The culprit is ONE grouped row, never a list: an asset can carry
+     * The booking is ONE grouped row, never a list: an asset can carry
      * hundreds of future bookings and this page must not pay for all of them
      * to name one. Standalone slices only, a kit's slices are its `inKits`
-     * units, and the primitive excludes them for the same reason.
+     * units, and the primitive excludes them for the same reason. The figure
+     * is the booked quantity of the largest upcoming RESERVED booking, which
+     * the page names as the biggest upcoming booking, not as part of the peak.
      */
-    const availabilityAhead = isQuantityTracked(asset)
-      ? await getAssetAvailability({
-          assetId: asset.id,
-          organizationId,
-          window: { from: new Date(), to: AVAILABILITY_HORIZON },
-        })
-      : null;
-
-    const topReservedBooking = isQuantityTracked(asset)
-      ? (
-          await db.bookingAsset.groupBy({
-            by: ["bookingId"],
-            where: {
-              assetId: asset.id,
-              assetKitId: null,
-              booking: {
-                status: BookingStatus.RESERVED,
-                to: { gt: new Date() },
+    const [availabilityAhead, topReservedBooking] = isQuantityTracked(asset)
+      ? await Promise.all([
+          getAssetAvailability({
+            assetId: asset.id,
+            organizationId,
+            window: { from: new Date(), to: AVAILABILITY_HORIZON },
+          }),
+          db.bookingAsset
+            .groupBy({
+              by: ["bookingId"],
+              where: {
+                assetId: asset.id,
+                assetKitId: null,
+                booking: {
+                  status: BookingStatus.RESERVED,
+                  to: { gt: new Date() },
+                },
               },
-            },
-            _sum: { quantity: true },
-            orderBy: { _sum: { quantity: "desc" } },
-            take: 1,
-          })
-        )[0] ?? null
-      : null;
+              _sum: { quantity: true },
+              orderBy: { _sum: { quantity: "desc" } },
+              take: 1,
+            })
+            .then((rows) => rows[0] ?? null),
+        ])
+      : [null, null];
 
     /**
      * The booking is named and linked only for a viewer who may open it, by

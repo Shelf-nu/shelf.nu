@@ -330,6 +330,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       reserved: number;
       checkedOut: number;
       custodyAvailable: number;
+      freeNow: number;
     } | null = null;
     if (isQuantityTracked(asset)) {
       const rows = await getAssetQuantityRows(db, {
@@ -354,6 +355,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
               0,
               breakdown.total - breakdown.inCustody - breakdown.checkedOut
             ),
+            // The figure the web labels "Free now": total minus custody,
+            // units in kits and units out, from the availability engine.
+            // Unlike `available`, reservations are not subtracted.
+            freeNow: breakdown.freeNow,
           }
         : null;
     }

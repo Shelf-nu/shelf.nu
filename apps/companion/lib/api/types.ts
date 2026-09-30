@@ -209,6 +209,12 @@ export type AssetQuantityBreakdown = {
    * Absent on older servers — fall back to `available`, then the plain total.
    */
   custodyAvailable?: number;
+  /**
+   * Units free to hand over right now, the figure the web labels "Free now":
+   * total minus custody, units in kits and units out. Reservations are NOT
+   * subtracted. Absent on older servers; see `resolveFreeNowFigure`.
+   */
+  freeNow?: number;
 };
 
 /**

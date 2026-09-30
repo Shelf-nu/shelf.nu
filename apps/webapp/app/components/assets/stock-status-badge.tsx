@@ -93,8 +93,9 @@ export type StockStatusBreakdown = {
   /** Free-text unit label ("pcs", "boxes"), when the asset has one. */
   unitOfMeasure?: string | null;
   /**
-   * The upcoming booking claiming the most units, the biggest part of the
-   * peak. Present so the hover can NAME it and link to it: telling someone
+   * The upcoming booking claiming the most units. It is not always part of
+   * the peak, so the hover calls it the biggest upcoming booking. Present so
+   * the hover can NAME it and link to it: telling someone
    * they are two short without saying where to look is a diagnosis, not a
    * tool.
    */
@@ -322,7 +323,7 @@ function StockStatusDetail({
           at once
           {topBooking ? (
             <>
-              ; the biggest,{" "}
+              ; the biggest upcoming booking,{" "}
               <span className="font-medium text-gray-700">
                 {topBooking.name}
               </span>

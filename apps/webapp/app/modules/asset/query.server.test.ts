@@ -1367,6 +1367,27 @@ describe("generateWhereClause - lowStockOnly", () => {
   });
 });
 
+describe("generateWhereClause - Free now filter", () => {
+  it("leaves individually-tracked assets out of a Free now number filter", () => {
+    // why: an individual asset has no pool. Before the type guard its Free now
+    // came out as 0, so "Free now is 0" listed every individual asset while
+    // their cells showed a dash.
+    const filter: Filter = {
+      name: "available",
+      type: "number",
+      operator: "is",
+      value: 0,
+    };
+    const sql = getSqlString(
+      generateWhereClause("test-org-id", null, [filter])
+    );
+
+    expect(sql).toContain(
+      `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN GREATEST(COALESCE(a.quantity, 0)`
+    );
+  });
+});
+
 describe("POOL_AGGREGATE_JOIN, the SQL twin of getAssetAvailability", () => {
   const sql = POOL_AGGREGATE_JOIN.strings.join("?");
 

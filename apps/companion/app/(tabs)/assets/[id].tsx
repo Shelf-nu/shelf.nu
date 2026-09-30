@@ -43,6 +43,7 @@ import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { pushIntoTab } from "@/lib/navigation";
 import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
+import { resolveFreeNowFigure } from "@/lib/asset-free-now";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
@@ -409,14 +410,12 @@ export default function AssetDetailScreen() {
   // activity (server's getQuantityData null contract) — we fall back to the
   // plain total in that case.
   const breakdown = isQtyTracked ? asset.quantityBreakdown ?? null : null;
-  // Available units for the low-stock check + the "Available" stat. Prefer the
-  // breakdown's `available`, but fall back to the plain total (`asset.quantity`)
-  // when the server omitted the breakdown: an idle QT asset (no custody/booking
-  // activity) returns a null breakdown yet can still sit at/below its threshold.
-  // Web derives `available` unconditionally (notifier + overview card), so
-  // gating on the breakdown here would hide low-stock on exactly the idle
-  // inventory the alert is for.
-  const availableUnits = breakdown?.available ?? asset.quantity ?? null;
+  // Free units for the low-stock check and the "Free now" stat, the same
+  // figure the web shows (see `resolveFreeNowFigure`). With no breakdown the
+  // whole pool is free, so an idle QT asset can still show its low-stock
+  // warning, which is exactly the inventory the alert is for.
+  const freeNowFigure = resolveFreeNowFigure(breakdown, asset.quantity);
+  const availableUnits = freeNowFigure.value;
   // Low-stock mirrors the web detail card: availability-aware
   // `available <= minQuantity` (null threshold = not low).
   const isAvailableLowStock =
@@ -549,15 +548,19 @@ export default function AssetDetailScreen() {
                     </TouchableOpacity>
                   )}
                 </View>
-                {/* "Available" always renders for a QT asset (so an idle asset
+                {/* "Free now" always renders for a QT asset (so an idle asset
                     at/below its low-stock threshold still shows the amber
                     warning); the other status slices render only when the
                     server sent a breakdown (null = no custody/booking activity,
-                    i.e. all units available). */}
+                    i.e. all units free). */}
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label={ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW}
+                      label={
+                        freeNowFigure.isFreeNow
+                          ? ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW
+                          : ASSET_QTY_STATUS_LABELS.AVAILABLE
+                      }
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />

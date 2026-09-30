@@ -2624,9 +2624,13 @@ export const POOL_AGGREGATE_JOIN = Prisma.sql`
  *
  * Reserved units are deliberately not subtracted: they are still physically on
  * the shelf, which is why `Reserved` ships as its own column.
+ *
+ * NULL for an individually-tracked asset, which has no pool: a number filter
+ * then leaves it out, the sort puts it last, and the projection matches the
+ * dash its cell shows.
  */
 const POOL_AVAILABLE_EXPR = Prisma.raw(
-  `GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0)`
+  `CASE WHEN a."type" = 'QUANTITY_TRACKED' THEN GREATEST(COALESCE(a.quantity, 0) - pool.in_custody - pool.in_kits - pool.checked_out, 0) END`
 );
 
 /**

@@ -243,25 +243,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     // Run each booking through `computeBookingAssetRemainingToCheckOut`
-    // in parallel — independent reads, no shared state.
-    const effectiveActiveRows: RawBookingAssetRow[] = await Promise.all(
-      Array.from(activeByBooking.entries()).map(async ([bookingId, agg]) => {
-        const remaining = await computeBookingAssetRemainingToCheckOut(
-          db,
-          bookingId,
-          asset.id
-        );
-        // effective claimed = booked − remaining-to-check-out, floored at 0
-        const effectiveQuantity = Math.max(0, agg.bookedQuantity - remaining);
-        return {
-          quantity: effectiveQuantity,
-          // Per-slice attribution collapses at the aggregate grain — see
-          // the API endpoint for the same rationale.
-          assetKitId: null,
-          booking: agg.booking,
-        } as RawBookingAssetRow;
-      })
-    );
+    // in parallel: independent reads, no shared state. The engine's
+    // free-now figure is read alongside them.
+    const [effectiveActiveRows, freeNow] = await Promise.all([
+      Promise.all(
+        Array.from(activeByBooking.entries()).map(async ([bookingId, agg]) => {
+          const remaining = await computeBookingAssetRemainingToCheckOut(
+            db,
+            bookingId,
+            asset.id
+          );
+          // effective claimed = booked − remaining-to-check-out, floored at 0
+          const effectiveQuantity = Math.max(0, agg.bookedQuantity - remaining);
+          return {
+            quantity: effectiveQuantity,
+            // Per-slice attribution collapses at the aggregate grain; see
+            // the API endpoint for the same rationale.
+            assetKitId: null,
+            booking: agg.booking,
+          } as RawBookingAssetRow;
+        })
+      ),
+      isQuantityTracked(asset)
+        ? getAssetAvailability({ assetId: asset.id, organizationId }).then(
+            (availability) => Math.max(0, availability.physicalAvailable)
+          )
+        : null,
+    ]);
 
     // Drop ONGOING/OVERDUE rows with zero effective quantity — they
     // represent bookings where nothing has been scanned out yet (e.g. a
@@ -276,13 +284,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingAssets: [...reservedRows, ...cleanedActiveRows],
       // The engine's free-now figure, so the header tooltip's "free right
       // now" matches the Quantity Overview and the assets index.
-      freeNow: isQuantityTracked(asset)
-        ? Math.max(
-            0,
-            (await getAssetAvailability({ assetId: asset.id, organizationId }))
-              .physicalAvailable
-          )
-        : null,
+      freeNow,
     };
 
     /**
