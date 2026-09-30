@@ -450,6 +450,12 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   assertModelUnitsNotReservedElsewhere: vitest
     .fn()
     .mockResolvedValue(undefined),
+  // why: the twin guard for the reservations a booking still owes, run on both
+  // exits from DRAFT. Its placement and the pool math it performs are covered
+  // in service.server.model-request-transitions.test.ts and
+  // booking-model-request/service.server.test.ts; here it only has to let every
+  // transition through. Default: everything fits.
+  assertOutstandingModelRequestsFit: vitest.fn().mockResolvedValue(undefined),
   // why: `createBooking` bounds its reservation batch on every call, so the
   // symbol has to exist even though no case in this file reserves anything.
   // The limit itself is pinned in booking-model-request/service.server.test.ts

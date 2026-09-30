@@ -78,6 +78,7 @@ import {
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  assertOutstandingModelRequestsFit,
   assertReservationBatchWithinLimit,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
@@ -2447,19 +2448,51 @@ export async function reserveBooking({
       }
 
       /**
+       * The INDIVIDUAL units the draft holds by name, in the order the two
+       * model-pool guards below need them. Kit-driven rows are included: the
+       * pool a reservation draws on loses the unit either way, and a member
+       * reaches the draft through a kit without ever passing the add-time
+       * guards. Quantity-tracked rows are judged by the guard above.
+       */
+      const namedIndividualAssets = bookingFound.bookingAssets
+        .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
+        .map((ba) => ba.asset);
+
+      /**
+       * The units the draft still owes by model, measured against their pools
+       * in the transaction that flips the status.
+       *
+       * A draft's reservations claim nothing, so two drafts can each promise a
+       * model's entire pool. RESERVED is where those promises start to compete,
+       * and this is the only point that can tell whether they still fit. The
+       * guard below covers the by-name half of the same pools; both run here,
+       * over the same window, so a booking cannot pass one and break the other.
+       *
+       * Runs FIRST so one sorted pass covers every `AssetModel` row this
+       * transaction locks: `alsoLockAssetModelIds` carries the models the
+       * by-name guard goes on to measure, and its own pass then re-acquires
+       * locks this transaction already holds.
+       */
+      await assertOutstandingModelRequestsFit({
+        bookingId: id,
+        organizationId,
+        from,
+        to,
+        action: "reserve booking",
+        alsoLockAssetModelIds: namedIndividualAssets
+          .map((asset) => asset.assetModelId)
+          .filter((assetModelId): assetModelId is string => !!assetModelId),
+        tx,
+      });
+
+      /**
        * Units booked by name claim the same pool that other bookings' model
-       * reservations draw from. Every standalone INDIVIDUAL row on the draft
-       * is checked here, in the transaction that flips the status, so a draft
-       * assembled before those reservations existed cannot commit past them.
-       * Kit-driven rows count too: the pool a reservation draws on loses the
-       * unit either way, and a member reaches the draft through a kit without
-       * ever passing the add-time guards. Quantity-tracked rows are judged by
-       * the guard above.
+       * reservations draw from. Every INDIVIDUAL unit on the draft is checked
+       * here, in the transaction that flips the status, so a draft assembled
+       * before those reservations existed cannot commit past them.
        */
       await assertModelUnitsNotReservedElsewhere({
-        assets: bookingFound.bookingAssets
-          .filter((ba) => ba.asset.type === AssetType.INDIVIDUAL)
-          .map((ba) => ba.asset),
+        assets: namedIndividualAssets,
         bookingId: id,
         bookingStatus: bookingFound.status,
         organizationId,
@@ -2842,7 +2875,10 @@ async function readFullCheckoutDepartures(
  *      validates available pool capacity inside the tx — closes the TOCTOU
  *      window against sibling writers (other checkouts, custody
  *      assignments, quantity adjustments).
- *   3. Flips the checked-out assets + kits to `CHECKED_OUT` and updates
+ *   3. On a booking leaving DRAFT, measures whatever it still owes by model
+ *      against those models' pools: that exit is the only other point where
+ *      unnamed units start competing, and it bypasses `reserveBooking`.
+ *   4. Flips the checked-out assets + kits to `CHECKED_OUT` and updates
  *      the booking row with `dataToUpdate` (status + optional adjusted
  *      dates).
  *
@@ -2853,6 +2889,7 @@ async function readFullCheckoutDepartures(
  *
  * @param tx - Prisma transaction client
  * @param args.bookingId - Booking being transitioned
+ * @param args.bookingStatus - The booking's status before this transition, read under its row lock
  * @param args.bookingAssetIds - All asset IDs currently on the booking (used to fan the CHECKED_OUT status update)
  * @param args.qtyTrackedBookingAssets - Booking-asset pairs whose asset is QUANTITY_TRACKED (used for the availability guard)
  * @param args.uniqueQtyTrackedAssetIds - Deduplicated IDs from the above list
@@ -2861,6 +2898,7 @@ async function readFullCheckoutDepartures(
  * @param args.hasKits - Whether the kit update should fire
  * @throws {ShelfError} 400 when the booking holds no items to check out
  * @throws {ShelfError} 400 when any QUANTITY_TRACKED asset lacks sufficient pool availability
+ * @throws {ShelfError} 400 when a DRAFT booking's outstanding model reservations no longer fit
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function checkoutBookingWritesWithinTx(
@@ -2868,6 +2906,7 @@ async function checkoutBookingWritesWithinTx(
   {
     bookingId,
     organizationId,
+    bookingStatus,
     bookingAssetIds,
     qtyTrackedBookingAssets,
     uniqueQtyTrackedAssetIds,
@@ -2880,6 +2919,12 @@ async function checkoutBookingWritesWithinTx(
   }: {
     bookingId: Booking["id"];
     organizationId: Booking["organizationId"];
+    /**
+     * The booking's status as this transaction holds it, before the flip below.
+     * Read under the booking's row lock, because it decides whether the
+     * model-reservation guard runs and a pre-lock snapshot could have it wrong.
+     */
+    bookingStatus: BookingStatus;
     bookingAssetIds: Asset["id"][];
     /**
      * Acting user, stamped onto each slice's checkout marker. Nullable because
@@ -3005,6 +3050,33 @@ async function checkoutBookingWritesWithinTx(
         status: 400,
       });
     }
+  }
+
+  /**
+   * A booking may reach ONGOING straight from DRAFT, which skips
+   * {@link reserveBooking} and with it the only other point that measures what
+   * the booking still owes by model. A draft's reservations claim nothing, so
+   * two drafts can each promise a model's whole pool; this transition is where
+   * those promises start competing, and it has to hold the units it is about to
+   * send out.
+   *
+   * DRAFT only. A booking that came through RESERVED was measured there, and
+   * refusing it here would strand an operator over a pool that shrank for
+   * reasons the booking did not cause. The units it owes stay open on the
+   * ongoing booking either way.
+   *
+   * The window is the booking's own committed one, the same `from`/`to` the
+   * quantity-tracked guard above is scoped by.
+   */
+  if (bookingStatus === BookingStatus.DRAFT) {
+    await assertOutstandingModelRequestsFit({
+      bookingId,
+      organizationId,
+      from,
+      to,
+      action: "check out booking",
+      tx,
+    });
   }
 
   // SECURITY (cross-org IDOR): scope the status mutation to the caller's
@@ -3532,14 +3604,22 @@ export async function checkoutBooking({
         // The race is not theoretical: cancelling a RESERVED booking from
         // another tab while this checkout is in flight would otherwise leave a
         // CANCELLED booking whose assets are all CHECKED_OUT.
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          id,
+          organizationId
+        );
         assertBookingIsOpen({
-          status: await lockBookingForStatusCheck(tx, id, organizationId),
+          status: lockedStatus,
           operation: "check out",
           bookingId: id,
         });
 
         await checkoutBookingWritesWithinTx(tx, {
           bookingId: bookingFound.id,
+          // The status this transaction holds, not the pre-transaction read:
+          // it decides whether the model-reservation guard runs.
+          bookingStatus: lockedStatus,
           // SECURITY (cross-org IDOR): the helper scopes the asset/kit
           // status mutations to this org so a foreign asset id that slipped
           // into the booking's list can never be flipped.
@@ -3873,8 +3953,15 @@ export async function fulfilModelRequestsAndCheckout({
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
         // transaction, so the assignment below cannot interleave with a
-        // concurrent check-out or reservation edit on the same booking.
-        await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
+        // concurrent check-out or reservation edit on the same booking. The
+        // booking's lock comes from the shared helper, which returns the status
+        // it locked: read any other way it is a pre-lock snapshot, and the
+        // model-reservation guard downstream keys off whether this is a draft.
+        const lockedStatus = await lockBookingForStatusCheck(
+          tx,
+          bookingId,
+          organizationId
+        );
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
         const scanResult = await addScannedAssetsToBookingWithinTx(tx, {
@@ -3938,6 +4025,10 @@ export async function fulfilModelRequestsAndCheckout({
         await checkoutBookingWritesWithinTx(tx, {
           bookingId,
           organizationId,
+          // Read under the booking's row lock above, so a concurrent reserve
+          // cannot make a booking that is already claiming its pool look like a
+          // draft to the model-reservation guard.
+          bookingStatus: lockedStatus,
           bookingAssetIds: allBookingAssetIds,
           qtyTrackedBookingAssets,
           uniqueQtyTrackedAssetIds,
