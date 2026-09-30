@@ -368,6 +368,7 @@ export const AssetsList = ({
                   // rendered rows, which includes the "No model" bucket, and a
                   // bucket is not a model; `totalModels` excludes it. Two
                   // counts of the same thing disagreeing is worse than either.
+                  countLabelIsTotal
                   countLabel={() =>
                     `${totalModelsShown} ${
                       totalModelsShown === 1 ? "asset model" : "asset models"

@@ -47,6 +47,18 @@ type ListTitleProps = {
   items?: ListItemData[];
 
   /**
+   * Whether `countLabel` already states the list's total.
+   *
+   * A label that describes the rows on the page (the booking overview's
+   * "18 assets and 2 kits") still needs "out of N" to say more exist. A label
+   * that is itself the total (the model view's model count) must not get one,
+   * because the total appended counts RENDERED ROWS, which is a different
+   * unit: the model view renders a "No model" bucket that is not a model, so
+   * the suffix produced "3 asset models out of 4" above two rows.
+   */
+  countLabelIsTotal?: boolean;
+
+  /**
    * Optional class name for the title element
    */
   titleClassName?: string;
@@ -81,6 +93,7 @@ export default function ListTitle({
   items: itemsProp,
   titleClassName,
   countLabel,
+  countLabelIsTotal = false,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -167,16 +180,13 @@ export default function ListTitle({
           <div>
             {/* Both branches pluralise on the count, not on `> 1`: an empty
                 list read "0 item". Only exactly one is singular. */}
-            {countLabel ? (
-              /* A caller that supplies `countLabel` owns the whole phrase, so
-                 nothing is appended to it. `totalItems` counts rendered rows,
-                 which is not always the unit the label counts: the model view
-                 labels models while its rows include the "No model" bucket, so
-                 appending gave "3 asset models out of 4" above two rows. */
+            {countLabel && countLabelIsTotal ? (
               <p>{countLabel()}</p>
             ) : perPage < totalItems ? (
               <p>
-                {`${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
+                {countLabel
+                  ? countLabel()
+                  : `${rowCount} ${rowCount === 1 ? singular : plural}`}{" "}
                 <span className="text-gray-400">out of {totalItems}</span>
               </p>
             ) : (
@@ -188,7 +198,9 @@ export default function ListTitle({
                     about. Narrow in practice (the branch only runs when
                     `perPage >= totalItems`), but both branches should derive
                     the noun from the number beside it. */}
-                {`${totalItems} ${totalItems === 1 ? singular : plural}`}
+                {countLabel
+                  ? countLabel()
+                  : `${totalItems} ${totalItems === 1 ? singular : plural}`}
               </span>
             )}
           </div>

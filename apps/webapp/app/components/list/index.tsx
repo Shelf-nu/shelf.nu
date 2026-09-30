@@ -103,6 +103,9 @@ export type ListProps = {
    * models, so the row count and the model count are different numbers.
    */
   countLabel?: () => ReactNode;
+
+  /** Whether `countLabel` already states the total; see `ListTitle`. */
+  countLabelIsTotal?: boolean;
 };
 
 /**
@@ -125,6 +128,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     disableSelectAllItems,
     items: itemsProp,
     countLabel,
+    countLabelIsTotal,
   }: ListProps,
   ref
 ) {
@@ -170,6 +174,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 hasBulkActions={!!bulkActions}
                 items={items}
                 countLabel={countLabel}
+                countLabelIsTotal={countLabelIsTotal}
               />
             </div>
             <div className="flex items-center justify-end gap-2">
