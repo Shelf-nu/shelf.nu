@@ -384,28 +384,39 @@ export const handleDetection = async ({
 }) => {
   if (!result || paused) return;
 
-  // First, check if it's a QR code (URL pattern)
-  const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
-  const qrMatch = result.match(qrRegex);
+  /**
+   * The QR heuristics below are host-agnostic, so they only get to speak when
+   * the caller has not already classified the code. A `barcodeType` means it
+   * has: the camera path decides against `isShelfQrCode`, which knows our own
+   * host and the shortener, and sends `ExternalQR` precisely for a QR that is
+   * NOT ours. Letting the pattern re-read that as a Shelf id claims somebody
+   * else's QR code, and a structured barcode whose value happens to read like a
+   * cuid would be claimed the same way.
+   */
+  if (!barcodeType) {
+    // Check if it's a QR code (URL pattern)
+    const qrRegex = /^(https?:\/\/[^/]+\/(?:qr\/)?([a-zA-Z0-9]+))$/;
+    const qrMatch = result.match(qrRegex);
 
-  if (qrMatch) {
-    // It's a QR code URL
-    const qrId = qrMatch[2];
-    await onCodeDetectionSuccess?.({
-      value: qrId,
-      type: "qr",
-      error: !isQrId(qrId) ? "Invalid QR code format" : undefined,
-    });
-    return;
-  }
+    if (qrMatch) {
+      // It's a QR code URL
+      const qrId = qrMatch[2];
+      await onCodeDetectionSuccess?.({
+        value: qrId,
+        type: "qr",
+        error: !isQrId(qrId) ? "Invalid QR code format" : undefined,
+      });
+      return;
+    }
 
-  // Check if it's a raw QR ID (before checking barcodes)
-  if (isQrId(result)) {
-    await onCodeDetectionSuccess?.({
-      value: result,
-      type: "qr",
-    });
-    return;
+    // Check if it's a raw QR ID (before checking barcodes)
+    if (isQrId(result)) {
+      await onCodeDetectionSuccess?.({
+        value: result,
+        type: "qr",
+      });
+      return;
+    }
   }
 
   // If we have a specific barcode type passed in (like ExternalQR), use it
