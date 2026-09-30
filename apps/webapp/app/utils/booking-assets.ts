@@ -86,15 +86,19 @@ export type ExtendedKitStatus = KitStatus | "PARTIALLY_CHECKED_IN";
  * - INDIVIDUAL asset, partial check-in + booking ONGOING/OVERDUE → PARTIALLY_CHECKED_IN
  * - INDIVIDUAL asset, otherwise → raw `Asset.status`
  *
- * QUANTITY_TRACKED assets need a different treatment for DRAFT/RESERVED
- * bookings. The global `Asset.status` (e.g. `CHECKED_OUT`) can reflect
- * state from a *different* active booking or stale data from a prior
- * cancellation — neither is relevant to a DRAFT/RESERVED row in the
- * current booking, and surfacing "Checked out" there is misleading
- * ("this booking hasn't checked anything out yet"). So for qty-tracked
- * assets we hard-override to `AVAILABLE` when the booking is
- * DRAFT/RESERVED, letting the row focus on this booking's own progress
- * (reserved qty, disposition indicator) rather than global pool state.
+ * QUANTITY_TRACKED assets read as THIS booking's state, never the shared
+ * pool's. The global `Asset.status` describes the whole pool: `CHECKED_OUT`
+ * can come from a different active booking, and `IN_CUSTODY` only says that
+ * some units sit with a team member. A booking row must not inherit either
+ * signal from units it never took:
+ * - DRAFT/RESERVED: the booking has taken nothing yet, so the row is
+ *   `AVAILABLE` whatever the pool is doing elsewhere.
+ * - Any status: `IN_CUSTODY` reads as `AVAILABLE`. Units in custody are
+ *   outside the bookable pool, so they are never the units this row booked.
+ * - `CHECKED_OUT` on an active or finished booking still falls through: it
+ *   is the label for an all-at-once check-out, which writes no per-slice
+ *   counters. The partial cases are decided upstream by
+ *   {@link resolveBookingRowQtyState} before this fallback runs.
  */
 export function getBookingContextAssetStatus(
   asset: AssetWithStatus,
@@ -115,18 +119,21 @@ export function getBookingContextAssetStatus(
   }
 
   /**
-   * QUANTITY_TRACKED + DRAFT/RESERVED: the per-row badge should reflect
-   * *this* booking's state, not the shared pool's. "Checked out" leaking
-   * in from a prior booking (or from stale data) is noise at best and
-   * incorrect at worst. Force AVAILABLE; the qty progress indicator
-   * elsewhere in the row surfaces whatever real signal exists.
+   * QUANTITY_TRACKED: the per-row badge reflects *this* booking's state, not
+   * the shared pool's. Before the booking starts nothing has left, so the row
+   * is AVAILABLE. Once it runs, custody held by a team member is still not
+   * this booking's business: those units were never bookable, so the row
+   * stays AVAILABLE until the per-slice counters (resolved upstream) or an
+   * all-at-once check-out (`CHECKED_OUT`) say otherwise.
    */
   const isQtyTracked = (asset as { type?: string }).type === "QUANTITY_TRACKED";
-  if (
-    isQtyTracked &&
-    (bookingStatus === "DRAFT" || bookingStatus === "RESERVED")
-  ) {
-    return AssetStatus.AVAILABLE;
+  if (isQtyTracked) {
+    if (bookingStatus === "DRAFT" || bookingStatus === "RESERVED") {
+      return AssetStatus.AVAILABLE;
+    }
+    if (asset.status === AssetStatus.IN_CUSTODY) {
+      return AssetStatus.AVAILABLE;
+    }
   }
 
   return asset.status as AssetStatus;
