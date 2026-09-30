@@ -73,16 +73,6 @@ vi.mock("./kit-row-actions-dropdown", () => ({ default: () => <td /> }));
 // why: expanded rows render the asset list, which has its own test file.
 vi.mock("./list-asset-content", () => ({ default: () => <tr /> }));
 
-// why: the real badge is a bare SVG inside a Radix tooltip, so its text only
-// exists once something hovers it and the icon carries no accessible name.
-// Standing in for it makes the marker observable; `KitStatusBadge`, which
-// decides whether to render it at all, is left real.
-vi.mock("../shared/unavailable-badge", () => ({
-  UnavailableBadge: ({ title }: { title: string }) => (
-    <span data-testid="unavailable-badge">{title}</span>
-  ),
-}));
-
 describe("KitRow bulk-selection checkbox", () => {
   // `status` is a KitStatus and the row reads only these fields; the cast keeps
   // the fixture to what the component actually touches.
@@ -280,6 +270,37 @@ describe("KitRow already-booked signal (QT-only kit)", () => {
 
     renderKitRow(assets);
 
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  /**
+   * A kit can be both double-booked and holding a not-bookable asset. They are
+   * different problems with different fixes, and they now occupy different
+   * columns, so neither hides the other.
+   */
+  it("shows 'Unavailable' and 'Already booked' together when both apply", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: false,
+        bookingAssets: [
+          {
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
     expect(screen.getByText("Already booked")).toBeInTheDocument();
   });
 
@@ -533,7 +554,10 @@ describe("KitRow unavailable-member marker", () => {
       member({ id: "asset-2", title: "Light", availableToBook: true }),
     ]);
 
-    expect(screen.getByTestId("unavailable-badge")).toBeInTheDocument();
+    // Spelled out beside the kit's status chip. An icon-only marker there is
+    // too easy to miss next to a green "Available" chip, which is exactly how
+    // a flagged asset stayed hidden on a booking made entirely of kits.
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
   });
 
   it("leaves a kit alone when every member is bookable", () => {
@@ -542,7 +566,7 @@ describe("KitRow unavailable-member marker", () => {
       member({ id: "asset-2", availableToBook: true }),
     ]);
 
-    expect(screen.queryByTestId("unavailable-badge")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
   });
 
   /**
@@ -555,6 +579,6 @@ describe("KitRow unavailable-member marker", () => {
       member({ id: "asset-1", status: "AVAILABLE", availableToBook: false }),
     ]);
 
-    expect(screen.getByTestId("unavailable-badge")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
   });
 });
