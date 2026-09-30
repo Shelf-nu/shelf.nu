@@ -83,6 +83,7 @@ import {
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   loadActorBestEffort,
+  lockModelsForOutstandingRequests,
   RESERVATION_BATCH_TX_TIMEOUT_MS,
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
@@ -3962,6 +3963,15 @@ export async function fulfilModelRequestsAndCheckout({
           bookingId,
           organizationId
         );
+        // Models before request rows. The reservation writers lock the model
+        // first and hold no booking lock, so taking the request rows first
+        // inverts that pair and deadlocks the two transactions against each
+        // other. The check-out guard downstream locks the same models; a row
+        // this transaction already holds re-locks for free.
+        await lockModelsForOutstandingRequests(tx, {
+          bookingId,
+          organizationId,
+        });
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
         const scanResult = await addScannedAssetsToBookingWithinTx(tx, {

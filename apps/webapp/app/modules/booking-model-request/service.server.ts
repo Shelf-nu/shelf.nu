@@ -1057,6 +1057,57 @@ export async function measureModelPoolFit({
 }
 
 /* -------------------------------------------------------------------------- */
+/*                    lockModelsForOutstandingRequests                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Locks every `AssetModel` a booking still owes units for.
+ *
+ * Locks on these rows are taken in one order everywhere: the booking row, then
+ * `AssetModel`, then `BookingModelRequest`. The reservation writers take the
+ * model before the request row, so a transaction that wants a booking's request
+ * rows held for its whole duration has to take the models FIRST. Taking the
+ * request rows first inverts that pair, and the two transactions deadlock
+ * against each other with no booking lock between them to serialise the pair.
+ *
+ * Plain code-unit order, the comparator every writer of these rows uses, and
+ * the same set {@link assertOutstandingModelRequestsFit} goes on to lock
+ * downstream. Re-locking a row the transaction already holds costs nothing.
+ *
+ * @param tx - Transaction client, already holding the booking row.
+ * @param args.bookingId - Booking whose outstanding reservations to lock.
+ * @param args.organizationId - Workspace the booking must belong to.
+ */
+export async function lockModelsForOutstandingRequests(
+  tx: ModelReservationGuardClient,
+  {
+    bookingId,
+    organizationId,
+  }: {
+    bookingId: string;
+    organizationId: string;
+  }
+): Promise<void> {
+  // Workspace-scoped as well as booking-scoped: `bookingId` reaches this from
+  // request input, same rule as the guard's own read.
+  // The select matches `ModelReservationGuardClient`, which pins this read's
+  // shape for every caller's transaction client. Only `assetModelId` is used
+  // here; the quantities come along with the shape.
+  const requests = await tx.bookingModelRequest.findMany({
+    where: { bookingId, booking: { organizationId }, fulfilledAt: null },
+    select: { assetModelId: true, quantity: true, fulfilledQuantity: true },
+  });
+
+  const orderedModelIds = [
+    ...new Set(requests.map((request) => request.assetModelId)),
+  ].sort();
+
+  for (const assetModelId of orderedModelIds) {
+    await lockAssetModelForReservation(tx, assetModelId, organizationId);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /*                     assertOutstandingModelRequestsFit                      */
 /* -------------------------------------------------------------------------- */
 

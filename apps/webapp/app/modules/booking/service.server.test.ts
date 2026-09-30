@@ -32,6 +32,7 @@ import {
   assertModelUnitsNotReservedElsewhere,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
+  lockModelsForOutstandingRequests,
 } from "~/modules/booking-model-request/service.server";
 import * as bookingNoteService from "~/modules/booking-note/service.server";
 import * as lowStockService from "~/modules/consumption-log/low-stock.server";
@@ -456,6 +457,10 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   // booking-model-request/service.server.test.ts; here it only has to let every
   // transition through. Default: everything fits.
   assertOutstandingModelRequestsFit: vitest.fn().mockResolvedValue(undefined),
+  // why: the ordered model-lock pass the check-out transaction takes before it
+  // holds the booking's reservation rows. Spied on rather than executed: what
+  // the test below asserts is WHEN it runs relative to that row lock.
+  lockModelsForOutstandingRequests: vitest.fn().mockResolvedValue(undefined),
   // why: `createBooking` bounds its reservation batch on every call, so the
   // symbol has to exist even though no case in this file reserves anything.
   // The limit itself is pinned in booking-model-request/service.server.test.ts
@@ -5694,6 +5699,88 @@ describe("fulfilModelRequestsAndCheckout", () => {
       ]),
       expect.anything()
     );
+  });
+
+  /**
+   * Lock order rather than behaviour. The reservation writers take `AssetModel`
+   * before `BookingModelRequest` and hold no booking lock, so this transaction
+   * has to take the models first or the two deadlock against each other.
+   *
+   * Read off invocation order instead of a stubbed implementation, so nothing
+   * here changes what a later suite in this file sees.
+   */
+  it("locks the booking's models before locking its reservation rows", async () => {
+    expect.assertions(3);
+
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: [
+        {
+          asset: {
+            id: "hp-1",
+            assetKits: [],
+            title: "HP LaserJet 2020",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [],
+          },
+          assetId: "hp-1",
+          quantity: 1,
+          id: "ba-hp",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    });
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: scanned-unit metadata read inside the transaction.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "hp-1",
+        title: "HP LaserJet 2020",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-hp",
+      },
+    ]);
+    // why: the scan names a unit the booking already holds, so nothing is
+    // added and the post-commit note pass has no arrivals to narrate. This
+    // test is about the two locks that open the transaction, which both run
+    // before any of that.
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce([{ assetId: "hp-1", assetKitId: null }])
+      .mockResolvedValueOnce([
+        {
+          quantity: 1,
+          asset: {
+            id: "hp-1",
+            title: "HP LaserJet 2020",
+            type: AssetType.INDIVIDUAL,
+          },
+        },
+      ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["hp-1"],
+    });
+
+    const queryRaw = db.$queryRaw as ReturnType<typeof vitest.fn>;
+    // A tagged template hands the mock its static string parts first.
+    const requestRowLockIndex = queryRaw.mock.calls.findIndex((call) =>
+      (call[0] as readonly string[]).join("").includes('"BookingModelRequest"')
+    );
+
+    expect(lockModelsForOutstandingRequests).toHaveBeenCalledWith(db, {
+      bookingId: "booking-1",
+      organizationId: "org-1",
+    });
+    expect(requestRowLockIndex).toBeGreaterThanOrEqual(0);
+    expect(
+      vitest.mocked(lockModelsForOutstandingRequests).mock
+        .invocationCallOrder[0]
+    ).toBeLessThan(queryRaw.mock.invocationCallOrder[requestRowLockIndex]);
   });
 
   it("checks out the scanned units while a reservation is still partly unassigned", async () => {
