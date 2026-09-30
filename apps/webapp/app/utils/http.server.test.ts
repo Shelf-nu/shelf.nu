@@ -562,8 +562,8 @@ describe(buildContentDisposition.name, () => {
     });
 
     expect(result).toBe(
-      'attachment; filename="assets__-quoted-.csv"; ' +
-        "filename*=UTF-8''assets%0D%0A%22quoted%22.csv"
+      'attachment; filename="assets-quoted-.csv"; ' +
+        "filename*=UTF-8''assets%22quoted%22.csv"
     );
   });
 

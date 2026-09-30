@@ -379,6 +379,22 @@ export type DataOrErrorResponse<T extends ResponsePayload = ResponsePayload> =
  * Builds a Content-Disposition header value safe for non-ASCII filenames.
  * Uses RFC 5987 filename* parameter for Unicode support, with an
  * ASCII-only filename as fallback for older clients.
+ *
+ * The filename is either generated as `<name><suffix>-<timestamp>.csv`, or
+ * taken as-is from `opts.filename`. Pass `filename` when the client already
+ * chose the download name (a route's `$fileName` param), so a direct hit on
+ * the URL and an in-app download produce the same file. When `filename` is
+ * set, `name` and `suffix` are ignored.
+ *
+ * Control characters are removed from either form before encoding.
+ *
+ * @param name - entity name the generated filename starts with; blank falls
+ *   back to `opts.fallback`
+ * @param opts.fallback - used when `name` is blank, and when the sanitized
+ *   ASCII filename would otherwise be empty
+ * @param opts.suffix - appended to the name in the generated form
+ * @param opts.filename - finished filename, including its extension
+ * @returns the header value, e.g. `attachment; filename="..."; filename*=UTF-8''...`
  */
 export function buildContentDisposition(
   name: string | null | undefined,
@@ -387,10 +403,11 @@ export function buildContentDisposition(
   const { fallback, suffix = "", filename } = opts;
   const source = name && name.trim().length > 0 ? name : fallback;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const fullName =
+  const fullName = (
     filename && filename.trim().length > 0
       ? filename
-      : `${source}${suffix}-${timestamp}.csv`;
+      : `${source}${suffix}-${timestamp}.csv`
+  ).replace(/\p{Cc}/gu, "");
 
   // ASCII-safe version: strip non-ASCII, replace unsafe chars
   const asciiName =
