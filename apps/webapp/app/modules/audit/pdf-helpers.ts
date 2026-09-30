@@ -10,12 +10,17 @@ import type {
   AuditAssetStatus,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
+import type { ResolvableAssetModelImage } from "~/modules/asset/image-resolution";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
-import { resolveDisplayCode } from "~/modules/barcode/display";
+import {
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+} from "~/modules/barcode/display";
+import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
 import { rethrowIfClientError, ShelfError } from "~/utils/error";
 import type { UserNameFields } from "~/utils/user";
 import { getPrimaryLocation } from "../asset/utils";
-import { getQrCodeMaps } from "../qr/service.server";
 
 /**
  * Extended Asset type with audit-specific data for PDF generation
@@ -23,6 +28,9 @@ import { getQrCodeMaps } from "../qr/service.server";
 export interface AssetWithAuditStatus extends Asset {
   category: Pick<Category, "id" | "name" | "color"> | null;
   location: Pick<Location, "name"> | null;
+  /** Cover image of the asset's model, printed when the asset has no image of
+   * its own. See `~/modules/asset/image-resolution`. */
+  assetModel: ResolvableAssetModelImage;
   // Audit-specific data: expected flag and current status
   auditData: {
     expected: boolean;
@@ -76,13 +84,18 @@ export interface AuditPdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
-    // Whether the sheet prints the QR image at all.
+    // Whether the sheet prints the code pictures at all.
     | "showQrCodesOnPdfs"
   >;
-  // QR code data URLs mapped by asset ID
-  assetIdToQrCodeMap: Record<string, string>;
   /**
-   * The code to PRINT under each QR image — the same one the workspace's
+   * The picture printed in each row's Code cell, as a data URL, keyed by
+   * `Asset.id`. It is a picture of the code in `assetIdToDisplayCodeMap`: an SVG
+   * of the barcode when that code is one, otherwise the Shelf QR. An asset with
+   * no entry prints its code as text only. Built by `buildPdfCodeImageMap`.
+   */
+  assetIdToCodeImageMap: Record<string, string>;
+  /**
+   * The code to PRINT in each row's Code cell, the same one the workspace's
    * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
    * with a per-asset override winning over the workspace preference. Keyed by
    * `Asset.id`.
@@ -125,7 +138,7 @@ export interface AuditPdfDbResult {
 
 /**
  * Fetches all data needed to generate an audit receipt PDF.
- * Includes audit session, assets, images, activity notes, and QR codes.
+ * Includes audit session, assets, images, activity notes, and code pictures.
  *
  * @param auditSessionId - ID of the audit session
  * @param organizationId - Organization owning the audit
@@ -302,6 +315,9 @@ export async function fetchAllAuditPdfRelatedData(
               organizationId,
             },
             include: {
+              // Model cover image for assets with no image of their own, so the
+              // receipt prints the same image cascade as every web surface.
+              ...ASSET_MODEL_IMAGE_SELECT,
               category: {
                 select: {
                   id: true,
@@ -318,9 +334,11 @@ export async function fetchAllAuditPdfRelatedData(
                   },
                 },
               },
-              // why: out of this rule — `getQrCodeMaps` renders the image from
-              // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
-              qrCodes: true,
+              // why: out of this rule: `getQrCodeMaps` renders the image from
+              // `Qr.version`/`errorCorrection`, so the tight select cannot be
+              // used. Ordered so the QR picture and the QR id printed under it
+              // are the same first code on every print.
+              qrCodes: { orderBy: QR_CODES_ORDER_BY },
               // Feeds `resolveDisplayCode` so a barcode-preference workspace
               // gets its barcode value printed instead of the QR id.
               barcodes: { select: { id: true, type: true, value: true } },
@@ -335,8 +353,8 @@ export async function fetchAllAuditPdfRelatedData(
           imageId: true,
           currency: true,
           updatedAt: true,
-          // Which code the workspace wants printed under the QR image, and
-          // whether the QR image is printed at all.
+          // Which code the workspace wants printed, and whether its picture is
+          // printed at all.
           qrIdDisplayPreference: true,
           barcodesEnabled: true,
           showQrCodesOnPdfs: true,
@@ -377,25 +395,11 @@ export async function fetchAllAuditPdfRelatedData(
       };
     });
 
-    // QR data URLs per asset, encoded only when the receipt will print them.
-    // A workspace with the QR image turned off renders nothing from this map,
-    // so generating it would cost a QR encode per asset and put a data URL per
-    // asset in the response that nothing reads. The renderer already treats a
-    // missing entry as "no image", so an empty map needs no handling of its own.
-    const assetIdToQrCodeMap = organization.showQrCodesOnPdfs
-      ? await getQrCodeMaps({
-          assets,
-          userId,
-          organizationId,
-          size: "small",
-        })
-      : {};
-
-    // Resolve off the same raw rows the QR map is built from, so the two maps
-    // have one source. `assetsWithAuditStatus` is typed as a plain `Asset`,
-    // which declares neither `qrCodes` nor `barcodes`, and every field on the
-    // resolver's entity type is optional — so resolving from it would still
-    // compile on the day those relations stop coming through.
+    // Resolve off the raw rows, which still carry `qrCodes` and `barcodes`.
+    // `assetsWithAuditStatus` is typed as a plain `Asset`, which declares
+    // neither, and every field on the resolver's entity type is optional, so
+    // resolving from it would still compile on the day those relations stop
+    // coming through.
     const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
       Object.fromEntries(
         assets.map((asset) => [
@@ -408,11 +412,25 @@ export async function fetchAllAuditPdfRelatedData(
         ])
       );
 
+    // A picture per asset, drawn only when the receipt will print them. A
+    // workspace with code pictures turned off renders nothing from this map, so
+    // drawing it would cost an encode per asset and put a data URL per asset in
+    // the response that nothing reads. The renderer treats a missing entry as
+    // "text only", so an empty map needs no handling of its own.
+    const assetIdToCodeImageMap = organization.showQrCodesOnPdfs
+      ? await buildPdfCodeImageMap({
+          assets,
+          displayCodes: assetIdToDisplayCodeMap,
+          userId,
+          organizationId,
+        })
+      : {};
+
     return {
       session,
       assets: assetsWithAuditStatus,
       organization,
-      assetIdToQrCodeMap,
+      assetIdToCodeImageMap,
       assetIdToDisplayCodeMap,
       generalImages,
       assetImages,

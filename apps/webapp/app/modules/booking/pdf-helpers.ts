@@ -10,7 +10,11 @@ import type {
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import type { ResolvedDisplayCode } from "~/modules/barcode/display";
-import { resolveDisplayCode } from "~/modules/barcode/display";
+import {
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+} from "~/modules/barcode/display";
+import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
@@ -24,7 +28,6 @@ import {
   groupAndSortAssetsByKit,
 } from "./helpers";
 import { getBooking } from "./service.server";
-import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 export interface SortParams {
@@ -97,12 +100,18 @@ export interface PdfDbResult {
     // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
     | "qrIdDisplayPreference"
     | "barcodesEnabled"
-    // Whether the sheet prints the QR image at all.
+    // Whether the sheet prints the code pictures at all.
     | "showQrCodesOnPdfs"
   >;
-  assetIdToQrCodeMap: Record<string, string>;
   /**
-   * The code to PRINT under each QR image — the same one the workspace's
+   * The picture printed in each row's Code cell, as a data URL, keyed by
+   * `Asset.id`. It is a picture of the code in `assetIdToDisplayCodeMap`: an SVG
+   * of the barcode when that code is one, otherwise the Shelf QR. An asset with
+   * no entry prints its code as text only. Built by `buildPdfCodeImageMap`.
+   */
+  assetIdToCodeImageMap: Record<string, string>;
+  /**
+   * The code to PRINT in each row's Code cell, the same one the workspace's
    * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
    * with a per-asset override winning over the workspace preference.
    *
@@ -127,15 +136,15 @@ export interface PdfDbResult {
 /** Optional switches for {@link fetchAllPdfRelatedData}. */
 export interface PdfDataOptions {
   /**
-   * Whether to encode a QR image per asset. `true` by default, so a sheet that
-   * prints QR images needs no opt-in.
+   * Whether to draw a code picture per asset. `true` by default, so a sheet
+   * that prints code pictures needs no opt-in.
    *
    * A sheet that prints only the text code passes `false`: the encode is a
    * per-asset cost and puts a data URL per asset into a response that nothing
    * reads. The workspace's own `showQrCodesOnPdfs` still wins over a `true`
-   * here — this switch can only turn generation off, never on.
+   * here: this switch can only turn generation off, never on.
    */
-  includeQrImages?: boolean;
+  includeCodeImages?: boolean;
 }
 
 export async function fetchAllPdfRelatedData(
@@ -147,7 +156,7 @@ export async function fetchAllPdfRelatedData(
   sortParams?: SortParams,
   options?: PdfDataOptions
 ): Promise<PdfDbResult> {
-  const includeQrImages = options?.includeQrImages ?? true;
+  const includeCodeImages = options?.includeCodeImages ?? true;
 
   try {
     const booking = await getBooking({
@@ -217,9 +226,11 @@ export async function fetchAllPdfRelatedData(
               name: true,
             },
           },
-          // why: out of this rule — `getQrCodeMaps` renders the image from
+          // why: out of this rule: `getQrCodeMaps` renders the image from
           // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
-          qrCodes: true,
+          // Ordered so the QR picture and the QR id printed under it are the
+          // same first code on every print.
+          qrCodes: { orderBy: QR_CODES_ORDER_BY },
           // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
           // its barcode value printed instead of the QR id.
           barcodes: { select: { id: true, type: true, value: true } },
@@ -262,8 +273,8 @@ export async function fetchAllPdfRelatedData(
           id: true,
           currency: true,
           updatedAt: true,
-          // Which code the workspace wants printed under the QR image, and
-          // whether the QR image is printed at all.
+          // Which code the workspace wants printed, and whether its picture is
+          // printed at all.
           qrIdDisplayPreference: true,
           barcodesEnabled: true,
           showQrCodesOnPdfs: true,
@@ -314,39 +325,21 @@ export async function fetchAllPdfRelatedData(
       orderDirection
     );
 
-    // Deduplicate by asset id before QR generation: `sortedAssets` is now
-    // one row PER SLICE, so a QT asset booked standalone + via kits appears
-    // several times. `getQrCodeMaps` generates a QR per row and keys the
-    // result by asset id, so passing duplicates only repeats identical work —
-    // pass each asset once. The render still reads the map by `asset.id`, so
-    // every slice row resolves to the same (correct) QR.
-    const uniqueAssetsForQr = Array.from(
+    // Deduplicate by asset id: `sortedAssets` is one row PER SLICE, so a QT
+    // asset booked standalone + via kits appears several times. The code and
+    // its picture are properties of the asset, so each asset is resolved and
+    // drawn once, and every slice row reads the same entry by `asset.id`.
+    const uniqueAssets = Array.from(
       new Map(sortedAssets.map((asset) => [asset.id, asset])).values()
     );
-    // Encoded only when the sheet will print them: a workspace that turned QR
-    // images off, or a caller whose sheet has no QR column at all, renders
-    // nothing from this map, so generating it would cost a QR encode per asset
-    // and put a data URL per asset in the response that nothing reads. The
-    // renderer already treats a missing entry as "no image", so an empty map
-    // needs no handling of its own.
-    const assetIdToQrCodeMap =
-      organization.showQrCodesOnPdfs && includeQrImages
-        ? await getQrCodeMaps({
-            assets: uniqueAssetsForQr,
-            userId,
-            organizationId,
-            size: "small",
-          })
-        : {};
 
-    // Resolve the printed code once per unique asset, over the same deduped
-    // list the QR images are generated from. Resolving per rendered row would
-    // repeat identical work for every slice of a QUANTITY_TRACKED asset and
-    // would have to be threaded through `PdfAssetRow`; a map keyed by asset id
-    // leaves the row types untouched.
+    // Resolved once per unique asset. Resolving per rendered row would repeat
+    // identical work for every slice of a QUANTITY_TRACKED asset and would have
+    // to be threaded through `PdfAssetRow`; a map keyed by asset id leaves the
+    // row types untouched.
     const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
       Object.fromEntries(
-        uniqueAssetsForQr.map((asset) => [
+        uniqueAssets.map((asset) => [
           asset.id,
           resolveDisplayCode({
             entity: asset,
@@ -355,6 +348,22 @@ export async function fetchAllPdfRelatedData(
           }),
         ])
       );
+
+    // Drawn only when the sheet will print them: a workspace that turned code
+    // pictures off, or a caller whose sheet has no picture at all, renders
+    // nothing from this map, so drawing it would cost an encode per asset and
+    // put a data URL per asset in the response that nothing reads. The renderer
+    // treats a missing entry as "text only", so an empty map needs no handling
+    // of its own.
+    const assetIdToCodeImageMap =
+      organization.showQrCodesOnPdfs && includeCodeImages
+        ? await buildPdfCodeImageMap({
+            assets: uniqueAssets,
+            displayCodes: assetIdToDisplayCodeMap,
+            userId,
+            organizationId,
+          })
+        : {};
 
     // Phase 3d (Book-by-Model): surface outstanding model-level
     // reservations so the PDF can render a dedicated "Requested models"
@@ -426,7 +435,7 @@ export async function fetchAllPdfRelatedData(
         locale: getClientHint(request).locale,
       }),
       organization,
-      assetIdToQrCodeMap,
+      assetIdToCodeImageMap,
       assetIdToDisplayCodeMap,
       modelRequests,
     };

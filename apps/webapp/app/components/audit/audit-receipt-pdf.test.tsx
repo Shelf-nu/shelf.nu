@@ -9,9 +9,10 @@
  * @see {@link file://./audit-receipt-pdf.tsx}
  * @see {@link file://../assets/asset-code-print-text.tsx}
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { ASSET_IMAGE_PLACEHOLDER } from "~/modules/asset/image-resolution";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
 import type {
   DateFormatOptions,
@@ -61,10 +62,18 @@ function pdfMetaWith({
   displayCode,
   qrImage = QR_IMAGE,
   showQrCodesOnPdfs = true,
+  asset = {},
 }: {
   displayCode: AuditPdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
+  /** The row's code picture; `null` for a row with none. */
   qrImage?: string | null;
   showQrCodesOnPdfs?: boolean;
+  /** Image fields to override on the one asset row. */
+  asset?: Partial<{
+    mainImage: string | null;
+    thumbnailImage: string | null;
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  }>;
 }): AuditPdfDbResult {
   return {
     session: {
@@ -101,13 +110,16 @@ function pdfMetaWith({
       {
         id: "asset-1",
         title: "Camera",
+        mainImage: null,
         thumbnailImage: null,
+        assetModel: null,
         category: null,
         location: null,
         auditData: { expected: true, auditStatus: "SCANNED" },
+        ...asset,
       },
     ],
-    assetIdToQrCodeMap: qrImage ? { "asset-1": qrImage } : {},
+    assetIdToCodeImageMap: qrImage ? { "asset-1": qrImage } : {},
     assetIdToDisplayCodeMap: displayCode ? { "asset-1": displayCode } : {},
     generalImages: [],
     assetImages: [],
@@ -213,5 +225,109 @@ describe("audit receipt PDF — Code column", () => {
     renderReceipt({ displayCode: undefined });
 
     expect(screen.getByText("Camera")).toBeInTheDocument();
+  });
+});
+
+const CODE128_CODE = {
+  value: "AB-12345678",
+  type: "Code128",
+  isFallback: false,
+  entityKind: "asset",
+  workspacePreference: "Code128",
+} as AuditPdfDbResult["assetIdToDisplayCodeMap"][string];
+
+const BARCODE_PICTURE = "data:image/svg+xml;base64,PHN2Zy8+";
+
+describe("audit receipt PDF: the code picture", () => {
+  it("prints a linear barcode at the size its picture declares", () => {
+    // why: the server sized the SVG so each bar is exactly one module wide. A
+    // square box would squash the bars and the printed barcode would stop
+    // scanning.
+    renderReceipt({ displayCode: CODE128_CODE, qrImage: BARCODE_PICTURE });
+
+    const picture = codeCell().querySelector("img")!;
+    expect(picture).toHaveAttribute("src", BARCODE_PICTURE);
+    expect(picture).toHaveAttribute("data-code-shape", "linear");
+    expect(picture.className).not.toMatch(/size-|object-cover/);
+  });
+
+  it("prints a 2D barcode square, at the QR's size", () => {
+    renderReceipt({
+      displayCode: { ...CODE128_CODE, type: "ExternalQR" },
+      qrImage: BARCODE_PICTURE,
+    });
+
+    expect(codeCell().querySelector("img")).toHaveClass("size-16");
+  });
+
+  it("prints no picture, only the code, when the row has no picture", () => {
+    renderReceipt({ displayCode: CODE128_CODE, qrImage: null });
+
+    expect(codeCell().querySelector("img")).toBeNull();
+    expect(codeCell()).toHaveTextContent("AB-12345678");
+  });
+});
+
+describe("audit receipt PDF: photos", () => {
+  /** The row's photo: the image in the row's second cell. */
+  function photo() {
+    return screen
+      .getByText("Camera")
+      .closest("tr")!
+      .querySelectorAll("td")[1]
+      .querySelector("img")!;
+  }
+
+  it("prints the model's cover for an asset with no photo of its own", () => {
+    renderReceipt({
+      displayCode: CODE128_CODE,
+      asset: {
+        assetModel: {
+          image: "https://img/model.jpg",
+          thumbnailImage: "https://img/model-thumb.jpg",
+        },
+      },
+    });
+
+    expect(photo()).toHaveAttribute("src", "https://img/model-thumb.jpg");
+    expect(photo()).not.toHaveAttribute("loading");
+  });
+
+  it("prints the placeholder for an asset with no photo at all", () => {
+    renderReceipt({ displayCode: CODE128_CODE });
+
+    expect(photo()).toHaveAttribute("src", ASSET_IMAGE_PLACEHOLDER);
+  });
+
+  it("swaps a photo that fails to load for the placeholder", () => {
+    // why: a lapsed signed URL prints a broken-image icon otherwise.
+    renderReceipt({
+      displayCode: CODE128_CODE,
+      asset: {
+        mainImage: "https://img/expired.jpg",
+        thumbnailImage: "https://img/expired-thumb.jpg",
+      },
+    });
+
+    fireEvent.error(photo());
+
+    expect(photo()).toHaveAttribute("src", ASSET_IMAGE_PLACEHOLDER);
+  });
+});
+
+describe("audit receipt PDF: layout", () => {
+  it("fixes the table to the page width, one share per column", () => {
+    // why: a table sized by its content runs off the page when a name or a
+    // location is long; a fixed table wraps inside its columns instead.
+    const { container } = renderReceipt({ displayCode: CODE128_CODE });
+
+    const table = container.querySelector("table.audit-assets-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+
+    expect(table).toHaveClass("table-fixed");
+    expect(widths).toHaveLength(table.querySelectorAll("thead th").length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
   });
 });

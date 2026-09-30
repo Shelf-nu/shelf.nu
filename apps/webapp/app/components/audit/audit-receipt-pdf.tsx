@@ -10,12 +10,15 @@ import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
+import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
+import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
+import { AssetPrintImage } from "../assets/asset-print-image";
 import { CategoryBadge } from "../assets/category-badge";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
@@ -24,6 +27,31 @@ import { GrayBadge } from "../shared/gray-badge";
 import { Image } from "../shared/image";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
+
+/**
+ * Widths of the asset table's columns, in percent, in column order. They sum
+ * to 100 and the table is `table-fixed`, so the table is exactly the printable
+ * width and no cell's content can push it off the page; long text wraps inside
+ * its column instead. The Code column's share is shared with the server, which
+ * refuses a barcode picture wider than that cell.
+ */
+const ASSET_TABLE_COLUMNS = [
+  { name: "number", percent: 5 },
+  { name: "image", percent: 9 },
+  { name: "name", percent: 15 },
+  { name: "category", percent: 16 },
+  { name: "location", percent: 14 },
+  { name: "status", percent: 14 },
+  { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
+] as const;
+
+/**
+ * Lets a badge in a narrow table cell wrap its words instead of running past
+ * the cell's edge. The badges size to their text by default. The slimmer
+ * padding keeps a common label such as "Uncategorized" on one line.
+ */
+const WRAPPING_BADGE_CLASS =
+  "w-auto max-w-full px-1.5 [overflow-wrap:anywhere]";
 
 /**
  * Props for the AuditReceiptPDF component
@@ -166,7 +194,7 @@ export const AuditPDFContent = ({
     session,
     organization,
     assets,
-    assetIdToQrCodeMap,
+    assetIdToCodeImageMap,
     assetIdToDisplayCodeMap,
     generalImages,
     assetImages,
@@ -175,9 +203,9 @@ export const AuditPDFContent = ({
   } = pdfMeta;
 
   // An audit is a claim about what was physically present, so a receipt whose
-  // QR can be scanned from the desk undermines the thing it records. Workspaces
-  // that care turn the image off; the text code still prints.
-  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
+  // codes can be scanned from the desk undermines the thing it records.
+  // Workspaces that care turn the pictures off; the text code still prints.
+  const showCodeImages = organization.showQrCodesOnPdfs ?? true;
 
   // why: the receipt can be downloaded at ANY point in an audit's life — the
   // Actions dropdown offers it with no status gate — so it must apply the same
@@ -260,7 +288,9 @@ export const AuditPDFContent = ({
 
   return (
     <div
-      className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+      // On screen the sheet is an A4 page with its 10mm margins as padding,
+      // so the preview's table is the same 190mm wide as the printed one.
+      className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
       ref={componentRef}
     >
       {/* Print-specific styles for A4 layout */}
@@ -270,9 +300,12 @@ export const AuditPDFContent = ({
             margin: 10mm;
             size: A4;
           }
+          /* The printable width IS the sheet: A4 minus the page margins. A
+             fixed width wider than that makes Chrome shrink the whole page. */
           .pdf-wrapper {
-            margin: 0;
-            padding: 0;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: auto !important;
             position: static !important;
             left: auto !important;
           }
@@ -528,32 +561,38 @@ export const AuditPDFContent = ({
       <When truthy={assets.length > 0}>
         <section className="mb-5">
           <h2 className="mb-2 text-lg font-medium">Assets</h2>
-          <table className="audit-assets-table w-full border border-gray-300">
+          <table className="audit-assets-table w-full table-fixed border border-gray-300">
+            <colgroup>
+              {ASSET_TABLE_COLUMNS.map((column) => (
+                <col
+                  key={column.name}
+                  style={{ width: `${column.percent}%` }}
+                />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th className="w-10 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                   #
                 </th>
-                <th className="w-20 min-w-[76px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Image
                 </th>
-                <th className="w-1/4 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Name
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Category
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Location
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Status
                 </th>
-                {/* Sized for the code, which sits under the image: 140px gives
-                    it ~120px, enough for a 25-character legacy QR id on two
-                    lines. Below 140px those take three, and the extra line
-                    costs more table height than the Name column loses. */}
-                <th className="min-w-[140px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                {/* Wide enough for an 11-character Code 128 picture at 0.25mm
+                    per bar, with the code text under it. */}
+                <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Code
                 </th>
               </tr>
@@ -562,37 +601,35 @@ export const AuditPDFContent = ({
               {assets.map((asset, index) => (
                 <Fragment key={asset.id}>
                   <tr>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="border border-gray-300 px-1 py-2.5 align-top text-xs">
                       {index + 1}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top">
-                      {/* Use simple img tag for PDF - AssetImage component doesn't work in print context */}
-                      {asset.thumbnailImage ? (
-                        <img
-                          src={asset.thumbnailImage}
-                          alt={asset.title}
-                          className="size-12 rounded-[2px] object-cover"
-                        />
-                      ) : (
-                        <div className="flex size-12 items-center justify-center rounded-[2px] bg-gray-100 text-xs text-gray-400">
-                          No image
-                        </div>
-                      )}
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top">
+                      <AssetPrintImage
+                        asset={asset}
+                        alt={asset.title}
+                        className="size-12"
+                      />
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="break-words border border-gray-300 p-2.5 align-top text-xs">
                       {asset.title}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
-                      <CategoryBadge category={asset.category ?? null} />
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
+                      <CategoryBadge
+                        category={asset.category ?? null}
+                        className={WRAPPING_BADGE_CLASS}
+                      />
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
                       {asset.location?.name ? (
-                        <GrayBadge>{asset.location.name}</GrayBadge>
+                        <GrayBadge className={WRAPPING_BADGE_CLASS}>
+                          {asset.location.name}
+                        </GrayBadge>
                       ) : (
                         "-"
                       )}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
                       {/* Convert AuditAssetStatus to AuditStatusLabel for badge
                           display. Pass the audit's completion state so these
                           rows agree with the Statistics tile above them — the
@@ -612,19 +649,16 @@ export const AuditPDFContent = ({
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
                       <div className="flex flex-col items-start gap-1">
-                        <When
-                          truthy={
-                            showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
-                          }
-                        >
-                          <img
-                            src={assetIdToQrCodeMap[asset.id]}
-                            alt={`QR code for ${asset.title}`}
-                            className="size-16"
+                        <When truthy={showCodeImages}>
+                          <AssetCodePrintImage
+                            src={assetIdToCodeImageMap[asset.id]}
+                            displayCode={assetIdToDisplayCodeMap[asset.id]}
+                            alt={`Code for ${asset.title}`}
+                            squareClassName="size-16"
                           />
                         </When>
-                        {/* Printed even when the QR image is missing: the code
-                            is the part a reader matches against the physical
+                        {/* Printed even when there is no picture: the code is
+                            the part a reader matches against the physical
                             label. */}
                         <AssetCodePrintText
                           displayCode={assetIdToDisplayCodeMap[asset.id]}

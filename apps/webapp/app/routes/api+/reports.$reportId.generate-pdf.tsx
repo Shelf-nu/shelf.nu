@@ -5,10 +5,11 @@
  * Returns JSON that the client renders as a styled HTML preview,
  * then converts to PDF via react-to-print.
  *
- * Serves the three reports that ship a PDF — booking compliance, asset
+ * Serves the three reports that ship a PDF: booking compliance, asset
  * inventory and custody snapshot. `REPORTS_WITH_PDF` in
  * `report-export-actions.tsx` gates which pages offer the button, and the
- * switch below must cover exactly that list.
+ * switch below must cover exactly that list. Sends one `pdf_preview_opened`
+ * event per preview.
  *
  * @see {@link file://../../components/reports/report-pdf.tsx} the renderer this feeds
  * @see {@link file://../../components/reports/report-export-actions.tsx} `REPORTS_WITH_PDF`
@@ -19,6 +20,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
@@ -374,6 +376,17 @@ export const loader = async ({
           status: 500,
         });
     }
+
+    captureServerEvent({
+      distinctId: userId,
+      event: "pdf_preview_opened",
+      properties: {
+        sheet: "report",
+        organizationId,
+        rowCount: pdfMeta.rows.length,
+        reportId,
+      },
+    });
 
     return data(payload({ pdfMeta }));
   } catch (cause) {

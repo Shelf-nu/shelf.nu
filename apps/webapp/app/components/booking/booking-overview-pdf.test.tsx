@@ -13,9 +13,10 @@
  * @see {@link file://./booking-overview-pdf.tsx}
  * @see {@link file://../assets/asset-code-print-text.tsx}
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { ASSET_IMAGE_PLACEHOLDER } from "~/modules/asset/image-resolution";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import type {
   DateFormatOptions,
@@ -65,16 +66,26 @@ function pdfMetaWith({
   displayCode,
   qrImage = QR_IMAGE,
   showQrCodesOnPdfs = true,
+  description = null,
+  asset = {},
 }: {
   displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
+  /** The row's code picture; `null` for a row with none. */
   qrImage?: string | null;
   showQrCodesOnPdfs?: boolean;
+  description?: string | null;
+  /** Image fields to override on the one asset row. */
+  asset?: Partial<{
+    mainImage: string | null;
+    thumbnailImage: string | null;
+    assetModel: { image: string | null; thumbnailImage: string | null } | null;
+  }>;
 }): PdfDbResult {
   return {
     booking: {
       id: "booking-1",
       name: "Shoot",
-      description: null,
+      description,
       custodianUser: null,
       custodianTeamMember: { name: "Ada" },
       tags: [],
@@ -104,10 +115,11 @@ function pdfMetaWith({
         location: { name: "Studio" },
         kit: null,
         isRemovedFromKit: false,
+        ...asset,
       },
     ],
     totalValue: "$100",
-    assetIdToQrCodeMap: qrImage ? { "asset-1": qrImage } : {},
+    assetIdToCodeImageMap: qrImage ? { "asset-1": qrImage } : {},
     assetIdToDisplayCodeMap: displayCode ? { "asset-1": displayCode } : {},
     modelRequests: [],
   } as unknown as PdfDbResult;
@@ -236,7 +248,7 @@ describe("booking checklist PDF — Code column", () => {
       showQrCodesOnPdfs: false,
     });
 
-    expect(screen.queryByAltText("QR Code")).not.toBeInTheDocument();
+    expect(screen.queryByAltText("Code of Tripod")).not.toBeInTheDocument();
     expect(codeCell()).toHaveTextContent("SAM-0001");
   });
 
@@ -277,5 +289,154 @@ describe("booking checklist PDF — Code column", () => {
     });
 
     expect(codeCell()).toContainElement(checkbox);
+  });
+});
+
+const CODE128_CODE = {
+  value: "AB-12345678",
+  type: "Code128",
+  isFallback: false,
+  entityKind: "asset",
+  workspacePreference: "Code128",
+} as PdfDbResult["assetIdToDisplayCodeMap"][string];
+
+const BARCODE_PICTURE = "data:image/svg+xml;base64,PHN2Zy8+";
+
+describe("booking checklist PDF: the code picture", () => {
+  it("prints a linear barcode at the size its picture declares", () => {
+    // why: the server sized the SVG so each bar is exactly one module wide. A
+    // square box (the QR's size-14) would squash the bars or crop the quiet
+    // zones, and the printed barcode would stop scanning.
+    renderPreview({ displayCode: CODE128_CODE, qrImage: BARCODE_PICTURE });
+
+    const picture = codeCell().querySelector("img")!;
+    expect(picture).toHaveAttribute("src", BARCODE_PICTURE);
+    expect(picture).toHaveAttribute("data-code-shape", "linear");
+    expect(picture.className).not.toMatch(/size-|object-cover/);
+  });
+
+  it("prints a 2D barcode square, at the QR's size", () => {
+    renderPreview({
+      displayCode: { ...CODE128_CODE, type: "DataMatrix" },
+      qrImage: BARCODE_PICTURE,
+    });
+
+    const picture = codeCell().querySelector("img")!;
+    expect(picture).toHaveAttribute("data-code-shape", "square");
+    expect(picture).toHaveClass("size-14");
+  });
+
+  it("prints the Shelf QR square", () => {
+    renderPreview({
+      displayCode: {
+        value: "SAM-0001",
+        type: "SAM_ID",
+        isFallback: false,
+        entityKind: "asset",
+        workspacePreference: "SAM_ID",
+      },
+    });
+
+    expect(codeCell().querySelector("img")).toHaveClass("size-14");
+  });
+
+  it("prints no picture, only the code, when the row has no picture", () => {
+    // why: a barcode too wide for the column, or one its format refuses, gets
+    // no entry. A QR in its place would be a picture of a DIFFERENT code.
+    renderPreview({ displayCode: CODE128_CODE, qrImage: null });
+
+    expect(codeCell().querySelector("img")).toBeNull();
+    expect(codeCell()).toHaveTextContent("AB-12345678");
+  });
+});
+
+describe("booking checklist PDF: photos", () => {
+  it("never lazy-loads a photo", () => {
+    // why: the sheet is printed from a copy of the page, and a lazy photo
+    // below the fold has not loaded when the copy is taken.
+    const { container } = renderPreview({
+      displayCode: CODE128_CODE,
+      asset: { mainImage: "https://img/main.jpg", thumbnailImage: null },
+    });
+
+    const table = container.querySelector("table.booking-assets-table")!;
+    expect(table.querySelectorAll("img").length).toBeGreaterThan(0);
+    expect(table.querySelectorAll("img[loading]")).toHaveLength(0);
+  });
+
+  it("prints the asset's thumbnail", () => {
+    renderPreview({
+      displayCode: CODE128_CODE,
+      asset: {
+        mainImage: "https://img/main.jpg",
+        thumbnailImage: "https://img/thumb.jpg",
+      },
+    });
+
+    expect(screen.getByAltText("Image of Tripod")).toHaveAttribute(
+      "src",
+      "https://img/thumb.jpg"
+    );
+  });
+
+  it("prints the model's cover for an asset with no photo of its own", () => {
+    renderPreview({
+      displayCode: CODE128_CODE,
+      asset: {
+        assetModel: {
+          image: "https://img/model.jpg",
+          thumbnailImage: "https://img/model-thumb.jpg",
+        },
+      },
+    });
+
+    expect(screen.getByAltText("Image of Tripod")).toHaveAttribute(
+      "src",
+      "https://img/model-thumb.jpg"
+    );
+  });
+
+  it("swaps a photo that fails to load for the placeholder", () => {
+    // why: a lapsed signed URL prints a broken-image icon otherwise.
+    renderPreview({
+      displayCode: CODE128_CODE,
+      asset: { mainImage: "https://img/expired.jpg", thumbnailImage: null },
+    });
+
+    const photo = screen.getByAltText("Image of Tripod");
+    fireEvent.error(photo);
+
+    expect(photo).toHaveAttribute("src", ASSET_IMAGE_PLACEHOLDER);
+  });
+});
+
+describe("booking checklist PDF: layout", () => {
+  it("prints the Description row only when the booking has one", () => {
+    const { unmount } = renderPreview({
+      displayCode: CODE128_CODE,
+      description: "   ",
+    });
+    expect(screen.queryByText("Description")).not.toBeInTheDocument();
+    unmount();
+
+    renderPreview({ displayCode: CODE128_CODE, description: "Studio shoot" });
+    expect(screen.getByText("Description")).toBeInTheDocument();
+    expect(screen.getByText("Studio shoot")).toBeInTheDocument();
+  });
+
+  it("fixes the table to the page width, one share per column", () => {
+    // why: a table sized by its content runs off the page when a name or a
+    // code is long; a fixed table wraps inside its columns instead.
+    const { container } = renderPreview({ displayCode: CODE128_CODE });
+
+    const table = container.querySelector("table.booking-assets-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+    const headers = table.querySelectorAll("thead th");
+
+    expect(table).toHaveClass("table-fixed");
+    expect(widths).toHaveLength(headers.length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
   });
 });

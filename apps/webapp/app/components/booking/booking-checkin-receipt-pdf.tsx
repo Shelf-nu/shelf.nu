@@ -6,9 +6,9 @@
  * with totals, a completeness stamp and signature lines for the hand-over.
  *
  * Offered from the booking's Actions menu once anything has been checked in.
- * Unlike the checklist it carries no QR images and no tick boxes — the sheet is
- * a record of what happened, not a list of work to do — and it prints no asset
- * values: it is handed to custodians and clients.
+ * Unlike the checklist it carries no code pictures and no tick boxes (the sheet
+ * is a record of what happened, not a list of work to do), and it prints no
+ * asset values: it is handed to custodians and clients.
  *
  * @see {@link file://./../../routes/api+/bookings.$bookingId.generate-checkin-receipt.tsx}
  * @see {@link file://./../../modules/booking/checkin-receipt.ts}
@@ -38,6 +38,23 @@ import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type CheckinReceiptApiResponse = { pdfMeta: CheckinReceiptView };
+
+/**
+ * Widths of the receipt table's columns, in percent, in column order. They sum
+ * to 100 and the table is `table-fixed`, so the table is exactly the printable
+ * width and no cell's content can push it off the page; long text wraps inside
+ * its column instead.
+ */
+const RECEIPT_TABLE_COLUMNS = [
+  { name: "number", percent: 6 },
+  { name: "name", percent: 18 },
+  { name: "quantity", percent: 7 },
+  { name: "kit", percent: 12 },
+  { name: "code", percent: 16 },
+  { name: "returned", percent: 15 },
+  { name: "checked-in-on", percent: 14 },
+  { name: "checked-in-by", percent: 12 },
+] as const;
 
 /**
  * The Actions-menu entry that previews and prints a booking's check-in receipt.
@@ -235,7 +252,8 @@ function DispositionPill({
   return (
     <span
       className={tw(
-        "inline-block whitespace-nowrap rounded-full px-2 py-px text-xs font-medium",
+        // Wraps inside its narrow column rather than running past its edge.
+        "inline-block max-w-full rounded-full px-2 py-px text-xs font-medium",
         tone === "returned" && "bg-success-50 text-success-700",
         tone === "consumed" && "bg-gray-100 text-gray-700",
         tone === "lost" && "bg-warning-50 text-warning-700",
@@ -384,9 +402,12 @@ export const BookingCheckinReceiptPreview = ({
             margin: 10mm;
             size: A4;
           }
+          /* The printable width IS the sheet: A4 minus the page margins. A
+             fixed width wider than that makes Chrome shrink the whole page. */
           .pdf-wrapper {
-            margin: 0;
-            padding: 0;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: auto !important;
           }
           .checkin-receipt-table {
             border-collapse: separate !important;
@@ -413,7 +434,9 @@ export const BookingCheckinReceiptPreview = ({
         }`}
       </style>
       <div
-        className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+        // On screen the sheet is an A4 page with its 10mm margins as padding,
+        // so the preview's table is the same 190mm wide as the printed one.
+        className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
         ref={componentRef}
       >
         <div className="mb-5 flex justify-between gap-4">
@@ -502,31 +525,36 @@ export const BookingCheckinReceiptPreview = ({
           </When>
         </section>
 
-        <table className="checkin-receipt-table w-full border border-gray-300">
+        <table className="checkin-receipt-table w-full table-fixed border border-gray-300">
+          <colgroup>
+            {RECEIPT_TABLE_COLUMNS.map((column) => (
+              <col key={column.name} style={{ width: `${column.percent}%` }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
-              <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                 #
               </th>
-              <th className="w-[24%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Name
               </th>
-              <th className="w-12 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                 Qty
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Kit
               </th>
-              <th className="min-w-[110px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
-              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Returned
               </th>
-              <th className="min-w-[110px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                 Checked in on
               </th>
-              <th className="w-28 border-b border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-gray-300 p-2.5 text-left text-xs font-medium">
                 Checked in by
               </th>
             </tr>
@@ -540,17 +568,17 @@ export const BookingCheckinReceiptPreview = ({
                 key={row.bookingAssetId}
                 className="border-b border-gray-300 align-top"
               >
-                <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="border-r border-gray-300 px-1.5 py-2.5 text-sm text-gray-600">
                   {index + 1}
                 </td>
-                <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="break-words border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {row.title}
                 </td>
-                <td className="border-r border-gray-300 p-2.5 text-center text-sm tabular-nums text-gray-600">
+                <td className="break-words border-r border-gray-300 px-1.5 py-2.5 text-center text-sm tabular-nums text-gray-600">
                   {/* THIS slice's booked units; individual slices are qty 1. */}
                   {row.quantity}
                 </td>
-                <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="break-words border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   {row.kitName}
                   {/* Print-medium equivalent of the overview's "Removed from
                       kit" badge: without it a detached row is
@@ -567,10 +595,12 @@ export const BookingCheckinReceiptPreview = ({
                 <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
                   <ReturnedCell row={row} />
                 </td>
-                <td className="whitespace-nowrap border-r border-gray-300 p-2.5 font-mono text-xs text-gray-600">
+                {/* Wraps at the space between date and time: a full moment
+                    in mono is wider than this column. */}
+                <td className="break-words border-r border-gray-300 px-1.5 py-2.5 font-mono text-xs text-gray-600">
                   {row.checkedInOn}
                 </td>
-                <td className="border-gray-300 p-2.5 text-sm text-gray-600">
+                <td className="break-words border-gray-300 p-2.5 text-sm text-gray-600">
                   {row.checkedInByName}
                 </td>
               </tr>
