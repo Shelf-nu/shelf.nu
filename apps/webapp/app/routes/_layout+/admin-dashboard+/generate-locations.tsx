@@ -14,6 +14,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import { isMaxFileSizeError } from "~/utils/form-data-parse-errors.server";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -59,7 +60,32 @@ export async function action({ context, request }: ActionFunctionArgs) {
       GenerateLocationSchema.omit({ image: true })
     );
 
-    const formDataFile = await parseFormData(request);
+    /**
+     * The parser enforces its own per-file limit while reading the body, and it
+     * defaults to 2 MiB, so it has to be told the limit this route actually
+     * allows. Left on the default it rejects a file well inside the stated 4 MB
+     * and the operator is shown a captured 500 instead of the size message.
+     */
+    let formDataFile: FormData;
+    try {
+      formDataFile = await parseFormData(request, {
+        maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
+      });
+    } catch (parseError) {
+      if (isMaxFileSizeError(parseError)) {
+        throw new ShelfError({
+          cause: parseError,
+          message: `Image size exceeds maximum allowed size of ${
+            DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
+          }MB`,
+          status: 400,
+          label: "Admin dashboard",
+          shouldBeCaptured: false,
+        });
+      }
+
+      throw parseError;
+    }
 
     const image = formDataFile.get("image") as File | null;
     invariant(image instanceof File, "file not the right type");
@@ -70,17 +96,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         message: "Image is required",
         status: 400,
         label: "Admin dashboard",
-      });
-    }
-
-    if (image.size > DEFAULT_MAX_IMAGE_UPLOAD_SIZE) {
-      throw new ShelfError({
-        cause: null,
-        message: `Image size exceeds maximum allowed size of ${
-          DEFAULT_MAX_IMAGE_UPLOAD_SIZE / (1024 * 1024)
-        }MB`,
-        status: 400,
-        label: "Admin dashboard",
+        shouldBeCaptured: false,
       });
     }
 
