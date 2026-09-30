@@ -42,6 +42,10 @@ import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import {
+  canCancelModelReservation,
+  modelReservationBounds,
+} from "@/lib/booking-model-reservation";
 import { submitFromSheet } from "@/lib/sheet-submit";
 
 type Mode = "assets" | "kits" | "models";
@@ -354,15 +358,15 @@ export default function AddBookingAssetsScreen() {
   // ── Book-by-model reserve / edit / remove ────────────────────────────────
 
   /**
-   * Upper bound for reserving a model: what's free in the window PLUS the units
-   * this booking has already had assigned (they can't be re-reserved away but
-   * the total can't drop below them). Mirrors the server cap in
-   * `upsertBookingModelRequest` (available + existingFulfilled).
+   * How far this model's reservation may be moved — free pool plus the units
+   * the booking already holds, floored at what is already assigned. See
+   * {@link modelReservationBounds}; the server enforces the same range.
    */
-  const reserveMax = (model: AvailableModel) => {
-    const existing = modelRequestsById[model.id];
-    return model.available + (existing?.fulfilledQuantity ?? 0);
-  };
+  const reserveBounds = (model: AvailableModel) =>
+    modelReservationBounds({
+      available: model.available,
+      fulfilledQuantity: modelRequestsById[model.id]?.fulfilledQuantity,
+    });
 
   /**
    * Held while a reservation request runs, so a second tap on Reserve cannot
@@ -531,7 +535,11 @@ export default function AddBookingAssetsScreen() {
     ({ item }: { item: AvailableModel }) => {
       const existing = modelRequestsById[item.id];
       const reserved = existing?.quantity ?? 0;
-      const max = item.available + (existing?.fulfilledQuantity ?? 0);
+      const assigned = existing?.fulfilledQuantity ?? 0;
+      const { max } = modelReservationBounds({
+        available: item.available,
+        fulfilledQuantity: assigned,
+      });
       // Nothing free to reserve AND nothing already reserved → can't act.
       const canReserve = max >= 1;
       return (
@@ -546,9 +554,12 @@ export default function AddBookingAssetsScreen() {
             <Text style={styles.modelMeta}>
               {item.available} of {item.total} available
               {reserved > 0 ? ` · ${reserved} reserved here` : ""}
+              {assigned > 0 ? ` · ${assigned} assigned` : ""}
             </Text>
           </View>
-          {reserved > 0 && (
+          {/* Edit, floored at the assigned count, is the route that works
+              once units are on the booking. */}
+          {reserved > 0 && canCancelModelReservation(assigned) && (
             <TouchableOpacity
               style={styles.modelRemoveButton}
               onPress={() => handleRemoveModel(item)}
@@ -748,7 +759,8 @@ export default function AddBookingAssetsScreen() {
             : "Reserve model"
         }
         subtitle={activeModel?.name}
-        max={activeModel ? reserveMax(activeModel) : 1}
+        max={activeModel ? reserveBounds(activeModel).max : 1}
+        min={activeModel ? reserveBounds(activeModel).min : 1}
         defaultValue={
           activeModel ? modelRequestsById[activeModel.id]?.quantity ?? 1 : 1
         }

@@ -29,7 +29,7 @@
  * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
  */
 
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -52,6 +52,7 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
+import { resolveClaimableAssetIds } from "~/modules/booking-model-request/claimable";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -87,11 +88,11 @@ export const links: LinksFunction = () => [
  * - `assetIds`: concrete asset IDs the operator scanned in the drawer
  *   (matched OR off-model — server matches them against outstanding
  *   `BookingModelRequest` rows and creates `BookingAsset` rows).
- * - `kitIds`: present for forward compatibility — kit-level
- *   `BookingModelRequest`s don't exist today, so the server will
- *   reject non-empty kits when there are outstanding model requests.
- *   We still plumb the field through so the drawer can evolve without
- *   a schema change.
+ * - `kitIds`: kit IDs the operator scanned in the drawer. The server
+ *   resolves each into kit-driven `BookingAsset` rows and assigns their
+ *   INDIVIDUAL members against outstanding `BookingModelRequest` rows,
+ *   exactly as it does for a directly scanned asset. Members are not
+ *   listed in `assetIds` — sending one both ways would book it twice.
  * - `checkoutIntentChoice`: the operator's answer to the early-
  *   checkout alert (`with-adjusted-date` | `without-adjusted-date`).
  *   Only meaningful when `isBookingEarlyCheckout(booking.from)` is
@@ -115,6 +116,8 @@ export const fulfilAndCheckoutSchema = z.object({
  *   already-included concrete assets.
  * - Rejects if the user can't manage the booking (mirrors
  *   scan-assets).
+ * - Tells the drawer whether submit sends out only the scanned items, so
+ *   its "something to check out" rule matches the action's.
  * - Short-circuits to `/bookings/:id` when there are zero outstanding
  *   model requests — the regular checkout flow is correct in that
  *   case and the fulfil scanner would be a confusing detour.
@@ -231,12 +234,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       }
     }
 
+    /**
+     * Assets already on the booking that a scan could still make answer a
+     * reservation.
+     *
+     * Resolved server-side, and through the shared rule rather than inline:
+     * the drawer renders a "now counts" badge off this flag and moves the
+     * per-model progress strip by it, so it has to agree with what the write
+     * will do. It also reads every row of the booking, which the flat list
+     * below cannot express, because one asset can hold several at once.
+     */
+    const claimableAssetIds = resolveClaimableAssetIds(booking.bookingAssets);
+
     const alreadyIncluded = booking.bookingAssets.map((ba) => ({
       id: ba.asset.id,
       title: ba.asset.title,
       mainImage: ba.asset.mainImage,
       thumbnailImage: ba.asset.thumbnailImage,
       assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
+      /** Whether scanning this asset could still answer a reservation. */
+      claimable: claimableAssetIds.has(ba.asset.id),
       kitId: ba.asset.assetKits[0]?.kitId ?? null,
       // `ba.quantity` is the BOOKING-specific unit count (from the
       // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for
@@ -245,6 +262,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookedQuantity: ba.quantity,
       type: ba.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
     }));
+
+    /**
+     * Whether submit sends out only the scanned items, decided the same way
+     * `fulfilAndCheckOut` decides it: under the explicit check-out requirement,
+     * or once the booking is no longer RESERVED.
+     */
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const checksOutScannedOnly =
+      isExplicitCheckoutRequired({ role, bookingSettings }) ||
+      booking.status !== BookingStatus.RESERVED;
 
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
@@ -257,6 +285,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       expectedModelRequests,
       alreadyIncluded,
+      checksOutScannedOnly,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -374,8 +403,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
     // `error()` also sends the refusal to this user as an error notification.
-    // That toast is how a refused check-out (e.g. a reservation still
-    // unassigned) reaches the operator in the drawer.
+    // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
     return data(error(reason), { status: reason.status });
   }
@@ -414,8 +442,12 @@ export default function FulfilAndCheckoutForBooking() {
   // drawer also reads `useLoaderData` directly for its own
   // rendering — that's fine; `useLoaderData` dedupes via the router
   // context.
-  const { booking, expectedModelRequests, alreadyIncluded } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    expectedModelRequests,
+    alreadyIncluded,
+    checksOutScannedOnly,
+  } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
     session: {
@@ -428,6 +460,8 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingStatus: booking.status,
+      checksOutScannedOnly,
       expectedModelRequests,
       alreadyIncluded,
     },

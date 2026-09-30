@@ -237,6 +237,17 @@ export type AssetWithBooking = Asset & {
    * that don't project it.
    */
   isKitDriven?: boolean | null;
+  /**
+   * The reserved model this row answered, when it answered one — the name
+   * behind `BookingAsset.bookingModelRequestId`.
+   *
+   * A model reservation promises N units without naming them, so a row that
+   * discharged one is on the booking BECAUSE of that promise rather than in
+   * addition to it. Resolved by the booking-overview loader (the stamp is a
+   * plain column with no relation accessor, so the name cannot be joined from
+   * the row); absent on surfaces that don't project it.
+   */
+  fulfilsModelName?: string | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.

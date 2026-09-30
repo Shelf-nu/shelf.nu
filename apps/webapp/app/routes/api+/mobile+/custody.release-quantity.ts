@@ -197,6 +197,7 @@ export async function action({ request }: ActionFunctionArgs) {
         consumed,
         userId: user.id,
         organizationId,
+        role,
         note,
       });
 

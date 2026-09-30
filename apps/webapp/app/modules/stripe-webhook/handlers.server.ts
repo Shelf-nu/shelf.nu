@@ -1,5 +1,5 @@
 import { TierId } from "@prisma/client";
-import type Stripe from "stripe";
+import Stripe from "stripe";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { sendAuditTrialEndsSoonEmail } from "~/emails/stripe/audit-trial-ends-soon";
@@ -17,6 +17,7 @@ import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
+  customerHasOtherActiveAddonSubscription,
   customerHasPaymentMethod,
   fetchStripeSubscription,
   getCustomerActiveSubscription,
@@ -38,6 +39,195 @@ import {
 } from "./helpers.server";
 
 const OK = () => new Response(null, { status: 200 });
+
+/**
+ * Applies a tier subscription's lifecycle event to the add-ons bundled on it.
+ *
+ * A Team trial or checkout can carry the Audits and Barcodes add-ons as extra
+ * line items on the tier subscription (`createTeamTrialSubscription`,
+ * `createStripeCheckoutSession`). Workspace creation links that subscription
+ * to the new organization through `metadata.organizationId` and switches the
+ * add-ons on; from then on they live and die with the tier subscription, so
+ * its pauses, cancellations and status changes have to reach the same
+ * organization flags the standalone add-on handlers maintain.
+ *
+ * Only add-ons present on this subscription are touched. A workspace can also
+ * hold a standalone add-on subscription, governed by its own webhook events;
+ * the add-on handlers keep the flag on while any other live subscription of
+ * the customer still carries the add-on for the workspace.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The tier subscription from the event
+ * @param args.hasAuditAddon - Whether the subscription carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription carries a Barcodes item
+ */
+async function syncBundledAddons({
+  eventType,
+  subscription,
+  hasAuditAddon,
+  hasBarcodeAddon,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  if (hasAuditAddon) {
+    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  }
+  if (hasBarcodeAddon) {
+    await handleBarcodeAddonWebhook({
+      eventType,
+      subscription,
+      organizationId,
+    });
+  }
+}
+
+/**
+ * Switches off the add-ons carried by a subscription whose invoice went
+ * overdue.
+ *
+ * This is the add-on side of the overdue downgrade in `handleInvoiceOverdue`:
+ * a failed renewal (`past_due`) keeps both tier and add-ons, and the overdue
+ * invoice ends both. The add-on handlers still leave a flag on while another
+ * live subscription of the customer carries the add-on for the workspace.
+ *
+ * @param args.eventType - The Stripe event type being handled
+ * @param args.subscription - The subscription the overdue invoice belongs to,
+ *   with its line-item products expanded
+ */
+async function disableAddonsOnOverdueSubscription({
+  eventType,
+  subscription,
+}: {
+  eventType: string;
+  subscription: Stripe.Subscription;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  const addonTypes = new Set(
+    subscription.items.data.map((item) => {
+      const product = item.plan.product as Stripe.Product | null;
+      return product?.metadata?.product_type === "addon"
+        ? product.metadata.addon_type
+        : undefined;
+    })
+  );
+
+  if (addonTypes.has("audits")) {
+    await handleAuditAddonWebhook({ eventType, subscription, organizationId });
+  }
+  if (addonTypes.has("barcodes")) {
+    await handleBarcodeAddonWebhook({
+      eventType,
+      subscription,
+      organizationId,
+    });
+  }
+}
+
+/**
+ * Switches off the add-ons an update removed from a tier subscription.
+ *
+ * Stripe lists the pre-update line items in `previous_attributes.items`. An
+ * add-on item that was there and is gone now has been dropped from the
+ * subscription, which for the workspace is the same as cancelling it, unless
+ * another live subscription of the customer still carries the add-on.
+ *
+ * @param args.event - The `customer.subscription.updated` event
+ * @param args.subscription - The subscription as it is after the update
+ * @param args.hasAuditAddon - Whether the subscription still carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription still carries a Barcodes item
+ */
+async function disableAddonsRemovedFromSubscription({
+  event,
+  subscription,
+  hasAuditAddon,
+  hasBarcodeAddon,
+}: {
+  event: Stripe.Event;
+  subscription: Stripe.Subscription;
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  const previousItems = (
+    event.data.previous_attributes as
+      | { items?: { data?: Stripe.SubscriptionItem[] } }
+      | undefined
+  )?.items?.data;
+  if (!previousItems?.length) return;
+
+  const productIdOf = (item: Stripe.SubscriptionItem) =>
+    typeof item.price?.product === "string"
+      ? item.price.product
+      : item.price?.product?.id;
+  const currentProductIds = new Set(subscription.items.data.map(productIdOf));
+
+  const removed: { auditsEnabled?: false; barcodesEnabled?: false } = {};
+  for (const item of previousItems) {
+    const productId = productIdOf(item);
+    if (!productId || currentProductIds.has(productId)) continue;
+
+    // Same metadata reading as `getDataFromStripeEvent`: an archived add-on
+    // product is still an add-on for the purpose of taking it away. A product
+    // Stripe no longer knows cannot be an add-on this app tracks, so that item
+    // is skipped; any other failure is rethrown so Stripe retries the webhook
+    // instead of the removal being lost.
+    let product: Stripe.Product;
+    try {
+      product = await stripe.products.retrieve(productId);
+    } catch (cause) {
+      const isUnknownProduct =
+        cause instanceof Stripe.errors.StripeInvalidRequestError &&
+        (cause.code === "resource_missing" || cause.statusCode === 404);
+      if (!isUnknownProduct) throw cause;
+      continue;
+    }
+    if (product.metadata?.product_type !== "addon") continue;
+    const addonType = product.metadata.addon_type;
+    if (addonType !== "audits" && addonType !== "barcodes") continue;
+
+    // An add-on product replaced by another product of the same add-on looks
+    // removed, but the subscription still carries the add-on; the bundled
+    // sync above has just confirmed it.
+    const stillOnSubscription =
+      addonType === "audits" ? hasAuditAddon : hasBarcodeAddon;
+    if (stillOnSubscription) continue;
+
+    // A standalone add-on subscription bought next to the bundled one, for
+    // instance, may still pay for the add-on.
+    const customerId =
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer.id;
+    const coveredElsewhere = await customerHasOtherActiveAddonSubscription({
+      customerId,
+      organizationId,
+      addonType,
+      exceptSubscriptionId: subscription.id,
+    });
+    if (coveredElsewhere) continue;
+
+    if (addonType === "audits") removed.auditsEnabled = false;
+    if (addonType === "barcodes") removed.barcodesEnabled = false;
+  }
+
+  if (Object.keys(removed).length === 0) return;
+
+  await db.organization.update({
+    where: { id: organizationId },
+    data: removed,
+    select: { id: true },
+  });
+}
 
 /**
  * Builds the `upgrade_completed` PostHog properties from a Stripe subscription.
@@ -292,8 +482,15 @@ export async function handleSubscriptionPaused(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (
     isAddonSubscription({
@@ -320,6 +517,13 @@ export async function handleSubscriptionPaused(
     }
     return OK();
   }
+
+  await syncBundledAddons({
+    eventType: event.type,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
 
   const pausedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
     tierId as TierId,
@@ -361,8 +565,15 @@ export async function handleSubscriptionUpdated(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (
     isAddonSubscription({
@@ -389,6 +600,19 @@ export async function handleSubscriptionUpdated(
     }
     return OK();
   }
+
+  await syncBundledAddons({
+    eventType: event.type,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
+  await disableAddonsRemovedFromSubscription({
+    event,
+    subscription,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  });
 
   const newSubscriptionIsHigherTier = isHigherTier(
     tierId as TierId,
@@ -452,8 +676,15 @@ export async function handleSubscriptionDeleted(
   event: Stripe.Event,
   user: WebhookUser
 ) {
-  const { subscription, customerId, tierId, productType, product } =
-    await getDataFromStripeEvent(event);
+  const {
+    subscription,
+    customerId,
+    tierId,
+    productType,
+    product,
+    hasAuditAddon,
+    hasBarcodeAddon,
+  } = await getDataFromStripeEvent(event);
 
   if (isAddonSubscription({ tierId, productType, event })) {
     const organizationId = subscription?.metadata?.organizationId;
@@ -468,6 +699,7 @@ export async function handleSubscriptionDeleted(
     ) {
       await handleAuditAddonWebhook({
         eventType: event.type,
+        subscription,
         organizationId,
       });
     }
@@ -478,10 +710,22 @@ export async function handleSubscriptionDeleted(
     ) {
       await handleBarcodeAddonWebhook({
         eventType: event.type,
+        subscription,
         organizationId,
       });
     }
     return OK();
+  }
+
+  // A transfer cancels the old subscription only after its replacement exists
+  // with the same items and metadata, so the add-ons stay with the workspace.
+  if (!subscription?.metadata?.transferred_to_subscription) {
+    await syncBundledAddons({
+      eventType: event.type,
+      subscription,
+      hasAuditAddon,
+      hasBarcodeAddon,
+    });
   }
 
   const deletedSubscriptionIsHigherOrEqualTier = isHigherOrEqualTier(
@@ -817,7 +1061,7 @@ export async function handleInvoiceOverdue(
     });
   }
 
-  // Downgrade user tier if invoice is for a subscription with a tier
+  // End the tier and the add-ons of the subscription the invoice belongs to
   const subscriptionId =
     overdueInvoice.parent?.subscription_details?.subscription;
   if (subscriptionId) {
@@ -827,6 +1071,13 @@ export async function handleInvoiceOverdue(
     const product = subscription.items.data[0].plan.product as Stripe.Product;
     const tierId = product?.metadata?.shelf_tier;
     const productType = product?.metadata?.product_type;
+
+    // Add-ons on the overdue subscription end with it, whether they are
+    // bundled on a tier subscription or bought standalone.
+    await disableAddonsOnOverdueSubscription({
+      eventType: event.type,
+      subscription,
+    });
 
     // Only downgrade for non-addon subscription products with a tier
     if (tierId && productType !== "addon") {

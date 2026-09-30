@@ -43,7 +43,10 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // pulls canvas/lottie UI deps and crashes happy-dom at collection time — e.g.
 // the reports `*.server.test.ts` files import this module via
 // `refreshExpiredAssetImages`). See the leaf's header doc.
-import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
+import {
+  assertAssetQuantityNotBelowReservations,
+  computeCustodyAvailability,
+} from "~/modules/asset/availability-primitives.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
@@ -150,9 +153,16 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { custodiesForRestore } from "./backup-custody";
+import {
+  placementsForRestore,
+  readLegacyBackupLocation,
+  type BackupLocationDetails,
+} from "./backup-placements";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
+import { validateContentImportRows } from "./import-preflight.server";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -189,6 +199,7 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
+  resolveImportedAssetModel,
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -4638,6 +4649,44 @@ export async function createAssetsFromContentImport({
   canUseBarcodes?: boolean;
 }) {
   try {
+    /**
+     * Nothing below this point may run against a file with invalid rows. The
+     * taxonomy helpers and the row loop each write as they go, outside any
+     * transaction, so a row rejected part way through would leave everything
+     * before it committed — and a retry would create those rows a second time.
+     */
+    // Mirrors `upsertCustomField`'s own lookup, which matches on name and
+    // `deletedAt` and ignores `active` — filtering on active here would miss a
+    // conflict it goes on to reject.
+    const existingCustomFields = await db.customField.findMany({
+      where: { organizationId, deletedAt: null },
+      select: { name: true, type: true },
+    });
+
+    const { errors: rowErrors, totalErrors } = validateContentImportRows({
+      data,
+      existingCustomFields,
+    });
+
+    if (rowErrors.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Import file has errors",
+        message: `Found ${totalErrors} problem${
+          totalErrors === 1 ? "" : "s"
+        } in your file. Nothing was imported. Fix the rows below and upload again.`,
+        additionalData: {
+          userId,
+          organizationId,
+          rowErrors,
+          totalErrors,
+        },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Create cache instance for this import operation
     const imageCache = new LRUCache<string, CachedImage>({
       maxSize: importImageCacheServer.MAX_CACHE_SIZE,
@@ -4928,9 +4977,12 @@ export async function createAssetsFromContentImport({
       }
 
       // ── AssetModel column → resolved model id ──────────────────────
-      const modelKey = asset.assetModel?.trim();
-      const assetModelId =
-        modelKey && assetModels?.[modelKey] ? assetModels[modelKey] : undefined;
+      // The pre-resolve keys its result by the original cell, so the lookup goes
+      // through the shared resolver rather than trimming first.
+      const { name: modelKey, id: assetModelId } = resolveImportedAssetModel({
+        cell: asset.assetModel,
+        models: assetModels,
+      });
       if (modelKey && !assetModelId) {
         // The createAssetModelsIfNotExists pre-resolve should have
         // populated every non-empty key. If we land here, something
@@ -4953,22 +5005,10 @@ export async function createAssetsFromContentImport({
       const { type, quantity, minQuantity, unitOfMeasure, consumptionType } =
         parseQtyTrackedCsvRow(asset);
 
-      // AssetModel is INDIVIDUAL-only — a model represents N
-      // distinguishable units of the same template, whereas a
-      // QUANTITY_TRACKED asset is a stock pool. Reject the row up-front
-      // with a row-friendly message rather than silently dropping the
-      // model link or relying on createAsset's downstream guard.
-      if (type === AssetType.QUANTITY_TRACKED && assetModelId) {
-        throw new ShelfError({
-          cause: null,
-          title: "Asset model not allowed",
-          message: `Asset "${asset.title}": models can only be linked to INDIVIDUAL assets. Remove the assetModel cell or change type to INDIVIDUAL.`,
-          label: "Assets",
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: { assetKey: asset.key, assetTitle: asset.title },
-        });
-      }
+      // AssetModel is INDIVIDUAL-only, and the qty-tracked columns must parse:
+      // both are settled by `validateContentImportRows` before this loop starts,
+      // so neither can fail here. `createAsset` keeps its own guards for the
+      // callers that do not come through the importer.
 
       await createAsset({
         id: assetId, // Pass the pre-generated ID
@@ -5070,6 +5110,82 @@ export async function createAssetsFromContentImport({
   }
 }
 
+/**
+ * Finds a workspace's locations by name for a backup restore, creating the
+ * ones that are missing. Names match regardless of case, the same way the
+ * database's unique index on location names compares them.
+ *
+ * @param args.names - Location names from the backup file, repeats allowed.
+ * @returns Location ids keyed by lower-cased name.
+ */
+async function findOrCreateLocationsByName({
+  names,
+  details,
+  userId,
+  organizationId,
+}: {
+  names: string[];
+  /** Details to create a missing location with, keyed by lower-cased name. */
+  details: Map<string, BackupLocationDetails>;
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /** Lower-cased name -> the first spelling the file uses for it. */
+  const spellings = new Map<string, string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (!spellings.has(key)) spellings.set(key, name);
+  }
+
+  const locationIds = new Map<string, Location["id"]>();
+  if (spellings.size === 0) return locationIds;
+
+  // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
+  // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
+  // location name act as wildcards.
+  const existing = await db.location.findMany({
+    where: {
+      organizationId,
+      name: { in: [...spellings.values()], mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  for (const location of existing) {
+    locationIds.set(location.name.toLowerCase(), location.id);
+  }
+
+  for (const [key, name] of spellings) {
+    if (locationIds.has(key)) continue;
+    const created = await db.location.create({
+      data: { ...details.get(key), name, organizationId, userId },
+      select: { id: true },
+    });
+    locationIds.set(key, created.id);
+  }
+
+  return locationIds;
+}
+
+/**
+ * Restores the assets of a workspace backup into a workspace.
+ *
+ * Relations travel by name, because ids only resolve in the workspace the
+ * backup came from. Locations, categories, tags, asset models, custodians and
+ * custom fields are matched regardless of case and created when missing.
+ *
+ * The restore is not atomic. Locations are resolved before any asset is
+ * created, and each asset is then created with its other relations one row at
+ * a time, so a failure part-way leaves everything already written in place.
+ * Running the file again reuses those relations by name, but creates the
+ * already-restored assets a second time. One transaction does not fit: a
+ * workspace-sized restore runs far past Prisma's interactive-transaction
+ * timeout.
+ *
+ * @param args.data - Rows parsed by `extractCSVDataFromBackupImport`.
+ * @param args.userId - The admin running the restore; owns what it creates.
+ * @param args.organizationId - The workspace restored into.
+ * @throws {ShelfError} Wrapping the first row that fails.
+ */
 export async function createAssetsFromBackupImport({
   data,
   userId,
@@ -5080,332 +5196,358 @@ export async function createAssetsFromBackupImport({
   organizationId: Organization["id"];
 }) {
   try {
-    //TODO use concurrency control or it will overload the server
-    await Promise.all(
-      data.map(async (asset) => {
-        /** Quantity-tracked + assetModel fields — passed through from
-         * the backup payload. Backup export emits these as raw string
-         * values (per-Asset scalar columns); on restore we read them
-         * back so round-trip preserves the qty-tracked semantics. The
-         * content-import path validates these aggressively; for backup
-         * import we trust the source (it came from our own exporter)
-         * but still coerce types defensively. */
-        const backupType =
-          typeof asset.type === "string" &&
-          (asset.type === AssetType.INDIVIDUAL ||
-            asset.type === AssetType.QUANTITY_TRACKED)
-            ? (asset.type as AssetType)
-            : undefined;
-        const backupQuantity =
-          typeof asset.quantity === "string" && asset.quantity.trim() !== ""
-            ? Number(asset.quantity)
-            : typeof asset.quantity === "number"
-            ? asset.quantity
-            : undefined;
-        const backupMinQuantity =
-          typeof asset.minQuantity === "string" &&
-          asset.minQuantity.trim() !== ""
-            ? Number(asset.minQuantity)
-            : typeof asset.minQuantity === "number"
-            ? asset.minQuantity
-            : undefined;
-        const backupUnit =
-          typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
-            ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
-            : undefined;
-        const backupCt =
-          typeof asset.consumptionType === "string" &&
-          (asset.consumptionType === ConsumptionType.ONE_WAY ||
-            asset.consumptionType === ConsumptionType.TWO_WAY)
-            ? (asset.consumptionType as ConsumptionType)
-            : undefined;
+    // Placements travel by location name. Every name is resolved once, here,
+    // before any asset is created, so a location shared by many assets is
+    // looked up in one query rather than once per asset.
+    const placementsPerRow = data.map((asset) =>
+      placementsForRestore({
+        type: asset.type,
+        quantity: asset.quantity,
+        assetLocations: asset.assetLocations,
+        location: asset.location,
+      })
+    );
+    // A backup written before placements existed describes the location
+    // itself; a location created from it keeps that description.
+    const legacyLocationDetails = new Map<string, BackupLocationDetails>();
+    for (const asset of data) {
+      const legacy = readLegacyBackupLocation(asset.location);
+      if (legacy && !legacyLocationDetails.has(legacy.name.toLowerCase())) {
+        legacyLocationDetails.set(legacy.name.toLowerCase(), legacy.details);
+      }
+    }
+    const locationIds = await findOrCreateLocationsByName({
+      names: placementsPerRow.flat().map((placement) => placement.location),
+      details: legacyLocationDetails,
+      userId,
+      organizationId,
+    });
 
-        /** Base data from asset */
-        const d = {
-          data: {
-            title: asset.title,
-            description: asset.description || null,
-            mainImage: asset.mainImage || null,
-            mainImageExpiration: threeDaysFromNow(),
-            userId,
-            organizationId,
-            status: asset.status,
-            createdAt: new Date(asset.createdAt),
-            updatedAt: new Date(asset.updatedAt),
-            qrCodes: {
-              create: [
-                {
-                  id: id(),
-                  version: 0,
-                  errorCorrection: ErrorCorrection["L"],
-                  userId,
-                  organizationId,
-                },
-              ],
-            },
-            valuation: asset.valuation ? +asset.valuation : null,
-            ...(backupType !== undefined ? { type: backupType } : {}),
-            ...(backupQuantity !== undefined
-              ? { quantity: backupQuantity }
-              : {}),
-            ...(backupMinQuantity !== undefined
-              ? { minQuantity: backupMinQuantity }
-              : {}),
-            ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
-            ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
-          },
-        };
+    // One asset at a time. Each row finds or creates its category, tags,
+    // model, custodian and custom fields by name, and those names are unique
+    // per workspace: two rows creating the same new name at once would
+    // collide on the unique index, or leave duplicates where there is none.
+    for (const [rowIndex, asset] of data.entries()) {
+      /** Quantity-tracked + assetModel fields — passed through from
+       * the backup payload. Backup export emits these as raw string
+       * values (per-Asset scalar columns); on restore we read them
+       * back so round-trip preserves the qty-tracked semantics. The
+       * content-import path validates these aggressively; for backup
+       * import we trust the source (it came from our own exporter)
+       * but still coerce types defensively. */
+      const backupType =
+        typeof asset.type === "string" &&
+        (asset.type === AssetType.INDIVIDUAL ||
+          asset.type === AssetType.QUANTITY_TRACKED)
+          ? (asset.type as AssetType)
+          : undefined;
+      const backupQuantity =
+        typeof asset.quantity === "string" && asset.quantity.trim() !== ""
+          ? Number(asset.quantity)
+          : typeof asset.quantity === "number"
+          ? asset.quantity
+          : undefined;
+      const backupMinQuantity =
+        typeof asset.minQuantity === "string" && asset.minQuantity.trim() !== ""
+          ? Number(asset.minQuantity)
+          : typeof asset.minQuantity === "number"
+          ? asset.minQuantity
+          : undefined;
+      const backupUnit =
+        typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
+          ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+          : undefined;
+      const backupCt =
+        typeof asset.consumptionType === "string" &&
+        (asset.consumptionType === ConsumptionType.ONE_WAY ||
+          asset.consumptionType === ConsumptionType.TWO_WAY)
+          ? (asset.consumptionType as ConsumptionType)
+          : undefined;
 
-        /** AssetModel by name — mirrors the category block below.
-         * Skip linkage entirely when the row is QUANTITY_TRACKED:
-         * models are INDIVIDUAL-only by design. Importing a backup that
-         * predates this rule should not block (we just drop the model
-         * connect) — the user can clean up the export upstream or
-         * re-import the model link manually after fixing the type. */
-        if (
-          asset.assetModel &&
-          typeof asset.assetModel === "object" &&
-          (asset.assetModel as any).name &&
-          backupType !== AssetType.QUANTITY_TRACKED
-        ) {
-          const modelPayload = asset.assetModel as { name: string };
-          const existingModel = await db.assetModel.findFirst({
-            where: {
-              organizationId,
-              name: {
-                equals: modelPayload.name.trim(),
-                mode: "insensitive",
+      /** Base data from asset */
+      const d = {
+        data: {
+          title: asset.title,
+          description: asset.description || null,
+          mainImage: asset.mainImage || null,
+          mainImageExpiration: threeDaysFromNow(),
+          userId,
+          organizationId,
+          status: asset.status,
+          createdAt: new Date(asset.createdAt),
+          updatedAt: new Date(asset.updatedAt),
+          qrCodes: {
+            create: [
+              {
+                id: id(),
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                userId,
+                organizationId,
               },
+            ],
+          },
+          valuation: asset.valuation ? +asset.valuation : null,
+          ...(backupType !== undefined ? { type: backupType } : {}),
+          ...(backupQuantity !== undefined ? { quantity: backupQuantity } : {}),
+          ...(backupMinQuantity !== undefined
+            ? { minQuantity: backupMinQuantity }
+            : {}),
+          ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
+          ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
+        },
+      };
+
+      /** AssetModel by name — mirrors the category block below.
+       * Skip linkage entirely when the row is QUANTITY_TRACKED:
+       * models are INDIVIDUAL-only by design. Importing a backup that
+       * predates this rule should not block (we just drop the model
+       * connect) — the user can clean up the export upstream or
+       * re-import the model link manually after fixing the type. */
+      if (
+        asset.assetModel &&
+        typeof asset.assetModel === "object" &&
+        (asset.assetModel as any).name &&
+        backupType !== AssetType.QUANTITY_TRACKED
+      ) {
+        const modelPayload = asset.assetModel as { name: string };
+        const existingModel = await db.assetModel.findFirst({
+          where: {
+            organizationId,
+            name: {
+              equals: modelPayload.name.trim(),
+              mode: "insensitive",
+            },
+          },
+        });
+        if (existingModel) {
+          Object.assign(d.data, { assetModelId: existingModel.id });
+        } else {
+          const newModel = await db.assetModel.create({
+            data: {
+              name: modelPayload.name.trim(),
+              createdBy: { connect: { id: userId } },
+              organization: { connect: { id: organizationId } },
             },
           });
-          if (existingModel) {
-            Object.assign(d.data, { assetModelId: existingModel.id });
-          } else {
-            const newModel = await db.assetModel.create({
-              data: {
-                name: modelPayload.name.trim(),
-                createdBy: { connect: { id: userId } },
-                organization: { connect: { id: organizationId } },
-              },
-            });
-            Object.assign(d.data, { assetModelId: newModel.id });
-          }
+          Object.assign(d.data, { assetModelId: newModel.id });
         }
+      }
 
-        /** Category */
-        if (asset.category && Object.keys(asset?.category).length > 0) {
-          const category = asset.category as Category;
+      /** Category */
+      if (asset.category && Object.keys(asset?.category).length > 0) {
+        const category = asset.category as Category;
 
-          const existingCat = await db.category.findFirst({
-            where: {
+        // Matched like the unique index on category names, regardless of
+        // case. `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+        const existingCat = await db.category.findFirst({
+          where: {
+            organizationId,
+            name: { in: [category.name], mode: "insensitive" },
+          },
+        });
+
+        /** If it doesn't exist, create a new one */
+        if (!existingCat) {
+          const newCat = await db.category.create({
+            data: {
               organizationId,
               name: category.name,
+              description: category.description || "",
+              color: category.color,
+              userId,
+              createdAt: new Date(category.createdAt),
+              updatedAt: new Date(category.updatedAt),
             },
           });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingCat) {
-            const newCat = await db.category.create({
-              data: {
-                organizationId,
-                name: category.name,
-                description: category.description || "",
-                color: category.color,
-                userId,
-                createdAt: new Date(category.createdAt),
-                updatedAt: new Date(category.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: newCat.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: existingCat.id,
-            });
-          }
-        }
-
-        /** Location */
-        if (asset.location && Object.keys(asset?.location).length > 0) {
-          const location = asset.location as Location;
-
-          const existingLoc = await db.location.findFirst({
-            where: {
-              organizationId,
-              name: location.name,
-            },
+          /** Add it to the data for creating the asset */
+          Object.assign(d.data, {
+            categoryId: newCat.id,
           });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingLoc) {
-            const newLoc = await db.location.create({
-              data: {
-                name: location.name,
-                description: location.description || "",
-                address: location.address || "",
-                organizationId,
-                userId,
-                createdAt: new Date(location.createdAt),
-                updatedAt: new Date(location.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: newLoc.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: existingLoc.id,
-            });
-          }
+        } else {
+          /** Add it to the data for creating the asset */
+          Object.assign(d.data, {
+            categoryId: existingCat.id,
+          });
         }
+      }
 
-        /** Custody */
-        if (asset.custody && Object.keys(asset?.custody).length > 0) {
-          const { custodian } = asset.custody;
+      /** Placements. They are created with the asset, in one write, so the
+       * database checks them together: a pool's placed units may not
+       * exceed its quantity. Names that differ only in case resolve to one
+       * location, so their units are added up. */
+      const unitsByLocationId = new Map<string, number>();
+      for (const { location, quantity } of placementsPerRow[rowIndex]) {
+        const locationId = locationIds.get(location.toLowerCase())!;
+        unitsByLocationId.set(
+          locationId,
+          (unitsByLocationId.get(locationId) ?? 0) + quantity
+        );
+      }
+      if (unitsByLocationId.size > 0) {
+        const placements: Prisma.AssetLocationUncheckedCreateWithoutAssetInput[] =
+          [...unitsByLocationId].map(([locationId, quantity]) => ({
+            locationId,
+            organizationId,
+            quantity,
+          }));
+        Object.assign(d.data, { assetLocations: { create: placements } });
+      }
 
+      /** Custody. Custodians travel by name, matched regardless of case like
+       * the other restored relations; one missing from the workspace is
+       * created as a team member without an account. */
+      const custodies = custodiesForRestore({
+        type: asset.type,
+        custody: asset.custody,
+      });
+      if (custodies.length > 0) {
+        /** Team member id -> units held. Names that differ only in case
+         * resolve to one team member, and the custody unique index allows
+         * one operator row per (asset, team member), so their units add up. */
+        const unitsByTeamMemberId = new Map<string, number>();
+        for (const custody of custodies) {
+          // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+          // Team member names are not unique, so the oldest match wins.
           const existingCustodian = await db.teamMember.findFirst({
             where: {
               deletedAt: null,
               organizationId,
-              name: custodian.name,
+              name: { in: [custody.custodianName], mode: "insensitive" },
+            },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          const custodian =
+            existingCustodian ??
+            (await db.teamMember.create({
+              data: {
+                name: custody.custodianName,
+                organizationId,
+                createdAt: custody.createdAt,
+                updatedAt: custody.updatedAt,
+              },
+              select: { id: true },
+            }));
+          unitsByTeamMemberId.set(
+            custodian.id,
+            (unitsByTeamMemberId.get(custodian.id) ?? 0) + custody.quantity
+          );
+        }
+        const custodyCreates: Prisma.CustodyUncheckedCreateWithoutAssetInput[] =
+          [...unitsByTeamMemberId].map(([teamMemberId, quantity]) => ({
+            teamMemberId,
+            quantity,
+          }));
+        Object.assign(d.data, { custody: { create: custodyCreates } });
+      }
+
+      /** Tags */
+      if (asset.tags && asset.tags.length > 0) {
+        const tagsNames = asset.tags.map((t) => t.name);
+        // now we loop through the categories and check if they exist
+        const tags: Record<string, string> = {};
+        for (const tag of tagsNames) {
+          // Matched like the unique index on tag names, regardless of case.
+          const existingTag = await db.tag.findFirst({
+            where: {
+              name: { in: [tag], mode: "insensitive" },
+              organizationId,
             },
           });
 
-          if (!existingCustodian) {
-            const newCustodian = await db.teamMember.create({
+          if (!existingTag) {
+            // if the tag doesn't exist, we create a new one
+            const newTag = await db.tag.create({
               data: {
-                name: custodian.name,
-                organizationId,
-                createdAt: new Date(custodian.createdAt),
-                updatedAt: new Date(custodian.updatedAt),
-              },
-            });
-
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: newCustodian.id }],
-              },
-            });
-          } else {
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: existingCustodian.id }],
-              },
-            });
-          }
-        }
-
-        /** Tags */
-        if (asset.tags && asset.tags.length > 0) {
-          const tagsNames = asset.tags.map((t) => t.name);
-          // now we loop through the categories and check if they exist
-          const tags: Record<string, string> = {};
-          for (const tag of tagsNames) {
-            const existingTag = await db.tag.findFirst({
-              where: {
-                name: tag,
-                organizationId,
-              },
-            });
-
-            if (!existingTag) {
-              // if the tag doesn't exist, we create a new one
-              const newTag = await db.tag.create({
-                data: {
-                  name: tag as string,
-                  user: {
-                    connect: {
-                      id: userId,
-                    },
-                  },
-                  organization: {
-                    connect: {
-                      id: organizationId,
-                    },
+                name: tag as string,
+                user: {
+                  connect: {
+                    id: userId,
                   },
                 },
-              });
-              tags[tag] = newTag.id;
-            } else {
-              // if the tag exists, we just update the id
-              tags[tag] = existingTag.id;
-            }
+                organization: {
+                  connect: {
+                    id: organizationId,
+                  },
+                },
+              },
+            });
+            tags[tag] = newTag.id;
+          } else {
+            // if the tag exists, we just update the id
+            tags[tag] = existingTag.id;
           }
-
-          Object.assign(d.data, {
-            tags:
-              asset.tags.length > 0
-                ? {
-                    connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-                  }
-                : undefined,
-          });
         }
 
-        /** Custom fields */
-        if (asset.customFields && asset.customFields.length > 0) {
-          const customFieldDef = asset.customFields.reduce(
-            (res, { value, customField }) => {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { id, createdAt, updatedAt, ...rest } = customField;
-              const options = value?.valueOption?.length
-                ? [value?.valueOption]
-                : undefined;
-              res.push({ ...rest, options, userId, organizationId });
-              return res;
-            },
-            [] as Array<CustomFieldDraftPayload>
-          );
-
-          const cfIds = await upsertCustomField(customFieldDef);
-
-          Object.assign(d.data, {
-            customFields: {
-              create: asset.customFields.map((cf) => ({
-                value: cf.value,
-                // @ts-ignore
-                customFieldId: cfIds[cf.customField.name].id,
-              })),
-            },
-          });
-        }
-
-        /** Create the Asset */
-        const { id: assetId } = await db.asset.create(d);
-
-        // Activity event: ASSET_CREATED at the moment of creation.
-        // The per-note createMany below restores HISTORICAL notes with
-        // their original timestamps — those are not events.
-        await recordEvent({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_CREATED",
-          entityType: "ASSET",
-          entityId: assetId,
-          assetId,
-          meta: { source: "backup_import" },
+        Object.assign(d.data, {
+          tags:
+            asset.tags.length > 0
+              ? {
+                  connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+                }
+              : undefined,
         });
+      }
 
-        /** Create notes */
-        if (asset?.notes?.length > 0) {
-          await db.note.createMany({
-            data: asset.notes.map((note: Note) => ({
-              content: note.content,
-              type: note.type,
-              assetId,
-              userId,
-              createdAt: new Date(note.createdAt),
-              updatedAt: new Date(note.updatedAt),
+      /** Custom fields */
+      if (asset.customFields && asset.customFields.length > 0) {
+        const customFieldDef = asset.customFields.reduce(
+          (res, { value, customField }) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { id, createdAt, updatedAt, ...rest } = customField;
+            const options = value?.valueOption?.length
+              ? [value?.valueOption]
+              : undefined;
+            res.push({ ...rest, options, userId, organizationId });
+            return res;
+          },
+          [] as Array<CustomFieldDraftPayload>
+        );
+
+        const { customFields: customFieldsByName } =
+          await upsertCustomField(customFieldDef);
+
+        Object.assign(d.data, {
+          customFields: {
+            create: asset.customFields.map((cf) => ({
+              value: cf.value,
+              customFieldId: customFieldsByName[cf.customField.name].id,
             })),
-          });
-        }
-      })
-    );
+          },
+        });
+      }
+
+      /** Create the Asset */
+      const { id: assetId } = await db.asset.create(d);
+
+      // Activity event: ASSET_CREATED at the moment of creation.
+      // The per-note createMany below restores HISTORICAL notes with
+      // their original timestamps — those are not events.
+      await recordEvent({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_CREATED",
+        entityType: "ASSET",
+        entityId: assetId,
+        assetId,
+        meta: { source: "backup_import" },
+      });
+
+      /** Create notes */
+      if (asset?.notes?.length > 0) {
+        await db.note.createMany({
+          data: asset.notes.map((note: Note) => ({
+            content: note.content,
+            type: note.type,
+            assetId,
+            userId,
+            createdAt: new Date(note.createdAt),
+            updatedAt: new Date(note.updatedAt),
+          })),
+        });
+      }
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -5932,64 +6074,6 @@ export async function refreshExpiredAssetImages(
     }
     return a;
   });
-}
-
-export async function updateAssetQrCode({
-  assetId,
-  newQrId,
-  organizationId,
-}: {
-  organizationId: string;
-  assetId: string;
-  newQrId: string;
-}) {
-  // Disconnect all existing QR codes
-  try {
-    // Disconnect all existing QR codes
-    await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            set: [],
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't disconnect existing codes",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-
-    // Connect the new QR code
-    return await db.asset
-      .update({
-        where: { id: assetId, organizationId },
-        data: {
-          qrCodes: {
-            connect: { id: newQrId },
-          },
-        },
-      })
-      .catch((cause) => {
-        throw new ShelfError({
-          cause,
-          message: "Couldn't connect the new QR code",
-          label,
-          additionalData: { assetId, organizationId, newQrId },
-        });
-      });
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: "Something went wrong while updating asset QR code",
-      label,
-      additionalData: { assetId, organizationId, newQrId },
-    });
-  }
 }
 
 export async function bulkDeleteAssets({
@@ -8278,6 +8362,15 @@ type CheckOutQuantityArgs = {
   userId: string;
   /** The organization owning the asset (used for validation) */
   organizationId: string;
+  /**
+   * The acting user's role in this organization.
+   *
+   * Required, not optional: a SELF_SERVICE caller may only assign custody to
+   * themselves, and a missing role would silently fall open. Making the
+   * compiler demand it is what stops a new call site from reaching the write
+   * without the policy being considered.
+   */
+  role: OrganizationRoles;
   /** Optional note explaining the checkout */
   note?: string;
 };
@@ -8303,6 +8396,7 @@ export async function checkOutQuantity({
   quantity,
   userId,
   organizationId,
+  role,
   note,
 }: CheckOutQuantityArgs) {
   try {
@@ -8347,7 +8441,53 @@ export async function checkOutQuantity({
       }
 
       /**
-       * Step 4: Compute available quantity within the transaction.
+       * Step 4: Resolve the custodian, and refuse a self-service caller
+       * handing units to anyone but themselves.
+       *
+       * `teamMemberId` is request input, so the lookup is org-scoped: a team
+       * member from another workspace resolves to nothing and is refused here
+       * rather than being written into a custody row.
+       *
+       * The check lives in this primitive rather than at its routes so that
+       * every caller inherits it: the web bulk, web single-asset and mobile
+       * quantity-custody routes all reach custody through this one function,
+       * and a guard at any one of them leaves the others to remember. The row
+       * is resolved before any write so a refusal commits nothing, and reused
+       * for the activity event below rather than read twice.
+       */
+      const custodianTeamMember = await tx.teamMember.findFirst({
+        where: { id: teamMemberId, organizationId },
+        select: { user: { select: { id: true } } },
+      });
+
+      if (!custodianTeamMember) {
+        throw new ShelfError({
+          cause: null,
+          message: "The selected custodian does not belong to this workspace.",
+          label,
+          status: 403,
+          additionalData: { teamMemberId, organizationId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (
+        role === OrganizationRoles.SELF_SERVICE &&
+        custodianTeamMember.user?.id !== userId
+      ) {
+        throw new ShelfError({
+          cause: null,
+          title: "Action not allowed",
+          message: "Self service users can only assign custody to themselves.",
+          label,
+          status: 403,
+          additionalData: { userId, teamMemberId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      /**
+       * Step 5: Compute available quantity within the transaction.
        *
        * `available = total − inCustody − checkedOutViaBooking`
        *
@@ -8365,30 +8505,18 @@ export async function checkOutQuantity({
        * checkout time.
        */
       const totalQuantity = asset.quantity ?? 0;
-      const [custodySum, bookingCheckedOutSum] = await Promise.all([
-        tx.custody.aggregate({
-          where: { assetId },
-          _sum: { quantity: true },
-        }),
-        tx.bookingAsset.aggregate({
-          where: {
-            assetId,
-            booking: {
-              status: { in: ["ONGOING", "OVERDUE"] },
-            },
-          },
-          _sum: { quantity: true },
-        }),
-      ]);
-      const inCustody = custodySum._sum.quantity ?? 0;
-      const checkedOut = bookingCheckedOutSum._sum.quantity ?? 0;
-      const available = totalQuantity - inCustody - checkedOut;
+      const { inCustody, inKits, checkedOut, available } =
+        await computeCustodyAvailability(tx, {
+          assetId,
+          organizationId,
+          totalQuantity,
+        });
 
-      /** Step 5: Validate sufficient availability */
+      /** Step 6: Validate sufficient availability */
       if (quantity > available) {
         throw new ShelfError({
           cause: null,
-          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${checkedOut} checked out on active bookings).`,
+          message: `Cannot check out ${quantity} units. Only ${available} units are available (${inCustody} in custody, ${inKits} allocated to kits, ${checkedOut} checked out on active bookings).`,
           label,
           status: 400,
           additionalData: {
@@ -8396,13 +8524,14 @@ export async function checkOutQuantity({
             quantity,
             available,
             inCustody,
+            inKits,
             checkedOut,
           },
         });
       }
 
       /**
-       * Step 6: Upsert the OPERATOR-allocated custody row (kitCustodyId
+       * Step 7: Upsert the OPERATOR-allocated custody row (kitCustodyId
        * IS NULL). Find-then-branch instead of `prisma.upsert` because
        * the composite (assetId, teamMemberId) uniqueness is now split
        * into two partial uniques (operator + kit-allocated) — Prisma's
@@ -8461,7 +8590,7 @@ export async function checkOutQuantity({
         data: { status: AssetStatus.IN_CUSTODY },
       });
 
-      /** Step 7: Create an immutable audit log entry */
+      /** Step 8: Create an immutable audit log entry */
       await createConsumptionLog({
         assetId,
         category: "CHECKOUT",
@@ -8473,17 +8602,11 @@ export async function checkOutQuantity({
       });
 
       /**
-       * Step 8: Activity event — emit `CUSTODY_ASSIGNED` inside the tx so
+       * Step 9: Activity event. Emit `CUSTODY_ASSIGNED` inside the tx so
        * it commits atomically with the custody upsert. The `viaQuantity`
        * meta flag distinguishes qty-tracked custody slices from
        * INDIVIDUAL-asset custody assignments.
        */
-      const custodianTeamMember = await tx.teamMember.findFirst({
-        // org-scoped: teamMemberId is request input, so scope the lookup to
-        // the caller's org (cross-org IDOR guard).
-        where: { id: teamMemberId, organizationId },
-        select: { user: { select: { id: true } } },
-      });
       await recordEvent(
         {
           organizationId,
@@ -8493,13 +8616,13 @@ export async function checkOutQuantity({
           entityId: assetId,
           assetId,
           teamMemberId,
-          targetUserId: custodianTeamMember?.user?.id ?? undefined,
+          targetUserId: custodianTeamMember.user?.id ?? undefined,
           meta: { quantity, viaQuantity: true },
         },
         tx
       );
 
-      /** Step 9: Return the refreshed asset */
+      /** Step 10: Return the refreshed asset */
       return tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
@@ -8532,6 +8655,17 @@ type ReleaseQuantityArgs = {
   userId: string;
   /** The organization owning the asset (used for validation) */
   organizationId: string;
+  /**
+   * The acting user's role in this organization.
+   *
+   * Required, not optional: a SELF_SERVICE caller may only release custody
+   * they hold themselves, and a missing role would silently fall open. The
+   * bulk route deliberately does NOT judge quantity-tracked rows in its own
+   * guard: they are released per asset, so refusing the whole selection over
+   * one would reject work nobody asked for, which leaves this the only place
+   * the restriction can be applied to them.
+   */
+  role: OrganizationRoles;
   /** Optional note explaining the release */
   note?: string;
   /**
@@ -8582,6 +8716,7 @@ export async function releaseQuantity({
   quantity,
   userId,
   organizationId,
+  role,
   note,
   consumed,
 }: ReleaseQuantityArgs) {
@@ -8624,6 +8759,35 @@ export async function releaseQuantity({
           status: 400,
           additionalData: { assetId, assetType: asset.type },
         });
+      }
+
+      /**
+       * Step 3a: Refuse a self-service caller releasing someone else's hold.
+       *
+       * `teamMemberId` is resolved by the caller from the asset's custody
+       * rows, so it names whoever currently holds the units, which for a
+       * self-service user is exactly what must be checked before those units
+       * are taken off them. The lookup is org-scoped, so a team member from
+       * another workspace is refused here rather than written into a log.
+       */
+      if (role === OrganizationRoles.SELF_SERVICE) {
+        const holder = await tx.teamMember.findFirst({
+          where: { id: teamMemberId, organizationId },
+          select: { user: { select: { id: true } } },
+        });
+
+        if (holder?.user?.id !== userId) {
+          throw new ShelfError({
+            cause: null,
+            title: "Action not allowed",
+            message:
+              "Self service users can only release custody they hold themselves.",
+            label,
+            status: 403,
+            additionalData: { userId, teamMemberId, assetId },
+            shouldBeCaptured: false,
+          });
+        }
       }
 
       /**

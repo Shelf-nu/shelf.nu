@@ -28,9 +28,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type ExpectedModelRequest,
+  type FulfilSessionInfo,
   expectedModelRequestsAtom,
   fulfilSessionAtom,
+  scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 
 import FulfilReservationsDrawer from "./fulfil-reservations-drawer";
 
@@ -81,12 +87,23 @@ vi.mock("~/components/list/list-header", () => ({
 }));
 
 // why: Radix AlertDialog portals don't settle in happy-dom. The check-out
-// dialog's trigger button is what these tests locate; the dialog body is not
+// dialog's trigger button is what these tests locate, and the units it would
+// ask the operator to confirm are exposed on it; the dialog body is not
 // asserted against.
 vi.mock("~/components/booking/checkout-dialog", () => ({
   __esModule: true,
-  default: ({ disabled }: { disabled?: boolean }) => (
-    <button type="submit" disabled={disabled}>
+  default: ({
+    disabled,
+    unassignedUnits,
+  }: {
+    disabled?: boolean;
+    unassignedUnits?: Array<{ name: string; count: number }>;
+  }) => (
+    <button
+      type="submit"
+      disabled={disabled}
+      data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+    >
       Check out
     </button>
   ),
@@ -108,8 +125,98 @@ function makeExpectedModels(n: number): ExpectedModelRequest[] {
   }));
 }
 
-/** Mounts the drawer with a seeded fulfil session for `modelCount` models. */
-function renderDrawer(modelCount: number) {
+/** An item already on the booking, as the loader lists it. */
+const ALREADY_ON_BOOKING: Exclude<
+  FulfilSessionInfo,
+  null
+>["alreadyIncluded"][number] = {
+  id: "asset-tripod",
+  title: "Tripod",
+  mainImage: null,
+  thumbnailImage: null,
+  assetModelId: null,
+  // Its row already answered something, or answers nothing this booking
+  // reserves. Either way scanning it cannot claim.
+  claimable: false,
+  kitId: null,
+  bookedQuantity: 1,
+  type: "INDIVIDUAL",
+};
+
+/**
+ * An item already on the booking whose row answered no reservation, and whose
+ * model the booking still has outstanding.
+ *
+ * This is the state a unit lands in when it was added before the reservation
+ * existed, or before its model matched one.
+ */
+const CLAIMABLE_ON_BOOKING: Exclude<
+  FulfilSessionInfo,
+  null
+>["alreadyIncluded"][number] = {
+  ...ALREADY_ON_BOOKING,
+  id: "asset-claimable",
+  title: "Claimable Tripod",
+  assetModelId: "model-0",
+  claimable: true,
+};
+
+/** One member of a scanned kit, as `KIT_INCLUDE` selects it. */
+type KitMember = KitFromQr["assetKits"][number]["asset"];
+
+/**
+ * A resolved kit payload, as the scanned-item endpoint responds with it.
+ *
+ * @param id - Kit id; what the form submits.
+ * @param name - Rendered in the kit row.
+ * @param members - Its assets. `assetModelId` is what decides whether a
+ *   member assigns an outstanding reservation.
+ */
+function makeKit({
+  id,
+  name,
+  members,
+}: {
+  id: string;
+  name: string;
+  members: Array<Pick<KitMember, "id" | "type" | "assetModelId">>;
+}): Partial<KitFromQr> {
+  return {
+    id,
+    name,
+    _count: { assetKits: members.length },
+    assetKits: members.map((member, index) => ({
+      id: `${id}-membership-${index}`,
+      quantity: 1,
+      asset: {
+        status: "AVAILABLE",
+        availableToBook: true,
+        // `KIT_INCLUDE` selects custody as a relation list, so an unheld
+        // member is an empty array rather than null.
+        custody: [],
+        ...member,
+      },
+    })) as KitFromQr["assetKits"],
+  };
+}
+
+/**
+ * Mounts the drawer with a seeded fulfil session for `modelCount` models.
+ *
+ * @param options.alreadyIncluded - Items already on the booking.
+ * @param options.checksOutScannedOnly - Whether submit sends out scans only.
+ * @param options.scannedAssets - Resolved asset scans, keyed by their QR id.
+ * @param options.scannedKits - Resolved kit scans, keyed by their QR id.
+ */
+function renderDrawer(
+  modelCount: number,
+  options: {
+    alreadyIncluded?: Exclude<FulfilSessionInfo, null>["alreadyIncluded"];
+    checksOutScannedOnly?: boolean;
+    scannedAssets?: Record<string, Partial<AssetFromQr>>;
+    scannedKits?: Record<string, Partial<KitFromQr>>;
+  } = {}
+) {
   const store = createStore();
   const expectedModelRequests = makeExpectedModels(modelCount);
 
@@ -117,10 +224,26 @@ function renderDrawer(modelCount: number) {
     bookingId: "booking-1",
     bookingName: "Nishanth",
     bookingFrom: new Date("2099-01-01T10:00:00Z").toISOString(),
+    bookingStatus: "RESERVED",
+    checksOutScannedOnly: options.checksOutScannedOnly ?? false,
     expectedModelRequests,
-    alreadyIncluded: [],
+    alreadyIncluded: options.alreadyIncluded ?? [],
   });
   store.set(expectedModelRequestsAtom, expectedModelRequests);
+  store.set(scannedItemsAtom, {
+    ...Object.fromEntries(
+      Object.entries(options.scannedAssets ?? {}).map(([qrId, asset]) => [
+        qrId,
+        { type: "asset" as const, data: asset as AssetFromQr },
+      ])
+    ),
+    ...Object.fromEntries(
+      Object.entries(options.scannedKits ?? {}).map(([qrId, kit]) => [
+        qrId,
+        { type: "kit" as const, data: kit as KitFromQr },
+      ])
+    ),
+  });
 
   return render(
     <Provider store={store}>
@@ -260,5 +383,353 @@ describe("FulfilReservationsDrawer layout", () => {
       expect(getModelsToggle()).toHaveTextContent("40 models reserved");
       expect(getModelsToggle()).toHaveTextContent("0 / 160");
     });
+  });
+});
+
+/**
+ * A check-out needs at least one item to go out, and nothing more. Reserved
+ * units still unassigned are confirmed by the operator and stay open on the
+ * booking; they never keep the button disabled.
+ */
+describe("FulfilReservationsDrawer check-out rule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useRouteLoaderDataMock.mockReturnValue({
+      minimizedSidebar: false,
+    } as never);
+  });
+
+  it("offers check-out while reserved units are unassigned, once an item would go out", () => {
+    // Two models x 4 units, nothing scanned; the booking already holds a
+    // tripod, and the whole booking goes out.
+    renderDrawer(2, { alreadyIncluded: [ALREADY_ON_BOOKING] });
+
+    const checkoutButton = screen.getByRole("button", { name: "Check out" });
+
+    expect(checkoutButton).toBeEnabled();
+    expect(screen.getByText("8 reserved units still unassigned")).toBeTruthy();
+    // The confirmation names every model with units still to assign.
+    expect(JSON.parse(checkoutButton.dataset.unassigned ?? "[]")).toEqual([
+      { name: 'Matthews 24" x 36" Black Flag 0', count: 4 },
+      { name: 'Matthews 24" x 36" Black Flag 1', count: 4 },
+    ]);
+  });
+
+  it("keeps check-out disabled while nothing would go out", () => {
+    renderDrawer(2);
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeDisabled();
+    expect(
+      screen.getByText("Scan at least one item to check out")
+    ).toBeTruthy();
+  });
+
+  it("requires a scan when only scanned items go out, even with items on the booking", () => {
+    renderDrawer(2, {
+      alreadyIncluded: [ALREADY_ON_BOOKING],
+      checksOutScannedOnly: true,
+    });
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeDisabled();
+  });
+
+  it("checks out an item already on the booking by scanning it, when only scanned items go out", () => {
+    renderDrawer(2, {
+      alreadyIncluded: [ALREADY_ON_BOOKING],
+      checksOutScannedOnly: true,
+      scannedAssets: {
+        "qr-tripod": {
+          id: "asset-tripod",
+          title: "Tripod",
+          type: "INDIVIDUAL",
+          assetModelId: null,
+          mainImage: null,
+          thumbnailImage: null,
+        },
+      },
+    });
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(screen.getByText("Ready to check out")).toBeTruthy();
+    expect(document.querySelector('input[name="assetIds[0]"]')).toHaveAttribute(
+      "value",
+      "asset-tripod"
+    );
+  });
+});
+
+describe("FulfilReservationsDrawer already-on-booking scans", () => {
+  /**
+   * How many places report `fulfilled / booked` for the one model rendered.
+   *
+   * With a single model the header total and the model's own strip carry the
+   * same text, so the count is what tells them apart from absence.
+   */
+  function progressReadings(text: string): number {
+    return screen.queryAllByText(text).length;
+  }
+
+  /** A resolved scan of an asset that is already on the booking. */
+  function scanOf(id: string, assetModelId: string | null) {
+    return {
+      id,
+      title: id,
+      type: "INDIVIDUAL" as const,
+      assetModelId,
+      mainImage: null,
+      thumbnailImage: null,
+    };
+  }
+
+  it("counts a unit already on the booking whose row answered nothing", () => {
+    // The customer-reported case: the unit is in the booking's asset list, its
+    // model is reserved, and scanning it used to report only that it was
+    // already there.
+    renderDrawer(1, {
+      alreadyIncluded: [CLAIMABLE_ON_BOOKING],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already here, now counts toward/)).toBeTruthy();
+    // It answers a reserved unit, so the model's strip has to move.
+    expect(progressReadings("1 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("0 / 4")).toBe(0);
+    // And it has to reach the server, or nothing is stamped.
+    expect(submittedValues("assetIds")).toContain("asset-claimable");
+  });
+
+  it("leaves a fresh quantity-tracked scan out of the count", () => {
+    // A reserved unit is a whole unit, and the server refuses anything else,
+    // so a pool contributing a slice must not fill the strip. The kit-member
+    // pass has always applied this rule; a loose scan has to as well, or the
+    // booking reads ready to leave on a claim the write declines.
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-pool": {
+          ...scanOf("asset-pool", "model-0"),
+          type: "QUANTITY_TRACKED",
+        },
+      },
+    });
+
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+  });
+
+  it("leaves a unit whose row already answered as a plain duplicate", () => {
+    // Its reservation is already discharged, so counting it again would report
+    // a reserved unit as satisfied twice over by one asset.
+    renderDrawer(1, {
+      alreadyIncluded: [{ ...CLAIMABLE_ON_BOOKING, claimable: false }],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("leaves a claimable unit alone when the booking reserves nothing it answers", () => {
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, assetModelId: "model-not-reserved" },
+      ],
+      scannedAssets: {
+        "qr-claimable": scanOf("asset-claimable", "model-not-reserved"),
+      },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("counts a claimable unit only up to what is still reserved", () => {
+    // One unit left outstanding, two claimable units scanned: the second is an
+    // over-scan and must not move the strip past its reservation.
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-a" },
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-b" },
+      ],
+      scannedAssets: {
+        "qr-a": scanOf("asset-a", "model-0"),
+        "qr-b": scanOf("asset-b", "model-0"),
+      },
+    });
+
+    // Both are claimable and the model reserves 4, so both count here.
+    expect(progressReadings("2 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).toEqual(
+      expect.arrayContaining(["asset-a", "asset-b"])
+    );
+  });
+});
+
+/** Values of the hidden inputs the form would submit under `field`. */
+function submittedValues(field: "assetIds" | "kitIds"): string[] {
+  return Array.from(
+    document.querySelectorAll<HTMLInputElement>(`input[name^="${field}["]`)
+  ).map((input) => input.value);
+}
+
+/**
+ * A scanned kit goes on the booking whole, and its INDIVIDUAL members assign
+ * outstanding reserved units on the way. The kit id is what the form sends —
+ * members are never submitted as loose asset ids.
+ */
+describe("FulfilReservationsDrawer kit scans", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: the drawer renders inside the app shell, which reads the layout
+    // route's loader for the sidebar state. Nothing here exercises that, but
+    // without it the shell throws before any row is rendered.
+    useRouteLoaderDataMock.mockReturnValue({
+      minimizedSidebar: false,
+    } as never);
+  });
+
+  it("assigns a reserved unit from a scanned kit's member", () => {
+    renderDrawer(1, {
+      scannedKits: {
+        "qr-grip-kit": makeKit({
+          id: "kit-grip",
+          name: "Grip Kit",
+          members: [
+            { id: "asset-flag", type: "INDIVIDUAL", assetModelId: "model-0" },
+          ],
+        }),
+      },
+    });
+
+    expect(screen.getByText("Grip Kit")).toBeTruthy();
+    expect(screen.getByText("Assigns 1 reserved unit")).toBeTruthy();
+    // The member advances the very strip a loose scan of it would.
+    expect(getModelsToggle()).toHaveTextContent("1 / 4");
+    expect(screen.getByText("3 reserved units still unassigned")).toBeTruthy();
+
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(submittedValues("kitIds")).toEqual(["kit-grip"]);
+    // The server resolves the kit into kit-driven rows. A member sent as a
+    // loose id as well would land on the booking twice.
+    expect(submittedValues("assetIds")).toEqual([]);
+  });
+
+  it("blocks a loose scan of a unit that belongs to a kit", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          // Committed to a kit that this scan does not name.
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+    });
+
+    expect(screen.getByText(/belongs to a kit/i)).toBeInTheDocument();
+    // Sending one member out alone would answer the reservation and check the
+    // booking out with the kit split, so submit is refused until it is removed.
+    expect(screen.getByRole("button", { name: /check out/i })).toBeDisabled();
+  });
+
+  it("does not block the member when its kit is scanned too", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-member": {
+          id: "asset-member",
+          title: "Camera A",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          assetKits: [{ id: "ak-1", kitId: "kit-9" }],
+        } as never,
+      },
+      scannedKits: {
+        "qr-kit": makeKit({
+          id: "kit-9",
+          name: "Kit Nine",
+          members: [
+            {
+              id: "asset-member",
+              type: "INDIVIDUAL",
+              assetModelId: "model-0",
+            } as never,
+          ],
+        }),
+      },
+    });
+
+    expect(screen.queryByText(/belongs to a kit/i)).not.toBeInTheDocument();
+  });
+
+  it("renders and submits a kit whose members assign nothing", () => {
+    renderDrawer(1, {
+      scannedKits: {
+        "qr-cable-kit": makeKit({
+          id: "kit-cable",
+          name: "Cable Kit",
+          members: [
+            // Off-model, and a quantity-tracked member of a reserved model:
+            // a slice of a pool is not the whole unit a reservation books.
+            { id: "asset-cable", type: "INDIVIDUAL", assetModelId: null },
+            {
+              id: "asset-sandbags",
+              type: "QUANTITY_TRACKED",
+              assetModelId: "model-0",
+            },
+          ],
+        }),
+      },
+    });
+
+    expect(screen.getByText("Cable Kit")).toBeTruthy();
+    expect(
+      screen.getByText("Will be added to booking and checked out")
+    ).toBeTruthy();
+    expect(getModelsToggle()).toHaveTextContent("0 / 4");
+
+    // Matching nothing is not an error — the kit still goes out.
+    expect(screen.getByRole("button", { name: "Check out" })).toBeEnabled();
+    expect(submittedValues("kitIds")).toEqual(["kit-cable"]);
+  });
+
+  it("lets one asset assign one unit, however many ways it was scanned", () => {
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-flag": {
+          id: "asset-flag",
+          title: "Black Flag",
+          type: "INDIVIDUAL",
+          assetModelId: "model-0",
+          mainImage: null,
+          thumbnailImage: null,
+        },
+      },
+      scannedKits: {
+        "qr-grip-kit": makeKit({
+          id: "kit-grip",
+          name: "Grip Kit",
+          members: [
+            { id: "asset-flag", type: "INDIVIDUAL", assetModelId: "model-0" },
+          ],
+        }),
+      },
+    });
+
+    expect(getModelsToggle()).toHaveTextContent("1 / 4");
+    // The kit owns the assignment, matching the server: it drops the loose
+    // scan and books the unit through the kit slice, because both rows would
+    // book one physical camera twice.
+    expect(screen.getByText("Assigns 1 reserved unit")).toBeTruthy();
+    // So the asset's own row reports where it arrives from rather than
+    // claiming a unit of its own — one camera, one reserved unit.
+    expect(screen.getByText("Arrives with Grip Kit")).toBeTruthy();
+    expect(screen.queryByText("Ready")).toBeNull();
+    // Both still submit: the server decides which row carries it.
+    expect(submittedValues("assetIds")).toEqual(["asset-flag"]);
+    expect(submittedValues("kitIds")).toEqual(["kit-grip"]);
   });
 });

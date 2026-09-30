@@ -41,7 +41,10 @@ import {
   computeBookingSliceUnitCounts,
   type QtyBookingAssetRow,
 } from "~/modules/booking/booking-slice-unit-counts.server";
-import { computeDispatchedUnitsByAsset } from "~/modules/booking/checkout-attribution";
+import {
+  combineDispatchedWithStoredUnits,
+  computeDispatchedUnitsByAsset,
+} from "~/modules/booking/checkout-attribution";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -56,7 +59,6 @@ import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -450,6 +452,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             assetKitId: true,
             checkedOutAt: true,
             checkedInAt: true,
+            // Cumulative units this slice has sent out. The markers say
+            // WHETHER a slice went out; only this says HOW MANY, which is what
+            // sizes a check-in.
+            checkedOutQuantity: true,
           },
         }),
         kitIdsOnBooking.length > 0
@@ -480,6 +486,48 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         dispositionLogs: dispositionLogRows,
         checkoutSessions: checkoutSessionRows,
       });
+
+    /**
+     * Units each quantity-tracked asset has SENT OUT on this booking, and how
+     * many of those have come back.
+     *
+     * "Still out" is `dispatched - dispositioned`, and it is the only figure
+     * that answers whether a row can be checked in. `remainingToCheckIn` —
+     * booked minus dispositioned — cannot: it counts booked units that never
+     * left, and `partialCheckinBooking` refuses a row no slice of which was
+     * ever stamped with "Cannot check in assets that were never checked out".
+     *
+     * Departures come from {@link combineDispatchedWithStoredUnits}, which the
+     * completion gate `isBookingFullyCheckedIn` reads through its one-call
+     * form. Sharing it is what keeps the check-in this route OFFERS and the
+     * check-in that gate DEMANDS from answering differently.
+     *
+     * Returns are summed straight off the logs, UNCAPPED, which is the pairing
+     * that helper requires: the per-slice attribution bounds each slice at one
+     * booked quantity, so a row that went out, came back and went out again
+     * would report more departures than returns and read as permanently out.
+     */
+    // The per-trip figure. Also what the lifecycle progress bar reads further
+    // down, which asks how far through THIS trip the booking is — a different
+    // question from what is still out, so it keeps the bounded count.
+    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
+      slices: sliceRows,
+      checkoutSessions: checkoutSessionRows,
+    });
+    const dispatchedUnitsTotalByAsset = combineDispatchedWithStoredUnits({
+      slices: sliceRows,
+      dispatchedByAsset: dispatchedUnitsByAsset,
+    });
+    // The log query is already scoped to this booking, to its quantity-tracked
+    // assets and to the four disposition categories, so a plain sum per asset
+    // IS the uncapped figure.
+    const dispositionedUnitsTotalByAsset = new Map<string, number>();
+    for (const log of dispositionLogRows) {
+      dispositionedUnitsTotalByAsset.set(
+        log.assetId,
+        (dispositionedUnitsTotalByAsset.get(log.assetId) ?? 0) + log.quantity
+      );
+    }
 
     /**
      * The assets in the web booking overview's default order, which the app
@@ -523,44 +571,56 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     );
     const remainingByAsset = new Map(qtRemaining.map((r) => [r.assetId, r]));
 
+    /**
+     * Units of a quantity-tracked asset that are out, not yet back, and that
+     * `partialCheckinBooking` would accept.
+     *
+     * Bounded by `remainingToCheckIn` because that is the cap the endpoint
+     * applies to every claim. The two agree on every single-trip booking; they
+     * part on a row that went out, came back and went out again inside one
+     * booking, where the departure count keeps climbing while the endpoint's
+     * cap — booked minus everything dispositioned — has already reached zero.
+     * The app applies the same bound, so the flag and the rows agree.
+     */
+    const unitsStillOut = (assetId: string): number =>
+      Math.min(
+        Math.max(
+          0,
+          (dispatchedUnitsTotalByAsset.get(assetId) ?? 0) -
+            (dispositionedUnitsTotalByAsset.get(assetId) ?? 0)
+        ),
+        remainingByAsset.get(assetId)?.remainingToCheckIn ?? 0
+      );
+
     // Compute booking capability flags
     const checkedOutCount = assets.filter(
       (a) => a.status === AssetStatus.CHECKED_OUT
     ).length;
     const totalAssets = assets.length;
 
-    // Book-by-model: a booking with unfulfilled model reservations cannot be
-    // checked out. The shared checkout service hard-blocks the RESERVED →
-    // ONGOING transition until every `BookingModelRequest` is assigned to
-    // concrete assets (`checkoutBookingWritesWithinTx` throws a 400 while any
-    // request is outstanding). Read through the same predicate the service
-    // uses, and fold it into the state flag so the app never offers a "Check
-    // Out" the server would reject — the app instead guides the operator to
-    // assign the reserved units first (see the booking-detail "Assign to
-    // check out" CTA).
-    const hasOutstandingModelRequests =
-      getOutstandingModelRequests(booking.modelRequests).length > 0;
-
-    const canCheckoutByState =
-      booking.status === "RESERVED" &&
-      totalAssets > 0 &&
-      !hasOutstandingModelRequests;
+    // A check-out needs at least one item on the booking and nothing more.
+    // Unassigned model reservations stay open on the ongoing booking, so they
+    // play no part in this flag; the app confirms them with the operator
+    // before submitting.
+    const canCheckoutByState = booking.status === "RESERVED" && totalAssets > 0;
     // Checkinable while ONGOING/OVERDUE AND something is still to check in.
-    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: booked units not
-    // yet reconciled = remainingToCheckIn > 0 (booked − returned/consumed/lost/
-    // damaged) — the SAME "remaining" the web check-in drawer caps at. Status
-    // cannot answer this for a QT asset: it stays AVAILABLE while some of its
-    // units are still out.
-    const hasCheckinable = assets.some((a) => {
-      if (a.type === AssetType.QUANTITY_TRACKED) {
-        const rem = remainingByAsset.get(a.id);
-        return rem ? rem.remainingToCheckIn > 0 : false;
-      }
-      return a.status === AssetStatus.CHECKED_OUT;
-    });
-    const canCheckinByState =
-      (booking.status === "ONGOING" || booking.status === "OVERDUE") &&
-      hasCheckinable;
+    // INDIVIDUAL: global status CHECKED_OUT. QUANTITY_TRACKED: units that went
+    // out on this booking and are not back yet. Status cannot answer this for a
+    // QT asset — it stays AVAILABLE while some of its units are still out — and
+    // neither can `remainingToCheckIn`, which counts booked units that never
+    // left, so a booking holding only never-dispatched rows would offer a
+    // check-in the server then refuses.
+    const hasCheckinable = assets.some((a) =>
+      a.type === AssetType.QUANTITY_TRACKED
+        ? unitsStillOut(a.id) > 0
+        : a.status === AssetStatus.CHECKED_OUT
+    );
+    const isActiveBooking =
+      booking.status === "ONGOING" || booking.status === "OVERDUE";
+    // Gates the EXPLICIT paths — scan and select — which submit to
+    // `partialCheckinBooking` and so need units that actually went out. The
+    // quick full check-in is gated separately, below.
+    const canCheckinByState = isActiveBooking && hasCheckinable;
 
     // Quick "check in all" and "check out all" are disallowed when the
     // workspace requires EXPLICIT (scan/select) check-in or check-out for the
@@ -644,6 +704,18 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // so without this the user meets the rule as a 403 instead of an absence.
     const canCheckout = canCheckoutByState && canCheckoutPerm;
     const canCheckin = canCheckinByState && canCheckinPerm;
+    /**
+     * Whether the quick "check in all" is offered.
+     *
+     * Deliberately NOT gated on `hasCheckinable`. It submits to
+     * `checkinBooking`, which completes a booking whatever went out and has no
+     * never-checked-out guard, so web offers it on any active booking the
+     * caller may check in (`CheckinDropdown` in `edit-booking-form.tsx`).
+     * Gating it on units being out would leave a booking whose rows were all
+     * added after check-out closable from a browser and from nowhere on the
+     * phone.
+     */
+    const canCheckinAll = isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
@@ -693,9 +765,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       0
     );
 
-    // Attach the per-asset remaining (computed up-front, above) to each QT
+    // Attach the per-asset counters (computed up-front, above) to each QT
     // asset so the app's pickers can cap inputs; INDIVIDUAL rows pass through
     // unchanged.
+    //
+    // `remainingToCheckIn` and `remainingToCheckOut` keep their meaning and
+    // their values: app bundles already in the field read them, and a bundle
+    // that does not know the two counters beside them falls back to the older
+    // rule rather than losing the picker entirely.
     const assetsForResponse = assets.map((a) => {
       const rem = remainingByAsset.get(a.id);
       return rem
@@ -703,6 +780,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             ...a,
             remainingToCheckIn: rem.remainingToCheckIn,
             remainingToCheckOut: rem.remainingToCheckOut,
+            dispatchedUnitsTotal: dispatchedUnitsTotalByAsset.get(a.id) ?? 0,
+            dispositionedUnitsTotal:
+              dispositionedUnitsTotalByAsset.get(a.id) ?? 0,
           }
         : a;
     });
@@ -726,10 +806,6 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // dispatched units are judged slice by slice from stamps + session
     // attribution (an asset can mix a button-checked-out slice with a
     // progressively-scanned sibling — see `computeDispatchedUnitsByAsset`).
-    const dispatchedUnitsByAsset = computeDispatchedUnitsByAsset({
-      slices: sliceRows,
-      checkoutSessions: checkoutSessionRows,
-    });
     const sliceMarkersByAssetId = new Map<
       string,
       { out: boolean; allStampedIn: boolean }
@@ -857,6 +933,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckout,
       canCheckin,
       canQuickCheckin,
+      canCheckinAll,
       canQuickCheckout,
       bookingActions,
     });

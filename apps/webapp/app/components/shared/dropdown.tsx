@@ -74,7 +74,13 @@ const DropdownMenuContent = React.forwardRef<
     portalContainer?: HTMLElement;
   }
 >(function DropdownMenuContent(
-  { className, sideOffset = 4, portalContainer, ...props },
+  {
+    className,
+    sideOffset = 4,
+    collisionPadding = 16,
+    portalContainer,
+    ...props
+  },
   ref
 ) {
   return (
@@ -82,8 +88,13 @@ const DropdownMenuContent = React.forwardRef<
       <DropdownMenuPrimitive.Content
         ref={ref}
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
+        // Capped at the viewport space Radix measures between the trigger and
+        // the screen edge (minus `collisionPadding`, which keeps a gap there),
+        // so a menu taller than that scrolls instead of running off-screen
+        // with its last items unreachable.
         className={tw(
-          " z-50 min-w-32 overflow-hidden rounded border border-gray-300 bg-white p-3 shadow-md animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2  data-[side=top]:slide-in-from-bottom-2",
+          " z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-32 overflow-y-auto rounded border border-gray-300 bg-white p-3 shadow-md animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2  data-[side=top]:slide-in-from-bottom-2",
           className
         )}
         {...props}

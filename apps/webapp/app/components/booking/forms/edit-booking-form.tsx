@@ -94,12 +94,12 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
-   * Bookings with outstanding `BookingModelRequest` rows must route through
-   * the fulfil-and-checkout scanner instead of the normal checkout alert —
-   * the server's `RESERVED → ONGOING` guard refuses transitions while any
-   * request still has `quantity > 0`. Derived inline from
-   * `booking.modelRequests` (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`)
-   * to avoid a new loader field.
+   * Reserved model units no asset has been assigned to yet. A RESERVED booking
+   * with any routes "Check Out" through the fulfil-and-checkout scanner, which
+   * lists what is still to pull and confirms the unassigned units before the
+   * booking goes out without them. Derived inline from `booking.modelRequests`
+   * (already loaded via `BOOKING_WITH_ASSETS_INCLUDE`) to avoid a new loader
+   * field.
    */
   const outstandingModelRequestCount = getOutstandingModelRequests(
     loaderBooking.modelRequests
@@ -367,11 +367,11 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               applies, and only "Scan to check out" when the workspace requires
               explicit check-out for the viewer's role.
 
-              When the booking has outstanding `BookingModelRequest` rows the
-              normal RESERVED → ONGOING transition is refused by the server
-              (qty > 0 model requests must be fulfilled first), so we bypass
-              the dropdown entirely and route through the fulfil-and-checkout
-              scanner — HEAD's qty-tracked behaviour.
+              A RESERVED booking with unassigned model units routes through the
+              fulfil-and-checkout scanner instead, which lists what is still to
+              pull. Once the booking is underway, its remaining items go out
+              through the dropdown's "Scan to check out", like any other
+              booking; unassigned units stay open for "Scan to assign".
             */}
             <When
               truthy={
@@ -400,11 +400,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       }
                     : false;
 
-                // When requests are outstanding, the normal checkout would hit
-                // the guard — route through the fulfil scanner instead. This
-                // takes precedence over the progressive-checkout dropdown
-                // because the booking can't transition until requests are met.
-                if (outstandingModelRequestCount > 0) {
+                // A reserved booking's first check-out goes through the fulfil
+                // scanner while model units are unassigned, so the operator
+                // sees what is still to pull before it leaves.
+                if (
+                  outstandingModelRequestCount > 0 &&
+                  bookingStatus?.isReserved
+                ) {
                   return (
                     <Button
                       to="fulfil-and-checkout"

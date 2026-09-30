@@ -374,3 +374,193 @@ export function computeDispatchedUnitsByAsset(args: {
 
   return dispatchedByAsset;
 }
+
+/**
+ * Units a booking has SENT OUT per ASSET, counting every departure of every
+ * slice.
+ *
+ * Two records carry a departure and neither is complete on its own, so this
+ * takes whichever accounts for more units:
+ *
+ * - `dispatchedByAsset` — the slice markers and the progressive sessions, via
+ *   {@link computeDispatchedUnitsByAsset}. It is bounded by each slice's
+ *   booked quantity, so it describes one trip and cannot describe a second.
+ * - `BookingAsset.checkedOutQuantity` — cumulative across every departure, so
+ *   a slice that went out, came back and went out again carries both trips.
+ *
+ * Whatever reads this MUST pair it with an UNCAPPED disposition sum. Pairing a
+ * cumulative departure count with a per-slice-capped return count leaves a
+ * fully reconciled repeat-trip row reading as still out. Both counters measure
+ * the booking's whole lifetime or neither can.
+ *
+ * This is the one place the pairing is written down, so that the completion
+ * gate ({@link isBookingFullyCheckedIn}) and the check-in the mobile booking
+ * route offers cannot answer "what went out?" differently: an offer the gate
+ * will not clear strands a booking on ONGOING, and a check-in the gate still
+ * demands but nothing offers cannot be given at all.
+ *
+ * Takes `dispatchedByAsset` rather than deriving it so a caller that already
+ * holds it for another purpose pays for the attribution pass once.
+ * {@link computeDispatchedUnitsTotalByAsset} is the one-call form.
+ *
+ * @param args.slices - ALL of the booking's slices, with their stored counter.
+ * @param args.dispatchedByAsset - Output of `computeDispatchedUnitsByAsset`
+ *   over those same slices.
+ * @returns Map keyed by `assetId` → units sent out (absent = 0).
+ */
+export function combineDispatchedWithStoredUnits(args: {
+  slices: Array<{
+    assetId: string;
+    quantity: number;
+    checkedOutQuantity: number | null;
+  }>;
+  dispatchedByAsset: Map<string, number>;
+}): Map<string, number> {
+  const { slices, dispatchedByAsset } = args;
+
+  // One pass: both sums span exactly the slices `dispatchedByAsset` was built
+  // from, so the three figures can never describe different row sets.
+  const bookedByAsset = new Map<string, number>();
+  const storedByAsset = new Map<string, number>();
+  for (const s of slices) {
+    bookedByAsset.set(
+      s.assetId,
+      (bookedByAsset.get(s.assetId) ?? 0) + s.quantity
+    );
+    storedByAsset.set(
+      s.assetId,
+      (storedByAsset.get(s.assetId) ?? 0) + (s.checkedOutQuantity ?? 0)
+    );
+  }
+
+  const totalByAsset = new Map<string, number>();
+  for (const [assetId, booked] of bookedByAsset) {
+    // The `Math.min` restates a bound `computeDispatchedUnitsByAsset` already
+    // applies slice by slice over these same slices, so it cannot bind while
+    // that holds. It stays because the PAIRING is what this function promises;
+    // the other helper's internals are not part of that promise.
+    const units = Math.max(
+      Math.min(dispatchedByAsset.get(assetId) ?? 0, booked),
+      storedByAsset.get(assetId) ?? 0
+    );
+    if (units > 0) totalByAsset.set(assetId, units);
+  }
+  return totalByAsset;
+}
+
+/**
+ * {@link combineDispatchedWithStoredUnits} for a caller that does not already
+ * hold the per-trip dispatch figure — it runs the attribution pass itself.
+ *
+ * @param args.slices - ALL of the booking's slices, with their stored counter.
+ * @param args.checkoutSessions - The booking's raw checkout sessions.
+ * @returns Map keyed by `assetId` → units sent out (absent = 0).
+ */
+export function computeDispatchedUnitsTotalByAsset(args: {
+  slices: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedOutQuantity: number | null;
+  }>;
+  checkoutSessions: CheckoutSession[];
+}): Map<string, number> {
+  const { slices, checkoutSessions } = args;
+  return combineDispatchedWithStoredUnits({
+    slices,
+    dispatchedByAsset: computeDispatchedUnitsByAsset({
+      slices,
+      checkoutSessions,
+    }),
+  });
+}
+
+/**
+ * Units of one asset's slices on ONE active booking that are still off the
+ * shelf: what left, minus what came back or was used up.
+ *
+ * What left, per slice, is the larger of two records:
+ * - one trip's worth, read the way {@link computeDispatchedUnitsByAsset} reads
+ *   it: the slice's session claims (tagged exactly, untagged spread by
+ *   {@link attributeDispositionsByBookingAsset}) capped at the booked quantity;
+ *   with no claim, the whole slice when its own `checkedOutAt` is set (the
+ *   all-at-once checkout stamps it and writes no session); otherwise nothing;
+ * - the stored `checkedOutQuantity`. It is cumulative, so it is the one that
+ *   still counts a slice sent out a second time, by either checkout.
+ *
+ * Never `Asset.status`: it is global, so an asset checked out on another
+ * booking would read as fully out on every booking that holds a slice of it.
+ *
+ * What came back: the booking's RETURN / CONSUME / LOSS / DAMAGE logs for the
+ * asset. A tagged log lands on its slice. An untagged one is spread standalone
+ * first, each slice taking up to what it still has out. Capping by what left
+ * rather than by the booked quantity is what lets a cumulative departure count
+ * pair with a cumulative return count: a slice sent out twice and returned twice
+ * reads zero, not one trip's worth.
+ *
+ * The result is clamped to `[0, quantity]` per slice.
+ *
+ * @param args.slices - The asset's slices on the booking.
+ * @param args.checkoutClaims - This asset's session claims on the booking, as
+ *   parsed by {@link checkoutSessionsToLogsByAsset}.
+ * @param args.dispositions - This asset's RETURN / CONSUME / LOSS / DAMAGE logs
+ *   on the booking.
+ * @returns Map keyed by every slice id to the units it still has out.
+ */
+export function computeUnitsStillOutBySlice(args: {
+  slices: Array<{
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedOutQuantity: number | null;
+  }>;
+  checkoutClaims: CheckoutAttributionLog[];
+  dispositions: CheckoutAttributionLog[];
+}): Map<string, number> {
+  const { slices, checkoutClaims, dispositions } = args;
+
+  const claimedBySlice = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices,
+    consumptionLogs: checkoutClaims,
+  });
+
+  const departedBySlice = new Map<string, number>();
+  for (const slice of slices) {
+    const claimed = claimedBySlice.get(slice.id) ?? 0;
+    const recorded =
+      claimed > 0
+        ? Math.min(slice.quantity, claimed)
+        : slice.checkedOutAt
+        ? slice.quantity
+        : 0;
+    departedBySlice.set(
+      slice.id,
+      Math.max(recorded, slice.checkedOutQuantity ?? 0)
+    );
+  }
+
+  // Each slice's capacity for untagged returns is what it has out, so the
+  // attributor is handed the departed count in place of the booked quantity.
+  const disposedBySlice = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      quantity: departedBySlice.get(slice.id) ?? 0,
+    })),
+    consumptionLogs: dispositions,
+  });
+
+  const stillOut = new Map<string, number>();
+  for (const slice of slices) {
+    const departed = departedBySlice.get(slice.id) ?? 0;
+    const disposed = disposedBySlice.get(slice.id) ?? 0;
+    stillOut.set(
+      slice.id,
+      Math.min(slice.quantity, Math.max(0, departed - disposed))
+    );
+  }
+  return stillOut;
+}

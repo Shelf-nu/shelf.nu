@@ -1,5 +1,8 @@
 import { Roles, AssetIndexMode, OrganizationRoles } from "@prisma/client";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import {
+  PrismaClientKnownRequestError,
+  type ITXClientDenyList,
+} from "@prisma/client/runtime/library";
 
 import { matchRequestUrl, http, HttpResponse } from "msw";
 import { server } from "@mocks";
@@ -16,7 +19,8 @@ import {
   USER_ID,
   USER_PASSWORD,
 } from "@mocks/user";
-import { db } from "~/database/db.server";
+import { db, type ExtendedPrismaClient } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
 import {
@@ -24,6 +28,8 @@ import {
   createUserAccountForTesting,
   createUserOrAttachOrg,
   defaultUserCategories,
+  findUserByEmail,
+  findUserById,
 } from "./service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 
@@ -38,6 +44,7 @@ vitest.mock("~/database/db.server", () => ({
     user: {
       create: vitest.fn().mockResolvedValue({}),
       findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
     },
     organization: {
@@ -49,6 +56,13 @@ vitest.mock("~/database/db.server", () => ({
       upsert: vitest.fn().mockResolvedValue({}),
     },
   },
+}));
+
+// why: the signup event is the sink under test for attribution; the real
+// wrapper is a silent no-op without a PostHog key, so its calls are recorded
+// here instead.
+vitest.mock("~/integrations/posthog/client.server", () => ({
+  captureServerEvent: vitest.fn(),
 }));
 
 // why: ensureAssetIndexModeForRole has its own db dependencies unrelated to user creation
@@ -324,7 +338,7 @@ describe(createUserOrAttachOrg.name, () => {
     vitest.clearAllMocks();
     // Default: no existing Prisma user, no existing auth user
     // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValue(null);
+    db.user.findMany.mockResolvedValue([]);
     // @ts-expect-error missing vitest type
     db.$queryRaw.mockResolvedValue([]);
     // @ts-expect-error missing vitest type
@@ -434,7 +448,7 @@ describe(createUserOrAttachOrg.name, () => {
     };
 
     // @ts-expect-error missing vitest type
-    db.user.findFirst.mockResolvedValueOnce(existingUser);
+    db.user.findMany.mockResolvedValueOnce([existingUser]);
 
     const result = await createUserOrAttachOrg({
       email: USER_EMAIL,
@@ -447,6 +461,129 @@ describe(createUserOrAttachOrg.name, () => {
 
     expect(result.id).toBe(USER_ID);
     expect(db.userOrganization.upsert).toHaveBeenCalled();
+    expect(db.user.create).not.toHaveBeenCalled();
+  });
+
+  /** An address that differs only in letter case is the same person */
+  it("attaches the existing account when the email differs only in letter case", async () => {
+    const authAdminRequests: string[] = [];
+    server.events.on("request:start", ({ request }) => {
+      if (
+        new URL(request.url).pathname.startsWith(SUPABASE_AUTH_ADMIN_USER_API)
+      )
+        authAdminRequests.push(request.method);
+    });
+
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: USER_ID,
+        email: USER_EMAIL,
+        firstName: "Existing",
+        lastName: "User",
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: "Hello@Supabase.com",
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: { in: [USER_EMAIL], mode: "insensitive" } },
+      })
+    );
+    expect(result.id).toBe(USER_ID);
+    expect(db.userOrganization.upsert).toHaveBeenCalled();
+    // Attaching an existing account needs no auth admin call and no new row.
+    expect(authAdminRequests).toEqual([]);
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(db.user.create).not.toHaveBeenCalled();
+  });
+
+  /** Rows that differ only by case: the lowercase one is the account in use */
+  it("prefers the lowercase row when several rows match the email", async () => {
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: "stale-mixed-case-row",
+        email: "Hello@Supabase.com",
+        sso: false,
+        userOrganizations: [],
+      },
+      {
+        id: USER_ID,
+        email: USER_EMAIL,
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(result.id).toBe(USER_ID);
+    expect(db.user.create).not.toHaveBeenCalled();
+    expect(db.userOrganization.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          userId_organizationId: {
+            userId: USER_ID,
+            organizationId: ORGANIZATION_ID,
+          },
+        },
+      })
+    );
+  });
+
+  /**
+   * Rows differing only by case with none in the stored lowercase form: the
+   * account picked has to be the same on every call, so it is the oldest row.
+   * That only holds while the query asks the database for that order.
+   */
+  it("asks for the oldest row first when no row carries the lowercase form", async () => {
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([
+      {
+        id: "oldest-mixed-case-row",
+        email: "Hello@Supabase.com",
+        sso: false,
+        userOrganizations: [],
+      },
+      {
+        id: "newer-mixed-case-row",
+        email: "HELLO@SUPABASE.COM",
+        sso: false,
+        userOrganizations: [],
+      },
+    ]);
+
+    const result = await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles: [OrganizationRoles.BASE],
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "asc" } })
+    );
+    expect(result.id).toBe("oldest-mixed-case-row");
     expect(db.user.create).not.toHaveBeenCalled();
   });
 });
@@ -644,5 +781,166 @@ describe(createUser.name, () => {
       createUser({ email: USER_EMAIL, userId: USER_ID, username })
     ).rejects.toThrow("We had trouble while creating your account");
     expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The `signup_completed` event carries what the signup link asked for, so
+ * PostHog funnels agree with the business-intel record.
+ */
+describe("createUser — signup attribution on the signup event", () => {
+  /** The client shape a `$transaction` callback receives. */
+  type TransactionClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // @ts-expect-error missing vitest type
+    db.user.create.mockResolvedValue(newUserMock);
+    // why: the mocked $transaction just invokes the callback with the mocked db
+    // @ts-expect-error missing vitest type
+    db.$transaction.mockImplementation(
+      (callback: (tx: TransactionClient) => Promise<unknown>) =>
+        callback(db as unknown as TransactionClient)
+    );
+  });
+
+  it("puts the plan, trial and campaign on the event and sets them once on the person", async () => {
+    await createUser({
+      email: USER_EMAIL,
+      userId: USER_ID,
+      username,
+      signupIntent: {
+        plan: "team",
+        trial: true,
+        utmSource: "website",
+        utmMedium: "pricing",
+        utmCampaign: "launch",
+        utmContent: "hero",
+      },
+    });
+
+    expect(captureServerEvent).toHaveBeenCalledWith({
+      distinctId: USER_ID,
+      event: "signup_completed",
+      properties: {
+        created_with_invite: false,
+        is_sso: false,
+        signup_plan: "team",
+        signup_trial: true,
+        utm_source: "website",
+        utm_medium: "pricing",
+        utm_campaign: "launch",
+        utm_content: "hero",
+      },
+      setOnce: {
+        initial_signup_plan: "team",
+        initial_signup_trial: true,
+        $initial_utm_source: "website",
+        $initial_utm_medium: "pricing",
+        $initial_utm_campaign: "launch",
+        $initial_utm_content: "hero",
+      },
+    });
+  });
+
+  it("sends the event exactly as before when there is no intent", async () => {
+    await createUser({ email: USER_EMAIL, userId: USER_ID, username });
+
+    expect(captureServerEvent).toHaveBeenCalledWith({
+      distinctId: USER_ID,
+      event: "signup_completed",
+      properties: { created_with_invite: false, is_sso: false },
+      setOnce: undefined,
+    });
+  });
+});
+
+describe(findUserByEmail.name, () => {
+  const findManyMock = db.user.findMany as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("finds an account stored with capitals from the address as typed", async () => {
+    // why: the stored row keeps the capitals it was created with; sign-in
+    // forms lowercase what the person types.
+    findManyMock.mockResolvedValueOnce([
+      { id: "user-1", email: "Karen.Smith@School.org" },
+    ]);
+
+    const user = await findUserByEmail("karen.smith@school.org");
+
+    expect(user).toMatchObject({ id: "user-1" });
+    expect(findManyMock).toHaveBeenCalledWith({
+      where: {
+        email: { in: ["karen.smith@school.org"], mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  });
+
+  it("prefers the row stored in lowercase when two differ only by case", async () => {
+    // why: two rows can share an address up to case; the lowercase one is
+    // what every path writes today, so it is the account to resolve to.
+    findManyMock.mockResolvedValueOnce([
+      { id: "older", email: "Karen.Smith@School.org" },
+      { id: "lowercase", email: "karen.smith@school.org" },
+    ]);
+
+    expect(await findUserByEmail("Karen.Smith@School.org")).toMatchObject({
+      id: "lowercase",
+    });
+  });
+
+  it("falls back to the oldest account when none is stored in lowercase", async () => {
+    // why: the query orders by creation, so the first row is the oldest.
+    findManyMock.mockResolvedValueOnce([
+      { id: "oldest", email: "KAREN@school.org" },
+      { id: "newer", email: "Karen@School.org" },
+    ]);
+
+    expect(await findUserByEmail("karen@school.org")).toMatchObject({
+      id: "oldest",
+    });
+  });
+
+  it("returns null when no account has the address", async () => {
+    findManyMock.mockResolvedValueOnce([]);
+
+    expect(await findUserByEmail("nobody@school.org")).toBeNull();
+  });
+});
+
+describe(findUserById.name, () => {
+  const findUniqueMock = db.user.findUnique as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reads only what sign-in needs, by id", async () => {
+    // why: the row exists for this auth id.
+    findUniqueMock.mockResolvedValueOnce({ id: "user-1", onboarded: true });
+
+    expect(await findUserById("user-1")).toEqual({
+      id: "user-1",
+      onboarded: true,
+    });
+    expect(findUniqueMock).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: { id: true, onboarded: true },
+    });
+  });
+
+  it("returns null instead of throwing when there is no account", async () => {
+    // why: no row for this auth id yet.
+    findUniqueMock.mockResolvedValueOnce(null);
+
+    expect(await findUserById("user-new")).toBeNull();
   });
 });

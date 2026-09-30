@@ -58,11 +58,21 @@ vi.mock("~/components/custom-form", () => ({
   ),
 }));
 
-// why: the early-checkout branch renders CheckoutDialog, whose react-router
-// dependencies this harness does not mount. The stub renders a marker, so a
-// test can tell the early-checkout branch from the plain submit button.
+// why: the confirming branch renders CheckoutDialog, whose react-router
+// dependencies this harness does not mount. The stub renders a marker carrying
+// the unassigned units it would confirm, so a test can tell the confirming
+// branch from the plain submit button.
 vi.mock("./checkout-dialog", () => ({
-  default: () => <div data-testid="checkout-dialog-mock" />,
+  default: ({
+    unassignedUnits,
+  }: {
+    unassignedUnits?: Array<{ name: string; count: number }>;
+  }) => (
+    <div
+      data-testid="checkout-dialog-mock"
+      data-unassigned={JSON.stringify(unassignedUnits ?? [])}
+    />
+  ),
 }));
 
 // why: image components have their own server loader chains (signed URLs,
@@ -132,6 +142,7 @@ function makeLoaderData({
   partialCheckinDetails = {},
   status = BookingStatus.ONGOING,
   from = new Date("2024-01-01T10:00:00Z"),
+  modelRequests = [],
 }: {
   bookingAssets: Array<{
     id: string;
@@ -171,6 +182,13 @@ function makeLoaderData({
   partialCheckinDetails?: Record<string, unknown>;
   status?: BookingStatus;
   from?: Date;
+  /** The booking's model reservations. */
+  modelRequests?: Array<{
+    quantity: number;
+    fulfilledQuantity: number;
+    fulfilledAt: Date | null;
+    assetModel: { name: string };
+  }>;
 }) {
   return {
     booking: {
@@ -180,6 +198,7 @@ function makeLoaderData({
       from,
       to: new Date("2099-01-05T10:00:00Z"),
       bookingAssets,
+      modelRequests,
     },
     checkedOutAssetIds,
     remainingToCheckOutByAsset,
@@ -522,5 +541,72 @@ describe("BulkPartialCheckoutDialog — items that cannot go out again", () => {
         'button[type="submit"][name="intent"][value="partial-checkout"]'
       )
     ).toBeNull();
+  });
+});
+
+/**
+ * A check-out needs at least one item to go out. The one that takes a reserved
+ * booking out with model units still unassigned asks first; the units stay
+ * open on the booking.
+ */
+describe("BulkPartialCheckoutDialog — unassigned model reservations", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useActionDataMock.mockReturnValue(undefined);
+  });
+
+  const openDellReservation = {
+    quantity: 3,
+    fulfilledQuantity: 1,
+    fulfilledAt: null,
+    assetModel: { name: "Dell Latitude" },
+  };
+
+  it("asks before a reserved booking goes out with reserved units unassigned", () => {
+    const tripod = individualRow("tripod-id", "Tripod", AssetStatus.AVAILABLE);
+    const lens = individualRow("lens-id", "Lens", AssetStatus.AVAILABLE);
+
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [individualSlice(tripod), individualSlice(lens)],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: {},
+        status: BookingStatus.RESERVED,
+        modelRequests: [openDellReservation],
+      })
+    );
+    // Not the final check-out and not early: only the reservations ask.
+    seedSelection([tripod]);
+
+    renderDialog();
+
+    const dialog = screen.getByTestId("checkout-dialog-mock");
+    expect(JSON.parse(dialog.dataset.unassigned ?? "[]")).toEqual([
+      { name: "Dell Latitude", count: 2 },
+    ]);
+  });
+
+  it("does not ask again once the booking is underway", () => {
+    const tripod = individualRow("tripod-id", "Tripod", AssetStatus.AVAILABLE);
+
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        bookingAssets: [individualSlice(tripod)],
+        checkedOutAssetIds: [],
+        remainingToCheckOutByAsset: {},
+        status: BookingStatus.ONGOING,
+        modelRequests: [openDellReservation],
+      })
+    );
+    seedSelection([tripod]);
+
+    renderDialog();
+
+    expect(screen.queryByTestId("checkout-dialog-mock")).toBeNull();
+    expect(
+      document.querySelector(
+        'button[type="submit"][name="intent"][value="partial-checkout"]'
+      )
+    ).not.toBeNull();
   });
 });
