@@ -73,10 +73,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import {
-  canManageBookingItems,
-  isExplicitScanRequired,
-} from "~/utils/permissions/role-access";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -130,6 +127,9 @@ export const fulfilAndCheckoutSchema = z.object({
  *   group "already included" entries by model and to compute
  *   per-model progress without issuing a follow-up round-trip.
  */
+/** Statuses a booking can be checked out in, as `fulfilAndCheckOut` accepts. */
+const FULFILLABLE_STATUSES: string[] = ["RESERVED", "ONGOING", "OVERDUE"];
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -156,12 +156,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // The manage-items rule below reads only the booking's status, so it cannot
-    // answer "is this MY booking". Without this, a SELF_SERVICE user could load
-    // another member's booking, its model requests and its asset data through
-    // this screen, even though the action would refuse the checkout. Read
-    // access is the leak; the write guard does not cover it. No-op when
-    // `access.bookings.writeAll`.
+    // Seeing a booking does not grant checking it out: a caller who does not
+    // write every booking must own it. The action refuses the same callers, so
+    // this keeps another member's booking, model requests and asset data off
+    // this screen. No-op when `access.bookings.writeAll`.
     validateBookingOwnership({
       booking,
       userId,
@@ -169,17 +167,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: "check out",
     });
 
-    const canManageAssets = canManageBookingItems({
-      access,
-      bookingStatus: booking.status,
-    });
-
-    if (!canManageAssets) {
+    // This screen is a check-out, so it takes the check-out rule (the
+    // permission above, ownership, and a status that can be checked out), not
+    // the add-items rule: assigning reserved units is part of checking the
+    // booking out, which Self service may do on its own booking. The service
+    // re-checks the status under a row lock.
+    if (!FULFILLABLE_STATUSES.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        message:
-          "You are not allowed to add assets for this booking at the moment.",
+        message: "This booking cannot be checked out in its current status.",
         label: "Booking",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -349,11 +347,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // The loader's `canManageBookingItems` only shapes what renders; this
-    // check is what stops a cross-user check-out on a direct POST. SELF_SERVICE
-    // holds `booking:checkout`, and `fulfilAndCheckOut` does not check
-    // ownership itself. No-op when `access.bookings.writeAll`. Mirrors
-    // api+/mobile+/bookings.fulfil-and-checkout.ts.
+    // A direct POST skips the loader, so the action repeats the ownership
+    // check. SELF_SERVICE holds `booking:checkout`, and `fulfilAndCheckOut`
+    // does not check ownership itself. No-op when `access.bookings.writeAll`.
+    // Mirrors api+/mobile+/bookings.fulfil-and-checkout.ts.
     validateBookingOwnership({
       booking: basicBookingInfo,
       userId,

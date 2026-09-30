@@ -1335,6 +1335,29 @@ export const handle = {
 
 export type BookingPageActionData = typeof action;
 
+/**
+ * The verb phrase each mutating intent reads as in an ownership refusal
+ * ("You are not authorized to <verb> this booking.").
+ */
+const INTENT_VERB = {
+  save: "save",
+  reserve: "reserve",
+  delete: "delete",
+  removeAsset: "remove items from",
+  checkOut: "check out",
+  checkOutRemaining: "check out",
+  checkIn: "check in",
+  archive: "archive",
+  cancel: "cancel",
+  removeKit: "remove kits from",
+  "revert-to-draft": "revert",
+  "extend-booking": "extend",
+  "bulk-remove-asset-or-kit": "remove items from",
+  "partial-checkin": "check in",
+  "partial-checkout": "check out",
+  updateNotificationRecipients: "change the notification recipients of",
+} as const;
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -1566,7 +1589,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       booking: basicBookingInfo,
       userId,
       access,
-      action: intent,
+      action: INTENT_VERB[intent],
     });
 
     switch (intent) {

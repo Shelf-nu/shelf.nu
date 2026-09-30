@@ -1,6 +1,9 @@
 /**
- * Web fulfil-and-checkout action — what a direct POST, which skips the loader,
- * is held to before `fulfilAndCheckOut` runs.
+ * Web fulfil-and-checkout: who may open the scanner, and what a direct POST,
+ * which skips the loader, is held to before `fulfilAndCheckOut` runs.
+ *
+ * The page is a check-out, so it takes the check-out rule: Self service opens
+ * it on its own reserved booking, like every other check-out.
  *
  * Pins:
  *  - the permission demanded: `booking:checkout`, which BASE does not hold,
@@ -54,7 +57,7 @@ vi.mock("~/database/db.server", () => ({
   db: { booking: { findUniqueOrThrow: bookingFindUniqueOrThrow } },
 }));
 
-// why: the loader's export; the action never calls it.
+// why: the loader's booking read; each loader case supplies the booking.
 vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
 }));
@@ -81,7 +84,11 @@ vi.mock("~/modules/booking-settings/service.server", () => ({
   getBookingSettingsForOrganization: bookingSettingsMock,
 }));
 
-import { action } from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
+import { getBooking } from "~/modules/booking/service.server";
+import {
+  action,
+  loader,
+} from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 
@@ -251,5 +258,73 @@ describe("fulfil-and-checkout action", () => {
     expect(sendNotification).not.toHaveBeenCalledWith(
       expect.objectContaining({ title: "Checked out" })
     );
+  });
+});
+
+describe("fulfil-and-checkout loader", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** Loads the page as `roles` against a booking in `status` owned by `creatorId`. */
+  function load({
+    roles,
+    status,
+    creatorId = "user-1",
+  }: {
+    roles: OrganizationRoles[];
+    status: string;
+    creatorId?: string;
+  }) {
+    requirePermissionMock.mockResolvedValue(permissionContext({ roles }));
+    bookingSettingsMock.mockResolvedValue(createBookingSettings({}));
+    vi.mocked(getBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status,
+      creatorId,
+      custodianUserId: creatorId,
+      bookingAssets: [],
+      modelRequests: [
+        {
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Tripod" },
+        },
+      ],
+    } as never);
+
+    return loader({
+      request: new Request(
+        "https://app.shelf.nu/bookings/booking-1/overview/fulfil-and-checkout"
+      ),
+      params: { bookingId: "booking-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as unknown as Parameters<typeof loader>[0]);
+  }
+
+  it("opens for SELF_SERVICE on its own reserved booking", async () => {
+    await expect(
+      load({ roles: [OrganizationRoles.SELF_SERVICE], status: "RESERVED" })
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses SELF_SERVICE on someone else's booking", async () => {
+    const thrown = await load({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      status: "RESERVED",
+      creatorId: "someone-else",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(403);
+  });
+
+  it("answers 400 for a booking that cannot be checked out", async () => {
+    const thrown = await load({
+      roles: [OrganizationRoles.ADMIN],
+      status: "COMPLETE",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(400);
   });
 });
