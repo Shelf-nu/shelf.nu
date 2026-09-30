@@ -514,10 +514,17 @@ export type ModelReservationGuardClient = RawQueryClient &
 
 type AssertModelUnitsNotReservedElsewhereArgs = {
   /**
-   * The INDIVIDUAL assets about to hold a standalone `BookingAsset` row on
-   * `bookingId`. Assets without a model are ignored. Kit-driven slices must
-   * not be passed: a kit is reserved as one unit on its own axis, and its
-   * members are not claims on the loose pool.
+   * The INDIVIDUAL assets about to hold a `BookingAsset` row on `bookingId`,
+   * whether that row is standalone or kit-driven. Assets without a model are
+   * ignored.
+   *
+   * Kit-driven units belong here: a model pool has ONE axis, and
+   * {@link getAssetModelAvailability} counts every INDIVIDUAL `BookingAsset`
+   * row of the model without looking at `assetKitId`. A unit arriving inside a
+   * kit therefore leaves the loose pool exactly as a loose one does, and it can
+   * discharge a model reservation on the same terms.
+   *
+   * QUANTITY_TRACKED assets are not model units and must not be passed.
    */
   assets: ModelUnitCandidate[];
   bookingId: string;

@@ -10430,24 +10430,24 @@ export async function updateBookingAssets({
 
       /**
        * Units booked by name claim the same pool that other bookings' model
-       * reservations draw from. Only the standalone INDIVIDUAL rows that are
-       * new on this call are judged here: kit slices are reserved as one unit
-       * on the kit axis, quantity-tracked rows are judged by the pool guard
-       * above, and a re-submitted row holds nothing new.
+       * reservations draw from. Judged over `arrivalRowByAssetId`, the same set
+       * fulfilment draws from: a model pool has ONE axis, and
+       * `getAssetModelAvailability` counts every INDIVIDUAL `BookingAsset` row
+       * of the model without looking at `assetKitId`. So a unit arriving inside
+       * a kit leaves the loose pool exactly as a loose one does.
        *
-       * Narrower than `arrivalRowByAssetId` on purpose. That set answers "what
-       * did this booking just receive?"; this one answers "what is this
-       * booking taking from the shared pool?", and a kit slice is already
-       * counted there through its kit. The two questions are not the same, so
-       * widening one must not widen the other.
+       * Whatever may discharge a reservation must be measured against the pool
+       * it draws from, or a unit can answer this booking's promise while going
+       * unmeasured against everyone else's. Quantity-tracked rows stay out:
+       * they are judged by the pool guard above and are not model units.
        *
        * Runs before the inserts and before fulfilment, while this booking's
-       * own requests are still outstanding.
+       * own requests are still outstanding and therefore still exempt.
        */
       await assertModelUnitsNotReservedElsewhere({
         assets: validAssets.filter(
           (asset) =>
-            newlyStandaloneAssetIds.has(asset.id) &&
+            arrivalRowByAssetId.has(asset.id) &&
             asset.type === AssetType.INDIVIDUAL
         ),
         bookingId: id,
@@ -15418,13 +15418,21 @@ async function addScannedAssetsToBookingWithinTx(
 
   /**
    * Units scanned by name claim the same pool that other bookings' model
-   * reservations draw from. Standalone INDIVIDUAL scans only: kit slices are
-   * reserved as one unit on the kit axis and quantity-tracked scans are judged
-   * by the pool guard above. Runs before fulfilment, while this booking's own
+   * reservations draw from. Measured over the same INDIVIDUAL candidates
+   * fulfilment draws from, kit-driven arrivals included: a model pool has ONE
+   * axis, and `getAssetModelAvailability` counts every INDIVIDUAL
+   * `BookingAsset` row of the model without looking at `assetKitId`, so a unit
+   * arriving inside a scanned kit leaves the loose pool exactly as a loose one
+   * does. Anything allowed to discharge a reservation has to be measured
+   * against that pool, or it answers this booking's promise while going
+   * unmeasured against everyone else's.
+   *
+   * Quantity-tracked scans stay out: they are judged by the pool guard above
+   * and are not model units. Runs before fulfilment, while this booking's own
    * requests are still outstanding and therefore still exempt their model.
    */
   await assertModelUnitsNotReservedElsewhere({
-    assets: newStandaloneScans.filter(
+    assets: fulfilmentCandidates.filter(
       (meta) => meta.type === AssetType.INDIVIDUAL
     ),
     bookingId,

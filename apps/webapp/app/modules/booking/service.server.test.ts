@@ -16485,7 +16485,7 @@ describe("model reservation guard — write paths", () => {
       ]);
     });
 
-    it("hands the guard only the new standalone INDIVIDUAL rows, with the booking window", async () => {
+    it("hands the guard every new INDIVIDUAL arrival, kit-driven included, with the booking window", async () => {
       expect.assertions(2);
 
       await updateBookingAssets({
@@ -16505,9 +16505,10 @@ describe("model reservation guard — write paths", () => {
         userId: "user-1",
       });
 
-      // Kit slices are reserved on the kit axis, quantity-tracked rows have
-      // their own pool guard, and a row that is already there claims nothing.
-      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      // A kit-driven unit leaves the loose pool like a loose one, so it is
+      // measured too. Quantity-tracked rows have their own pool guard and are
+      // not model units; a row that is already there claims nothing new.
+      expect(handedAssetIds()).toEqual(["asset-ind", "asset-kit"]);
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
@@ -16549,9 +16550,10 @@ describe("model reservation guard — write paths", () => {
         "asset-qt",
         "asset-kit",
       ]);
-      // The pool guard stays standalone-only — the two lists are not the same
-      // question, and widening one does not widen the other.
-      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      // The pool guard sees the same arrivals, minus the quantity-tracked one:
+      // whatever may discharge a reservation is measured against the pool it
+      // draws from.
+      expect(handedAssetIds()).toEqual(["asset-ind", "asset-kit"]);
     });
 
     it("offers fulfilment nothing for a kit membership the booking already holds", async () => {
@@ -16619,7 +16621,7 @@ describe("model reservation guard — write paths", () => {
       });
     });
 
-    it("hands the guard the standalone INDIVIDUAL scans only, before fulfilment", async () => {
+    it("hands the guard every INDIVIDUAL scan, kit-driven included, before fulfilment", async () => {
       expect.assertions(3);
 
       await addScannedAssetsToBooking({
@@ -16632,7 +16634,9 @@ describe("model reservation guard — write paths", () => {
         userId: "user-1",
       });
 
-      expect(handedAssetIds()).toEqual(["asset-ind"]);
+      // The scanned kit's INDIVIDUAL member is measured too: it can discharge
+      // a reservation, so it has to answer to the pool it draws from.
+      expect(handedAssetIds()).toEqual(["asset-ind", "asset-kit"]);
       expect(guard).toHaveBeenCalledWith(
         expect.objectContaining({
           bookingId: "booking-1",
