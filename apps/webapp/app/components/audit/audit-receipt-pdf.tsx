@@ -309,7 +309,10 @@ export const AuditPDFContent = ({
             position: static !important;
             left: auto !important;
           }
+          /* The cells draw every line. The table's own border would run
+             down into the space a whole row leaves at the foot of a page. */
           .audit-assets-table {
+            border: 0 !important;
             border-collapse: separate !important;
             border-spacing: 0 !important;
           }
@@ -324,6 +327,14 @@ export const AuditPDFContent = ({
           .audit-assets-table th:first-child,
           .audit-assets-table td:first-child {
             border-left: 1px solid #d1d5db !important;
+          }
+          /* A row never splits across a page break; the header repeats on
+             every page. */
+          .audit-assets-table tr {
+            break-inside: avoid;
+          }
+          .audit-assets-table thead {
+            display: table-header-group;
           }
         }`}
       </style>

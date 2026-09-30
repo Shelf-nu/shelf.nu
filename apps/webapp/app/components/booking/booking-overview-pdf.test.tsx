@@ -74,8 +74,9 @@ function pdfMetaWith({
   qrImage?: string | null;
   showQrCodesOnPdfs?: boolean;
   description?: string | null;
-  /** Image fields to override on the one asset row. */
+  /** Fields to override on the one asset row. */
   asset?: Partial<{
+    description: string | null;
     mainImage: string | null;
     thumbnailImage: string | null;
     assetModel: { image: string | null; thumbnailImage: string | null } | null;
@@ -422,6 +423,41 @@ describe("booking checklist PDF: layout", () => {
     renderPreview({ displayCode: CODE128_CODE, description: "Studio shoot" });
     expect(screen.getByText("Description")).toBeInTheDocument();
     expect(screen.getByText("Studio shoot")).toBeInTheDocument();
+  });
+
+  it("gives each asset its own row group, description included", () => {
+    // why: the print styles keep a row group whole across a page break. With
+    // every row in one shared group, a description can land at the top of the
+    // next page with no asset above it.
+    const pdfMeta = pdfMetaWith({
+      displayCode: CODE128_CODE,
+      asset: { description: "Carbon legs, 1.5 m" },
+    });
+    pdfMeta.assets = [
+      ...pdfMeta.assets,
+      {
+        ...pdfMeta.assets[0],
+        id: "asset-2",
+        bookingAssetId: "ba-2",
+        title: "Light stand",
+        description: null,
+      },
+    ];
+    render(
+      <BookingPDFPreview componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+
+    const tripodGroup = screen.getByText("Tripod").closest("tr")!.parentElement;
+    const descriptionGroup = screen
+      .getByText("Carbon legs, 1.5 m")
+      .closest("tr")!.parentElement;
+    const standGroup = screen
+      .getByText("Light stand")
+      .closest("tr")!.parentElement;
+
+    expect(tripodGroup?.tagName).toBe("TBODY");
+    expect(descriptionGroup).toBe(tripodGroup);
+    expect(standGroup).not.toBe(tripodGroup);
   });
 
   it("fixes the table to the page width, one share per column", () => {

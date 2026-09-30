@@ -409,7 +409,10 @@ export const BookingCheckinReceiptPreview = ({
             padding: 0 !important;
             width: auto !important;
           }
+          /* The cells draw every line. The table's own border would run
+             down into the space a whole row leaves at the foot of a page. */
           .checkin-receipt-table {
+            border: 0 !important;
             border-collapse: separate !important;
             border-spacing: 0 !important;
           }
