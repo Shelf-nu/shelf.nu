@@ -90,9 +90,21 @@ describe("maskEmailAddresses", () => {
     }
   );
 
-  it("masks every address in an encoded comma-separated list", () => {
+  it("masks every address in an encoded comma-separated list, keeping the commas", () => {
     expect(maskEmailAddresses("to=a%40x.com%2Cb%40y.com")).toBe(
-      `to=${MASKED_EMAIL_LOCAL_PART}%40x.com${MASKED_EMAIL_LOCAL_PART}%40y.com`
+      `to=${MASKED_EMAIL_LOCAL_PART}%40x.com%2C${MASKED_EMAIL_LOCAL_PART}%40y.com`
+    );
+  });
+
+  it("keeps an encoded page path in front of an encoded address", () => {
+    expect(
+      maskEmailAddresses("redirectTo=%2Fotp%3Femail%3Djane%40acme.com")
+    ).toBe(`redirectTo=%2Fotp%3Femail%3D${MASKED_EMAIL_LOCAL_PART}%40acme.com`);
+  });
+
+  it("stops the local part at an encoded space", () => {
+    expect(maskEmailAddresses("Hello%20jane%40acme.com")).toBe(
+      `Hello%20${MASKED_EMAIL_LOCAL_PART}%40acme.com`
     );
   });
 
@@ -273,6 +285,54 @@ describe("maskEmailsInSentryPayload", () => {
       message: `No account found for ${MASKED_EMAIL_LOCAL_PART}@acme.com`,
       attributes: { label: "Auth", status: 404 },
     });
+  });
+
+  it("keeps a Date as the same Date", () => {
+    const when = new Date("2026-09-30T10:00:00Z");
+
+    const masked = maskEmailsInSentryPayload({ extra: { when } });
+
+    expect(masked.extra.when).toBe(when);
+  });
+
+  it("keeps an Error an Error, with its message and stack masked", () => {
+    const cause = new TypeError("No account for jane.doe@acme.com");
+
+    const masked = maskEmailsInSentryPayload({ extra: { cause } });
+
+    expect(masked.extra.cause).toBeInstanceOf(TypeError);
+    expect(masked.extra.cause.message).toBe(
+      `No account for ${MASKED_EMAIL_LOCAL_PART}@acme.com`
+    );
+    expect(masked.extra.cause.stack).not.toContain("jane.doe");
+    // The original is left as it was.
+    expect(cause.message).toBe("No account for jane.doe@acme.com");
+  });
+
+  it("passes other class instances through untouched", () => {
+    const labels = new Set(["a"]);
+    class Holder {
+      value = 1;
+    }
+    const holder = new Holder();
+
+    const masked = maskEmailsInSentryPayload({ extra: { labels, holder } });
+
+    expect(masked.extra.labels).toBe(labels);
+    expect(masked.extra.holder).toBe(holder);
+  });
+
+  it("passes Sentry's own processing metadata through without copying it", () => {
+    // It carries live Scope and client objects, which Sentry reads before the
+    // hooks run and removes before sending.
+    const sdkProcessingMetadata = { capturedSpanScope: { client: {} } };
+
+    const masked = maskEmailsInSentryPayload({
+      transaction: "/assets",
+      sdkProcessingMetadata,
+    });
+
+    expect(masked.sdkProcessingMetadata).toBe(sdkProcessingMetadata);
   });
 
   it("copies cyclic structures without recursing forever", () => {

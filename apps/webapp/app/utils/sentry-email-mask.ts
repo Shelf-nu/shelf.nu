@@ -40,9 +40,22 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * five that delimit a URL (`/ ? = & #`), so an address such as
  * `o'connor@acme.com` or `john!smith@acme.com` is masked whole. Those five stay
  * out because an address in a URL follows them (`/otp?email=jane%40acme.com`),
- * and taking them in would mask the page path along with the address. The
- * trade-off: an address that itself contains one of them keeps the part before
- * that character unmasked. Such addresses are valid but almost never issued.
+ * and taking them in would mask the page path along with the address. The same
+ * goes for their encoded forms: a percent-encoded byte counts toward the local
+ * part only when it encodes a character the local part allows (`%2B` for `+`,
+ * the UTF-8 bytes `%80`-`%FF` of a non-ASCII letter), never an encoded `/ ? =
+ * & # @`, comma or space. That keeps an encoded path
+ * (`%2Fotp%3Femail%3Djane%40acme.com`) and the commas of an encoded list. The
+ * trade-off: an address that itself contains one of those characters, or a
+ * literal `%`, keeps the part before it unmasked. Such addresses are valid but
+ * almost never issued.
+ *
+ * A percent-encoded byte that does not start an address is matched on its own
+ * (the last alternative) and written back unchanged. Consuming it whole is what
+ * stops a match starting inside it: without that, `%2Cb%40y.com` would be read
+ * from its `2Cb`, since hex digits are letters and digits too. A lookbehind
+ * would say the same thing more directly, but it cannot run in the browsers
+ * this module ships to.
  *
  * Every repeat is bounded and the local part never runs across an encoded
  * separator, so the time to scan a string grows in line with its length. An
@@ -53,7 +66,7 @@ export const MASKED_EMAIL_LOCAL_PART = "[email]";
  * when percent-encoded), 32 labels of up to 63 characters for a domain.
  */
 const EMAIL_ADDRESS =
-  /(?:"(?:[^"\\\r\n]|\\[^\r\n]){0,256}"|(?:(?!%40)[\p{L}\p{M}\p{N}.!$%'*+^_`{|}~-]){1,256})(@|%40)((?:(?:[\p{L}\p{M}\p{N}-]|%[89A-F][0-9A-F]){1,63}(?:\.|%2E)){1,32}(?:[\p{L}\p{M}]|%[89A-F][0-9A-F]){2,63})/giu;
+  /(?:"(?:[^"\\\r\n]|\\[^\r\n]){0,256}"|(?:[\p{L}\p{M}\p{N}.!$'*+^_`{|}~-]|%(?:2[147ABDE]|5[EF]|60|7[B-E]|[89A-F][0-9A-F])){1,256})(@|%40)((?:(?:[\p{L}\p{M}\p{N}-]|%[89A-F][0-9A-F]){1,63}(?:\.|%2E)){1,32}(?:[\p{L}\p{M}]|%[89A-F][0-9A-F]){2,63})|(%[0-9A-F]{2})/giu;
 
 /**
  * Stack traces and debug metadata describe code, not runtime data: file paths,
@@ -64,6 +77,14 @@ const EMAIL_ADDRESS =
  */
 const STACKTRACE_KEY = "stacktrace";
 const DEBUG_META_KEY = "debug_meta";
+
+/**
+ * Sentry's own bookkeeping on an event: live `Scope` and client objects that
+ * Sentry reads before the hooks run and removes before sending. Walking it
+ * would copy the whole client on every transaction for nothing, so it is
+ * passed through as it is.
+ */
+const SDK_PROCESSING_METADATA_KEY = "sdkProcessingMetadata";
 
 /**
  * Replaces the local part of every email address in a string, keeping the
@@ -78,15 +99,22 @@ export function maskEmailAddresses(text: string): string {
     return text;
   }
 
-  return text.replace(EMAIL_ADDRESS, `${MASKED_EMAIL_LOCAL_PART}$1$2`);
+  return text.replace(
+    EMAIL_ADDRESS,
+    (_match, separator: string, domain: string, strayEscape?: string) =>
+      strayEscape ?? `${MASKED_EMAIL_LOCAL_PART}${separator}${domain}`
+  );
 }
 
 /**
  * Returns a copy of a Sentry payload (error event, transaction or log) with
  * every email address in every string value masked.
  *
- * Walks nested objects and arrays. Stack traces and debug metadata are kept as
- * they are, apart from captured local variables (see {@link STACKTRACE_KEY}).
+ * Walks nested plain objects and arrays, and copies errors with their message
+ * masked. Other class instances (a Date, Map or Set) are passed through as
+ * they are, as is Sentry's own processing metadata. Stack traces and debug
+ * metadata are kept as they are, apart from captured local variables (see
+ * {@link STACKTRACE_KEY}).
  * Shared and cyclic references are copied once, so the copy has the same shape
  * as the input. Never mutates the input.
  *
@@ -127,10 +155,22 @@ function maskValue(value: unknown, copies: WeakMap<object, unknown>): unknown {
     return copy;
   }
 
+  if (value instanceof Error) {
+    return maskError(value, copies);
+  }
+
+  // Only plain objects are rebuilt. A Date, Map, Set or class instance keeps
+  // its data in fields a plain copy cannot see, so copying one would turn it
+  // into `{}`; such values are passed through as they are.
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return value;
+  }
+
   const copy: Record<string, unknown> = {};
   copies.set(value, copy);
   for (const [key, item] of Object.entries(value)) {
-    if (key === DEBUG_META_KEY) {
+    if (key === DEBUG_META_KEY || key === SDK_PROCESSING_METADATA_KEY) {
       copy[key] = item;
     } else if (key === STACKTRACE_KEY) {
       copy[key] = maskStacktrace(item, copies);
@@ -138,6 +178,32 @@ function maskValue(value: unknown, copies: WeakMap<object, unknown>): unknown {
       copy[key] = maskValue(item, copies);
     }
   }
+  return copy;
+}
+
+/**
+ * Copies an error as the same kind of error, with its message, stack and own
+ * fields (such as a `ShelfError`'s `additionalData`) masked.
+ *
+ * @param error - The error to copy
+ * @param copies - Originals already copied, mapped to their copies
+ * @returns A masked copy with the original's prototype
+ */
+function maskError(error: Error, copies: WeakMap<object, unknown>): Error {
+  const copy = Object.create(Object.getPrototypeOf(error)) as Error;
+  copies.set(error, copy);
+
+  for (const [key, item] of Object.entries(error)) {
+    (copy as unknown as Record<string, unknown>)[key] = maskValue(item, copies);
+  }
+  copy.message = maskEmailAddresses(error.message);
+  if (error.stack !== undefined) {
+    copy.stack = maskEmailAddresses(error.stack);
+  }
+  if (error.cause !== undefined) {
+    copy.cause = maskValue(error.cause, copies);
+  }
+
   return copy;
 }
 
