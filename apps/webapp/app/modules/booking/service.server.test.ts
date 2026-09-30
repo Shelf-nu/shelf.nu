@@ -15798,13 +15798,20 @@ describe("checkinBooking - releases a quantity-only kit whose member another kit
    * @param heldElsewhere - Slices of other live bookings that are still out.
    */
   function arrange(heldElsewhere: any[]) {
+    // why: the booking under check-in is the fixture above; the real read
+    // needs a database this suite does not have.
     //@ts-expect-error missing vitest type
     db.booking.findUniqueOrThrow.mockResolvedValue(kitOneBooking);
+    // why: the completing write returns the booking the post-transaction
+    // notes and emails read; its shape is not under test.
     //@ts-expect-error missing vitest type
     db.booking.update.mockResolvedValue({
       ...kitOneBooking,
       status: BookingStatus.COMPLETE,
     });
+    // why: three reads share this model method and each needs its own
+    // answer; routing by query shape lets one fixture describe what other
+    // live bookings still have out.
     (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockImplementation((q?: any) => {
@@ -15824,15 +15831,23 @@ describe("checkinBooking - releases a quantity-only kit whose member another kit
         }
         return Promise.resolve([]);
       });
+    // why: each slice is booked for one unit, so the per-slice remaining
+    // read answers 1 and the default disposition returns it.
     (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ quantity: 1 });
+    // why: no unit has been logged back yet, so nothing is already claimed.
     (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue({ _sum: { quantity: 0 } });
+    // why: booking-2 has no partial check-in, so its hold on the shared
+    // tripod stands; earlier suites leave other values in this mock.
     (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
+    // why: the row lock is a raw `SELECT ... FOR UPDATE`, which the
+    // model-shaped database mock cannot express; the locked row's pool is
+    // large enough that returning units never trips the pool-drain guard.
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
