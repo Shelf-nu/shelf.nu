@@ -78,6 +78,16 @@ interface Props {
   recipientEmail?: string;
 }
 
+/**
+ * The HTML email sent for booking lifecycle events: reserved, completed,
+ * extended, reverted, cancelled, deleted, updated, and the scheduled
+ * reminders. One template serves them all; `heading` names the event and the
+ * optional sections (actor line, booked items, requested models, cancellation
+ * reason, change list) appear only when their prop is given.
+ *
+ * Every date is formatted with `prefs`, which are the RECIPIENT's resolved
+ * preferences, so each person sees times in their own format and time zone.
+ */
 export function BookingUpdatesEmailTemplate({
   booking,
   heading,

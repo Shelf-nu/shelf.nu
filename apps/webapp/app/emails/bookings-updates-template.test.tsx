@@ -54,6 +54,10 @@ const actor: BookingEmailActor = {
   at: new Date("2026-09-30T14:15:00Z"),
 };
 
+/**
+ * Renders the completed-booking email for the custodian with the given prefs
+ * and optional actor, and parses it so tests can query the DOM.
+ */
 async function renderEmail(props: {
   prefs: ResolvedFormatPrefs;
   actor?: BookingEmailActor;
