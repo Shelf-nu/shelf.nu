@@ -236,7 +236,13 @@ export const QUANTITY_COLUMN_BLOCK: readonly ColumnLabelKey[] = [
   "minQuantity",
 ];
 
-function isQuantityColumn(name: ColumnLabelKey): boolean {
+/**
+ * Whether a column belongs to {@link QUANTITY_COLUMN_BLOCK}.
+ *
+ * @param name - A column name
+ * @returns `true` for Free now, Total quantity, Reserved, Stock status and Min quantity
+ */
+export function isQuantityColumn(name: ColumnLabelKey): boolean {
   return QUANTITY_COLUMN_BLOCK.includes(name);
 }
 
@@ -299,18 +305,22 @@ function positionInQuantityBlock(
  * position moves down by one, so the user's own order is kept.
  *
  * - A quantity column goes next to the quantity columns the set already has
- *   (see {@link QUANTITY_COLUMN_BLOCK}), wherever the user put them, and starts
- *   hidden: the user switches it on from the columns list.
+ *   (see {@link QUANTITY_COLUMN_BLOCK}), wherever the user put them. In a
+ *   workspace with quantity-tracked assets it takes its default visibility, so
+ *   Free now and Stock status appear and the rest stay one switch away. In a
+ *   workspace without any it starts hidden, instead of as a column of dashes.
  * - Any other column goes in at the position a fresh row would give it, with
  *   its default visibility.
  *
  * @param columns - The row's saved columns; not modified
  * @param missing - Names of the default columns to add
+ * @param options.hasQuantityAssets - Whether the workspace has any quantity-tracked asset
  * @returns A new column list with the missing default columns inserted
  */
 export function insertMissingDefaultColumns(
   columns: Column[],
-  missing: ColumnLabelKey[]
+  missing: ColumnLabelKey[],
+  { hasQuantityAssets }: { hasQuantityAssets: boolean }
 ): Column[] {
   // Ascending default order, so block columns missing together are inserted
   // in block order, each next to the one before it.
@@ -323,7 +333,10 @@ export function insertMissingDefaultColumns(
       const position =
         positionInQuantityBlock(acc, field.name) ?? field.position;
 
-      const visible = isQuantityColumn(field.name) ? false : field.visible;
+      const visible =
+        isQuantityColumn(field.name) && !hasQuantityAssets
+          ? false
+          : field.visible;
 
       return [
         ...acc.map((col) =>

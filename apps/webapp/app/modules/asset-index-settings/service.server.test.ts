@@ -120,6 +120,7 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
 
   beforeEach(() => {
     findFirstMock.mockReset();
+    assetFindFirstMock.mockReset();
     updateMock.mockReset();
     updateMock.mockImplementation((({
       data,
@@ -128,8 +129,16 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     }) => Promise.resolve({ columns: data.columns })) as never);
   });
 
-  function loadSavedColumns(columns: Column[], canUseBarcodes: boolean) {
+  /** Loads a saved set; the workspace tracks quantities unless told otherwise. */
+  function loadSavedColumns(
+    columns: Column[],
+    canUseBarcodes: boolean,
+    { hasQuantityAssets = true }: { hasQuantityAssets?: boolean } = {}
+  ) {
     findFirstMock.mockResolvedValue({ columns } as never);
+    assetFindFirstMock.mockResolvedValue(
+      (hasQuantityAssets ? { id: "asset-1" } : null) as never
+    );
     return getAssetIndexSettings({
       userId: "user-1",
       organizationId: "org-1",
@@ -137,7 +146,7 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     });
   }
 
-  it("adds the quantity columns as one block around Total quantity, switched off", async () => {
+  it("adds the quantity columns as one block around Total quantity, Free now and Stock status switched on", async () => {
     const saved = [...SAVED_DEFAULTS, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
 
     const settings = await loadSavedColumns(saved, true);
@@ -154,10 +163,11 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
       ...savedOrder.slice(quantityIndex + 1),
     ]);
 
-    // Nothing new is switched on.
-    expect(find(columns, "available")?.visible).toBe(false);
+    // The workspace tracks quantities: the two new default columns appear,
+    // Reserved stays one switch away.
+    expect(find(columns, "available")?.visible).toBe(true);
+    expect(find(columns, "stockStatus")?.visible).toBe(true);
     expect(find(columns, "reserved")?.visible).toBe(false);
-    expect(find(columns, "stockStatus")?.visible).toBe(false);
 
     // Every saved column keeps its visibility.
     for (const col of saved) {
@@ -169,7 +179,7 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     expect(new Set(positions).size).toBe(positions.length);
   });
 
-  it("adds every new quantity column hidden when Total quantity is hidden too", async () => {
+  it("switches Free now and Stock status on even when Total quantity stays hidden", async () => {
     const quantityHidden = SAVED_DEFAULTS.map((col) =>
       col.name === "quantity" ? { ...col, visible: false } : col
     );
@@ -177,8 +187,31 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     const settings = await loadSavedColumns(quantityHidden, false);
     const columns = settings.columns as Column[];
 
-    for (const name of BLOCK) {
+    expect(find(columns, "available")?.visible).toBe(true);
+    expect(find(columns, "stockStatus")?.visible).toBe(true);
+    // Total quantity, Reserved and Min quantity stay as the user had them.
+    expect(find(columns, "quantity")?.visible).toBe(false);
+    expect(find(columns, "reserved")?.visible).toBe(false);
+    expect(find(columns, "minQuantity")?.visible).toBe(false);
+  });
+
+  it("adds every new quantity column switched off in a workspace without quantity-tracked assets", async () => {
+    const saved = [...SAVED_DEFAULTS, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
+
+    const settings = await loadSavedColumns(saved, true, {
+      hasQuantityAssets: false,
+    });
+    const columns = settings.columns as Column[];
+
+    for (const name of ["available", "reserved", "stockStatus"]) {
       expect(find(columns, name)?.visible).toBe(false);
+    }
+    // Still one block, ready for the day the workspace starts counting.
+    const newOrder = inOrder(columns);
+    const start = newOrder.indexOf("available");
+    expect(newOrder.slice(start, start + BLOCK.length)).toEqual(BLOCK);
+    for (const col of saved) {
+      expect(find(columns, col.name)?.visible).toBe(col.visible);
     }
   });
 
@@ -248,7 +281,8 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
       visible: true,
       position: 4,
     });
-    expect(find(columns, "stockStatus")?.visible).toBe(false);
+    expect(find(columns, "stockStatus")?.visible).toBe(true);
+    expect(find(columns, "reserved")?.visible).toBe(false);
   });
 
   it("leaves a column set that already has every quantity column untouched", async () => {
@@ -264,6 +298,8 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     await loadSavedColumns(saved, false);
 
     expect(updateMock).not.toHaveBeenCalled();
+    // Nothing missing, so the workspace is not asked about its assets.
+    expect(assetFindFirstMock).not.toHaveBeenCalled();
   });
 });
 

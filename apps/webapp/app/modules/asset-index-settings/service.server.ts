@@ -18,6 +18,7 @@ import {
   fixedFields,
   generateBarcodeColumns,
   insertMissingDefaultColumns,
+  isQuantityColumn,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -41,6 +42,25 @@ function getDefaultModeForRole(
 
 const label: ErrorLabel = "Asset Index Settings";
 
+/**
+ * Whether the workspace has at least one quantity-tracked asset. Decides
+ * whether the quantity columns start visible in a column set.
+ *
+ * @param organizationId - The workspace to check
+ * @param client - The Prisma client or transaction to read through
+ * @returns `true` when any asset in the workspace is quantity-tracked
+ */
+async function workspaceHasQuantityAssets(
+  organizationId: string,
+  client: Pick<typeof db, "asset"> = db
+): Promise<boolean> {
+  const asset = await client.asset.findFirst({
+    where: { organizationId, type: AssetType.QUANTITY_TRACKED },
+    select: { id: true },
+  });
+  return Boolean(asset);
+}
+
 export async function createUserAssetIndexSettings({
   userId,
   organizationId,
@@ -59,16 +79,13 @@ export async function createUserAssetIndexSettings({
   const _db = tx || db;
 
   try {
-    const [org, quantityAsset] = await Promise.all([
+    const [org, hasQuantityAssets] = await Promise.all([
       getOrganizationById(organizationId, {
         customFields: {
           where: { active: true, deletedAt: null },
         },
       }),
-      _db.asset.findFirst({
-        where: { organizationId, type: AssetType.QUANTITY_TRACKED },
-        select: { id: true },
-      }),
+      workspaceHasQuantityAssets(organizationId, _db),
     ]);
 
     /** We start at the default fields length */
@@ -90,9 +107,7 @@ export async function createUserAssetIndexSettings({
     });
 
     const columns = [
-      ...defaultColumnsForWorkspace({
-        hasQuantityAssets: Boolean(quantityAsset),
-      }),
+      ...defaultColumnsForWorkspace({ hasQuantityAssets }),
       ...barcodeColumns,
       ...customFieldsColumns,
     ];
@@ -453,9 +468,15 @@ async function validateColumns({
     // If default fields are missing, add them from our static defaults at
     // their default positions, keeping the saved order of everything else
     if (missingDefaultFields.length > 0) {
+      // Asked only when a quantity column is missing, which happens once per
+      // saved column set, not on every page load.
+      const hasQuantityAssets = missingDefaultFields.some(isQuantityColumn)
+        ? await workspaceHasQuantityAssets(organizationId)
+        : false;
       updatedColumns = insertMissingDefaultColumns(
         updatedColumns,
-        missingDefaultFields
+        missingDefaultFields,
+        { hasQuantityAssets }
       );
       needsUpdate = true;
     }
