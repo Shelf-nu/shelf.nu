@@ -1790,12 +1790,13 @@ describe("partialCheckinBooking", () => {
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
       // why: the kit status update is scoped by organizationId (cross-org
-      // IDOR hardening) and by CHECKED_OUT, so a kit that shares a member
-      // with this booking but is held in custody is left alone.
+      // IDOR hardening), by CHECKED_OUT and by the absence of a KitCustody
+      // row, so a kit held in a custodian's hands is left alone.
       where: {
         id: { in: ["kit-1"] },
         organizationId: "org-1",
         status: KitStatus.CHECKED_OUT,
+        custody: { is: null },
       },
       data: { status: KitStatus.AVAILABLE },
     });
@@ -15712,9 +15713,200 @@ describe("checkinBooking - releases a kit detached mid-booking", () => {
         id: { in: ["kit-1"] },
         organizationId: "org-1",
         status: KitStatus.CHECKED_OUT,
+        custody: { is: null },
       },
       data: { status: KitStatus.AVAILABLE },
     });
+  });
+});
+
+/**
+ * The Check in button releases every kit the booking took out, and the release
+ * is decided by booking slices alone.
+ *
+ * A `QUANTITY_TRACKED` asset can sit in several kits at once, and a unit of it
+ * out on another booking under a DIFFERENT kit keeps `Asset.status` at
+ * CHECKED_OUT. That status says nothing about this booking's kit, whose own
+ * slices all come back here.
+ */
+describe("checkinBooking - releases a quantity-only kit whose member another kit holds", () => {
+  const ORG = "org-1";
+  const OUT = new Date("2026-09-28T16:09:27.000Z");
+
+  /** Kit 1's two quantity-tracked slices on this booking. */
+  const kitOneBooking = {
+    ...mockBookingData,
+    status: BookingStatus.ONGOING,
+    bookingAssets: [
+      {
+        id: "ba-tripod-k1",
+        assetId: "asset-tripod",
+        quantity: 1,
+        assetKitId: "ak-tripod-k1",
+        sourceKitId: "kit-1",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+        asset: {
+          id: "asset-tripod",
+          type: AssetType.QUANTITY_TRACKED,
+          consumptionType: ConsumptionType.TWO_WAY,
+          unitOfMeasure: "pcs",
+          title: "Tripod",
+          // The tripod belongs to kit 1 and kit 2. Kit 2 is out on booking-2,
+          // so the asset reads CHECKED_OUT and booking-2 is live on it.
+          assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+          status: AssetStatus.CHECKED_OUT,
+          bookingAssets: [
+            { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            { booking: { id: "booking-2", status: BookingStatus.ONGOING } },
+          ],
+        },
+      },
+      {
+        id: "ba-mic-k1",
+        assetId: "asset-mic",
+        quantity: 1,
+        assetKitId: "ak-mic-k1",
+        sourceKitId: "kit-1",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+        asset: {
+          id: "asset-mic",
+          type: AssetType.QUANTITY_TRACKED,
+          consumptionType: ConsumptionType.TWO_WAY,
+          unitOfMeasure: "pcs",
+          title: "Mic",
+          assetKits: [{ kitId: "kit-1" }],
+          status: AssetStatus.CHECKED_OUT,
+          bookingAssets: [
+            { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+          ],
+        },
+      },
+    ],
+    partialCheckins: [],
+  };
+
+  /**
+   * Routes the `bookingAsset.findMany` shapes the button check-in issues:
+   *   - `where.assetId.in` + `bookingId.notIn`: the asset-status reconciler's
+   *     "held by another live booking" read;
+   *   - `where.OR` + `bookingId.notIn`: the kit release guard's read of other
+   *     live bookings' slices still out;
+   *   - `where.assetId` as a string: `computeBookingAssetRemaining`.
+   *
+   * @param heldElsewhere - Slices of other live bookings that are still out.
+   */
+  function arrange(heldElsewhere: any[]) {
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(kitOneBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...kitOneBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    (db.bookingAsset.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockImplementation((q?: any) => {
+        const where = q?.where ?? {};
+        if (where.bookingId?.notIn && where.assetId?.in) {
+          return Promise.resolve(
+            heldElsewhere
+              .filter((slice) => where.assetId.in.includes(slice.assetId))
+              .map((slice) => ({ assetId: slice.assetId }))
+          );
+        }
+        if (where.bookingId?.notIn && where.OR) {
+          return Promise.resolve(heldElsewhere);
+        }
+        if (typeof where.assetId === "string") {
+          return Promise.resolve([{ quantity: 1 }]);
+        }
+        return Promise.resolve([]);
+      });
+    (db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ quantity: 1 });
+    (db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue({ _sum: { quantity: 0 } });
+    (db.partialBookingCheckin.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-tripod",
+      title: "Tripod",
+      quantity: 20,
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: "pcs",
+      consumptionType: ConsumptionType.TWO_WAY,
+    });
+  }
+
+  /** Kit 2's tripod slice, out on booking-2. It holds kit 2, not kit 1. */
+  const kitTwoTripodOut = {
+    id: "ba-tripod-k2",
+    assetId: "asset-tripod",
+    assetKitId: "ak-tripod-k2",
+    sourceKitId: "kit-2",
+    asset: {
+      type: AssetType.QUANTITY_TRACKED,
+      assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+    },
+  };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("releases the kit when a shared member is out on another booking under another kit", async () => {
+    expect.assertions(1);
+    arrange([kitTwoTripodOut]);
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: ORG,
+      hints: mockClientHints,
+      userId: "user-1",
+    });
+
+    expect(db.kit.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["kit-1"] },
+        organizationId: ORG,
+        status: KitStatus.CHECKED_OUT,
+        custody: { is: null },
+      },
+      data: { status: KitStatus.AVAILABLE },
+    });
+  });
+
+  it("keeps the kit CHECKED_OUT while another live booking still has one of its own slices out", async () => {
+    expect.assertions(1);
+    arrange([
+      kitTwoTripodOut,
+      {
+        id: "ba-mic-k1-elsewhere",
+        assetId: "asset-mic",
+        assetKitId: "ak-mic-k1",
+        sourceKitId: "kit-1",
+        asset: {
+          type: AssetType.QUANTITY_TRACKED,
+          assetKits: [{ kitId: "kit-1" }],
+        },
+      },
+    ]);
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: ORG,
+      hints: mockClientHints,
+      userId: "user-1",
+    });
+
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 });
 
