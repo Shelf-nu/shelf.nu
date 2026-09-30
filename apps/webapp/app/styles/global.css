@@ -89,8 +89,14 @@ p {
   display: none;
 }
 
+/*
+ * pointer-events-auto is load-bearing, not cosmetic. A modal Radix overlay
+ * (the Sheet) sets `pointer-events: none` on <body> and re-enables it only
+ * inside its own content. This dialog portals to <body>, so without this it
+ * renders normally and silently ignores every click.
+ */
 .dialog-backdrop {
-  @apply fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
+  @apply pointer-events-auto fixed inset-0 z-[100] backdrop-blur-sm flex items-center justify-center bg-black/50;
 }
 /*
  * why h-[100dvh]: on iOS Safari `h-full` resolves to the LARGE viewport (LVH),

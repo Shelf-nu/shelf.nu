@@ -40,6 +40,25 @@ type ListTitleProps = {
   itemsGetter?: (data: LoaderData) => ListItemData[];
 
   /**
+   * The rows on screen, when they are not the loader's `items` — a list
+   * rendering rows from another key (the asset index's model view) must pass
+   * them, or both the count and "Select all" describe a different set.
+   */
+  items?: ListItemData[];
+
+  /**
+   * Whether `countLabel` already states the list's total.
+   *
+   * A label that describes the rows on the page (the booking overview's
+   * "18 assets and 2 kits") still needs "out of N" to say more exist. A label
+   * that is itself the total (the model view's model count) must not get one,
+   * because the total appended counts RENDERED ROWS, which is a different
+   * unit: the model view renders a "No model" bucket that is not a model, so
+   * the suffix produced "3 asset models out of 4" above two rows.
+   */
+  countLabelIsTotal?: boolean;
+
+  /**
    * Optional class name for the title element
    */
   titleClassName?: string;
@@ -71,8 +90,10 @@ export default function ListTitle({
   hasBulkActions,
   disableSelectAllItems = false,
   itemsGetter,
+  items: itemsProp,
   titleClassName,
   countLabel,
+  countLabelIsTotal = false,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -88,20 +109,21 @@ export default function ListTitle({
    * for any count shown to a human.
    */
   const items =
-    typeof itemsGetter === "function"
+    itemsProp ??
+    (typeof itemsGetter === "function"
       ? itemsGetter(loaderData)
-      : loaderData.items;
+      : loaderData.items);
 
   /**
    * DISPLAY count: rows actually rendered on this page.
    *
-   * Must not come from `items` above. On the booking overview a 10-row page
-   * containing two kits (4 and 3 members) flattens to 17 selectable entities,
-   * so the header read "17 items out of 20" — a number matching neither the
-   * rows on screen nor the total. Identical to `items.length` on every list
-   * that passes no `itemsGetter`.
+   * Must not come from `items` above whenever an `itemsGetter` flattens
+   * composite rows: on the booking overview a 10-row page holding two kits of
+   * 4 and 3 members flattens to 17 selectable entities, and counting those
+   * gives a number matching neither the rows on screen nor the total.
+   * `itemsProp` needs no such care — it IS the rendered rows.
    */
-  const rowCount = loaderData.items?.length ?? 0;
+  const rowCount = (itemsProp ?? loaderData.items)?.length ?? 0;
 
   const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
@@ -156,9 +178,11 @@ export default function ListTitle({
           </div>
         ) : (
           <div>
-            {/* Both branches pluralise on the count, not on `> 1` — an empty
+            {/* Both branches pluralise on the count, not on `> 1`: an empty
                 list read "0 item". Only exactly one is singular. */}
-            {perPage < totalItems ? (
+            {countLabel && countLabelIsTotal ? (
+              <p>{countLabel()}</p>
+            ) : perPage < totalItems ? (
               <p>
                 {countLabel
                   ? countLabel()

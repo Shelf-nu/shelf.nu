@@ -7,6 +7,7 @@ import { HydratedRouter } from "react-router/dom";
 
 import { isUnsupportedBrowser } from "~/utils/browser-support";
 import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
+import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
 
 // Must run before hydration so every React commit goes through the guard.
@@ -47,8 +48,7 @@ if (window.env?.SENTRY_DSN) {
       // chains form submit + revalidation + image upload across multiple
       // HTTP spans, which Sentry's perf detector groups as
       // `performance_consecutive_http`. Drop any transaction on this route
-      // that includes the form-data submit span — the previous threshold
-      // (`> 1` matching spans) was too narrow and let most events through.
+      // that includes the form-data submit span, however many there are.
       if (event.transaction === "/assets/new") {
         const hasAssetNewDataSpan = spans.some(
           (s) => s.description?.includes("/assets/new.data")
@@ -58,11 +58,15 @@ if (window.env?.SENTRY_DSN) {
         }
       }
 
-      return event;
+      return maskEmailsInSentryPayload(event);
     },
     // Drop/keep rules live in `handleClientBeforeSend` (a pure, unit-tested
     // function) so they can be exercised without hydrating this entry module.
-    beforeSend: handleClientBeforeSend,
+    // Kept events have email addresses masked before they are sent.
+    beforeSend(event) {
+      const kept = handleClientBeforeSend(event);
+      return kept && maskEmailsInSentryPayload(kept);
+    },
   });
 }
 

@@ -135,9 +135,30 @@ const ALREADY_ON_BOOKING: Exclude<
   mainImage: null,
   thumbnailImage: null,
   assetModelId: null,
+  // Its row already answered something, or answers nothing this booking
+  // reserves. Either way scanning it cannot claim.
+  claimable: false,
   kitId: null,
   bookedQuantity: 1,
   type: "INDIVIDUAL",
+};
+
+/**
+ * An item already on the booking whose row answered no reservation, and whose
+ * model the booking still has outstanding.
+ *
+ * This is the state a unit lands in when it was added before the reservation
+ * existed, or before its model matched one.
+ */
+const CLAIMABLE_ON_BOOKING: Exclude<
+  FulfilSessionInfo,
+  null
+>["alreadyIncluded"][number] = {
+  ...ALREADY_ON_BOOKING,
+  id: "asset-claimable",
+  title: "Claimable Tripod",
+  assetModelId: "model-0",
+  claimable: true,
 };
 
 /** One member of a scanned kit, as `KIT_INCLUDE` selects it. */
@@ -324,33 +345,35 @@ describe("FulfilReservationsDrawer layout", () => {
   });
 
   describe("folding the model list", () => {
-    it("starts folded when the list is long enough to need its own scroll", () => {
-      // Fixed chrome competes with the scan list for one screen. A list that
-      // cannot be read at a glance is not worth the height by default.
+    it("starts folded when many models are reserved", () => {
+      // Fixed chrome competes with the scan list for one screen, and the
+      // summary row already carries overall progress.
       renderDrawer(40);
 
       expect(queryModelListNode()).toBeNull();
       expect(getModelsToggle()).toHaveAttribute("aria-expanded", "false");
     });
 
-    it("starts open when the whole list is visible at once", () => {
+    it("starts folded even when the whole list would fit", () => {
+      // Size does not decide this. A short list opening by itself and a long
+      // one staying shut is the screen changing shape under the operator.
       renderDrawer(3);
 
-      expect(queryModelListNode()?.children).toHaveLength(3);
-      expect(getModelsToggle()).toHaveAttribute("aria-expanded", "true");
+      expect(queryModelListNode()).toBeNull();
+      expect(getModelsToggle()).toHaveAttribute("aria-expanded", "false");
     });
 
-    it("folds and unfolds on demand", async () => {
+    it("unfolds and refolds on demand", async () => {
       const user = userEvent.setup();
       renderDrawer(3);
+
+      await user.click(getModelsToggle());
+      expect(queryModelListNode()?.children).toHaveLength(3);
 
       await user.click(getModelsToggle());
       // Asserted against the DOM, not the a11y tree: a list that is merely
       // marked hidden still occupies the drawer.
       expect(queryModelListNode()).toBeNull();
-
-      await user.click(getModelsToggle());
-      expect(queryModelListNode()?.children).toHaveLength(3);
     });
 
     it("keeps overall progress visible while folded", () => {
@@ -433,6 +456,115 @@ describe("FulfilReservationsDrawer check-out rule", () => {
     expect(document.querySelector('input[name="assetIds[0]"]')).toHaveAttribute(
       "value",
       "asset-tripod"
+    );
+  });
+});
+
+describe("FulfilReservationsDrawer already-on-booking scans", () => {
+  /**
+   * How many places report `fulfilled / booked` for the one model rendered.
+   *
+   * With a single model the header total and the model's own strip carry the
+   * same text, so the count is what tells them apart from absence.
+   */
+  function progressReadings(text: string): number {
+    return screen.queryAllByText(text).length;
+  }
+
+  /** A resolved scan of an asset that is already on the booking. */
+  function scanOf(id: string, assetModelId: string | null) {
+    return {
+      id,
+      title: id,
+      type: "INDIVIDUAL" as const,
+      assetModelId,
+      mainImage: null,
+      thumbnailImage: null,
+    };
+  }
+
+  it("counts a unit already on the booking whose row answered nothing", () => {
+    // The customer-reported case: the unit is in the booking's asset list, its
+    // model is reserved, and scanning it used to report only that it was
+    // already there.
+    renderDrawer(1, {
+      alreadyIncluded: [CLAIMABLE_ON_BOOKING],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already here, now counts toward/)).toBeTruthy();
+    // It answers a reserved unit, so the model's strip has to move.
+    expect(progressReadings("1 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("0 / 4")).toBe(0);
+    // And it has to reach the server, or nothing is stamped.
+    expect(submittedValues("assetIds")).toContain("asset-claimable");
+  });
+
+  it("leaves a fresh quantity-tracked scan out of the count", () => {
+    // A reserved unit is a whole unit, and the server refuses anything else,
+    // so a pool contributing a slice must not fill the strip. The kit-member
+    // pass has always applied this rule; a loose scan has to as well, or the
+    // booking reads ready to leave on a claim the write declines.
+    renderDrawer(1, {
+      scannedAssets: {
+        "qr-pool": {
+          ...scanOf("asset-pool", "model-0"),
+          type: "QUANTITY_TRACKED",
+        },
+      },
+    });
+
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+  });
+
+  it("leaves a unit whose row already answered as a plain duplicate", () => {
+    // Its reservation is already discharged, so counting it again would report
+    // a reserved unit as satisfied twice over by one asset.
+    renderDrawer(1, {
+      alreadyIncluded: [{ ...CLAIMABLE_ON_BOOKING, claimable: false }],
+      scannedAssets: { "qr-claimable": scanOf("asset-claimable", "model-0") },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(progressReadings("1 / 4")).toBe(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("leaves a claimable unit alone when the booking reserves nothing it answers", () => {
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, assetModelId: "model-not-reserved" },
+      ],
+      scannedAssets: {
+        "qr-claimable": scanOf("asset-claimable", "model-not-reserved"),
+      },
+    });
+
+    expect(screen.getByText(/Already on this booking/)).toBeTruthy();
+    expect(progressReadings("0 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).not.toContain("asset-claimable");
+  });
+
+  it("counts a claimable unit only up to what is still reserved", () => {
+    // One unit left outstanding, two claimable units scanned: the second is an
+    // over-scan and must not move the strip past its reservation.
+    renderDrawer(1, {
+      alreadyIncluded: [
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-a" },
+        { ...CLAIMABLE_ON_BOOKING, id: "asset-b" },
+      ],
+      scannedAssets: {
+        "qr-a": scanOf("asset-a", "model-0"),
+        "qr-b": scanOf("asset-b", "model-0"),
+      },
+    });
+
+    // Both are claimable and the model reserves 4, so both count here.
+    expect(progressReadings("2 / 4")).toBeGreaterThan(0);
+    expect(submittedValues("assetIds")).toEqual(
+      expect.arrayContaining(["asset-a", "asset-b"])
     );
   });
 });

@@ -1,113 +1,87 @@
 /**
- * Custody in the workspace backup.
+ * Asset custody in the workspace backup restore.
  *
- * The backup export writes each asset's `custody` cell as its Custody rows,
- * whole, custodian included. The restore cannot use their ids (they only
- * resolve in the workspace the backup came from), so it recreates custody by
- * custodian name. This module is the pure half of that: which custody a
- * restored asset gets from its row. Resolving names to team members lives in
- * the restore itself.
+ * The backup export writes an asset's custody rows whole, each with its
+ * `custodian` team member. Every id in them belongs to the workspace the
+ * backup came from, so a restore reads only the custodian's name and the
+ * quantity held, and resolves the name in the target workspace. This is the
+ * pure half: which custody a restored asset gets. The database half (finding
+ * or creating the team member) lives in the restore itself.
  *
- * @see {@link file://./../../utils/csv.server.ts} `buildCsvBackupDataFromAssets`
  * @see {@link file://./service.server.ts} `createAssetsFromBackupImport`
+ * @see {@link file://./backup-placements.ts} the same split for placements
  */
 import { AssetType } from "@prisma/client";
 
-/** What the backup says about a custodian, to find or create them by. */
-export type BackupCustodian = {
-  /**
-   * Tells the file's custodians apart: their team member id in the source
-   * workspace, or their name when the row has no id. Team member names are not
-   * unique, so two people can share one. It is a label within the file only;
-   * an id from the file never resolves anything in the target workspace.
-   */
-  key: string;
-  name: string;
+/** One custody a restored asset is created with. */
+export type BackupCustody = {
+  /** The custodian team member's name, as the source workspace spelled it. */
+  custodianName: string;
+  /** Timestamps to create the team member with when the workspace has none
+   * of that name. */
   createdAt?: Date;
   updatedAt?: Date;
+  /** Units held. Always 1 for an individual asset. */
+  quantity: number;
 };
 
-/** One custody allocation a restored asset gets: who holds how many units. */
-export type BackupCustody = { custodian: BackupCustodian; quantity: number };
-
-/** A Custody row as the backup carries it, reduced to what the restore reads. */
-type BackupCustodyRow = {
-  custodian: BackupCustodian;
-  quantity: unknown;
-  kitCustodyId: unknown;
-};
-
-function readDate(value: unknown) {
+/** Reads a date the backup wrote as an ISO string, if it is one. */
+function readDate(value: unknown): Date | undefined {
   if (typeof value !== "string" || value === "") return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
-function readCustodyRow(row: unknown): BackupCustodyRow | null {
-  if (typeof row !== "object" || row === null) return null;
-  const { custodian, quantity, kitCustodyId } = row as Record<string, unknown>;
-  if (typeof custodian !== "object" || custodian === null) return null;
-
-  const { id, name, createdAt, updatedAt } = custodian as Record<
-    string,
-    unknown
-  >;
-  if (typeof name !== "string" || name.trim() === "") return null;
-
-  return {
-    custodian: {
-      key: typeof id === "string" && id !== "" ? `id:${id}` : `name:${name}`,
-      name,
-      createdAt: readDate(createdAt),
-      updatedAt: readDate(updatedAt),
-    },
-    quantity,
-    kitCustodyId,
-  };
-}
-
 /**
  * The custody a restored asset gets from its backup row.
  *
- * - Only operator custody is restored. A row with a `kitCustodyId` exists
- *   because the asset's kit is in custody; the backup carries no kits, so the
- *   asset comes back outside any kit and without that custody.
- * - An individual asset has at most one custodian, so it keeps the first
- *   operator row, at 1 unit.
- * - A pool keeps every operator row with its quantity. A row without a whole
- *   quantity above zero gets 1, the column's default.
- * - A backup written while an asset had at most one custody row carries that
- *   row as a single object rather than a list. It restores as that one row.
+ * - The cell holds a list of custody rows. A backup written while custody was
+ *   one row per asset holds a single object instead; it reads as a list of one.
+ * - A pool keeps every custodian, with the units each holds. Rows naming the
+ *   same custodian are added up: kit-driven custody comes back as the
+ *   custodian's own, because the backup carries no kits to rebuild it from.
+ * - An individual asset is held by one custodian, so it keeps the first, at 1.
  *
  * @param args.type - The row's asset type. Missing means individual, the
  *   column's default.
  * @param args.custody - The parsed `custody` cell, if the row has one.
- * @returns One entry per custody row to create.
+ * @returns One entry per custodian, in the order the file lists them.
  */
-export function custodyForRestore({
+export function custodiesForRestore({
   type,
   custody,
 }: {
   type: unknown;
   custody: unknown;
 }): BackupCustody[] {
-  const rows = (Array.isArray(custody) ? custody : [custody])
-    .map(readCustodyRow)
-    .filter((row): row is BackupCustodyRow => row !== null)
-    // The export turns a null `kitCustodyId` into "".
-    .filter(({ kitCustodyId }) => !kitCustodyId);
+  const rows: unknown[] = Array.isArray(custody) ? custody : [custody];
 
-  if (type !== AssetType.QUANTITY_TRACKED) {
-    return rows.length > 0
-      ? [{ custodian: rows[0].custodian, quantity: 1 }]
-      : [];
-  }
+  const byName = new Map<string, BackupCustody>();
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const { custodian, quantity } = row as Record<string, unknown>;
+    if (typeof custodian !== "object" || custodian === null) continue;
+    const { name, createdAt, updatedAt } = custodian as Record<string, unknown>;
+    if (typeof name !== "string" || name.trim() === "") continue;
 
-  return rows.map(({ custodian, quantity }) => ({
-    custodian,
-    quantity:
+    const units =
       typeof quantity === "number" && Number.isInteger(quantity) && quantity > 0
         ? quantity
-        : 1,
-  }));
+        : 1;
+    const seen = byName.get(name);
+    if (seen) {
+      seen.quantity += units;
+    } else {
+      byName.set(name, {
+        custodianName: name,
+        createdAt: readDate(createdAt),
+        updatedAt: readDate(updatedAt),
+        quantity: units,
+      });
+    }
+  }
+
+  const custodies = [...byName.values()];
+  if (type === AssetType.QUANTITY_TRACKED) return custodies;
+  return custodies.length > 0 ? [{ ...custodies[0], quantity: 1 }] : [];
 }
