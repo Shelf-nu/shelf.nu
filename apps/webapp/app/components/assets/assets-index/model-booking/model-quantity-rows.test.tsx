@@ -172,7 +172,9 @@ describe("ModelQuantityRows", () => {
       />
     );
 
-    fireEvent.change(screen.getByLabelText(/^add$/i), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText(/^add$/i), {
+      target: { value: "" },
+    });
 
     expect(onChange).toHaveBeenLastCalledWith("m1", 1);
   });

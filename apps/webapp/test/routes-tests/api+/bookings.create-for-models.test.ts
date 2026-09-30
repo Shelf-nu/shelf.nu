@@ -285,4 +285,35 @@ describe("api/bookings/create-for-models", () => {
     // — a submission with nothing in it never reaches the database.
     expect(dbMocks.assetModelFindMany).not.toHaveBeenCalled();
   });
+
+  it("names the models field in the refusal, so the dialog can render it", async () => {
+    dbMocks.assetModelFindMany.mockResolvedValue([]);
+
+    const response = (await action(
+      buildArgs(
+        post({
+          ...validBookingFields(),
+          models: [{ assetModelId: "am1", quantity: 0 }],
+        })
+      )
+    )) as unknown as Response;
+
+    expect(response.status).toBe(400);
+
+    const body = (await response.json()) as {
+      error: {
+        message: string;
+        additionalData?: {
+          validationErrors?: Record<string, { message?: string }>;
+        };
+      };
+    };
+
+    // The dialog reads exactly this path to put the message next to the
+    // quantity rows. A refusal that arrives under any other key leaves it with
+    // nothing to render, and the submission looks accepted.
+    expect(body.error.additionalData?.validationErrors?.models?.message).toBe(
+      "Quantity must be a positive integer"
+    );
+  });
 });

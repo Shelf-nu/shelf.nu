@@ -49,3 +49,21 @@ export function modelReservationsField(emptyMessage: string) {
       .default([])
   );
 }
+
+/**
+ * Submitted shape of the models a NEW booking reserves.
+ *
+ * Parsed on its own rather than folded into the booking form's schema, so an
+ * empty or malformed selection is reported before the org's working-hours and
+ * booking settings are loaded: the models are what that endpoint exists for.
+ *
+ * Lives beside the field rather than in the route because the dialog that posts
+ * there reads its refusals under this type, and importing a route into a
+ * component would drag server-only code into the client bundle.
+ *
+ * @see {@link file://./../../routes/api+/bookings.create-for-models.ts} (the action that parses it)
+ * @see {@link file://./../../components/assets/assets-index/model-booking/create-booking-for-models-dialog.tsx} (the dialog that renders its errors)
+ */
+export const CreateBookingForModelsSchema = z.object({
+  models: modelReservationsField("Select at least one model to book."),
+});

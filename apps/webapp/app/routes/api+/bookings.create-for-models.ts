@@ -25,9 +25,8 @@
  */
 
 import { data, redirect, type ActionFunctionArgs } from "react-router";
-import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
-import { modelReservationsField } from "~/modules/asset-model/model-reservations-schema";
+import { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
 import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { buildTagsSet } from "~/modules/tag/service.server";
@@ -45,25 +44,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-
-/**
- * The models to reserve, as the dialog submits them.
- *
- * Posted as indexed form fields (`models[0].assetModelId`,
- * `models[0].quantity`, …), which `parseData` turns back into an array before
- * this schema sees it. Quantities arrive as strings from the form, hence the
- * coercion.
- *
- * Parsed on its own rather than folded into {@link BookingFormSchema} so an
- * empty or malformed selection is reported before the org's working-hours and
- * booking settings are loaded — the models are what this route exists for.
- *
- * Exported so the dialog and tests validate against the same shape. The
- * `models` field itself is shared with the add-to-existing route.
- */
-export const CreateBookingForModelsSchema = z.object({
-  models: modelReservationsField("Select at least one model to book."),
-});
 
 /**
  * Creates a booking holding model-level reservations for the selected models.

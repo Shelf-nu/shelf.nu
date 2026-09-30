@@ -39,11 +39,29 @@ export const Dialog = ({
       (document.activeElement as HTMLElement | null) ?? null;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current?.();
-      }
+      if (event.key !== "Escape") return;
+
+      /**
+       * A floating layer owns Escape while the keystroke comes from inside it.
+       *
+       * Radix portals popover, select and combobox content into a
+       * `[data-radix-popper-content-wrapper]` on `body` and closes it from its
+       * own document-level handler. Because this listener runs first (see
+       * below), closing unconditionally would shut the whole dialog the moment
+       * someone dismissed a picker inside it, losing the form. Escape is
+       * expected to peel one layer at a time, so the innermost open layer
+       * takes it and this one only acts when nothing floats above.
+       *
+       * Keyed on where the keystroke came from rather than on whether any
+       * popper exists: an unrelated open layer elsewhere on the page, a
+       * tooltip for instance, must not stop this dialog closing.
+       */
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-radix-popper-content-wrapper]")) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseRef.current?.();
     };
 
     // `window`, not `document`, and capture: the capture phase runs

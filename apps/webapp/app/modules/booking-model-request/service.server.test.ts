@@ -23,7 +23,9 @@ import {
   getAssetModelAvailability,
   getBookingModelTabData,
   materializeModelRequestForAsset,
+  MAX_MODELS_PER_RESERVATION_BATCH,
   removeBookingModelRequest,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
   upsertBookingModelRequest,
   upsertBookingModelRequests,
 } from "./service.server";
@@ -1653,6 +1655,116 @@ describe("upsertBookingModelRequests", () => {
     // The write it delegates to takes the quantity as already checked, so a
     // fractional or zero target would reach the database unexamined.
     expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * One addition per model, `count` models, every quantity 1.
+   *
+   * Sized off the exported limit rather than a literal, so raising or lowering
+   * the limit moves these cases with it instead of leaving them asserting a
+   * number the service no longer uses.
+   */
+  function additionsForModels(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      assetModelId: `batch-model-${index}`,
+      quantity: 1,
+    }));
+  }
+
+  it("refuses a batch over the model limit before opening a transaction", async () => {
+    expect.assertions(4);
+
+    const error = await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: additionsForModels(MAX_MODELS_PER_RESERVATION_BATCH + 1),
+    }).catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    // A 4xx the dialog renders beside the rows, not a 500 that reaches Sentry:
+    // an oversized selection is a user decision, not a fault.
+    expect(error.status).toBe(400);
+    // The message has to carry the limit and the count, because the operator's
+    // only way forward is to select fewer and they need to know how many fewer.
+    expect(error.message).toContain(
+      `at most ${MAX_MODELS_PER_RESERVATION_BATCH} models`
+    );
+    // The point of the guard. Every model costs fourteen statements inside the
+    // one interactive transaction the batch commits in, and a batch that runs
+    // past the budget aborts with P2028 after doing all of that work: the
+    // selection was valid, the pool had the units, and nothing was reserved.
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("accepts a batch at exactly the model limit", async () => {
+    expect.assertions(2);
+
+    const { requests } = await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: additionsForModels(MAX_MODELS_PER_RESERVATION_BATCH),
+    });
+
+    // The limit is inclusive: a cap that refused the number it advertises
+    // would leave the message telling the operator to do something it rejects.
+    expect(requests).toHaveLength(MAX_MODELS_PER_RESERVATION_BATCH);
+    expect(writtenQuantities()).toHaveLength(MAX_MODELS_PER_RESERVATION_BATCH);
+  });
+
+  it("counts distinct models against the limit, not submitted entries", async () => {
+    expect.assertions(1);
+
+    // why: the folded target is larger than the block's default pool of 12, so
+    // without this the pool guard refuses the batch and the test would pass on
+    // the wrong refusal. Enough units that the only thing left to refuse it is
+    // the limit under test.
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(100);
+
+    // Well past the limit in entries, one model in writes. Repeats are summed
+    // into a single write before the transaction opens, so they cost the
+    // transaction nothing extra and must not be what the limit measures.
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: Array.from(
+        { length: MAX_MODELS_PER_RESERVATION_BATCH + 5 },
+        () => ({ assetModelId: MODEL_ID, quantity: 1 })
+      ),
+    });
+
+    expect(writtenQuantities()).toEqual([
+      {
+        assetModelId: MODEL_ID,
+        quantity: MAX_MODELS_PER_RESERVATION_BATCH + 5,
+      },
+    ]);
+  });
+
+  it("runs the batch on a raised transaction budget, not Prisma's default", async () => {
+    expect.assertions(2);
+
+    await upsertBookingModelRequests({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      additions: [{ assetModelId: MODEL_ID, quantity: 1 }],
+    });
+
+    // The limit alone cannot bound this transaction. Two of the availability
+    // aggregates filter through the model's `Asset` relation, so their cost
+    // nests over that model's units and each unit's booking rows: workspace
+    // data, not anything the caller passes. Capping the number of models says
+    // nothing about the cost of one, so the budget has to be stated.
+    expect(db.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
+    // Prisma's default is five seconds, meant for a single write. Reverting to
+    // it silently puts a multi-model loop back on a single-write budget.
+    expect(RESERVATION_BATCH_TX_TIMEOUT_MS).toBeGreaterThan(5_000);
   });
 });
 

@@ -23,7 +23,9 @@ import type { Mock } from "vitest";
 
 import { db } from "~/database/db.server";
 import {
+  assertReservationBatchWithinLimit,
   loadActorBestEffort,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
   writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
 import { ShelfError } from "~/utils/error";
@@ -125,6 +127,17 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
     .fn()
     .mockResolvedValue(undefined),
   fulfilModelRequestsForAssets: vitest.fn().mockResolvedValue(undefined),
+  // why: the batch-size guard is a pure input check whose limit and message are
+  // pinned where it lives. Here it is stubbed to a no-op so these tests can
+  // name as many models as an assertion needs, and so the one test below can
+  // assert that `createBooking` delegates to it at all.
+  assertReservationBatchWithinLimit: vitest.fn(),
+  // why: a total factory cannot reach the real module, so this is a stand-in
+  // value. The assertion below reads this same binding, so what it pins is that
+  // `createBooking` passes THE CONSTANT rather than omitting the option or
+  // inlining a number of its own. The value itself is pinned in
+  // booking-model-request/service.server.test.ts, where the module is real.
+  RESERVATION_BATCH_TX_TIMEOUT_MS: 15_000,
 }));
 
 // why: activity events are written inside the same transaction and are not
@@ -188,6 +201,10 @@ beforeEach(() => {
   vitest.mocked(writeBookingModelRequestInTx).mockReset();
   vitest.mocked(loadActorBestEffort).mockReset();
   vitest.mocked(loadActorBestEffort).mockResolvedValue(actor);
+  // why: a throwing implementation staged by one test would abort every later
+  // call before it reaches the transaction, so the guard resets to letting
+  // batches through.
+  vitest.mocked(assertReservationBatchWithinLimit).mockReset();
 });
 
 /** The `(tx, args)` pairs the reservation write core was called with. */
@@ -309,5 +326,82 @@ describe("createBooking model reservations", () => {
       actor,
       actor,
     ]);
+  });
+
+  it("bounds the batch before creating anything", async () => {
+    // why: the limit and its message belong to the guard and are pinned where
+    // it lives. What this file owns is that `createBooking` reaches it, and
+    // reaches it early: a refusal has to land before the booking row exists,
+    // or an oversized selection leaves a booking behind with no reservations.
+    vitest.mocked(assertReservationBatchWithinLimit).mockImplementation(() => {
+      throw new ShelfError({
+        cause: null,
+        message: "Reserve at most 25 models at a time.",
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    });
+
+    await expect(
+      createBooking({
+        booking: baseBooking,
+        assetIds: [],
+        hints,
+        modelRequests: [{ assetModelId: "am1", quantity: 1 }],
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    // Nothing was attempted: no booking, no reservation, and not even the actor
+    // lookup that the reservation path hoists ahead of the transaction.
+    expect(testDb.__committedBookings()).toHaveLength(0);
+    expect(testDb.__lastTx()).toBeNull();
+    expect(reservationWrites()).toEqual([]);
+    expect(vitest.mocked(loadActorBestEffort)).not.toHaveBeenCalled();
+  });
+
+  it("measures the batch by the models actually submitted", async () => {
+    await createBooking({
+      booking: baseBooking,
+      assetIds: [],
+      hints,
+      modelRequests: [
+        { assetModelId: "am1", quantity: 2 },
+        { assetModelId: "am2", quantity: 5 },
+        { assetModelId: "am1", quantity: 1 },
+      ],
+    });
+
+    // Every id, repeats included: the guard folds them itself, because the
+    // transaction's cost is per distinct model. Handing it a pre-deduplicated
+    // list here would work today and quietly stop matching the moment the
+    // guard's own counting changes.
+    expect(
+      vitest.mocked(assertReservationBatchWithinLimit)
+    ).toHaveBeenCalledWith(["am1", "am2", "am1"]);
+  });
+
+  it("runs on the reservation-batch transaction budget, not Prisma's default", async () => {
+    expect.assertions(1);
+
+    await createBooking({
+      booking: baseBooking,
+      assetIds: [],
+      hints,
+      modelRequests: [{ assetModelId: "am1", quantity: 1 }],
+    });
+
+    // The batch limit caps how many models a caller may name; it cannot cap
+    // what measuring one costs, because the availability reads nest over each
+    // model's own units and their booking rows. So the timeout is what bounds
+    // the duration, and this transaction carries more than the reservations
+    // alone: the booking and its assets are written before the loop starts.
+    //
+    // Asserted on the LAST call because this suite's `beforeEach` resets the
+    // collaborators but not `$transaction`, so its call history accumulates and
+    // `toHaveBeenCalledWith` would pass on an earlier test's call.
+    expect(db.$transaction).toHaveBeenLastCalledWith(expect.any(Function), {
+      timeout: RESERVATION_BATCH_TX_TIMEOUT_MS,
+    });
   });
 });

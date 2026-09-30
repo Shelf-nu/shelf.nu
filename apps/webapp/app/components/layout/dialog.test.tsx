@@ -79,6 +79,38 @@ describe("Dialog dismissal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves Escape to an open Radix layer the keystroke came from", () => {
+    // why: Radix portals popover and select content into a
+    // `[data-radix-popper-content-wrapper]` on body and closes it from its own
+    // document-level handler. This listener runs first, so closing
+    // unconditionally would shut the whole dialog the moment someone dismissed
+    // a picker inside it, losing the form. Escape peels one layer at a time.
+    const onClose = vi.fn();
+    render(
+      <Dialog open onClose={onClose} title="t">
+        body
+      </Dialog>
+    );
+
+    const wrapper = document.createElement("div");
+    wrapper.setAttribute("data-radix-popper-content-wrapper", "");
+    const inside = document.createElement("input");
+    wrapper.appendChild(inside);
+    document.body.appendChild(wrapper);
+
+    fireEvent.keyDown(inside, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    // why: an open layer elsewhere must not hold the dialog open, so a
+    // keystroke from outside any popper still closes it.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    wrapper.remove();
+  });
+
   it("closes when the backdrop itself is clicked", () => {
     const { onClose, container } = renderDialog();
 

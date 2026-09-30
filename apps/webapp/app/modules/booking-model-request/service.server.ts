@@ -63,6 +63,90 @@ const ACTIVE_BOOKING_STATUSES = [
 ] as const;
 
 /**
+ * The most distinct models one call may reserve in a single transaction.
+ *
+ * Every model in a batch costs its own round of work inside the one
+ * interactive transaction the batch commits in: the two `SELECT … FOR UPDATE`
+ * locks its caller takes, then, in {@link writeBookingModelRequestInTx}, the
+ * booking and model lookups, the same two locks again, the current-quantity
+ * read, the four windowed aggregates behind
+ * {@link getAssetModelAvailability}, the by-name read, the upsert and the
+ * activity event. Fourteen statements per model, and none of them can move
+ * outside the transaction without giving up what the transaction is for: two
+ * concurrent batches measuring the same free pool and both committing.
+ *
+ * **This number cannot bound the transaction on its own, and is not what
+ * mainly protects it.** Two of the four aggregates filter through the model's
+ * `Asset` relation, so Postgres drives a nested loop over that model's own
+ * fan-out: its units, then each unit's `BookingAsset` rows. The cost is linear
+ * in that fan-out, which is workspace data rather than anything a caller
+ * passes. A model with a handful of units costs well under a millisecond to
+ * measure; one with hundreds of units across years of bookings costs hundreds.
+ * Capping the COUNT of models says nothing about the cost of each, so the
+ * `timeout` both batch writers pass is what actually bounds the duration. This
+ * limit keeps the ordinary case far inside that bound, and caps something the
+ * timeout cannot: how much of the workspace one batch locks.
+ *
+ * Lock breadth is the sharper reason for a low number. Each model's pool lock
+ * is held to COMMIT, so a batch blocks every concurrent reservation write and
+ * every assignment touching any model it names, for as long as it runs. Twenty
+ * is deliberately close to the number of models a small workspace has at all.
+ *
+ * Twenty is also exactly the asset index's default page, so ticking the header
+ * checkbox on an unmodified page always fits. Reaching the limit takes a
+ * widened page (the selector offers 50 and 100) or a selection carried across
+ * pages, and splitting that costs one extra submit.
+ */
+export const MAX_MODELS_PER_RESERVATION_BATCH = 20;
+
+/**
+ * Interactive-transaction budget for a reservation batch, in milliseconds.
+ *
+ * Prisma's default is five seconds, and no client-level `transactionOptions`
+ * raises it (`createDatabaseClient` passes none), so a batch writer that omits
+ * this runs a multi-model loop on the budget meant for a single write. Fifteen
+ * seconds is what every other multi-write transaction in this repo asks for.
+ *
+ * This is the bound that holds when {@link MAX_MODELS_PER_RESERVATION_BATCH}
+ * cannot: per-model cost scales with each model's fan-out, so a legal batch of
+ * heavily-booked models can take far longer than the same count of sparse
+ * ones. Raising it further is not the answer if batches start expiring here.
+ * A batch that needs more than fifteen seconds is holding every model's pool
+ * lock for that long, and the fix is a smaller limit or a cheaper measurement,
+ * not a longer window.
+ */
+export const RESERVATION_BATCH_TX_TIMEOUT_MS = 15_000;
+
+/**
+ * Refuses a batch naming more models than one transaction can carry.
+ *
+ * Counts DISTINCT models rather than submitted entries, because both batch
+ * writers fold repeated entries for one model into a single write: a list that
+ * names a model three times costs exactly what naming it once costs.
+ *
+ * Call before opening the transaction. Opening one to reject input holds locks
+ * on behalf of a request that was never going to commit.
+ *
+ * @param assetModelIds - Every model id the batch names, repeats included.
+ * @throws {ShelfError} 400 when the batch names more than
+ *   {@link MAX_MODELS_PER_RESERVATION_BATCH} distinct models.
+ */
+export function assertReservationBatchWithinLimit(
+  assetModelIds: string[]
+): void {
+  const distinctModels = new Set(assetModelIds).size;
+  if (distinctModels <= MAX_MODELS_PER_RESERVATION_BATCH) return;
+
+  throw new ShelfError({
+    cause: null,
+    label,
+    status: 400,
+    message: `Reserve at most ${MAX_MODELS_PER_RESERVATION_BATCH} models at a time. This selection names ${distinctModels}. Reserve them in smaller batches.`,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
  * The `Booking` predicate for "overlaps this window".
  *
  * An absent end means a draft with no dates: nothing can overlap it, so the
@@ -1599,13 +1683,22 @@ type UpsertBookingModelRequestsArgs = {
  * reservation change; the per-model `ActivityEvent`s the write core emits
  * cover the batch.
  *
+ * **Bounded twice.** At most {@link MAX_MODELS_PER_RESERVATION_BATCH} distinct
+ * models per call, and the transaction runs on
+ * {@link RESERVATION_BATCH_TX_TIMEOUT_MS} rather than Prisma's single-write
+ * default. Both are needed: the limit caps what a caller can ask for and how
+ * much of the workspace the batch locks, while the timeout is what bounds the
+ * duration, because per-model cost scales with each model's fan-out rather
+ * than with anything the caller passes.
+ *
  * @param args.additions - Units to ADD per model, each a positive integer.
  *   Never a target.
  * @returns `{ requests }` — the written reservation rows, one per distinct
  *   model.
- * @throws {ShelfError} 400 when `additions` is empty or any quantity is not a
- *   positive integer; whatever the write core raises for the first model that
- *   fails.
+ * @throws {ShelfError} 400 when `additions` is empty, when any quantity is not
+ *   a positive integer, or when it names more distinct models than
+ *   {@link MAX_MODELS_PER_RESERVATION_BATCH}; whatever the write core raises
+ *   for the first model that fails.
  */
 export async function upsertBookingModelRequests({
   bookingId,
@@ -1654,6 +1747,10 @@ export async function upsertBookingModelRequests({
     );
   }
 
+  // After the fold, so a selection that repeats a model is measured by what it
+  // actually costs the transaction rather than by how it was submitted.
+  assertReservationBatchWithinLimit([...additionsByModel.keys()]);
+
   // Loaded before the transaction opens, for the reason
   // `upsertBookingModelRequest` gives: the actor read is a plain User lookup
   // with nothing to serialise against the reservation writes, and hoisting it
@@ -1662,72 +1759,75 @@ export async function upsertBookingModelRequests({
   const actor = await loadActorBestEffort(userId);
 
   try {
-    return await db.$transaction(async (tx) => {
-      /**
-       * Locks first, then the read they protect.
-       *
-       * The read below is the operand of every absolute target, so it has to
-       * be taken under the same locks as the writes. A plain read commits to
-       * nothing: Postgres runs READ COMMITTED here (no client sets an
-       * isolation level), so it returns a snapshot another transaction is free
-       * to supersede before these writes land. Two callers each adding 3 to a
-       * booking holding 5 would both read 5, both target 8, and the booking
-       * would end at 8 instead of 11. The loss is silent, because the second
-       * write sees its target equal to what the first committed, takes the
-       * reduction path, skips the pool check and emits no event.
-       *
-       * Both locks, not just the pool lock: `removeBookingModelRequest` takes
-       * only the reservation row lock, so the pool lock alone leaves a
-       * concurrent cancellation free to move the operand.
-       *
-       * Sorted by model id, NOT by the order the caller selected. Each lock is
-       * `SELECT … FOR UPDATE` and holds to commit, so two batches covering the
-       * same models in opposite orders would each hold what the other waits
-       * for, and Postgres would break the cycle by aborting one. Plain
-       * code-unit order, matching every other writer of these rows. Taking the
-       * locks here rather than inside the write core does not widen the set
-       * the batch holds at commit; it only acquires them sooner.
-       */
-      const orderedModelIds = [...additionsByModel.keys()].sort();
-      for (const assetModelId of orderedModelIds) {
-        await lockAssetModelForReservation(tx, assetModelId, organizationId);
-        await lockModelRequestRow(tx, bookingId, assetModelId);
-      }
+    return await db.$transaction(
+      async (tx) => {
+        /**
+         * Locks first, then the read they protect.
+         *
+         * The read below is the operand of every absolute target, so it has to
+         * be taken under the same locks as the writes. A plain read commits to
+         * nothing: Postgres runs READ COMMITTED here (no client sets an
+         * isolation level), so it returns a snapshot another transaction is free
+         * to supersede before these writes land. Two callers each adding 3 to a
+         * booking holding 5 would both read 5, both target 8, and the booking
+         * would end at 8 instead of 11. The loss is silent, because the second
+         * write sees its target equal to what the first committed, takes the
+         * reduction path, skips the pool check and emits no event.
+         *
+         * Both locks, not just the pool lock: `removeBookingModelRequest` takes
+         * only the reservation row lock, so the pool lock alone leaves a
+         * concurrent cancellation free to move the operand.
+         *
+         * Sorted by model id, NOT by the order the caller selected. Each lock is
+         * `SELECT … FOR UPDATE` and holds to commit, so two batches covering the
+         * same models in opposite orders would each hold what the other waits
+         * for, and Postgres would break the cycle by aborting one. Plain
+         * code-unit order, matching every other writer of these rows. Taking the
+         * locks here rather than inside the write core does not widen the set
+         * the batch holds at commit; it only acquires them sooner.
+         */
+        const orderedModelIds = [...additionsByModel.keys()].sort();
+        for (const assetModelId of orderedModelIds) {
+          await lockAssetModelForReservation(tx, assetModelId, organizationId);
+          await lockModelRequestRow(tx, bookingId, assetModelId);
+        }
 
-      // Scoped to the workspace even though every write re-proves it: this
-      // read takes a caller-supplied `bookingId`, and an id that belongs to
-      // another workspace has no quantities to offer this one.
-      const existing = await tx.bookingModelRequest.findMany({
-        where: {
-          bookingId,
-          booking: { organizationId },
-          assetModelId: { in: orderedModelIds },
-        },
-        select: { assetModelId: true, quantity: true },
-      });
-      const reservedByModel = new Map(
-        existing.map((row) => [row.assetModelId, row.quantity])
-      );
-
-      const requests: BookingModelRequest[] = [];
-
-      for (const assetModelId of orderedModelIds) {
-        const addition = additionsByModel.get(assetModelId)!;
-        const { request } = await writeBookingModelRequestInTx(tx, {
-          bookingId,
-          assetModelId,
-          // The absolute target: what this booking already reserves of the
-          // model, plus what was asked for.
-          quantity: (reservedByModel.get(assetModelId) ?? 0) + addition,
-          organizationId,
-          userId,
-          actor,
+        // Scoped to the workspace even though every write re-proves it: this
+        // read takes a caller-supplied `bookingId`, and an id that belongs to
+        // another workspace has no quantities to offer this one.
+        const existing = await tx.bookingModelRequest.findMany({
+          where: {
+            bookingId,
+            booking: { organizationId },
+            assetModelId: { in: orderedModelIds },
+          },
+          select: { assetModelId: true, quantity: true },
         });
-        requests.push(request);
-      }
+        const reservedByModel = new Map(
+          existing.map((row) => [row.assetModelId, row.quantity])
+        );
 
-      return { requests };
-    });
+        const requests: BookingModelRequest[] = [];
+
+        for (const assetModelId of orderedModelIds) {
+          const addition = additionsByModel.get(assetModelId)!;
+          const { request } = await writeBookingModelRequestInTx(tx, {
+            bookingId,
+            assetModelId,
+            // The absolute target: what this booking already reserves of the
+            // model, plus what was asked for.
+            quantity: (reservedByModel.get(assetModelId) ?? 0) + addition,
+            organizationId,
+            userId,
+            actor,
+          });
+          requests.push(request);
+        }
+
+        return { requests };
+      },
+      { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+    );
   } catch (cause) {
     if (cause instanceof ShelfError) throw cause;
     throw new ShelfError({

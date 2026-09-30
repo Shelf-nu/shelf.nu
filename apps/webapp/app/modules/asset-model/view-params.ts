@@ -23,17 +23,54 @@ export const MODEL_VIEW_SCOPED_PARAMS = [
 ] as const;
 
 /**
- * Params the model view cannot express, stripped from any asset query it
- * builds.
+ * Params the model view cannot express.
  *
  * The inverse of {@link MODEL_VIEW_SCOPED_PARAMS}: these mean something real
- * to a query over assets, but nothing reachable from this view, so a value
- * left in the URL is stale state the user has no control to clear.
+ * to a query over assets, but nothing reachable from this view, so they are
+ * stripped twice over. Any asset query the view builds drops them, and the
+ * Filter popover drops them from the URL itself while the view is on screen,
+ * because the view hides the toggles that set them and a param no control can
+ * reach is state the user cannot get back off.
  *
  * `lowStockOnly` narrows to `QUANTITY_TRACKED` assets at or below their
  * reorder threshold. The rollup counts `INDIVIDUAL` assets only, so the two
  * are mutually exclusive by construction: forwarded into a drill-down it
- * returns nothing, every time, and the model view hides the toggle that would
- * let anyone turn it back off.
+ * returns nothing, every time.
+ *
+ * @see {@link file://./../../components/assets/assets-index/advanced-asset-index-filters-and-sorting.tsx}
+ * @see {@link file://./../../hooks/use-asset-index-view.ts}
  */
 export const MODEL_VIEW_INAPPLICABLE_PARAMS = ["lowStockOnly"] as const;
+
+/**
+ * Which of {@link MODEL_VIEW_INAPPLICABLE_PARAMS} are set in `params`.
+ *
+ * Read-only, so a caller holding react-router's live `URLSearchParams` can ask
+ * the question without mutating the URL it is rendering from.
+ *
+ * @param params - The params to inspect
+ * @returns The names that are present, in declaration order
+ */
+export function findModelViewInapplicableParams(
+  params: URLSearchParams
+): string[] {
+  return MODEL_VIEW_INAPPLICABLE_PARAMS.filter((param) => params.has(param));
+}
+
+/**
+ * Removes {@link MODEL_VIEW_INAPPLICABLE_PARAMS} from `params`, in place.
+ *
+ * The one place the removal happens, so the surface that switches INTO the model
+ * view and the one that normalizes a URL arriving on it cannot come to disagree
+ * about which params this view is unable to express.
+ *
+ * @param params - The params to normalize; mutated
+ * @returns The names that were present and have been removed
+ */
+export function stripModelViewInapplicableParams(
+  params: URLSearchParams
+): string[] {
+  const present = findModelViewInapplicableParams(params);
+  present.forEach((param) => params.delete(param));
+  return present;
+}

@@ -26,6 +26,10 @@ import {
   parseColumnName,
   type Column,
 } from "~/modules/asset-index-settings/helpers";
+import {
+  findModelViewInapplicableParams,
+  stripModelViewInapplicableParams,
+} from "~/modules/asset-model/view-params";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
@@ -62,7 +66,9 @@ export interface Sort {
  * and change nothing. The model view sorts from its column headers instead.
  *
  * Filter stays: the rollup is built from the same filtered asset set as the
- * list, so every filter applies to it unchanged.
+ * list, so every filter applies to it unchanged, bar the quick filters this
+ * view hides the toggles for, which Filter strips from the URL via
+ * {@link stripModelViewInapplicableParams}.
  *
  * @see {@link file://./asset-model-sort-header.tsx}
  */
@@ -112,14 +118,14 @@ function AdvancedFilter() {
 
   const availableColumns = getAvailableColumns(columns, filters, "filter");
 
-  // "Low stock" quick filter — a standalone `lowStockOnly` URL param
+  // "Low stock" quick filter: a standalone `lowStockOnly` URL param
   // (QUANTITY_TRACKED assets at/below their reorder threshold). Surfaced INSIDE
   // this Filter popover rather than as a separate top-bar button. It's
   // independent of the column-filter apply model (toggles immediately) and
   // counts toward the trigger's active badge so it's visible when collapsed.
-  // A `lowStockOnly` param can still ride in on a bookmarked URL while the
-  // model view is active; treat it as inactive there so the badge, the
-  // empty-state copy and the clear control agree with the hidden toggle.
+  // Reads as inactive on the model view, which renders no toggle for it, so the
+  // badge, the empty-state copy and the clear control describe the controls
+  // actually on screen for the render before the strip below lands.
   const lowStockActive =
     !isModelView && searchParams.get("lowStockOnly") === "true";
   const activeFilterCount = initialFilters.length + (lowStockActive ? 1 : 0);
@@ -159,6 +165,47 @@ function AdvancedFilter() {
     setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantSearchParamsString]);
+
+  /**
+   * Which params the model view cannot express are sitting in the URL.
+   *
+   * A bookmark, a shared link or the restored filter cookie can put one there
+   * without the user ever choosing it on this view. Joined into a string so the
+   * effect below depends on WHICH params are present rather than on a fresh
+   * array identity every render.
+   */
+  const staleModelViewParams =
+    findModelViewInapplicableParams(searchParams).join(",");
+
+  /**
+   * Strips those params while the model view is the one on screen.
+   *
+   * This view hides the controls that set them, so a param left in the URL is
+   * state with no way back off: it counts as an active filter, and it takes
+   * effect again the moment the user returns to the list. Declared after the
+   * URL-sync effect above so that effect still seeds the column filters from
+   * the URL on the render this one navigates away from.
+   */
+  useEffect(() => {
+    if (!isModelView || !staleModelViewParams) {
+      return;
+    }
+
+    // Preserve any in-progress (unapplied) column-filter edits, exactly as
+    // `toggleLowStock` / `applyFilters` / `clearAllFilters` do.
+    isApplyingInternally.current = true;
+    // Replaces rather than pushes: this rewrites a URL the user never typed, so
+    // a history entry for it would send Back to a URL this effect strips again,
+    // leaving Back with nothing to do. `page` stays put because the rollup
+    // ignores these params, so no row moved.
+    setSearchParams(
+      (prev) => {
+        stripModelViewInapplicableParams(prev);
+        return prev;
+      },
+      { replace: true }
+    );
+  }, [isModelView, staleModelViewParams, setSearchParams]);
 
   function clearAllFilters() {
     setFilters([]);

@@ -44,6 +44,7 @@ import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import type { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { getValidationErrors } from "~/utils/http";
@@ -273,10 +274,49 @@ export default function CreateBookingForModelsDialog() {
       // already clips the suggestion listbox before the dialog body ever could.
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => {
-        /** This handles server side errors in case client side validation fails */
+        /**
+         * Server-side field errors, the fallback for when client validation is
+         * bypassed or disagrees with the server.
+         *
+         * Read under two types because the route parses this one submission
+         * with two schemas: the models list first, then the booking's own
+         * fields. A refusal therefore names a key from one set or the other.
+         */
         const validationErrors = getValidationErrors<BookingFormSchemaType>(
           fetcherData?.error
         );
+        const modelValidationErrors = getValidationErrors<
+          typeof CreateBookingForModelsSchema
+        >(fetcherData?.error);
+
+        /**
+         * Every message this form puts next to a field, server error first.
+         *
+         * Resolved in one place so the generic message at the foot of the form
+         * is suppressed only while a field message is genuinely on screen.
+         * Keying that on the mere existence of a validation-error object hides
+         * any refusal naming a field the form does not render, and a rejected
+         * submission with nothing visible reads to the user as an accepted one.
+         */
+        const fieldErrors = {
+          name: validationErrors?.name?.message || zo.errors.name()?.message,
+          startDate:
+            validationErrors?.startDate?.message ||
+            zo.errors.startDate()?.message,
+          endDate:
+            validationErrors?.endDate?.message || zo.errors.endDate()?.message,
+          custodian:
+            validationErrors?.custodian?.message ||
+            zo.errors.custodian()?.message,
+          tags: validationErrors?.tags?.message || zo.errors.tags()?.message,
+          description:
+            validationErrors?.description?.message ||
+            zo.errors.description()?.message,
+          // Server only: the booking form's schema does not describe the models
+          // list, so nothing in the browser can refuse it.
+          models: modelValidationErrors?.models?.message,
+        };
+        const hasFieldError = Object.values(fieldErrors).some(Boolean);
 
         return (
           <div className="max-h-[calc(100vh_-_200px)] overflow-auto">
@@ -284,9 +324,7 @@ export default function CreateBookingForModelsDialog() {
               <NameField
                 name={undefined}
                 fieldName={zo.fields.name()}
-                error={
-                  validationErrors?.name?.message || zo.errors.name()?.message
-                }
+                error={fieldErrors.name}
                 disabled={disabled}
                 onChange={() => {}}
               />
@@ -295,17 +333,11 @@ export default function CreateBookingForModelsDialog() {
               <DatesFields
                 startDate={startDate}
                 startDateName={zo.fields.startDate()}
-                startDateError={
-                  validationErrors?.startDate?.message ||
-                  zo.errors.startDate()?.message
-                }
+                startDateError={fieldErrors.startDate}
                 setStartDate={setStartDate}
                 endDate={endDate}
                 endDateName={zo.fields.endDate()}
-                endDateError={
-                  validationErrors?.endDate?.message ||
-                  zo.errors.endDate()?.message
-                }
+                endDateError={fieldErrors.endDate}
                 setEndDate={setEndDate}
                 disabled={disabled}
                 isNewBooking
@@ -318,10 +350,7 @@ export default function CreateBookingForModelsDialog() {
                 disabled={disabled || isBaseOrSelfService}
                 userCanSeeCustodian={userCanSeeCustodian}
                 isNewBooking
-                error={
-                  validationErrors?.custodian?.message ||
-                  zo.errors.custodian()?.message
-                }
+                error={fieldErrors.custodian}
               />
             </Card>
 
@@ -330,9 +359,7 @@ export default function CreateBookingForModelsDialog() {
                 existingTags={[]}
                 suggestions={tagsSuggestions}
                 required={bookingSettings.tagsRequired}
-                error={
-                  validationErrors?.tags?.message || zo.errors.tags()?.message
-                }
+                error={fieldErrors.tags}
               />
             </Card>
 
@@ -341,10 +368,7 @@ export default function CreateBookingForModelsDialog() {
                 description={undefined}
                 fieldName={zo.fields.description()}
                 disabled={disabled}
-                error={
-                  validationErrors?.description?.message ||
-                  zo.errors.description()?.message
-                }
+                error={fieldErrors.description}
               />
             </Card>
 
@@ -396,9 +420,22 @@ export default function CreateBookingForModelsDialog() {
                   />
                 </Fragment>
               ))}
+
+              {/* The models list has no input of its own to hang an error on,
+                  so the server's refusal of it is rendered against the rows it
+                  is about. */}
+              {fieldErrors.models ? (
+                <p className="mt-2 text-sm text-error-500">
+                  {fieldErrors.models}
+                </p>
+              ) : null}
             </Card>
 
-            {fetcherError && !validationErrors ? (
+            {/* The server's own message, for a refusal no field above carries:
+                a guard rather than a field error (a foreign model id, a
+                workspace that cannot book at all), or a field this form does
+                not render. */}
+            {fetcherError && !hasFieldError ? (
               <p className="mt-2 text-sm text-error-500">{fetcherError}</p>
             ) : null}
 
