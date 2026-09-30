@@ -270,6 +270,15 @@ const disabled = useDisabled(fetcher);
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
 
+### Scanner Blockers
+
+Every blocker a scanner drawer can raise must be derived in a pure builder with
+a stable `id` and covered by a test, including a manifest assertion over the id
+list. A missing blocker silently reports success while nothing moves, and no
+other check in this repo can see it.
+
+- 📖 Full rule: [.claude/rules/scanner-blockers-need-a-test.md](./.claude/rules/scanner-blockers-need-a-test.md)
+
 ### Silencing react-doctor findings
 
 `react-doctor` runs in CI on every PR for both the webapp (`pnpm webapp:doctor`)

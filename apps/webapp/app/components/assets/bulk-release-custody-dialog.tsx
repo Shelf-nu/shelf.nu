@@ -3,12 +3,20 @@ import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { isQuantityTracked } from "~/modules/asset/utils";
+import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 import { WarningBox } from "../shared/warning-box";
 
 export const BulkReleaseCustodySchema = z.object({
   assetIds: z.array(z.string()).min(1),
+  /**
+   * Units per quantity-tracked asset, sent only by the scanner, which shows a
+   * quantity input on each scanned row. This dialog selects rows on the assets
+   * index, where there is nowhere to say how many units come back, so it sends
+   * nothing and those assets keep being skipped.
+   */
+  quantities: AssetQuantitiesSchema,
 });
 
 export default function BulkReleaseCustodyDialog() {

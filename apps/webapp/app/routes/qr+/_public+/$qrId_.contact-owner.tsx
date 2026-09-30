@@ -62,7 +62,25 @@ export const QR_SELECT_FOR_REPORT = {
       },
     },
   },
-  kit: true,
+  // Narrowed from `kit: true` to carry the owner. `normalizeQrData` needs only
+  // `id` and `name` from a kit, and the owner has to come through here or the
+  // lookup below has nothing to find.
+  kit: {
+    select: {
+      id: true,
+      name: true,
+      organization: {
+        select: {
+          owner: {
+            select: {
+              email: true,
+              id: true,
+            },
+          },
+        },
+      },
+    },
+  },
 };
 
 export async function loader({ params }: LoaderFunctionArgs) {
@@ -121,7 +139,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
       });
     }
 
-    const ownerEmail = qr?.asset?.organization?.owner.email;
+    /**
+     * The owner belongs to the organization that claimed the QR, and a QR links
+     * to either an asset or a kit. Reading it only through the asset left every
+     * kit-linked report with no address, and since the send below is gated on
+     * this one value, that silenced the reporter's confirmation too.
+     */
+    const ownerEmail =
+      qr?.asset?.organization?.owner?.email ??
+      qr?.kit?.organization?.owner?.email;
 
     const parsedData = parseData(await request.formData(), NewReportSchema);
     const { email, content } = parsedData;
