@@ -78,7 +78,12 @@ import {
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertModelUnitsNotReservedElsewhere,
+  assertReservationBatchWithinLimit,
+  claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
+  loadActorBestEffort,
+  RESERVATION_BATCH_TX_TIMEOUT_MS,
+  writeBookingModelRequestInTx,
 } from "~/modules/booking-model-request/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -176,8 +181,10 @@ import {
   outranksReservations,
 } from "./helpers";
 import { findConflictingKits } from "./kit-conflicts.server";
+import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
+import { resolveSliceKitIds } from "./slice-kit-attribution";
 import {
   isSliceOutByMarker,
   makeIsIndividualSliceOutstanding,
@@ -1007,6 +1014,7 @@ export async function createBooking({
   booking,
   assetIds,
   kitSlices,
+  modelRequests,
   hints,
 }: {
   /**
@@ -1049,10 +1057,45 @@ export async function createBooking({
   kitSlices?: KitSliceSpec[];
 
   /**
+   * Optional model-level reservations to create with the booking — units of an
+   * `AssetModel` promised to the booking without naming which physical assets
+   * will serve them. Each becomes a `BookingModelRequest` row.
+   *
+   * Written inside this function's own transaction, so the booking never
+   * commits without the reservations it was created to hold, and a model whose
+   * pool cannot cover its quantity aborts the create entirely.
+   *
+   * Bounded by `MAX_MODELS_PER_RESERVATION_BATCH` distinct models, which is
+   * what that transaction can carry inside its budget. Repeated entries for
+   * one model are summed into a single write, so they count once.
+   *
+   * Every caller that books concrete assets omits this.
+   */
+  modelRequests?: { assetModelId: string; quantity: number }[];
+
+  /**
    * Hints are used for setting the timezone of the booking
    */
   hints: ClientHint;
 }) {
+  /**
+   * Bounded on the same limit the add-to-existing-booking batch uses.
+   *
+   * Both paths take their selection from the asset index's model view and walk
+   * the same per-model write, so the per-model cost inside the transaction is
+   * identical: whatever number that write can carry there, it can carry from
+   * either caller. This transaction also creates the booking and connects its
+   * assets, so it starts with less of the budget left than the
+   * reservations-only batch does.
+   *
+   * Outside the `try` below, matching the sibling batch: a selection that is
+   * too large is a user decision to report back verbatim, not a service
+   * failure to dress in the create path's `additionalData`.
+   */
+  assertReservationBatchWithinLimit(
+    (modelRequests ?? []).map((reservation) => reservation.assetModelId)
+  );
+
   try {
     const dataToCreate: Prisma.BookingCreateInput = {
       name: booking.name,
@@ -1144,188 +1187,286 @@ export async function createBooking({
       };
     }
 
-    // Use transaction to ensure booking creation and activity events are atomic
-    const createdBooking = await db.$transaction(async (tx) => {
-      // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
-      // member ID all originate from request/form input. Before connecting
-      // them to the new booking we must prove they belong to the booking's
-      // organization — otherwise an attacker in Org A could supply Org B's
-      // IDs and link foreign-org entities into their own booking. Validation
-      // runs with the active `tx` so it commits atomically with the create.
-      if (dedupedAssetIds.length > 0) {
-        await assertAssetsBelongToOrg(
-          { assetIds: dedupedAssetIds, organizationId: booking.organizationId },
-          tx
-        );
-      }
+    // Normalize the optional model reservations once, mirroring `slices`.
+    const reservations = modelRequests ?? [];
 
-      // SECURITY (cross-org IDOR): kit-slice asset ids and their source
-      // `AssetKit` ids also originate from request/form input and are written
-      // straight onto `BookingAsset` rows. Prove both belong to the booking's
-      // org before the create — otherwise an attacker could attach Org B's
-      // assets/kit memberships to their own booking. Runs with the active `tx`
-      // so it commits atomically with the create.
-      let kitIdByAssetKitId = new Map<string, string>();
-      if (slices.length > 0) {
-        await assertAssetsBelongToOrg(
-          {
-            assetIds: slices.map((s) => s.assetId),
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-        kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
-          {
-            assetKitIds: slices.map((s) => s.assetKitId),
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
+    /**
+     * Loaded before the transaction opens, for the reason
+     * `upsertBookingModelRequest` hoists the same call: the actor read is a
+     * plain `User` lookup with nothing to serialise against the reservation
+     * write, so holding it inside the interactive transaction would widen the
+     * window past the rows that matter. One read serves every reservation.
+     *
+     * Non-null exactly when there is something to reserve — a single condition,
+     * so it also carries the narrowing for the loop below.
+     */
+    const reservationActor =
+      reservations.length > 0
+        ? await loadActorBestEffort(booking.creatorId)
+        : null;
 
-      /**
-       * Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
-       * settable directly in a nested create) plus `sourceKitId`, the durable
-       * copy of the owning kit that outlives the `AssetKit` row.
-       *
-       * `sourceKitId` is taken from the guard's org-proven map, NEVER from
-       * `slice.kitId`: that value is request input and the column's FK accepts
-       * any `Kit` row in any organization, so trusting it would let a caller in
-       * Org A stamp Org B's kit onto its own booking. Deriving it from the same
-       * lookup that validated `assetKitId` also enforces the schema invariant
-       * that the two AGREE. The map is total over the validated ids (the guard
-       * throws otherwise), so `?? null` is unreachable — it only satisfies the
-       * type.
-       *
-       * A QUANTITY_TRACKED asset may be both standalone AND a kit member (two
-       * distinct rows under the two partial uniques); INDIVIDUAL overlaps were
-       * already removed from the standalone bucket above.
-       */
-      const bookingAssetRows = [
-        ...standaloneCreateRows,
-        ...slices.map((s) => ({
-          assetId: s.assetId,
-          quantity: s.quantity,
-          assetKitId: s.assetKitId,
-          sourceKitId: kitIdByAssetKitId.get(s.assetKitId) ?? null,
-        })),
-      ];
-
-      // Only set the nested create when there's at least one row — this covers
-      // standalone-only, kit-only, and mixed inputs (and avoids an empty
-      // `create: []` when neither is supplied).
-      if (bookingAssetRows.length > 0) {
-        dataToCreate.bookingAssets = { create: bookingAssetRows };
-      }
-
-      if (booking.tags.length > 0) {
-        await assertTagsBelongToOrg(
-          {
-            tagIds: booking.tags.map((t) => t.id),
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
-
-      await assertTeamMemberBelongsToOrg(
-        {
-          teamMemberId: booking.custodianTeamMemberId,
-          organizationId: booking.organizationId,
-        },
-        tx
-      );
-
-      // SECURITY (cross-org IDOR): custodianUserId is also request input and a
-      // valid team member does not prove the paired user belongs to the org.
-      if (booking.custodianUserId) {
-        await assertUserBelongsToOrg(
-          {
-            userId: booking.custodianUserId,
-            organizationId: booking.organizationId,
-          },
-          tx
-        );
-      }
-
-      const created = await tx.booking.create({
-        data: dataToCreate,
-        include: { ...BOOKING_COMMON_INCLUDE, organization: true },
-      });
-
-      // Activity event for booking creation - must be inside transaction
-      await recordEvent(
-        {
-          organizationId: booking.organizationId,
-          actorUserId: booking.creatorId,
-          action: "BOOKING_CREATED",
-          entityType: "BOOKING",
-          entityId: created.id,
-          bookingId: created.id,
-          // Count the rows actually created (standalone + kit-driven). For the
-          // no-kit path this equals `assetIds.length` (unchanged); mirrors
-          // `duplicateBooking`, which counts its create payload.
-          meta: { assetCount: bookingAssetRows.length },
-        },
-        tx
-      );
-
-      // One BOOKING_ASSETS_ADDED event per asset attached at creation —
-      // standalone ids PLUS kit-member asset ids, deduped (an asset can be
-      // both a standalone row and a kit member). Look up `type`/`unitOfMeasure`
-      // so the event meta carries `quantity` for QUANTITY_TRACKED assets
-      // (no-op for INDIVIDUAL).
-      const eventAssetIds = [
-        ...new Set([...dedupedAssetIds, ...slices.map((s) => s.assetId)]),
-      ];
-      if (eventAssetIds.length > 0) {
-        const assetTypes = await tx.asset.findMany({
-          where: {
-            id: { in: eventAssetIds },
-            organizationId: booking.organizationId,
-          },
-          select: { id: true, type: true, unitOfMeasure: true },
-        });
-        const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
-
-        // Sum the booked quantity per asset across every row this create is
-        // responsible for: each standalone row contributes 1 (schema default —
-        // `createBooking` takes no per-asset quantity input) plus each kit
-        // slice's own quantity. Mirrors `updateBookingAssets` so the same
-        // asset added both standalone and via N kits reports the true count.
-        const addedQtyByAssetId = new Map<string, number>();
-        for (const sid of dedupedAssetIds) {
-          addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
-        }
-        for (const slice of slices) {
-          addedQtyByAssetId.set(
-            slice.assetId,
-            (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+    /**
+     * One transaction, so the booking, its assets, its activity events and its
+     * model reservations all commit together or not at all.
+     *
+     * On the shared reservation-batch budget rather than Prisma's five-second
+     * default, because this transaction carries strictly more than the
+     * reservations-only batch does: the booking row, its asset connections and
+     * their events come first, and the per-model reservation loop runs on
+     * whatever is left. Extending the window only affects transactions that
+     * would otherwise have expired and rolled back, so no create that succeeds
+     * today behaves differently.
+     */
+    const createdBooking = await db.$transaction(
+      async (tx) => {
+        // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
+        // member ID all originate from request/form input. Before connecting
+        // them to the new booking we must prove they belong to the booking's
+        // organization — otherwise an attacker in Org A could supply Org B's
+        // IDs and link foreign-org entities into their own booking. Validation
+        // runs with the active `tx` so it commits atomically with the create.
+        if (dedupedAssetIds.length > 0) {
+          await assertAssetsBelongToOrg(
+            {
+              assetIds: dedupedAssetIds,
+              organizationId: booking.organizationId,
+            },
+            tx
           );
         }
 
-        await recordEvents(
-          eventAssetIds.map((assetId) => {
-            const asset = assetTypeById.get(assetId);
-            return {
+        // SECURITY (cross-org IDOR): kit-slice asset ids and their source
+        // `AssetKit` ids also originate from request/form input and are written
+        // straight onto `BookingAsset` rows. Prove both belong to the booking's
+        // org before the create — otherwise an attacker could attach Org B's
+        // assets/kit memberships to their own booking. Runs with the active `tx`
+        // so it commits atomically with the create.
+        let kitIdByAssetKitId = new Map<string, string>();
+        if (slices.length > 0) {
+          await assertAssetsBelongToOrg(
+            {
+              assetIds: slices.map((s) => s.assetId),
               organizationId: booking.organizationId,
-              actorUserId: booking.creatorId,
-              action: "BOOKING_ASSETS_ADDED" as const,
-              entityType: "BOOKING" as const,
-              entityId: created.id,
-              bookingId: created.id,
-              assetId,
-              meta: asset
-                ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
-                : {},
-            };
-          }),
+            },
+            tx
+          );
+          kitIdByAssetKitId = await assertAssetKitsBelongToOrg(
+            {
+              assetKitIds: slices.map((s) => s.assetKitId),
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        /**
+         * Kit-driven rows carry a non-null `assetKitId` (a plain scalar column,
+         * settable directly in a nested create) plus `sourceKitId`, the durable
+         * copy of the owning kit that outlives the `AssetKit` row.
+         *
+         * `sourceKitId` is taken from the guard's org-proven map, NEVER from
+         * `slice.kitId`: that value is request input and the column's FK accepts
+         * any `Kit` row in any organization, so trusting it would let a caller in
+         * Org A stamp Org B's kit onto its own booking. Deriving it from the same
+         * lookup that validated `assetKitId` also enforces the schema invariant
+         * that the two AGREE. The map is total over the validated ids (the guard
+         * throws otherwise), so `?? null` is unreachable — it only satisfies the
+         * type.
+         *
+         * A QUANTITY_TRACKED asset may be both standalone AND a kit member (two
+         * distinct rows under the two partial uniques); INDIVIDUAL overlaps were
+         * already removed from the standalone bucket above.
+         */
+        const bookingAssetRows = [
+          ...standaloneCreateRows,
+          ...slices.map((s) => ({
+            assetId: s.assetId,
+            quantity: s.quantity,
+            assetKitId: s.assetKitId,
+            sourceKitId: kitIdByAssetKitId.get(s.assetKitId) ?? null,
+          })),
+        ];
+
+        // Only set the nested create when there's at least one row — this covers
+        // standalone-only, kit-only, and mixed inputs (and avoids an empty
+        // `create: []` when neither is supplied).
+        if (bookingAssetRows.length > 0) {
+          dataToCreate.bookingAssets = { create: bookingAssetRows };
+        }
+
+        if (booking.tags.length > 0) {
+          await assertTagsBelongToOrg(
+            {
+              tagIds: booking.tags.map((t) => t.id),
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        await assertTeamMemberBelongsToOrg(
+          {
+            teamMemberId: booking.custodianTeamMemberId,
+            organizationId: booking.organizationId,
+          },
           tx
         );
-      }
 
-      return created;
-    });
+        // SECURITY (cross-org IDOR): custodianUserId is also request input and a
+        // valid team member does not prove the paired user belongs to the org.
+        if (booking.custodianUserId) {
+          await assertUserBelongsToOrg(
+            {
+              userId: booking.custodianUserId,
+              organizationId: booking.organizationId,
+            },
+            tx
+          );
+        }
+
+        const created = await tx.booking.create({
+          data: dataToCreate,
+          include: { ...BOOKING_COMMON_INCLUDE, organization: true },
+        });
+
+        // Activity event for booking creation - must be inside transaction
+        await recordEvent(
+          {
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+            action: "BOOKING_CREATED",
+            entityType: "BOOKING",
+            entityId: created.id,
+            bookingId: created.id,
+            // Count the rows actually created (standalone + kit-driven). For the
+            // no-kit path this equals `assetIds.length` (unchanged); mirrors
+            // `duplicateBooking`, which counts its create payload.
+            meta: { assetCount: bookingAssetRows.length },
+          },
+          tx
+        );
+
+        // One BOOKING_ASSETS_ADDED event per asset attached at creation —
+        // standalone ids PLUS kit-member asset ids, deduped (an asset can be
+        // both a standalone row and a kit member). Look up `type`/`unitOfMeasure`
+        // so the event meta carries `quantity` for QUANTITY_TRACKED assets
+        // (no-op for INDIVIDUAL).
+        const eventAssetIds = [
+          ...new Set([...dedupedAssetIds, ...slices.map((s) => s.assetId)]),
+        ];
+        if (eventAssetIds.length > 0) {
+          const assetTypes = await tx.asset.findMany({
+            where: {
+              id: { in: eventAssetIds },
+              organizationId: booking.organizationId,
+            },
+            select: { id: true, type: true, unitOfMeasure: true },
+          });
+          const assetTypeById = new Map(assetTypes.map((a) => [a.id, a]));
+
+          // Sum the booked quantity per asset across every row this create is
+          // responsible for: each standalone row contributes 1 (schema default —
+          // `createBooking` takes no per-asset quantity input) plus each kit
+          // slice's own quantity. Mirrors `updateBookingAssets` so the same
+          // asset added both standalone and via N kits reports the true count.
+          const addedQtyByAssetId = new Map<string, number>();
+          for (const sid of dedupedAssetIds) {
+            addedQtyByAssetId.set(sid, (addedQtyByAssetId.get(sid) ?? 0) + 1);
+          }
+          for (const slice of slices) {
+            addedQtyByAssetId.set(
+              slice.assetId,
+              (addedQtyByAssetId.get(slice.assetId) ?? 0) + slice.quantity
+            );
+          }
+
+          await recordEvents(
+            eventAssetIds.map((assetId) => {
+              const asset = assetTypeById.get(assetId);
+              return {
+                organizationId: booking.organizationId,
+                actorUserId: booking.creatorId,
+                action: "BOOKING_ASSETS_ADDED" as const,
+                entityType: "BOOKING" as const,
+                entityId: created.id,
+                bookingId: created.id,
+                assetId,
+                meta: asset
+                  ? assetQtyMeta(asset, addedQtyByAssetId.get(assetId))
+                  : {},
+              };
+            }),
+            tx
+          );
+        }
+
+        /**
+         * Model-level reservations are written with the booking, in the booking's
+         * own transaction: a booking that committed while one of its reservations
+         * failed would promise a workspace something nobody recorded, and a model
+         * that cannot cover its quantity must take the whole create down with it.
+         *
+         * `assetModelId` is request input like every other id here, but it does
+         * NOT get an `assert…BelongToOrg` call beside the guards above:
+         * `writeBookingModelRequestInTx` looks the model up with
+         * `where: { id: assetModelId, organizationId }` and throws 404 when it is
+         * not in the workspace, using the same `tx`. The org check is one level
+         * down, not missing — adding a second one here would only duplicate it.
+         *
+         * Sequential rather than concurrent on purpose: each write measures the
+         * free pool through `tx`, so two models sharing assets must be measured
+         * one after the other to see each other's reservation.
+         */
+        if (reservationActor) {
+          /**
+           * One entry per model, quantities summed.
+           *
+           * Every write takes an absolute target, so a model listed twice would
+           * be written twice and the second write would REPLACE the first rather
+           * than add to it — and the write still succeeds, so nothing reports the
+           * units that went missing. Summing here matches
+           * `upsertBookingModelRequests`, which folds for the same reason.
+           *
+           * Iterated in model-id order, NOT the order the caller listed them.
+           * Each write takes `SELECT … FOR UPDATE` on its model and holds it to
+           * commit, so two concurrent batches covering the same models in
+           * opposite orders would each hold what the other waits for; Postgres
+           * breaks that by aborting one, turning a valid booking into a spurious
+           * failure. A deterministic global order cannot form a cycle. Plain
+           * code-unit order, matching `upsertBookingModelRequests` exactly: the
+           * two paths lock the same rows, so a second, locale-dependent ordering
+           * from `localeCompare` would reopen the cycle it closes.
+           */
+          const quantityByModelId = new Map<string, number>();
+          for (const reservation of reservations) {
+            quantityByModelId.set(
+              reservation.assetModelId,
+              (quantityByModelId.get(reservation.assetModelId) ?? 0) +
+                reservation.quantity
+            );
+          }
+          const orderedModelIds = [...quantityByModelId.keys()].sort();
+
+          for (const assetModelId of orderedModelIds) {
+            await writeBookingModelRequestInTx(tx, {
+              bookingId: created.id,
+              assetModelId,
+              // The quantity is an absolute target, never a delta. A booking
+              // created in this call reserves nothing yet, so the amount asked
+              // for IS the target — unlike the add-to-existing path, which has to
+              // sum against what the booking already reserves.
+              quantity: quantityByModelId.get(assetModelId)!,
+              organizationId: booking.organizationId,
+              userId: booking.creatorId,
+              actor: reservationActor,
+            });
+          }
+        }
+
+        return created;
+      },
+      { timeout: RESERVATION_BATCH_TX_TIMEOUT_MS }
+    );
 
     return createdBooking;
   } catch (cause) {
@@ -1334,7 +1475,10 @@ export async function createBooking({
       message: isLikeShelfError(cause)
         ? cause.message
         : "Something went wrong while trying to create or update the booking. Please try again or contact support.",
-      additionalData: { booking, hints },
+      // `modelRequests` is carried because a short model pool aborts the whole
+      // create: without it the report says a booking failed and nothing says
+      // which reservation was the one that did not fit.
+      additionalData: { booking, hints, modelRequests },
       label,
       shouldBeCaptured: isLikeShelfError(cause)
         ? cause.shouldBeCaptured
@@ -1466,6 +1610,8 @@ export async function updateBasicBooking({
         title: "Update failed",
         message: "Booking update is not allowed at this state of booking",
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2033,6 +2179,7 @@ export async function reserveBooking({
           label,
           title: "Booking conflict",
           message: `Cannot reserve booking. Some assets are already booked or checked out: ${conflictedAssetNames}${additionalText}. Please remove conflicted assets and try again.`,
+          status: 400,
           shouldBeCaptured: false,
         });
       }
@@ -2053,6 +2200,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking dates are missing.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2062,6 +2211,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking start date should be in future.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -2071,6 +2222,8 @@ export async function reserveBooking({
         cause: null,
         label,
         message: "Booking end date should be after start date.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -3698,6 +3851,9 @@ export async function fulfilModelRequestsAndCheckout({
       organizationId,
     });
 
+    /** The assets the scan actually put on the booking, for the notes below. */
+    let addedAssetIds: string[] = [];
+
     /**
      * Single atomic transaction:
      *   1. Materialise scanned assets against outstanding model requests
@@ -3721,7 +3877,7 @@ export async function fulfilModelRequestsAndCheckout({
         await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${bookingId} FOR UPDATE`;
         await tx.$queryRaw`SELECT id FROM "BookingModelRequest" WHERE "bookingId" = ${bookingId} FOR UPDATE`;
 
-        await addScannedAssetsToBookingWithinTx(tx, {
+        const scanResult = await addScannedAssetsToBookingWithinTx(tx, {
           assetIds,
           kitIds,
           kitSlices,
@@ -3729,6 +3885,9 @@ export async function fulfilModelRequestsAndCheckout({
           organizationId,
           userId,
         });
+        // Read post-commit, for the notes below. A scan that only claimed a
+        // unit already on the booking added nothing to narrate.
+        addedAssetIds = scanResult.addedAssetIds;
 
         /**
          * Post-scan snapshot of every booking asset that needs
@@ -3823,10 +3982,10 @@ export async function fulfilModelRequestsAndCheckout({
       { timeout: 15000 }
     );
 
-    /** Post-commit: activity notes for the scanned assets + kits */
+    /** Post-commit: activity notes for the assets that actually arrived */
     await createNotesForScannedAssetsAndKits({
       booking: { id: bookingFound.id, name: bookingFound.name },
-      assetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
@@ -10870,6 +11029,8 @@ export async function revertBookingToDraft({
         cause: null,
         label,
         message: "Booking can be reverted to draft only for reserved state.",
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -11804,6 +11965,12 @@ export async function getBookings(params: {
             bookingAssets: {
               some: {
                 asset: {
+                  // The workspace on the asset itself, not only on the
+                  // booking: without it Postgres evaluates the OR below
+                  // against every workspace's assets before joining back to
+                  // these bookings. With it, the match starts from this
+                  // workspace's asset index.
+                  organizationId,
                   OR: [
                     { title: { contains: term, mode: "insensitive" } },
                     {
@@ -13648,19 +13815,10 @@ export async function getKitIdsBySlice({
 
   const kitIdsBySliceId = new Map<string, Set<string>>();
   for (const slice of slices) {
-    const kitIds = new Set<string>();
-    if (slice.sourceKitId || slice.assetKitId) {
-      const kitId =
-        slice.sourceKitId ??
-        (slice.assetKitId
-          ? kitIdByAssetKitId.get(slice.assetKitId)
-          : undefined);
-      if (kitId) kitIds.add(kitId);
-    } else if (slice.assetType === AssetType.INDIVIDUAL) {
-      for (const membership of slice.assetKits ?? []) {
-        if (membership?.kitId) kitIds.add(membership.kitId);
-      }
-    }
+    const kitIds = resolveSliceKitIds(
+      { ...slice, assetKits: slice.assetKits ?? [] },
+      kitIdByAssetKitId
+    );
     if (kitIds.size > 0) kitIdsBySliceId.set(slice.id, kitIds);
   }
 
@@ -14041,7 +14199,7 @@ export async function bulkArchiveBookings({
       userId,
     });
 
-    const bookings = await db.booking.findMany({
+    const selectedBookings = await db.booking.findMany({
       where,
       select: {
         id: true,
@@ -14051,6 +14209,13 @@ export async function bulkArchiveBookings({
         activeSchedulerReference: true,
       },
     });
+
+    // A booking that is already archived needs nothing more, so archiving is
+    // idempotent: a repeat click, or a list still showing rows an earlier
+    // click archived, finishes quietly instead of refusing the batch.
+    const bookings = selectedBookings.filter(
+      (b) => b.status !== BookingStatus.ARCHIVED
+    );
 
     /**
      * Archivable = COMPLETE (returned) or a past-due RESERVED booking (a
@@ -14074,6 +14239,8 @@ export async function bulkArchiveBookings({
           organizationId,
           bookingIds,
         },
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -14479,7 +14646,7 @@ async function createNotesForScannedAssetsAndKits({
   // Fetch assets and kits in parallel for better performance.
   // type+unitOfMeasure widen the select so per-asset notes can prefix
   // a qty-tracked unit count via wrapAssetWithCountForNote.
-  const [assets, kits, bookedRows] = await Promise.all([
+  const [assets, scannedKits, bookedRows] = await Promise.all([
     db.asset.findMany({
       where: { id: { in: assetIds }, organizationId },
       select: {
@@ -14521,6 +14688,13 @@ async function createNotesForScannedAssetsAndKits({
     );
   }
   const assetById = new Map(assets.map((a) => [a.id, a]));
+
+  // A kit is named in the notes only when one of its members arrived on this
+  // call: re-scanning a kit the booking already holds adds nothing.
+  const arrivedAssetIds = new Set(assetIds);
+  const kits = scannedKits.filter((kit) =>
+    kit.assetKits.some((ak) => arrivedAssetIds.has(ak.assetId))
+  );
 
   // Create a map of asset ID to kit name for assets that came from kits
   const assetIdToKitName = new Map<string, string>();
@@ -15061,10 +15235,12 @@ async function addScannedAssetsToBookingWithinTx(
   }
 
   /**
-   * Scans that gain a standalone row on this call.
+   * Scans that gain a standalone row on this call: the ones this booking does
+   * not already hold loose. Deduped, because one asset owns at most one
+   * standalone row per booking.
    *
-   * Assets missing from `scannedAssetsMetaById` aren't in this org; they are
-   * skipped here and rejected by the FK on the create below.
+   * `assertAssetsBelongToOrg` above has already refused a foreign id, so an
+   * asset missing from `scannedAssetsMetaById` cannot reach here.
    */
   const newStandaloneScans = [...new Set(assetIds)]
     .filter((assetId) => !preExistingStandaloneScannedIds.has(assetId))
@@ -15073,10 +15249,11 @@ async function addScannedAssetsToBookingWithinTx(
 
   /**
    * `AssetKit` memberships among the scanned slices that this booking already
-   * holds. The create below is a plain insert, so a caller that re-sends one
-   * would hit `BookingAsset_kit_unique` — but a caller that filters them out
-   * client-side delivers nothing new either way, and a membership already on
-   * the booking has already had whatever effect it was going to have.
+   * holds. A membership already on the booking has already had whatever
+   * effect it was going to have, so re-scanning its kit is a no-op: its slice
+   * is dropped from `newKitSlices` below. The create is a plain insert, and a
+   * slice written twice collides with `BookingAsset_kit_unique`
+   * (`bookingId`, `assetKitId`).
    */
   const scannedAssetKitIds = [
     ...new Set(effectiveKitSlices.map((slice) => slice.assetKitId)),
@@ -15090,6 +15267,18 @@ async function addScannedAssetsToBookingWithinTx(
           })
         ).map((row: { assetKitId: string | null }) => row.assetKitId)
       : []
+  );
+
+  /**
+   * The kit slices this call will actually write: `effectiveKitSlices` minus
+   * any membership the booking already holds. Every downstream read of the
+   * scanned kit slices (fulfilment candidates, the `BookingAsset` create, the
+   * emitted events, the per-asset quantity summary) must use this set, not
+   * `effectiveKitSlices` directly, which still contains memberships the
+   * booking already holds.
+   */
+  const newKitSlices = effectiveKitSlices.filter(
+    (slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId)
   );
 
   /**
@@ -15108,8 +15297,7 @@ async function addScannedAssetsToBookingWithinTx(
    * is the one type whose standalone and kit rows legitimately coexist, so it
    * has no single arrival row to stamp.
    */
-  const newKitDrivenScans = effectiveKitSlices
-    .filter((slice) => !preExistingScannedAssetKitIds.has(slice.assetKitId))
+  const newKitDrivenScans = newKitSlices
     .map((slice) => scannedAssetsMetaById.get(slice.assetId))
     .filter((meta): meta is ScannedAssetMeta => meta !== undefined)
     .filter((meta) => meta.type === AssetType.INDIVIDUAL);
@@ -15155,6 +15343,33 @@ async function addScannedAssetsToBookingWithinTx(
   });
 
   /**
+   * Scans whose standalone row was already here get to answer a reservation
+   * too, if that row carries no stamp.
+   *
+   * They are deliberately absent from `fulfilmentCandidates`: no row is being
+   * inserted for them, and re-sending one must not discharge a reservation a
+   * second time. That rule is about the STAMP, not about the row, so the claim
+   * below re-reads them and takes only the unstamped ones. Without it a unit
+   * added before its reservation existed can never answer it, however often it
+   * is scanned.
+   */
+  const preExistingScannedAssetIds = [...new Set(assetIds)].filter((assetId) =>
+    preExistingStandaloneScannedIds.has(assetId)
+  );
+
+  if (preExistingScannedAssetIds.length > 0) {
+    await claimUnstampedBookingRows(
+      {
+        bookingId,
+        assetIds: preExistingScannedAssetIds,
+        organizationId,
+        userId,
+      },
+      tx
+    );
+  }
+
+  /**
    * Resolve the slice quantity for kit-driven scans. When a kit QR is
    * scanned, the drawer attributes each member to its `AssetKit` via
    * `kitSlices` but may not pass an explicit slice quantity — so a
@@ -15172,7 +15387,7 @@ async function addScannedAssetsToBookingWithinTx(
    * column whose FK accepts ANY kit — including another org's.
    */
   const referencedAssetKitIds = Array.from(
-    new Set(effectiveKitSlices.map((s) => s.assetKitId).filter(Boolean))
+    new Set(newKitSlices.map((s) => s.assetKitId).filter(Boolean))
   );
   const assetKitById = new Map<string, { quantity: number; kitId: string }>(
     referencedAssetKitIds.length > 0
@@ -15223,14 +15438,20 @@ async function addScannedAssetsToBookingWithinTx(
         create: [
           // Standalone scans: `assetKitId = null`. Quantity precedence:
           // explicit per-row qty input → 1 (schema default).
-          ...assetIds.map((id) => ({
-            assetId: id,
-            quantity: quantities[id] ?? 1,
+          //
+          // `newStandaloneScans`, not the raw scan: a scanned asset the
+          // booking already holds loose keeps the row it has. Every caller
+          // sends what the operator scanned, which legitimately includes
+          // units already on the booking, and a second standalone row for one
+          // of them collides with `BookingAsset_manual_unique`.
+          ...newStandaloneScans.map((meta) => ({
+            assetId: meta.id,
+            quantity: quantities[meta.id] ?? 1,
             assetKitId: null,
             // No kit provenance for a standalone scan — kept explicit so the
             // "assetKitId null ⇔ sourceKitId null" invariant reads locally.
             sourceKitId: null,
-            bookingModelRequestId: takeModelRequestId(id),
+            bookingModelRequestId: takeModelRequestId(meta.id),
           })),
           // Kit-driven slices: `assetKitId` set, plus `sourceKitId` — the
           // durable owning-kit pointer that survives the membership row's
@@ -15243,7 +15464,7 @@ async function addScannedAssetsToBookingWithinTx(
           // the empty string — writing that would violate the FK, so it
           // normalizes to NULL. Both falling through is unreachable: a missing
           // `AssetKit` row means `assetKitId` below fails the FK first.
-          ...effectiveKitSlices.map((slice) => ({
+          ...newKitSlices.map((slice) => ({
             assetId: slice.assetId,
             quantity:
               slice.quantity ??
@@ -15278,15 +15499,34 @@ async function addScannedAssetsToBookingWithinTx(
    * (from `quantities` map, default 1) plus every kit-driven slice qty
    * for the same asset created on this call.
    */
-  if (allScannedAssetIds.length > 0) {
+  /**
+   * The assets this call actually put on the booking.
+   *
+   * Not the raw scan. A scanned asset the booking already holds keeps the row
+   * it has, a kit slice for a member already held loose is dropped, and a kit
+   * slice whose membership the booking already holds is dropped too: none of
+   * these gained anything here. An audit row and a note are claims about what
+   * happened, and "added X to booking" for a unit that was already on it is a
+   * false one: it shows up in the feed, in reports, and in the asset's own
+   * timeline with a quantity it never gained.
+   * @see {@link file://./../../../../../.claude/rules/bulk-event-parity.md}
+   */
+  const addedAssetIds = Array.from(
+    new Set([
+      ...newStandaloneScans.map((meta) => meta.id),
+      ...newKitSlices.map((slice) => slice.assetId),
+    ])
+  );
+
+  if (addedAssetIds.length > 0) {
     const addedQtyByAssetId = new Map<string, number>();
-    for (const sid of assetIds) {
+    for (const meta of newStandaloneScans) {
       addedQtyByAssetId.set(
-        sid,
-        (addedQtyByAssetId.get(sid) ?? 0) + (quantities[sid] ?? 1)
+        meta.id,
+        (addedQtyByAssetId.get(meta.id) ?? 0) + (quantities[meta.id] ?? 1)
       );
     }
-    for (const slice of effectiveKitSlices) {
+    for (const slice of newKitSlices) {
       const sliceQty =
         slice.quantity ?? assetKitById.get(slice.assetKitId)?.quantity ?? 1;
       addedQtyByAssetId.set(
@@ -15296,7 +15536,7 @@ async function addScannedAssetsToBookingWithinTx(
     }
 
     await recordEvents(
-      allScannedAssetIds.map((assetId) => {
+      addedAssetIds.map((assetId) => {
         const asset = scannedAssetsMetaById.get(assetId);
         return {
           organizationId,
@@ -15322,7 +15562,10 @@ async function addScannedAssetsToBookingWithinTx(
    * flow ({@link partialCheckoutBooking}), never as a side-effect of scanning.
    */
 
-  return booking;
+  // `addedAssetIds` travels out because the notes are written post-commit, by
+  // callers that only hold the raw scan and so cannot tell an arrival from a
+  // rescan.
+  return { booking, addedAssetIds };
 }
 
 /**
@@ -15362,6 +15605,15 @@ export async function addScannedAssetsToBooking({
   kitSlices?: ScannedKitSliceSpec[];
 }) {
   try {
+    // A scanned kit's members arrive as `kitSlices`, never in `assetIds`, so no
+    // kit exempts a loose member here: one in `assetIds` would be booked alone.
+    await assertScannedUnitsAreNotKitMembers({
+      bookingId,
+      organizationId,
+      looseAssetIds: assetIds,
+      exemptKitIds: [],
+    });
+
     /**
      * Step 1: Add assets to booking inside a transaction so we can mirror the
      * status-sync behaviour used in manage-assets. The pure-tx body lives in
@@ -15370,29 +15622,29 @@ export async function addScannedAssetsToBooking({
      * overlap-conflict guard main added inline here was moved INTO the helper
      * so both call sites get it atomically with the writes.
      */
-    const updatedBooking = await db.$transaction(async (tx) =>
-      addScannedAssetsToBookingWithinTx(tx, {
-        assetIds,
-        kitIds,
-        bookingId,
-        organizationId,
-        userId,
-        quantities,
-        kitSlices,
-      })
+    const { booking: updatedBooking, addedAssetIds } = await db.$transaction(
+      async (tx) =>
+        addScannedAssetsToBookingWithinTx(tx, {
+          assetIds,
+          kitIds,
+          bookingId,
+          organizationId,
+          userId,
+          quantities,
+          kitSlices,
+        })
     );
 
     /**
-     * Step 2: Create activity notes. The notes helper derives standalone
-     * vs kit-driven attribution from `kitIds` membership, so it needs the
-     * full union of standalone + kit-slice asset ids.
+     * Step 2: Create activity notes, for the assets that actually arrived.
+     * The helper derives standalone vs kit-driven attribution from `kitIds`
+     * membership, so it takes the union of both kinds, but a rescan of a unit
+     * already on the booking added nothing and must not be narrated as if it
+     * had.
      */
-    const allAddedAssetIds = Array.from(
-      new Set([...assetIds, ...kitSlices.map((s) => s.assetId)])
-    );
     await createNotesForScannedAssetsAndKits({
       booking: updatedBooking,
-      assetIds: allAddedAssetIds,
+      assetIds: addedAssetIds,
       kitIds,
       organizationId,
       userId,
