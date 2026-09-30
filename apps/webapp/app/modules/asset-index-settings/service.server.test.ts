@@ -146,7 +146,7 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     });
   }
 
-  it("adds the quantity columns as one block around Total quantity, Free now and Stock status switched on", async () => {
+  it("keeps the block next to Total quantity when the user shows it, Free now and Stock status on", async () => {
     const saved = [...SAVED_DEFAULTS, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
 
     const settings = await loadSavedColumns(saved, true);
@@ -179,13 +179,30 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     expect(new Set(positions).size).toBe(positions.length);
   });
 
-  it("switches Free now and Stock status on even when Total quantity stays hidden", async () => {
-    const quantityHidden = SAVED_DEFAULTS.map((col) =>
-      col.name === "quantity" ? { ...col, visible: false } : col
-    );
+  /** The saved defaults with Total quantity hidden, as most saved sets have it. */
+  const QUANTITY_HIDDEN = SAVED_DEFAULTS.map((col) =>
+    col.name === "quantity" ? { ...col, visible: false } : col
+  );
 
-    const settings = await loadSavedColumns(quantityHidden, false);
+  /** The quantity block as a fresh set has it, Min quantity included. */
+  const FULL_BLOCK = [...BLOCK, "minQuantity"];
+
+  it("puts the block right after Status when Total quantity is hidden, Free now and Stock status on", async () => {
+    const saved = [...QUANTITY_HIDDEN, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
+
+    const settings = await loadSavedColumns(saved, true);
     const columns = settings.columns as Column[];
+
+    // Right after Status, so the new columns open on the first screen. The
+    // hidden Total quantity and Min quantity moved in with them; everything
+    // else keeps its order.
+    const others = inOrder(saved).filter((name) => !FULL_BLOCK.includes(name));
+    const statusIndex = others.indexOf("status");
+    expect(inOrder(columns)).toEqual([
+      ...others.slice(0, statusIndex + 1),
+      ...FULL_BLOCK,
+      ...others.slice(statusIndex + 1),
+    ]);
 
     expect(find(columns, "available")?.visible).toBe(true);
     expect(find(columns, "stockStatus")?.visible).toBe(true);
@@ -193,9 +210,52 @@ describe("getAssetIndexSettings with a column set saved before the quantity colu
     expect(find(columns, "quantity")?.visible).toBe(false);
     expect(find(columns, "reserved")?.visible).toBe(false);
     expect(find(columns, "minQuantity")?.visible).toBe(false);
+    for (const col of saved) {
+      expect(find(columns, col.name)?.visible).toBe(col.visible);
+    }
+
+    const positions = columns.map((col) => col.position);
+    expect(new Set(positions).size).toBe(positions.length);
   });
 
-  it("adds every new quantity column switched off in a workspace without quantity-tracked assets", async () => {
+  it("leaves a Min quantity the user shows where it is", async () => {
+    const minQuantityShown = QUANTITY_HIDDEN.map((col) =>
+      col.name === "minQuantity" ? { ...col, visible: true } : col
+    );
+
+    const settings = await loadSavedColumns(minQuantityShown, false);
+    const columns = settings.columns as Column[];
+
+    const newOrder = inOrder(columns);
+    const statusIndex = newOrder.indexOf("status");
+    expect(
+      newOrder.slice(statusIndex + 1, statusIndex + 1 + BLOCK.length)
+    ).toEqual(BLOCK);
+    // Still after the same columns it followed before.
+    const savedOrder = inOrder(minQuantityShown);
+    expect(newOrder[newOrder.indexOf("minQuantity") - 1]).toBe(
+      savedOrder[savedOrder.indexOf("minQuantity") - 1]
+    );
+    expect(find(columns, "minQuantity")?.visible).toBe(true);
+  });
+
+  it("gathers the block after Status, switched off, in a workspace without quantity-tracked assets", async () => {
+    const settings = await loadSavedColumns(QUANTITY_HIDDEN, false, {
+      hasQuantityAssets: false,
+    });
+    const columns = settings.columns as Column[];
+
+    const newOrder = inOrder(columns);
+    const statusIndex = newOrder.indexOf("status");
+    expect(
+      newOrder.slice(statusIndex + 1, statusIndex + 1 + FULL_BLOCK.length)
+    ).toEqual(FULL_BLOCK);
+    for (const name of FULL_BLOCK) {
+      expect(find(columns, name)?.visible).toBe(false);
+    }
+  });
+
+  it("adds every new quantity column switched off next to a shown Total quantity in a workspace without quantity-tracked assets", async () => {
     const saved = [...SAVED_DEFAULTS, ...SAVED_BARCODES, SAVED_CUSTOM_FIELD];
 
     const settings = await loadSavedColumns(saved, true, {

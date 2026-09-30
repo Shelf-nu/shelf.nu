@@ -297,6 +297,42 @@ function positionInQuantityBlock(
 }
 
 /**
+ * Moves a saved set's hidden quantity columns right after its Status column,
+ * when its Total quantity is hidden.
+ *
+ * A saved set keeps Total quantity wherever the user left it, and for most
+ * sets that is hidden near the end of the list. Quantity columns added next to
+ * it would then open far past the right edge of the table. Only hidden columns
+ * move, so nothing the user can see changes place; a quantity column the user
+ * shows stays where it is.
+ *
+ * @param columns - A saved column set; not modified
+ * @returns The same columns, re-positioned, or the input when Total quantity
+ *   is shown or the set has no Status or Total quantity column
+ */
+function gatherHiddenQuantityColumnsAfterStatus(columns: Column[]): Column[] {
+  const quantity = columns.find((col) => col.name === "quantity");
+  const hasStatus = columns.some((col) => col.name === "status");
+  if (!quantity || quantity.visible || !hasStatus) return columns;
+
+  const ordered = [...columns].sort((a, b) => a.position - b.position);
+  const isMoving = (col: Column) => isQuantityColumn(col.name) && !col.visible;
+
+  const staying = ordered.filter((col) => !isMoving(col));
+  // In block order, so the moved columns already sit the way a fresh set has them.
+  const moving = QUANTITY_COLUMN_BLOCK.flatMap((name) =>
+    ordered.filter((col) => col.name === name && isMoving(col))
+  );
+  const statusIndex = staying.findIndex((col) => col.name === "status");
+
+  return [
+    ...staying.slice(0, statusIndex + 1),
+    ...moving,
+    ...staying.slice(statusIndex + 1),
+  ].map((col, position) => ({ ...col, position }));
+}
+
+/**
  * Adds default columns that a saved column set lacks.
  *
  * Settings rows are per user and outlive the default list, so a fixed column
@@ -305,7 +341,9 @@ function positionInQuantityBlock(
  * position moves down by one, so the user's own order is kept.
  *
  * - A quantity column goes next to the quantity columns the set already has
- *   (see {@link QUANTITY_COLUMN_BLOCK}), wherever the user put them. In a
+ *   (see {@link QUANTITY_COLUMN_BLOCK}): next to Total quantity when the user
+ *   shows it, else right after Status, where the hidden quantity columns are
+ *   gathered first (see {@link gatherHiddenQuantityColumnsAfterStatus}). In a
  *   workspace with quantity-tracked assets it takes its default visibility, so
  *   Free now and Stock status appear and the rest stay one switch away. In a
  *   workspace without any it starts hidden, instead of as a column of dashes.
@@ -328,27 +366,25 @@ export function insertMissingDefaultColumns(
     .filter((field) => missing.includes(field.name))
     .sort((a, b) => a.position - b.position);
 
-  return toInsert.reduce<Column[]>(
-    (acc, field) => {
-      const position =
-        positionInQuantityBlock(acc, field.name) ?? field.position;
+  const start = toInsert.some((field) => isQuantityColumn(field.name))
+    ? gatherHiddenQuantityColumnsAfterStatus(columns)
+    : [...columns];
 
-      const visible =
-        isQuantityColumn(field.name) && !hasQuantityAssets
-          ? false
-          : field.visible;
+  return toInsert.reduce<Column[]>((acc, field) => {
+    const position = positionInQuantityBlock(acc, field.name) ?? field.position;
 
-      return [
-        ...acc.map((col) =>
-          col.position >= position
-            ? { ...col, position: col.position + 1 }
-            : col
-        ),
-        { ...field, position, visible },
-      ];
-    },
-    [...columns]
-  );
+    const visible =
+      isQuantityColumn(field.name) && !hasQuantityAssets
+        ? false
+        : field.visible;
+
+    return [
+      ...acc.map((col) =>
+        col.position >= position ? { ...col, position: col.position + 1 } : col
+      ),
+      { ...field, position, visible },
+    ];
+  }, start);
 }
 
 // Generate barcode columns when barcodes are enabled
