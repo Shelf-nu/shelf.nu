@@ -200,6 +200,54 @@ describe("redactCustodianForViewer", () => {
     // Prisma results get reused by callers; redaction must not reach back.
     expect(rows[0].custody?.custodian?.name).toBe("Someone Else");
   });
+
+  /**
+   * The advanced asset index's raw query projects a custodian's name TWICE —
+   * once at the top level of a custody entry (for a sort key and display code
+   * that read it without descending into `custodian`) and again inside
+   * `custodian.name`. Redacting only the nested copy leaves the same identity
+   * readable one field over.
+   */
+  describe("the top-level name mirror", () => {
+    it("empties an entry's top-level name alongside custodian.name", () => {
+      const rows = [
+        {
+          id: "asset-1",
+          custody: [
+            {
+              name: "Someone Else",
+              custodian: {
+                userId: COLLEAGUE,
+                name: "Someone Else",
+                user: { id: COLLEAGUE, email: "someone@example.com" },
+              },
+            },
+          ],
+        },
+      ];
+
+      const out = redactCustodianForViewer(rows, {
+        canSeeAllCustody: false,
+        userId: VIEWER,
+      });
+
+      const custody = out[0].custody as Array<{ name: string }>;
+      expect(custody[0].name).toBe("");
+      expect(JSON.stringify(out)).not.toContain("Someone Else");
+    });
+
+    it("does not invent a name field on a shape that never had one", () => {
+      // `rowHeldBy` is a kit-shaped row: no top-level `name` mirror.
+      const rows = [rowHeldBy(COLLEAGUE)];
+
+      const out = redactCustodianForViewer(rows, {
+        canSeeAllCustody: false,
+        userId: VIEWER,
+      });
+
+      expect(out[0].custody).not.toHaveProperty("name");
+    });
+  });
 });
 
 describe("redactCustodianForViewer — booking-derived custody", () => {

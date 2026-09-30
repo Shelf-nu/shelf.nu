@@ -450,6 +450,15 @@ vitest.mock("~/modules/booking-model-request/service.server", () => ({
   assertModelUnitsNotReservedElsewhere: vitest
     .fn()
     .mockResolvedValue(undefined),
+  // why: `createBooking` bounds its reservation batch on every call, so the
+  // symbol has to exist even though no case in this file reserves anything.
+  // The limit itself is pinned in booking-model-request/service.server.test.ts
+  // and the wiring in booking/service.server.model-requests.test.ts.
+  assertReservationBatchWithinLimit: vitest.fn(),
+  // why: a factory mock replaces the whole module, so a value export the
+  // caller reads has to be restated or it arrives undefined. `createBooking`
+  // passes this as its transaction timeout on every call.
+  RESERVATION_BATCH_TX_TIMEOUT_MS: 15_000,
 }));
 
 // why: spying on booking update email calls without executing
