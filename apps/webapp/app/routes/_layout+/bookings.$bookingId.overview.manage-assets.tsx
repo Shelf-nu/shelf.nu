@@ -52,6 +52,7 @@ import { CategoryBadge } from "~/components/assets/category-badge";
 import { ConsumptionTypeBadge } from "~/components/assets/consumption-type-badge";
 import { AvailabilityLabel } from "~/components/booking/availability-label";
 import { AvailabilitySelect } from "~/components/booking/availability-select";
+import { IncludeChildLocationsCheckbox } from "~/components/booking/include-child-locations-checkbox";
 import { ManageModelRequests } from "~/components/booking/manage-model-requests";
 import { assetIdsBlockedByModelHeadroom } from "~/components/booking/model-headroom";
 import { StatusFilter } from "~/components/booking/status-filter";
@@ -103,6 +104,10 @@ import {
   readOwnNamedUnits,
 } from "~/modules/booking-model-request/service.server";
 import { createSystemBookingNote } from "~/modules/booking-note/service.server";
+import {
+  hasTickedLocationWithChildren,
+  resolveLocationFilterIds,
+} from "~/modules/location/child-locations-filter.server";
 import { createNotes } from "~/modules/note/service.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getUserByID } from "~/modules/user/service.server";
@@ -296,6 +301,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
+    /**
+     * With "Include assets from child locations" on, each ticked location
+     * matches itself plus everything nested under it. `undefined` — the
+     * checkbox is off, or nothing is ticked — leaves the list on the ticked
+     * locations exactly. The action's select-all resolves the same URL through
+     * the same function, so it acts on the set this list shows.
+     */
+    const searchParams = getCurrentSearchParams(request);
+    const locationIdsOverride = await resolveLocationFilterIds({
+      organizationId,
+      searchParams,
+    });
+
     // getPaginatedAndFilterableAssets + getBooking both only need
     // `organizationId` (from requirePermission above). They're
     // independent — parallelise to cut a serial DB round-trip.
@@ -315,6 +333,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         totalLocations,
       },
       booking,
+      tickedLocationHasChildren,
     ] = await Promise.all([
       getPaginatedAndFilterableAssets({
         request,
@@ -322,6 +341,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Ignores the custodian-filter seed — scope it rather than fetch a
         // roster nobody renders.
         canSeeAllCustody: false,
+        locationIdsOverride,
         extraInclude: {
           assetLocations: {
             select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
@@ -334,6 +354,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userOrganizations,
         request,
       }),
+      // Decides whether the checkbox is offered: it can only change the list
+      // when a ticked location has child locations.
+      hasTickedLocationWithChildren({ organizationId, searchParams }),
     ]);
 
     /**
@@ -627,6 +650,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       totalTags,
       locations,
       totalLocations,
+      tickedLocationHasChildren,
       bookingKitIds,
       modelHeadroom,
       ...modelTabData,
@@ -748,6 +772,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       const assetsWhere = getAssetsWhereInput({
         organizationId,
         currentSearchParams: searchParams.toString(),
+        // Same URL, same resolver as the loader: with "Include assets from
+        // child locations" on, select-all adds the sub-location assets the
+        // list showed, not only those placed in the ticked locations.
+        locationIdsOverride: await resolveLocationFilterIds({
+          organizationId,
+          searchParams,
+        }),
         // `booking: update` is held by BASE and SELF_SERVICE. Select-all here
         // ADDS the matched assets to the booking, which then lists them — so an
         // unscoped custodian filter would hand a restricted user a readable
@@ -1287,6 +1318,7 @@ export default function AddAssetsToNewBooking() {
     assetModels,
     modelRequests,
     modelHeadroom,
+    tickedLocationHasChildren,
   } = useLoaderData<typeof loader>();
 
   /**
@@ -1618,7 +1650,13 @@ export default function AddAssetsToNewBooking() {
             className="justify-between !border-t-0 border-b px-6 md:flex"
           />
 
-          <div className="flex justify-around gap-2 border-b p-3 lg:gap-4">
+          <div
+            className={tw(
+              "flex justify-around gap-2 p-3 lg:gap-4",
+              // The checkbox line below closes the block when it is shown.
+              tickedLocationHasChildren ? "" : "border-b"
+            )}
+          >
             <DynamicDropdown
               trigger={
                 <div className="flex h-6 cursor-pointer items-center gap-2">
@@ -1666,6 +1704,13 @@ export default function AddAssetsToNewBooking() {
               )}
             />
           </div>
+          {/* Modifies the Locations filter, so it sits under it — in the
+              filter row, never inside the dropdown's list of locations. */}
+          {tickedLocationHasChildren ? (
+            <div className="flex justify-end border-b px-3 pb-3">
+              <IncludeChildLocationsCheckbox />
+            </div>
+          ) : null}
         </>
       ) : null}
 

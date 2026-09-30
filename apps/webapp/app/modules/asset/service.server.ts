@@ -4293,12 +4293,24 @@ export async function getPaginatedAndFilterableAssets({
   isSelfService,
   canSeeAllCustody,
   userId,
+  locationIdsOverride,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
   // `AssetKit` pivot. Callers still pass a plain `kitId` string here
   // for filtering; the where-builder will map it onto `assetKits.some`.
   kitId?: string | null;
+  /**
+   * Location ids the ASSET QUERY matches, in place of the URL's `location`
+   * values. Omitted, the URL's own values are matched exactly.
+   *
+   * The Locations filter seed still reads the URL, so widening what the list
+   * matches (ticked locations plus their child locations) never changes which
+   * options read as ticked.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: Location["id"][];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
@@ -4413,7 +4425,7 @@ export async function getPaginatedAndFilterableAssets({
         bookingTo: bookingTo ?? undefined,
         hideUnavailable,
         unhideAssetsBookigIds,
-        locationIds,
+        locationIds: locationIdsOverride ?? locationIds,
         teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
