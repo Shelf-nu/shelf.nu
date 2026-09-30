@@ -588,7 +588,7 @@ export const BookingCheckinReceiptPreview = ({
                       indistinguishable from a live kit member. */}
                   <When truthy={row.isRemovedFromKit}>
                     <span className="mt-1 block text-xs text-gray-500">
-                      Removed from kit — kept as a record of what was booked
+                      Removed from kit, kept as a record of what was booked
                     </span>
                   </When>
                 </td>

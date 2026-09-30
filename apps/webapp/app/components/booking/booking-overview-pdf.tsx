@@ -454,7 +454,7 @@ export const BookingPDFPreview = ({
                   {asset.quantity ?? 1}
                 </td>
                 <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
-                  {/* why: out of this rule — the checklist prints the kit's
+                  {/* why: out of this rule: the checklist prints the kit's
                         name only. Kits carry no `sequentialId`, so a SAM_ID
                         workspace has no kit code to print here. */}
                   {asset?.kit?.name}
@@ -468,7 +468,7 @@ export const BookingPDFPreview = ({
                         rows too and may never have gone out. */}
                   <When truthy={!!asset.isRemovedFromKit}>
                     <span className="mt-1 block text-xs text-gray-500">
-                      Removed from kit — kept as a record of what was booked
+                      Removed from kit, kept as a record of what was booked
                     </span>
                   </When>
                 </td>

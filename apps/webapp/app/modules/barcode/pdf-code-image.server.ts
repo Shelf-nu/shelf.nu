@@ -8,7 +8,7 @@
  * - a barcode (Code 128, Code 39, EAN-13, DataMatrix, External QR) is drawn
  *   here from its value, as an SVG, with bwip-js;
  * - anything else (the QR id, a SAM ID, or a fallback to the QR) prints the
- *   asset's Shelf QR, rendered by `getQrCodeMaps` as before.
+ *   asset's Shelf QR, rendered by `getQrCodeMaps`.
  *
  * A barcode that would not fit its space at a scannable module width (a linear
  * code wider than the Code column, a 2D code too dense for its square), or a
