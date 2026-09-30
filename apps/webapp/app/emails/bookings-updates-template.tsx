@@ -22,11 +22,30 @@ import {
 } from "./components/footers";
 import { LogoForEmail } from "./logo";
 import { styles } from "./styles";
-import type { BookingForEmail } from "./types";
+import type { BookingEmailActor, BookingForEmail } from "./types";
+
+/**
+ * The actor line's text after the label: "<name> on <date, time>", with the
+ * moment in the recipient's own date, time and time zone preferences. The HTML
+ * template and the plain-text body both use it, so the two always agree.
+ */
+export function formatBookingEmailActorDetail(
+  actor: BookingEmailActor,
+  prefs: ResolvedFormatPrefs
+) {
+  return `${actor.name} on ${formatDate(actor.at, prefs, {
+    includeTime: true,
+  })}`;
+}
 
 interface Props {
   heading: string;
   booking: BookingForEmail;
+  /**
+   * Who performed the action and when, shown directly under the heading.
+   * Leave it out for emails nobody triggered, such as scheduled reminders.
+   */
+  actor?: BookingEmailActor;
   assetCount: number;
   /** Resolved formatting prefs — the recipient's, for recipient-specific dates. */
   prefs: ResolvedFormatPrefs;
@@ -62,6 +81,7 @@ interface Props {
 export function BookingUpdatesEmailTemplate({
   booking,
   heading,
+  actor,
   prefs,
   assetCount,
   hideViewButton = false,
@@ -114,6 +134,14 @@ export function BookingUpdatesEmailTemplate({
           <Heading as="h1" style={{ ...styles.h1 }}>
             {heading}
           </Heading>
+          {actor ? (
+            <p style={{ ...styles.p }}>
+              <span style={{ color: "#101828", fontWeight: "600" }}>
+                {`${actor.label}:`}
+              </span>{" "}
+              {formatBookingEmailActorDetail(actor, prefs)}
+            </p>
+          ) : null}
           <Heading as="h2" style={{ ...styles.h2 }}>
             {booking.name} | {assetCount}{" "}
             {assetCount === 1 ? "asset" : "assets"}
@@ -358,37 +386,10 @@ export function BookingUpdatesEmailTemplate({
   );
 }
 
-/*
- *The HTML content of an email will be accessed by a server file to send email,
-  we cannot import a TSX component in a server file so we are exporting TSX converted to HTML string using render function by react-email.
+/**
+ * Renders {@link BookingUpdatesEmailTemplate} to an HTML string, for server
+ * code that sends the email and cannot import a TSX component. Every prop is
+ * passed through unchanged.
  */
-export const bookingUpdatesTemplateString = ({
-  booking,
-  heading,
-  assetCount,
-  prefs,
-  hideViewButton = false,
-  isAdminEmail = false,
-  cancellationReason,
-  changes,
-  assets,
-  modelRequests,
-  recipientReason,
-  recipientEmail,
-}: Props) =>
-  render(
-    <BookingUpdatesEmailTemplate
-      booking={booking}
-      heading={heading}
-      assetCount={assetCount}
-      prefs={prefs}
-      hideViewButton={hideViewButton}
-      isAdminEmail={isAdminEmail}
-      cancellationReason={cancellationReason}
-      changes={changes}
-      assets={assets}
-      modelRequests={modelRequests}
-      recipientReason={recipientReason}
-      recipientEmail={recipientEmail}
-    />
-  );
+export const bookingUpdatesTemplateString = (props: Props) =>
+  render(<BookingUpdatesEmailTemplate {...props} />);
