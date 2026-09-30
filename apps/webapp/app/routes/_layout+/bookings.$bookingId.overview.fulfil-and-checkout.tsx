@@ -27,6 +27,8 @@
  * @see {@link file://./../../hooks/use-booking-fulfil-session-initialization.ts}
  *   — atom seeding hook.
  * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
+ * @see {@link file://./../../modules/booking-model-request/scan-session.server.ts}
+ *   for the loader derivation shared with the Scan to Assign screen.
  */
 
 import { BookingStatus } from "@prisma/client";
@@ -52,12 +54,11 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
-import { resolveClaimableAssetIds } from "~/modules/booking-model-request/claimable";
+import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -117,15 +118,12 @@ export const fulfilAndCheckoutSchema = z.object({
  *   scan-assets).
  * - Tells the drawer whether submit sends out only the scanned items, so
  *   its "something to check out" rule matches the action's.
+ * - Derives `expectedModelRequests` and `alreadyIncluded` via
+ *   `deriveBookingScanSession`, shared with the Scan to Assign loader so
+ *   the two screens can never disagree about what a scan is worth.
  * - Short-circuits to `/bookings/:id` when there are zero outstanding
- *   model requests — the regular checkout flow is correct in that
- *   case and the fulfil scanner would be a confusing detour.
- * - Supplements the booking query with a lightweight lookup of each
- *   `bookingAsset.assetId → assetModelId` because the default
- *   `BOOKING_WITH_ASSETS_INCLUDE` on `getBooking` doesn't select
- *   `assetModelId` on the nested asset row. The drawer needs this to
- *   group "already included" entries by model and to compute
- *   per-model progress without issuing a follow-up round-trip.
+ *   model requests: the regular checkout flow is correct in that case and
+ *   the fulfil scanner would be a confusing detour.
  */
 /** Statuses a booking can be checked out in, as `fulfilAndCheckOut` accepts. */
 const FULFILLABLE_STATUSES: string[] = ["RESERVED", "ONGOING", "OVERDUE"];
@@ -183,79 +181,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     /**
-     * Outstanding model requests, read through the shared predicate so this
-     * page offers the fulfil scanner exactly when the service will accept a
-     * fulfilment. If none remain, this route has nothing to do; send the
+     * Outstanding model requests plus the assets already on the booking that
+     * a scan could still make answer one, derived through the predicate and
+     * rule both booking scanners share (this screen and Scan to Assign) so a
+     * scan is never worth a different amount depending which is open.
+     *
+     * If nothing remains outstanding, this route has nothing to do; send the
      * operator back to the booking page where the normal checkout flow
      * lives. `booked` reflects the original reservation intent (for progress
      * denominators); `remaining` is what's still outstanding after any prior
      * partial-scan progress, so the drawer pre-populates the right number of
      * pending rows.
      */
-    const expectedModelRequests = getOutstandingModelRequests(
-      booking.modelRequests
-    ).map((r) => ({
-      assetModelId: r.assetModelId,
-      assetModelName: r.assetModel.name,
-      booked: r.quantity,
-      remaining: r.quantity - r.fulfilledQuantity,
-    }));
+    const { expectedModelRequests, alreadyIncluded } =
+      await deriveBookingScanSession({
+        modelRequests: booking.modelRequests,
+        bookingAssets: booking.bookingAssets,
+        organizationId,
+      });
 
     if (expectedModelRequests.length === 0) {
       return redirect(`/bookings/${bookingId}`);
     }
-
-    /**
-     * Supplementary lookup: `assetModelId` per `BookingAsset.assetId`
-     * (not selected by `BOOKING_WITH_ASSETS_INCLUDE`). Cheap — narrow
-     * `select` on at most N rows where N = booking.bookingAssets
-     * length. Keeps the expensive `getBooking` call unchanged.
-     */
-    const alreadyIncludedAssetIds = booking.bookingAssets.map(
-      (ba) => ba.asset.id
-    );
-    const assetModelIdByAssetId = new Map<string, string | null>();
-    if (alreadyIncludedAssetIds.length > 0) {
-      const rows = await db.asset.findMany({
-        where: {
-          id: { in: alreadyIncludedAssetIds },
-          organizationId,
-        },
-        select: { id: true, assetModelId: true },
-      });
-      for (const row of rows) {
-        assetModelIdByAssetId.set(row.id, row.assetModelId);
-      }
-    }
-
-    /**
-     * Assets already on the booking that a scan could still make answer a
-     * reservation.
-     *
-     * Resolved server-side, and through the shared rule rather than inline:
-     * the drawer renders a "now counts" badge off this flag and moves the
-     * per-model progress strip by it, so it has to agree with what the write
-     * will do. It also reads every row of the booking, which the flat list
-     * below cannot express, because one asset can hold several at once.
-     */
-    const claimableAssetIds = resolveClaimableAssetIds(booking.bookingAssets);
-
-    const alreadyIncluded = booking.bookingAssets.map((ba) => ({
-      id: ba.asset.id,
-      title: ba.asset.title,
-      mainImage: ba.asset.mainImage,
-      thumbnailImage: ba.asset.thumbnailImage,
-      assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
-      /** Whether scanning this asset could still answer a reservation. */
-      claimable: claimableAssetIds.has(ba.asset.id),
-      kitId: ba.asset.assetKits[0]?.kitId ?? null,
-      // `ba.quantity` is the BOOKING-specific unit count (from the
-      // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for
-      // QUANTITY_TRACKED. Needed so the drawer's "Already included"
-      // section can render `"Pens × 20"` for qty-tracked rows.
-      bookedQuantity: ba.quantity,
-      type: ba.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
-    }));
 
     /**
      * Whether submit sends out only the scanned items, decided the same way

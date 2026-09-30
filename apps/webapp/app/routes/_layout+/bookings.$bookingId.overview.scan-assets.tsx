@@ -5,7 +5,7 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -16,6 +16,7 @@ import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
 import { db } from "~/database/db.server";
+import { useBookingAssignSessionInitialization } from "~/hooks/use-booking-assign-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { ScannedKitSliceSpec } from "~/modules/booking/service.server";
@@ -23,6 +24,7 @@ import {
   addScannedAssetsToBooking,
   getBooking,
 } from "~/modules/booking/service.server";
+import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
@@ -51,6 +53,22 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
+/**
+ * Loader for the Scan to Assign route.
+ *
+ * Auths the user against `booking.update`, loads the booking, and derives
+ * `assignSession`: the outstanding model reservations and the assets already
+ * on the booking, in the shape `useBookingAssignSessionInitialization` seeds
+ * into the scanner atoms. `assignSession` is null when the booking reserves
+ * no models, so the screen renders exactly as it did before this reservation
+ * context existed.
+ *
+ * `booking:update` is a permission every role holds, so past that gate this
+ * also proves the caller may write the booking (they created it or hold it,
+ * unless their access writes every booking), then applies the add-items rule
+ * for the caller's role and the booking's status. The action repeats both
+ * checks, since a direct POST skips this loader.
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -101,12 +119,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
     const title = `Scan assets for booking | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return payload({ title, header, booking });
+    /**
+     * Reservation context for the scanner, or null when the booking reserves
+     * no models and the drawer should look exactly as it always has.
+     *
+     * `getBooking` already returns everything `deriveBookingScanSession`
+     * needs, so there is no extra query here beyond its own supplementary
+     * asset lookup: `modelRequests` with its model's name, and
+     * `bookingAssets` with every scalar plus the asset's type. The
+     * derivation is shared with the Check Out scanner's loader so a scan can
+     * never be worth a different amount depending which screen is open.
+     */
+    const { expectedModelRequests, alreadyIncluded } =
+      await deriveBookingScanSession({
+        modelRequests: booking.modelRequests,
+        bookingAssets: booking.bookingAssets,
+        organizationId,
+      });
+
+    const assignSession =
+      expectedModelRequests.length === 0
+        ? null
+        : { expectedModelRequests, alreadyIncluded };
+
+    return payload({ title, header, booking, assignSession });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw data(error(reason), { status: reason.status });
@@ -271,7 +313,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (id) => !kitSliceAssetIds.has(id)
     );
 
-    await addScannedAssetsToBooking({
+    const { addedAssetIds, claimedAssetIds } = await addScannedAssetsToBooking({
       bookingId,
       assetIds: standaloneAssetIds,
       kitIds,
@@ -281,12 +323,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitSlices,
     });
 
-    sendNotification({
-      title: "Assets added",
-      message: "All the scanned assets has been successfully added to booking.",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
+    /**
+     * A scan can legitimately change nothing: every item may already sit on
+     * the booking. `addedAssetIds` is what got a new row; `claimedAssetIds`
+     * is what counted an EXISTING row toward a reservation without a new one.
+     * The notification names whichever actually happened, since a blanket
+     * "added" claim is false the moment neither set has anything in it.
+     */
+    const addedCount = addedAssetIds.length;
+    const claimedCount = claimedAssetIds.length;
+
+    if (addedCount > 0) {
+      sendNotification({
+        title: "Assets added",
+        message:
+          addedCount === 1
+            ? "The scanned asset was added to the booking."
+            : `${addedCount} scanned assets were added to the booking.`,
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+    } else if (claimedCount > 0) {
+      sendNotification({
+        title: "Reservation updated",
+        message:
+          claimedCount === 1
+            ? "That asset was already on the booking. It now counts toward a reservation."
+            : "Those assets were already on the booking. They now count toward reservations.",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+    } else {
+      sendNotification({
+        title: "Nothing to add",
+        message: "Every scanned item is already on this booking.",
+        icon: { name: "scan", variant: "gray" },
+        senderId: authSession.userId,
+      });
+    }
 
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
@@ -305,6 +379,12 @@ export const handle = {
 };
 
 export default function ScanAssetsForBookings() {
+  const { booking, assignSession } = useLoaderData<typeof loader>();
+  useBookingAssignSessionInitialization({
+    session: assignSession,
+    bookingId: booking.id,
+  });
+
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);

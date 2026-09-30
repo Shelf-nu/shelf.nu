@@ -75,6 +75,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -176,6 +177,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       request,
+    });
+
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage kits for",
     });
 
     // Kits can be changed while the booking is open; roles whose policy does
@@ -383,6 +397,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // of {asset} via {kit} to {booking}"). Cheap scalar pull.
           name: true,
           status: true,
+          // Both custody links, needed by the ownership check below.
+          creatorId: true,
+          custodianUserId: true,
           bookingAssets: {
             // `assetKitId` is needed by the kit-add logic below — it
             // checks "is this kit's AssetKit already represented in this
@@ -404,6 +421,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Booking not found. Are you sure it exists in current workspace?",
         });
       });
+
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage kits for",
+    });
 
     // Kits can be changed while the booking is open; roles whose policy does
     // not allow adding after DRAFT are held to DRAFT.

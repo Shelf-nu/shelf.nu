@@ -109,6 +109,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -330,6 +331,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
       }),
     ]);
+
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage assets for",
+    });
 
     /**
      * For QUANTITY_TRACKED assets, compute available quantity via the
@@ -766,6 +780,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           name: true,
           status: true,
+          // Both custody links, needed by the ownership check below.
+          creatorId: true,
+          custodianUserId: true,
           /**
            * We need the original assets and their quantities so we can
            * compare and detect changes. Asset `title` and `type` are
@@ -795,6 +812,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Booking not found. Are you sure it exists in the current workspace.",
         });
       });
+
+    /**
+     * `booking: update` is held by every role, so it settles nothing about
+     * THIS booking: a caller who does not write every booking may only change
+     * one they created or hold. Judged before the status, so a caller with no
+     * claim on the booking does not learn what state it is in.
+     */
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "manage assets for",
+    });
 
     if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({

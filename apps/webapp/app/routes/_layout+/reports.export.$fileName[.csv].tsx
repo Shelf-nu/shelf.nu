@@ -45,7 +45,11 @@ import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -340,7 +344,10 @@ export const loader = async ({
 
     return csvResponse(csvString, {
       headers: {
-        "content-disposition": `attachment; filename="${fileName}.csv"`,
+        "content-disposition": buildContentDisposition(null, {
+          fallback: `${reportId}-export`,
+          filename: `${fileName}.csv`,
+        }),
         "cache-control": "no-cache",
       },
     });
