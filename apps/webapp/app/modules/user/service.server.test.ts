@@ -28,6 +28,7 @@ import {
   createUserAccountForTesting,
   createUserOrAttachOrg,
   defaultUserCategories,
+  findUserByEmail,
 } from "./service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
 
@@ -850,5 +851,64 @@ describe("createUser — signup attribution on the signup event", () => {
       properties: { created_with_invite: false, is_sso: false },
       setOnce: undefined,
     });
+  });
+});
+
+describe(findUserByEmail.name, () => {
+  const findManyMock = db.user.findMany as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("finds an account stored with capitals from the address as typed", async () => {
+    // why: the stored row keeps the capitals it was created with; sign-in
+    // forms lowercase what the person types.
+    findManyMock.mockResolvedValueOnce([
+      { id: "user-1", email: "Karen.Smith@School.org" },
+    ]);
+
+    const user = await findUserByEmail("karen.smith@school.org");
+
+    expect(user).toMatchObject({ id: "user-1" });
+    expect(findManyMock).toHaveBeenCalledWith({
+      where: {
+        email: { in: ["karen.smith@school.org"], mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  });
+
+  it("prefers the row stored in lowercase when two differ only by case", async () => {
+    // why: two rows can share an address up to case; the lowercase one is
+    // what every path writes today, so it is the account to resolve to.
+    findManyMock.mockResolvedValueOnce([
+      { id: "older", email: "Karen.Smith@School.org" },
+      { id: "lowercase", email: "karen.smith@school.org" },
+    ]);
+
+    expect(await findUserByEmail("Karen.Smith@School.org")).toMatchObject({
+      id: "lowercase",
+    });
+  });
+
+  it("falls back to the oldest account when none is stored in lowercase", async () => {
+    // why: the query orders by creation, so the first row is the oldest.
+    findManyMock.mockResolvedValueOnce([
+      { id: "oldest", email: "KAREN@school.org" },
+      { id: "newer", email: "Karen@School.org" },
+    ]);
+
+    expect(await findUserByEmail("karen@school.org")).toMatchObject({
+      id: "oldest",
+    });
+  });
+
+  it("returns null when no account has the address", async () => {
+    findManyMock.mockResolvedValueOnce([]);
+
+    expect(await findUserByEmail("nobody@school.org")).toBeNull();
   });
 });

@@ -184,9 +184,48 @@ export async function getUserWithContact<T extends Prisma.UserInclude>(
   }
 }
 
+/**
+ * Picks the account an email address resolves to among rows that match it
+ * without regard to letter case.
+ *
+ * Stored addresses can carry capitals from before every path lowercased them,
+ * so one person can have rows that differ only by case. The row stored in
+ * lowercase wins, since that is what every path writes today; otherwise the
+ * oldest, so the same address always resolves to the same account.
+ *
+ * @param users - Matching rows, ordered oldest first
+ * @param email - The address being resolved
+ * @returns The account to use, or null when there is none
+ */
+function pickUserForEmail<T extends { email: string }>(
+  users: T[],
+  email: string
+): T | null {
+  return (
+    users.find((user) => user.email === normalizeInviteEmail(email)) ??
+    users[0] ??
+    null
+  );
+}
+
+/**
+ * Finds the account for an email address, whatever case it was stored in.
+ *
+ * Sign-in and signup decide from this whether a person already has an account,
+ * so an exact-case match would lock out anyone whose stored address has
+ * capitals, and let them sign up a second time.
+ *
+ * @param email - The address as the person typed it
+ * @returns The user, or null when no account has the address
+ * @throws {ShelfError} If the lookup fails
+ */
 export async function findUserByEmail(email: User["email"]) {
   try {
-    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    const users = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(email) },
+      orderBy: { createdAt: "asc" },
+    });
+    return pickUserForEmail(users, email);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -328,21 +367,17 @@ export async function createUserOrAttachOrg({
   try {
     /**
      * `User.email` can contain capitals, so the existing account is matched
-     * without regard to letter case. When rows differ only by case, the
-     * lowercase row wins, because that is the form sign-in uses; where no row
-     * carries that form, the oldest one does. Order the query: without it the
-     * fallback returns whichever row Postgres happened to read first, so the
-     * same invite can attach to a different account on a later call.
+     * without regard to letter case and `pickUserForEmail` chooses among rows
+     * that differ only by case. Keep the query ordered oldest first: the
+     * fallback depends on it, or the same invite could attach to a different
+     * account on a later call.
      */
     const matchingUsers = await db.user.findMany({
       where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
       orderBy: { createdAt: "asc" },
     });
-    const shelfUser =
-      matchingUsers.find(
-        (user) => user.email === normalizeInviteEmail(email)
-      ) ?? matchingUsers[0];
+    const shelfUser = pickUserForEmail(matchingUsers, email);
 
     // If no Prisma User exists, create one.
     // First try creating a fresh auth account. If that fails (email already
