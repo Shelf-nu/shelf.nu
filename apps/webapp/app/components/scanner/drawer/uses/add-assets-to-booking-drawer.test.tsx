@@ -228,12 +228,12 @@ describe("AddAssetsToBookingDrawer reservation progress", () => {
       ],
     });
 
-    // Once in the strip's summary, once in its per-model line, and nothing
-    // has been scanned yet, so no unit has moved off "0 / 2".
+    // The summary row carries the total while the strips are folded, and
+    // nothing has been scanned yet, so no unit has moved off "0 / 2".
     expect(screen.getAllByText("0 / 2").length).toBeGreaterThan(0);
-    // Once from the strip's own line, plus one pending row per outstanding
-    // unit (2 remaining, none matched): three renders of the model's name.
-    expect(screen.getAllByText("Model One").length).toBe(3);
+    // Folded, so the model's name comes only from the pull list: one row per
+    // outstanding unit (2 remaining, none matched).
+    expect(screen.getAllByText("Model One").length).toBe(2);
   });
 
   // The common case is a booking with no models at all.

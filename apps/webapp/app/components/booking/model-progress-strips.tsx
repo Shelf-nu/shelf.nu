@@ -18,15 +18,6 @@ import { tw } from "~/utils/tw";
 import type { ModelProgress } from "./model-pending-rows";
 
 /**
- * Number of model strips that fit in the list's height cap.
- *
- * Doubles as the threshold for starting folded: a list short enough to read
- * at a glance opens with the drawer, while one that would need its own
- * scrollbar starts as a summary and leaves the height to the scan list.
- */
-const MODEL_STRIPS_VISIBLE = 6;
-
-/**
  * Props for {@link ModelProgressStrips}.
  */
 type ModelProgressStripsProps = {
@@ -44,10 +35,11 @@ type ModelProgressStripsProps = {
 /**
  * Foldable per-model progress strips, keyed by reserved `AssetModel`.
  *
- * The strip list folds. It is fixed chrome sharing one screen with the scan
- * list and the check-out button, so on a booking reserving dozens of models
- * the per-model detail is worth less than the room it occupies: the summary
- * row keeps overall progress visible either way.
+ * Starts folded, at every size. This is fixed chrome sharing one screen with
+ * the scan list and the check-out button, and the summary row already answers
+ * the question an operator opens the screen with ("how far along am I"). The
+ * per-model breakdown is a follow-up question, so it costs a click rather
+ * than the height of the list.
  *
  * Renders `null` when `progressByModel` is empty, so a booking with no
  * reservations gets no empty chrome.
@@ -58,9 +50,7 @@ export function ModelProgressStrips({
   progressByModel,
   idPrefix,
 }: ModelProgressStripsProps): JSX.Element | null {
-  const [showModels, setShowModels] = useState(
-    progressByModel.length <= MODEL_STRIPS_VISIBLE
-  );
+  const [showModels, setShowModels] = useState(false);
 
   if (progressByModel.length === 0) {
     return null;
