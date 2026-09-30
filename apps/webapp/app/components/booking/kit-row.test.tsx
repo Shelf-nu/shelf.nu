@@ -73,6 +73,16 @@ vi.mock("./kit-row-actions-dropdown", () => ({ default: () => <td /> }));
 // why: expanded rows render the asset list, which has its own test file.
 vi.mock("./list-asset-content", () => ({ default: () => <tr /> }));
 
+// why: the real badge is a bare SVG inside a Radix tooltip, so its text only
+// exists once something hovers it and the icon carries no accessible name.
+// Standing in for it makes the marker observable; `KitStatusBadge`, which
+// decides whether to render it at all, is left real.
+vi.mock("../shared/unavailable-badge", () => ({
+  UnavailableBadge: ({ title }: { title: string }) => (
+    <span data-testid="unavailable-badge">{title}</span>
+  ),
+}));
+
 describe("KitRow bulk-selection checkbox", () => {
   // `status` is a KitStatus and the row reads only these fields; the cast keeps
   // the fixture to what the component actually touches.
@@ -439,5 +449,112 @@ describe("KitRow already-booked signal (QT-only kit)", () => {
     renderKitRow(assets);
 
     expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The collapsed kit header's "unavailable" marker.
+ *
+ * `Asset.availableToBook` is an admin flag, independent of `Asset.status`: a
+ * flagged asset still reads AVAILABLE everywhere status is shown, while the
+ * Reserve guard refuses the whole booking over it. The kit header is the only
+ * place that fact can surface without expanding the kit, so an operator facing
+ * a disabled Reserve button has nothing else to go on.
+ *
+ * `KitStatusBadge` is deliberately NOT mocked here — it owns the marker, and
+ * the defect this covers was the row passing it a constant.
+ */
+describe("KitRow unavailable-member marker", () => {
+  const kit = {
+    id: "kit-1",
+    name: "Lighting Kit",
+    image: null,
+    imageExpiration: null,
+    status: KitStatus.AVAILABLE,
+    category: null,
+    location: null,
+    qrCodes: [],
+    barcodes: [],
+  } as ComponentProps<typeof KitRow>["kit"];
+
+  function member(overrides: Partial<AssetWithBooking>): AssetWithBooking {
+    return {
+      id: "asset-1",
+      title: "Barndoors",
+      status: "AVAILABLE",
+      availableToBook: true,
+      bookings: [],
+      ...overrides,
+    } as unknown as AssetWithBooking;
+  }
+
+  const renderRow = (assets: AssetWithBooking[]) => {
+    mockUseUserRoleHelper.mockReturnValue({
+      isBase: false,
+      isSelfService: false,
+      isBaseOrSelfService: false,
+      roles: [OrganizationRoles.ADMIN],
+    });
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: BookingStatus.DRAFT,
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <KitRow
+            kit={kit}
+            isExpanded={false}
+            bookingStatus={BookingStatus.DRAFT}
+            bookingId="booking-1"
+            assets={assets}
+            partialCheckinDetails={{}}
+            shouldShowCheckinColumns={false}
+            partialCheckoutDetails={{}}
+            shouldShowCheckoutColumns={false}
+          />
+        </tbody>
+      </table>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks the kit when one of its members is not bookable", () => {
+    renderRow([
+      member({ id: "asset-1", title: "Barndoors", availableToBook: false }),
+      member({ id: "asset-2", title: "Light", availableToBook: true }),
+    ]);
+
+    expect(screen.getByTestId("unavailable-badge")).toBeInTheDocument();
+  });
+
+  it("leaves a kit alone when every member is bookable", () => {
+    renderRow([
+      member({ id: "asset-1", availableToBook: true }),
+      member({ id: "asset-2", availableToBook: true }),
+    ]);
+
+    expect(screen.queryByTestId("unavailable-badge")).not.toBeInTheDocument();
+  });
+
+  /**
+   * A flagged asset keeps its AVAILABLE status, which is exactly why the
+   * status chip cannot carry this signal: the two say opposite things about
+   * the same row and both are correct.
+   */
+  it("marks the kit even though the flagged member reads as available", () => {
+    renderRow([
+      member({ id: "asset-1", status: "AVAILABLE", availableToBook: false }),
+    ]);
+
+    expect(screen.getByTestId("unavailable-badge")).toBeInTheDocument();
   });
 });

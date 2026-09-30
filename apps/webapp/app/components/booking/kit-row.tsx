@@ -208,7 +208,12 @@ export default function KitRow({
                 ) : (
                   <KitStatusBadge
                     status={contextAwareKitStatus}
-                    availableToBook={true}
+                    // Derived from the members ON THIS BOOKING, which is what
+                    // `assets` holds, rather than from the kit's whole current
+                    // membership. The Reserve guard judges the booking's rows,
+                    // so this is the set that agrees with it: the kit's other
+                    // members are not on this booking and cannot block it.
+                    availableToBook={!assets.some((a) => !a.availableToBook)}
                   />
                 )}
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
