@@ -18,10 +18,10 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import { roleChangeTemplateString } from "~/emails/role-change-template";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { payload, parseData } from "~/utils/http.server";
+import { organizationRolesMap } from "~/utils/organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
