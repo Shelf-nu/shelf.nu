@@ -75,6 +75,7 @@ import { createNotes } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -162,6 +163,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       isSelfServiceOrBase,
       canSeeAllCustody,
+      role,
     } = await requirePermission({
       userId,
       request,
@@ -180,6 +182,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       request,
     });
+
+    /**
+     * The permission check above proves `booking: update`, and BASE holds
+     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
+     * which only SELF_SERVICE holds (see the ownership check in
+     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
+     * restricted roles are checked here: a BASE or SELF_SERVICE user may
+     * only open this picker for a booking they created or hold custody of.
+     * `getBooking` fetches with `include`, which returns every scalar
+     * column, so `creatorId`/`custodianUserId` are already on `booking`.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "manage kits for",
+      });
+    }
 
     /** Self service can only manage kits for bookings that are DRAFT */
     const cantManageAssetsAsBase =
@@ -365,12 +386,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, isSelfServiceOrBase, role } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const { kitIds, removedKitIds, redirectTo } = parseData(
       await request.formData(),
@@ -392,6 +414,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // of {asset} via {kit} to {booking}"). Cheap scalar pull.
           name: true,
           status: true,
+          // Both custody links, needed by the ownership check below.
+          creatorId: true,
+          custodianUserId: true,
           bookingAssets: {
             // `assetKitId` is needed by the kit-add logic below — it
             // checks "is this kit's AssetKit already represented in this
@@ -413,6 +438,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Booking not found. Are you sure it exists in current workspace?",
         });
       });
+
+    /**
+     * The permission check above proves `booking: update`, and BASE holds
+     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
+     * which only SELF_SERVICE holds (see the ownership check in
+     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
+     * restricted roles are checked here: a BASE or SELF_SERVICE user may
+     * only write kits to a booking they created or hold custody of.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "manage kits for",
+      });
+    }
 
     /** Self service can only manage kits for bookings that are DRAFT */
     const cantManageAssetsAsBase =

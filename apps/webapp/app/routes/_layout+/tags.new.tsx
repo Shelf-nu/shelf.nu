@@ -13,12 +13,12 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 
 import { createTag } from "~/modules/tag/service.server";
+import { tagUseForOptions } from "~/modules/tag/use-for-options";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
-import { formatEnum } from "~/utils/misc";
 import {
   PermissionAction,
   PermissionEntity,
@@ -63,10 +63,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return payload({
       header,
       colorFromServer: getRandomColor(),
-      tagUseFor: Object.values(TagUseFor).map((useFor) => ({
-        label: formatEnum(useFor),
-        value: useFor,
-      })),
+      tagUseFor: tagUseForOptions(),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

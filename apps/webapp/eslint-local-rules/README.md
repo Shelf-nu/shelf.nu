@@ -214,6 +214,69 @@ import { action } from "~/routes/api+/mobile+/qr.claim";
 
 The `*.test.server.ts` spelling is banned too — that infix only ever existed to dodge the warmup glob. The error message names the exact destination path to move the file to.
 
+### `no-hand-coerced-numeric-transform`
+
+**Purpose**: Keep hand-rolled numeric coercion out of zod `.transform()` callbacks.
+
+**Problem**: `Number("")`, `Number("   ")` and `Number("0")` all return `0`, and `+""` is `0` too, so a bare coercion inside `.transform()` cannot tell an untouched form field from a deliberate zero. The truthiness guard usually wrapped around it only half helps: in `val ? +val : null` the string `"0"` is truthy so a real zero survives, and `""` is falsy so a missing value becomes null, but `"   "` is truthy as well and coerces to `0`. A field the operator only put spaces in is therefore stored as a deliberate zero, which is how a whitespace submission becomes a valuation of nothing.
+
+**Solution**: `optionalNumberFromString()` and `requiredNumberFromString()` in `app/utils/zod-numeric.ts` decide blank vs zero on the **string**, before any coercion, and handle trimming and `NaN` along the way. Use them instead of coercing by hand.
+
+#### Examples
+
+❌ **Bad** (will cause ESLint error):
+
+```ts
+// Truthiness guard: a real 0 becomes null
+valuation: z.string().optional().transform((val) => (val ? +val : null)),
+
+// Bare coercion: "" and "0" are indistinguishable
+maxOrganizations: z.string().transform((val) => +val),
+
+// Same trap, other spellings
+count: z.string().transform((val) => Number(val)),
+limit: z.string().transform((val) => parseInt(val, 10)),
+```
+
+✅ **Good** (passes ESLint):
+
+```ts
+valuation: optionalNumberFromString({ blank: null }),
+maxOrganizations: requiredNumberFromString({ fieldName: "Max organizations" }),
+```
+
+✅ **Also good** (no coercion, never flagged):
+
+```ts
+z.string().transform((val) => val === "on"); // checkbox field
+z.string().transform((val) => val.trim()); // text field
+z.coerce.number().transform((val) => (Number.isNaN(val) ? undefined : val)); // guard
+```
+
+#### When does the rule trigger?
+
+The rule triggers when:
+
+1. The call is `.transform(...)`, matched by property name only (a zod chain spans many lines and is assembled from helpers, so proving the receiver statically is what would make this rule brittle)
+2. The first argument is an arrow function with an **expression body**
+3. Its first parameter is a plain identifier
+4. That parameter is coerced somewhere in the body by `+val`, `Number(val)`, `parseInt(val)`, `parseFloat(val)`, `Number.parseInt(val)` or `Number.parseFloat(val)`
+
+The report lands on the coercion itself, not on the whole `.transform()` call, so the squiggle points at the thing to replace.
+
+#### When does the rule skip checking?
+
+The rule does NOT flag:
+
+1. **Coercion outside a `.transform()`**: `Number(csvValue)` in `app/utils/import-update-diff.ts` compares CSV cells against stored values, which is a different job
+2. **A different value**: `.transform((val) => Number(somethingElse))` coerces something the callback did not receive
+3. **Guards**: `Number.isNaN(val)` and `Number.isFinite(val)` return a boolean and coerce nothing
+4. **Function references**: `.transform(Number)`, `.transform(toNumber)` carry no body to read at the call site
+5. **Block bodies**: `.transform((val) => { ... })` can branch, reassign and return from several places, so the rule bails rather than risk a false positive
+6. **Destructured or rest parameters**: `.transform(({ val }) => ...)` has no single name to match a coercion against
+7. **Nested callbacks**: an inner function can rebind the parameter name, so its body is not walked
+8. **`app/utils/zod-numeric.ts`**: the helper module coerces on purpose, after its own blank check, so that one file is exempt while every caller stays covered
+
 ## Development
 
 To add new rules:
