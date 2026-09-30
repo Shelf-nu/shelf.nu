@@ -53,18 +53,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const clonedRequest = request.clone();
-
-    const { numberOfLocations } = parseData(
-      await clonedRequest.formData(),
-      GenerateLocationSchema.omit({ image: true })
-    );
-
     /**
-     * The parser enforces its own per-file limit while reading the body, and it
-     * defaults to 2 MiB, so it has to be told the limit this route actually
-     * allows. Left on the default it rejects a file well inside the stated 4 MB
-     * and the operator is shown a captured 500 instead of the size message.
+     * One parse, and a bounded one. The parser enforces a per-file limit while
+     * reading the body and defaults to 2 MiB, so it has to be told the limit this
+     * route allows, or a file well inside the stated 4 MB is refused and the
+     * operator is shown a captured 500 instead of the size message.
+     *
+     * Every field is read from the result. Reading the text fields first through
+     * a clone would hand the whole upload to the native parser, which has no
+     * limit at all, so the body would be held in memory in full before this
+     * limit could refuse it.
      */
     let formDataFile: FormData;
     try {
@@ -86,6 +84,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       throw parseError;
     }
+
+    const { numberOfLocations } = parseData(
+      formDataFile,
+      GenerateLocationSchema.omit({ image: true })
+    );
 
     const image = formDataFile.get("image") as File | null;
     invariant(image instanceof File, "file not the right type");

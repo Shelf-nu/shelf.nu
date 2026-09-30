@@ -61,9 +61,12 @@ const PARSER_DEFAULT_MAX = 2 * 1024 * 1024;
  * why: the point of these tests is what the multipart parser does with the body,
  * so the body has to be a genuine multipart payload rather than a stub.
  */
-function buildArgs(sizeInBytes: number) {
+function buildArgs(
+  sizeInBytes: number,
+  overrides: Record<string, string> = {}
+) {
   const body = new FormData();
-  body.append("numberOfLocations", "3");
+  body.append("numberOfLocations", overrides.numberOfLocations ?? "3");
   body.append(
     "image",
     new File([new Uint8Array(sizeInBytes)], "locations.jpg", {
@@ -144,6 +147,27 @@ describe("admin generate-locations: image size limit", () => {
   it("answers 400 for an oversized image rather than a server error", async () => {
     const response = await action(buildArgs(DEFAULT_MAX_IMAGE_UPLOAD_SIZE + 1));
 
+    expect(asResponse(response).status).toBe(400);
+  });
+
+  it("reads the request once, so the body is never parsed unbounded first", async () => {
+    // Reading the text fields through a clone would hand the whole upload to the
+    // native parser, which applies no limit, so the body would be held in memory
+    // in full before the limit above could refuse it.
+    const args = buildArgs(1024);
+    const clone = vi.spyOn(args.request, "clone");
+
+    await action(args);
+
+    expect(clone).not.toHaveBeenCalled();
+  });
+
+  it("still validates the text fields it reads from that one parse", async () => {
+    // The guard for the reordering: the fields have to survive the switch from
+    // the clone to the parser's own result.
+    const response = await action(buildArgs(1024, { numberOfLocations: "0" }));
+
+    expect(generateLocationWithImages).not.toHaveBeenCalled();
     expect(asResponse(response).status).toBe(400);
   });
 });
