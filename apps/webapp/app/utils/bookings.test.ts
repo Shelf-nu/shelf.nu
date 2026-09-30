@@ -12,7 +12,6 @@ import { describe, expect, it } from "vitest";
 import { accessFor } from "@helpers/role-access";
 import {
   bookingCustodianIsSelf,
-  canScanAddBookingItems,
   canUserRemoveBookingAssets,
   mayRemoveBookingItems,
 } from "./bookings";
@@ -53,41 +52,7 @@ describe("canUserRemoveBookingAssets", () => {
   });
 });
 
-const CLOSED = ["COMPLETE", "ARCHIVED", "CANCELLED"] as const;
 const R = OrganizationRoles;
-
-describe("canScanAddBookingItems", () => {
-  it("lets BASE scan-add to a live booking, unlike SELF_SERVICE", () => {
-    expect(
-      canScanAddBookingItems({
-        access: accessFor([R.BASE]),
-        bookingStatus: "RESERVED",
-      })
-    ).toBe(true);
-    expect(
-      canScanAddBookingItems({
-        access: accessFor([R.SELF_SERVICE]),
-        bookingStatus: "RESERVED",
-      })
-    ).toBe(false);
-    expect(
-      canScanAddBookingItems({
-        access: accessFor([R.SELF_SERVICE]),
-        bookingStatus: "DRAFT",
-      })
-    ).toBe(true);
-  });
-
-  it("refuses a closed booking for every role", () => {
-    for (const role of [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE]) {
-      for (const bookingStatus of CLOSED) {
-        expect(
-          canScanAddBookingItems({ access: accessFor([role]), bookingStatus })
-        ).toBe(false);
-      }
-    }
-  });
-});
 
 describe("mayRemoveBookingItems", () => {
   it("needs the booking:update grant as well as the status rule", () => {

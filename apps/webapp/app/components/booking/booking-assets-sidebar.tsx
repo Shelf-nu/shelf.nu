@@ -44,6 +44,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
@@ -52,6 +53,7 @@ import {
   getOutstandingModelRequests,
 } from "~/utils/booking-model-requests";
 import { describeBookingRows } from "~/utils/booking-rows";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import {
   InsufficientStockBadge,
@@ -726,6 +728,20 @@ export function BookingAssetsSidebar({
    */
   const canAssignUnits = canAssignModelUnits(booking.status);
 
+  /**
+   * Whether this member may open the scanner to assign them: the scan page
+   * takes the same add rule as every other add path, so a role that only adds
+   * items to a DRAFT gets no link on a reserved or running booking. A DRAFT is
+   * only ever listed to its creator, so the status rule also settles ownership.
+   */
+  const roleAccess = useRoleAccess();
+  const canScanToAssign =
+    canAssignUnits &&
+    canManageBookingItems({
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+
   const defaultTrigger = (
     <Button
       type="button"
@@ -765,7 +781,7 @@ export function BookingAssetsSidebar({
               canAssign={canAssignUnits}
               className="rounded-none border-x-0 border-t-0"
               renderAction={
-                canAssignUnits
+                canScanToAssign
                   ? () => (
                       <Link
                         to={`/bookings/${booking.id}/overview/scan-assets`}

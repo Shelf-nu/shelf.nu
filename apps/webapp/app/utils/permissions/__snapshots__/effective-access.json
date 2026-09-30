@@ -8031,121 +8031,93 @@
   "D-20": {
     "OWNER": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "ADMIN": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "SELF_SERVICE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "BASE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     }
@@ -11934,541 +11906,415 @@
   "B9:D-20:web-server": {
     "OWNER": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "ADMIN": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "SELF_SERVICE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "BASE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "OWNER+ADMIN": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "OWNER+SELF_SERVICE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "OWNER+BASE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "ADMIN+OWNER": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "ADMIN+SELF_SERVICE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "ADMIN+BASE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "SELF_SERVICE+OWNER": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "SELF_SERVICE+ADMIN": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "SELF_SERVICE+BASE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "BASE+OWNER": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "BASE+ADMIN": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "BASE+SELF_SERVICE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "(none)": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     },
     "UNKNOWN_ROLE": {
       "DRAFT": {
-        "selfServiceFlag": true,
         "restrictedFlag": true
       },
       "RESERVED": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "ONGOING": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "OVERDUE": {
-        "selfServiceFlag": true,
         "restrictedFlag": false
       },
       "COMPLETE": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "ARCHIVED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       },
       "CANCELLED": {
-        "selfServiceFlag": false,
         "restrictedFlag": false
       }
     }

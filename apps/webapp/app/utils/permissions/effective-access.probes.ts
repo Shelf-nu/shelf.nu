@@ -29,7 +29,6 @@ import {
 } from "~/utils/booking-authorization.server";
 import {
   bookingCustodianIsSelf,
-  canScanAddBookingItems,
   mayRemoveBookingItems,
 } from "~/utils/bookings";
 import { isOrganizationOwner } from "~/utils/roles.server";
@@ -485,9 +484,8 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     ])
   );
 
-  // D-20: add items after DRAFT. The two keys name the two call-site rules:
-  // `selfServiceFlag` is the scan page (bookings.scanAddAfterDraft), and
-  // `restrictedFlag` is manage-assets / manage-kits / mobile add
+  // D-20: add items after DRAFT. One rule for every add path: the scan page,
+  // manage-assets, manage-kits, add-to-existing-booking and mobile add
   // (bookings.manageItemsAfterDraft).
   snapshot["D-20"] = Object.fromEntries(
     SINGLE_ROLES.map((role) => [
@@ -496,10 +494,6 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
         BOOKING_STATUSES.map((status) => [
           status,
           {
-            selfServiceFlag: canScanAddBookingItems({
-              access: accessFor([role]),
-              bookingStatus: status,
-            }),
             restrictedFlag: canManageBookingItems({
               access: accessFor([role]),
               bookingStatus: status,
@@ -895,17 +889,12 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
 
   // ===================== Bookings: adding and removing items =====================
 
-  // B9:D-20: web add-items rule for every membership, per call-site rule:
-  // `selfServiceFlag` is the scan page (`canScanAddBookingItems`),
-  // `restrictedFlag` is manage-assets / manage-kits / the fulfil loader
-  // (`canManageBookingItems`), both on the request's `access`.
+  // B9:D-20: web add-items rule for every membership, shared by the scan page,
+  // manage-assets, manage-kits and the fulfil loader (`canManageBookingItems`
+  // on the request's `access`).
   snapshot["B9:D-20:web-server"] = perRoleSet((roles) => {
     const access = accessFor(roles);
     return perCase(BOOKING_STATUSES, (status) => ({
-      selfServiceFlag: canScanAddBookingItems({
-        access,
-        bookingStatus: status,
-      }),
       restrictedFlag: canManageBookingItems({ access, bookingStatus: status }),
     }));
   });

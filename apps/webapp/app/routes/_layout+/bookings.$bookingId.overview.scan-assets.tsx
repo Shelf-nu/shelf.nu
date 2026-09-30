@@ -15,6 +15,7 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
+import { db } from "~/database/db.server";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { ScannedKitSliceSpec } from "~/modules/booking/service.server";
@@ -24,7 +25,10 @@ import {
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canScanAddBookingItems } from "~/utils/bookings";
+import {
+  assertCanAddBookingItems,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -39,6 +43,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -70,9 +75,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // The scan page keeps its own add rule (`bookings.scanAddAfterDraft`),
-    // which is wider than the manage-items rule for BASE.
-    const canManageAssets = canScanAddBookingItems({
+    // Seeing a booking does not grant writing it: the action refuses the same
+    // callers, so the page does not offer them a scanner that cannot submit.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "add items to",
+    });
+
+    // The same add rule as every other add path (manage-assets, manage-kits,
+    // add-to-existing-booking, mobile add-scanned-assets).
+    const canManageAssets = canManageBookingItems({
       access,
       bookingStatus: booking.status,
     });
@@ -83,6 +97,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         message:
           "You are not allowed to add assets for this booking at the moment.",
         label: "Booking",
+        status: 403,
         shouldBeCaptured: false,
       });
     }
@@ -107,12 +122,38 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
       action: PermissionAction.update,
     });
+
+    // `booking:update` is held by every role, so it settles nothing about THIS
+    // booking: a caller who does not write every booking must own it, and the
+    // status must accept new items for the caller's role. The service still
+    // re-checks, under a row lock, that the booking is not closed.
+    const target = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { status: true, creatorId: true, custodianUserId: true },
+    });
+    if (!target) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "Booking not found.",
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+    validateBookingOwnership({
+      booking: target,
+      userId,
+      access,
+      action: "add items to",
+    });
+    assertCanAddBookingItems({ access, bookingStatus: target.status });
 
     const formData = await request.formData();
 

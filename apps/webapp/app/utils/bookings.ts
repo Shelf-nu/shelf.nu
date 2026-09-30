@@ -39,32 +39,6 @@ export function canUserRemoveBookingAssets(booking: Pick<Booking, "status">) {
 }
 
 /**
- * Whether items may be added through the booking SCAN page in this status.
- *
- * The scan page keeps its own rule, `bookings.scanAddAfterDraft`, which is
- * wider than the manage-items rule for BASE. Closed bookings refuse everyone.
- *
- * @param args.access - The caller's access
- * @param args.bookingStatus - The booking's status
- * @returns `true` when the scan page may add items
- */
-export function canScanAddBookingItems({
-  access,
-  bookingStatus,
-}: {
-  access: RoleAccess;
-  bookingStatus: BookingStatusName;
-}): boolean {
-  if (!REMOVABLE_STATUSES.includes(bookingStatus)) {
-    return false;
-  }
-  return (
-    access.policy.bookings.scanAddAfterDraft ||
-    bookingStatus === BookingStatus.DRAFT
-  );
-}
-
-/**
  * Whether a surface should offer removing items from a booking in this status.
  *
  * Every remove path is gated on `booking:update`, which BASE holds, so the

@@ -14234,10 +14234,8 @@ describe("addScannedAssetsToBooking", () => {
     BookingStatus.ARCHIVED,
     BookingStatus.CANCELLED,
   ])("refuses to add scanned assets to a %s booking", async (status) => {
-    // This path had no booking-status check anywhere before: the route action
-    // only called requirePermission, and the loader's canScanAddBookingItems
-    // decided what to RENDER, not what to accept. A direct POST could therefore
-    // append assets to a closed booking. (detail.dev D097)
+    // A direct POST reaches this service without any loader in between, so
+    // the closed-booking refusal has to live here.
     //
     // Asserting through the public service function rather than the assertion
     // helper directly, so this fails if the guard is ever unwired from the path.

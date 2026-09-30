@@ -14975,10 +14975,9 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
 
-  // This path had NO booking-status check anywhere — not in the route action,
-  // not here. The scan-assets loader computes `canScanAddBookingItems`,
-  // but that only decides what to render, so a direct POST could add assets to
-  // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
+  // Closed bookings refuse every caller, and only a read inside this
+  // transaction sees the status the write lands on. The routes gate the
+  // caller's ownership and role-specific add rule; this is the backstop.
   //
   // Locked rather than merely re-read: this runs inside the caller's
   // transaction, and a plain SELECT there takes no lock under READ COMMITTED.

@@ -48,8 +48,6 @@ type RolePolicyShape = {
     removableItemStatuses: readonly BookingStatusName[];
     /** May add items to a booking that is past DRAFT. */
     manageItemsAfterDraft: boolean;
-    /** May add items through the booking scan page once past DRAFT (the scan page's own rule). */
-    scanAddAfterDraft: boolean;
     /** On the partial-scan pages, may act on a live booking it is the custodian of. */
     partialScanAsCustodian: boolean;
     /** Booking buffer and maximum length limits are skipped. */
@@ -147,7 +145,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       write: "all",
       removableItemStatuses: OPEN_STATUSES,
       manageItemsAfterDraft: true,
-      scanAddAfterDraft: true,
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "none",
@@ -189,7 +186,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       write: "all",
       removableItemStatuses: OPEN_STATUSES,
       manageItemsAfterDraft: true,
-      scanAddAfterDraft: true,
       partialScanAsCustodian: false,
       bypassTimeLimits: true,
       explicitScanSetting: "admin",
@@ -231,7 +227,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       write: "own",
       removableItemStatuses: ["DRAFT", "RESERVED"],
       manageItemsAfterDraft: false,
-      scanAddAfterDraft: false,
       partialScanAsCustodian: true,
       bypassTimeLimits: false,
       explicitScanSetting: "selfService",
@@ -273,7 +268,6 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       write: "own",
       removableItemStatuses: ["DRAFT"],
       manageItemsAfterDraft: false,
-      scanAddAfterDraft: true,
       partialScanAsCustodian: false,
       bypassTimeLimits: false,
       explicitScanSetting: "none",

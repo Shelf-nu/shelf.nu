@@ -963,10 +963,8 @@ export const IN_FLIGHT_BOOKING_STATUSES: BookingStatus[] = [
  * reading the status from a row loaded in that transaction. Routes checking
  * the status themselves is not equivalent, for two reasons:
  *
- * 1. A route that forgets is simply unguarded. The scan-assets action had no
- *    status check of any kind, so a direct POST could add assets to a
- *    COMPLETE booking; its loader computed `canScanAddBookingItems`, but
- *    that only decided what to RENDER.
+ * 1. A route that forgets is simply unguarded, and a loader's rule only
+ *    decides what to render: a direct POST skips it.
  * 2. A route that checks before calling the service leaves a window open. The
  *    four `updateBookingAssets` callers all validated the status, but each did
  *    so in a read of its own — so a booking completed in between was still
