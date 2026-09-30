@@ -50,6 +50,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Format return status for PDF - matches the CSV export format.
@@ -104,7 +105,7 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, organizations } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.reports,
@@ -113,12 +114,13 @@ export const loader = async ({
       action: PermissionAction.export,
     });
 
-    // Acting user's resolved prefs drive both the timeframe label ordering and
-    // the PDF table date formatter below (resolved once, reused twice).
-    const prefs = await resolveUserFormatPrefsById(
-      userId,
-      getClientHint(request)
-    );
+    const [, prefs] = await Promise.all([
+      // Reports are part of the Plus and Team plans; refuse the data with a 403.
+      assertUserCanUseReports({ organizationId, organizations }),
+      // Acting user's resolved prefs drive both the timeframe label ordering and
+      // the PDF table date formatter below (resolved once, reused twice).
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+    ]);
 
     // Validate report exists
     const reportDef = getReportById(reportId);

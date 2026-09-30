@@ -4,65 +4,124 @@
  * Displays a grid of available reports with their status (enabled/coming soon).
  * Users can click on enabled reports to navigate to them.
  *
+ * Reports are part of the Plus and Team plans. When the workspace's plan does
+ * not include them, the same page shows the unlock page instead of the cards,
+ * and the loader sends no report data.
+ *
  * @see {@link file://../../modules/reports/registry.ts}
+ * @see {@link file://../../components/reports/unlock-reports-page.tsx}
  */
 
-import type React from "react";
-import * as LucideIcons from "lucide-react";
-import { Lock } from "lucide-react";
+import { ArrowRight, Lock } from "lucide-react";
 import { data, Link, useLoaderData } from "react-router";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 
 import Header from "~/components/layout/header";
 import { ListContentWrapper } from "~/components/list/content-wrapper";
+import { ReportIcon } from "~/components/reports/report-icon";
+import { UnlockReportsPage } from "~/components/reports/unlock-reports-page";
 
 import {
   REPORTS,
   REPORT_CATEGORIES,
+  getEnabledReports,
   getReportsByCategory,
 } from "~/modules/reports/registry";
 import type { ReportDefinition } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import { isOrganizationOwner, requirePermission } from "~/utils/roles.server";
+import { workspaceCanUseReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title || "Reports") },
 ];
 
+/**
+ * Returns the reports index for the active workspace. The payload is a union on
+ * `canUseReports`: the report cards when the workspace's plan includes reports,
+ * or what the unlock page needs (the report list and whether the viewer owns
+ * the workspace) when it does not. Both shapes carry `header`, which `meta` and
+ * the layout header read.
+ *
+ * @throws {ShelfError} when the caller lacks `reports: read`
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
-  await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.reports,
-    action: PermissionAction.read,
-  });
+  try {
+    // The role check runs first, so a role that may not see reports gets the
+    // role error whatever the plan.
+    const { organizationId, organizations, userOrganizations } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.read,
+      });
 
-  const reportsByCategory = getReportsByCategory();
+    // Standard header object for app Header component
+    const header = {
+      title: "Reports",
+      subHeading: "Track and analyze your asset management operations",
+    };
 
-  // Standard header object for app Header component
-  const header = {
-    title: "Reports",
-    subHeading: "Track and analyze your asset management operations",
-  };
+    // The plan is the workspace's (its owner's tier), never the viewer's own.
+    const canUseReports = await workspaceCanUseReports({
+      organizationId,
+      organizations,
+    });
 
-  return data({
-    header,
-    reports: REPORTS,
-    reportsByCategory,
-    categories: REPORT_CATEGORIES,
-  });
+    if (!canUseReports) {
+      return data({
+        canUseReports: false as const,
+        header,
+        // Only the owner's plan decides what the workspace has, so only the
+        // owner is offered the upgrade.
+        isOwner: isOrganizationOwner({ userOrganizations, organizationId }),
+        reports: getEnabledReports(),
+      });
+    }
+
+    return data({
+      canUseReports: true as const,
+      header,
+      reports: REPORTS,
+      reportsByCategory: getReportsByCategory(),
+      categories: REPORT_CATEGORIES,
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportsIndex() {
-  const { reportsByCategory, categories } = useLoaderData<typeof loader>();
+  const loaderData = useLoaderData<typeof loader>();
+
+  // Branch before reading anything only the paid shape carries.
+  if (!loaderData.canUseReports) {
+    return (
+      <>
+        <Header />
+        <ListContentWrapper>
+          <UnlockReportsPage
+            reports={loaderData.reports}
+            isOwner={loaderData.isOwner}
+          />
+        </ListContentWrapper>
+      </>
+    );
+  }
+
+  const { reportsByCategory, categories } = loaderData;
 
   // Filter to only show categories with reports
   const visibleCategories = Object.entries(reportsByCategory).filter(
@@ -109,15 +168,6 @@ export default function ReportsIndex() {
 }
 
 function ReportCard({ report }: { report: ReportDefinition }) {
-  // Dynamically get the icon from Lucide
-  const IconComponent =
-    (
-      LucideIcons as unknown as Record<
-        string,
-        React.ComponentType<{ className?: string }>
-      >
-    )[report.icon] || LucideIcons.FileText;
-
   const cardContent = (
     <div
       className={tw(
@@ -136,7 +186,7 @@ function ReportCard({ report }: { report: ReportDefinition }) {
             : "bg-gray-100 text-gray-400"
         )}
       >
-        <IconComponent className="size-5" />
+        <ReportIcon name={report.icon} className="size-5" />
       </div>
 
       {/* Title */}
@@ -167,7 +217,7 @@ function ReportCard({ report }: { report: ReportDefinition }) {
       {/* Arrow indicator for enabled reports */}
       {report.enabled && (
         <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100">
-          <LucideIcons.ArrowRight className="size-4 text-gray-400" />
+          <ArrowRight className="size-4 text-gray-400" />
         </div>
       )}
     </div>
