@@ -20,6 +20,8 @@ import { getAuditAddonPrices } from "~/modules/audit/addon.server";
 import { getBarcodeAddonPrices } from "~/modules/barcode/addon.server";
 import { parsePlanIntentFromSearchParams } from "~/modules/signup-intent/schema";
 import { getUserByID } from "~/modules/user/service.server";
+import type { BillingInterval } from "~/utils/addon-price";
+import { resolveAddonPriceForInterval } from "~/utils/addon-price";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatCurrency } from "~/utils/currency";
 import { makeShelfError } from "~/utils/error";
@@ -109,8 +111,6 @@ export default function SelectPlan() {
     planIntent,
     freeTrialDays: config.freeTrialDays,
   });
-  type BillingInterval = "month" | "year";
-
   const planPrices = useMemo(() => {
     const intervals: Partial<Record<BillingInterval, (typeof prices)[number]>> =
       {};
@@ -139,20 +139,22 @@ export default function SelectPlan() {
 
   const activePrice = selectedPlan ? planPrices[selectedPlan] : null;
 
-  const hasAuditPrices = !!(auditPrices.month || auditPrices.year);
-  const hasBarcodePrices = !!(barcodePrices.month || barcodePrices.year);
+  // Strictly the selected interval's price, never the other one's: the amount
+  // is rendered with the selected interval's suffix and submitted as the price
+  // to bill, so a substitute would misquote and then mischarge.
+  const activeAuditPrice = resolveAddonPriceForInterval(
+    auditPrices,
+    selectedPlan
+  );
+  const activeBarcodePrice = resolveAddonPriceForInterval(
+    barcodePrices,
+    selectedPlan
+  );
 
-  // Get the matching audit price for the selected billing interval
-  const activeAuditPrice =
-    selectedPlan && auditPrices[selectedPlan]
-      ? auditPrices[selectedPlan]
-      : auditPrices.year || auditPrices.month;
-
-  // Get the matching barcode price for the selected billing interval
-  const activeBarcodePrice =
-    selectedPlan && barcodePrices[selectedPlan]
-      ? barcodePrices[selectedPlan]
-      : barcodePrices.year || barcodePrices.month;
+  // An add-on with no price for this interval cannot be quoted or billed, so it
+  // is not offered while that interval is selected.
+  const hasAuditPrices = !!activeAuditPrice;
+  const hasBarcodePrices = !!activeBarcodePrice;
 
   const fmtPrice = (amountInCents: number, currency: string) =>
     formatCurrency({
@@ -186,20 +188,22 @@ export default function SelectPlan() {
   // Build cost summary
   const teamPriceAmount = activePrice?.unit_amount || 0;
   const teamPriceCurrency = activePrice?.currency || "usd";
-  const auditPriceAmount =
-    wantsAudits && activeAuditPrice ? activeAuditPrice.unit_amount || 0 : 0;
-  const barcodePriceAmount =
-    wantsBarcodes && activeBarcodePrice
-      ? activeBarcodePrice.unit_amount || 0
-      : 0;
+  // What each add-on will actually cost, or null. A toggle survives a change of
+  // interval, so wanting an add-on is not the same as being able to have it, and
+  // one value for both questions keeps the quote, the total, the trial copy and
+  // the submitted price from disagreeing.
+  const auditPriceToBill = wantsAudits ? activeAuditPrice : null;
+  const barcodePriceToBill = wantsBarcodes ? activeBarcodePrice : null;
+  const auditPriceAmount = auditPriceToBill?.unit_amount || 0;
+  const barcodePriceAmount = barcodePriceToBill?.unit_amount || 0;
   const totalAmount = teamPriceAmount + auditPriceAmount + barcodePriceAmount;
   const isYearly = selectedPlan === "year";
 
   const billingLabel = isYearly ? "yr" : "mo";
 
   const selectedAddons = [
-    wantsAudits && "Audits",
-    wantsBarcodes && "Barcodes",
+    auditPriceToBill && "Audits",
+    barcodePriceToBill && "Barcodes",
   ].filter(Boolean);
   const trialText =
     selectedAddons.length > 0
@@ -507,24 +511,24 @@ export default function SelectPlan() {
                   {fmtPrice(teamPriceAmount, teamPriceCurrency)}/{billingLabel}
                 </span>
               </div>
-              {wantsAudits && activeAuditPrice ? (
+              {auditPriceToBill ? (
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">
                     Audits ({isYearly ? "yearly" : "monthly"})
                   </span>
                   <span className="font-medium text-gray-900">
-                    {fmtPrice(auditPriceAmount, activeAuditPrice.currency)}/
+                    {fmtPrice(auditPriceAmount, auditPriceToBill.currency)}/
                     {billingLabel}
                   </span>
                 </div>
               ) : null}
-              {wantsBarcodes && activeBarcodePrice ? (
+              {barcodePriceToBill ? (
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">
                     Barcodes ({isYearly ? "yearly" : "monthly"})
                   </span>
                   <span className="font-medium text-gray-900">
-                    {fmtPrice(barcodePriceAmount, activeBarcodePrice.currency)}/
+                    {fmtPrice(barcodePriceAmount, barcodePriceToBill.currency)}/
                     {billingLabel}
                   </span>
                 </div>
@@ -557,18 +561,18 @@ export default function SelectPlan() {
           name="shelfTier"
           value={activePrice?.product.metadata.shelf_tier}
         />
-        {wantsAudits && activeAuditPrice ? (
+        {auditPriceToBill ? (
           <input
             type="hidden"
             name="auditPriceId"
-            value={activeAuditPrice.id}
+            value={auditPriceToBill.id}
           />
         ) : null}
-        {wantsBarcodes && activeBarcodePrice ? (
+        {barcodePriceToBill ? (
           <input
             type="hidden"
             name="barcodePriceId"
-            value={activeBarcodePrice.id}
+            value={barcodePriceToBill.id}
           />
         ) : null}
 

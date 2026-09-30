@@ -8,6 +8,7 @@ import { parseFileFormData } from "~/utils/storage.server";
 import {
   createAssetModel,
   createAssetModelsIfNotExists,
+  resolveImportedAssetModel,
   getAssetModels,
   getAssetModel,
   updateAssetModel,
@@ -828,5 +829,63 @@ describe("updateAssetModelImage", () => {
         thumbnailImage: null,
       },
     });
+  });
+});
+
+/**
+ * Reading back what `createAssetModelsIfNotExists` resolved.
+ *
+ * That builder keys its result by the ORIGINAL cell, padding included, which the
+ * test above pins. A consumer that trims before looking up therefore misses every
+ * padded row, and the import fails telling the operator their CSV is wrong. The
+ * two halves have to agree on the key, so they live in one file.
+ */
+describe("resolveImportedAssetModel", () => {
+  it("finds a model whose cell was padded", () => {
+    const resolved = resolveImportedAssetModel({
+      cell: "  Brand X  ",
+      models: { "  Brand X  ": "model-1" },
+    });
+
+    expect(resolved).toEqual({ name: "Brand X", id: "model-1" });
+  });
+
+  it("finds a model whose cell had no padding", () => {
+    const resolved = resolveImportedAssetModel({
+      cell: "Brand X",
+      models: { "Brand X": "model-1" },
+    });
+
+    expect(resolved).toEqual({ name: "Brand X", id: "model-1" });
+  });
+
+  it("reports no model when the row named none", () => {
+    expect(resolveImportedAssetModel({ cell: undefined, models: {} })).toEqual({
+      name: null,
+      id: undefined,
+    });
+  });
+
+  it("reports no model for a whitespace-only cell", () => {
+    // The builder maps a blank cell to an empty id on purpose: the row named no
+    // model, so this is not an unresolved lookup and must not raise one.
+    expect(
+      resolveImportedAssetModel({ cell: "   ", models: { "   ": "" } })
+    ).toEqual({ name: null, id: undefined });
+  });
+
+  it("reports the name but no id when the pre-resolve missed the row", () => {
+    // The shape the caller turns into an error: a real model name that nothing
+    // resolved, which means the upstream step failed rather than the CSV.
+    expect(resolveImportedAssetModel({ cell: "Brand X", models: {} })).toEqual({
+      name: "Brand X",
+      id: undefined,
+    });
+  });
+
+  it("survives a missing resolved-models map", () => {
+    expect(
+      resolveImportedAssetModel({ cell: "Brand X", models: undefined })
+    ).toEqual({ name: "Brand X", id: undefined });
   });
 });
