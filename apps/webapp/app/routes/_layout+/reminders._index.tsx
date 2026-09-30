@@ -8,7 +8,11 @@ import RemindersTable from "~/components/asset-reminder/reminders-table";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { getPaginatedAndFilterableReminders } from "~/modules/asset-reminder/service.server";
-import { resolveRemindersActions } from "~/modules/asset-reminder/utils.server";
+import {
+  REMINDER_INTENT_PERMISSION,
+  readReminderIntent,
+  resolveRemindersActions,
+} from "~/modules/asset-reminder/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
@@ -68,11 +72,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const userId = authSession.userId;
 
   try {
+    // Editing and deleting a reminder have their own permissions.
+    const intent = await readReminderIntent(request);
     const { organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.assetReminders,
-      action: PermissionAction.update,
+      action: REMINDER_INTENT_PERMISSION[intent],
     });
 
     return await resolveRemindersActions({

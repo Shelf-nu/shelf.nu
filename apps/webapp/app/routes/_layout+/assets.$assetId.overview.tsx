@@ -1,10 +1,6 @@
 import { useState } from "react";
 import type { RenderableTreeNode } from "@markdoc/markdoc";
-import {
-  AssetStatus,
-  CustomFieldType,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, CustomFieldType } from "@prisma/client";
 import type {
   MetaFunction,
   ActionFunctionArgs,
@@ -49,8 +45,9 @@ import {
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAssetAvailability } from "~/modules/asset/availability.server";
 import { getAssetOverviewFields } from "~/modules/asset/fields";
 import {
@@ -150,8 +147,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
-      role,
-      canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -273,18 +269,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * For QUANTITY_TRACKED assets, fetch team members for the custody
-     * dialog. Self-service users are scoped to only their own record.
+     * dialog, scoped by the caller's custody assignment scope.
      */
     const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
       ? await getTeamMembersForQuantityCustody({
           organizationId,
           request,
           userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
+          access,
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
@@ -391,7 +383,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // Same reasoning as the parent detail route: this payload carries
       // `custody[].custodian` and is reachable with `asset: read`.
       asset: redactCustodianForViewer([{ ...asset, customFields }], {
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
       })[0],
       currentOrganization,
@@ -812,7 +804,8 @@ export default function AssetOverview() {
     "NewQuestionWizardScreen",
     AvailabilityForBookingFormSchema
   );
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { canUseBarcodes } = useBarcodePermissions();
   const canUpdateAvailability = userHasPermission({
     roles,
@@ -1836,7 +1829,7 @@ export default function AssetOverview() {
               unitOfMeasure={asset.unitOfMeasure}
               consumptionType={asset.consumptionType}
               availableQuantity={quantityData?.custodyAvailable}
-              isSelfService={isSelfService}
+              ownRowsOnly={assignsSelfOnly}
               currentUserId={userId}
               canViewAllCustody={canViewAllCustody}
               canCustody={canCustody}

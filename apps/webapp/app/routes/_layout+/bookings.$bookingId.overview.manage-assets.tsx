@@ -137,6 +137,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -282,17 +283,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   );
 
   try {
-    const {
-      organizationId,
-      userOrganizations,
-      isSelfServiceOrBase,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     // getPaginatedAndFilterableAssets + getBooking both only need
     // `organizationId` (from requirePermission above). They're
@@ -498,11 +495,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
-    /** Self service can only manage assets for bookings that are DRAFT */
-    const cantManageAssetsAsBaseOrSelfService =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing assets is not allowed at this stage */
+    // Items can be changed while the booking is open; roles whose policy does
+    // not allow adding after DRAFT are held to DRAFT.
     const isNotAllowedStatus = (
       [
         BookingStatus.CANCELLED,
@@ -511,22 +505,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ] as BookingStatus[]
     ).includes(booking.status);
 
-    if (cantManageAssetsAsBaseOrSelfService || isNotAllowedStatus) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
         message: isNotAllowedStatus
           ? "Changing of assets is not allowed for current status of booking."
-          : isSelfServiceOrBase
-          ? "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of assets is not allowed for current status of booking.",
+          : "You are unable to add assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
-        additionalData: {
-          booking,
-          userId,
-          organizationId,
-          isSelfServiceOrBase,
-        },
+        additionalData: { booking, userId, organizationId, role: access.role },
       });
     }
 
@@ -592,7 +579,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         assetsWithAvailability as unknown as Array<
           (typeof assetsWithAvailability)[number] & RowWithCustody
         >,
-        { canSeeAllCustody, userId: authSession?.userId }
+        { canSeeAllCustody: access.custody.seeAll, userId: authSession?.userId }
       ),
       categories,
       tags,
@@ -642,13 +629,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
-      await requirePermission({
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     let {
       assetIds,
@@ -733,7 +719,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // copy of exactly what a colleague holds.
         allowedTeamMemberIds: await scopeCustodianFilterIds({
           teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId: authSession?.userId,
           organizationId,
         }),
@@ -810,24 +796,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       });
 
-    /** Self service can only manage assets for bookings that are DRAFT */
-    const cantManageAssetsAsBase =
-      isSelfServiceOrBase && booking.status !== BookingStatus.DRAFT;
-
-    /** Changing assets is not allowed at this stage */
-    const notAllowedStatus: BookingStatus[] = [
-      BookingStatus.CANCELLED,
-      BookingStatus.ARCHIVED,
-      BookingStatus.COMPLETE,
-    ];
-
-    if (cantManageAssetsAsBase || notAllowedStatus.includes(booking.status)) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         label: "Booking",
-        message: isSelfServiceOrBase
-          ? "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes."
-          : "Changing of assets is not allowed for current status of booking.",
+        // The message names the rule that applies to this caller: members
+        // held to DRAFT get the "already reserved" explanation.
+        message: access.policy.bookings.manageItemsAfterDraft
+          ? "Changing of assets is not allowed for current status of booking."
+          : "You are unable to manage assets at this point because the booking is already reserved. Cancel this booking and create another one if you need to make changes.",
         shouldBeCaptured: false,
       });
     }

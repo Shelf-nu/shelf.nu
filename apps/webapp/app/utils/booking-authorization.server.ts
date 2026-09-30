@@ -1,12 +1,8 @@
 import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { ShelfError } from "./error";
-import { resolveMostPrivilegedRole } from "./role-precedence";
+import { canManageBookingItems } from "./permissions/role-access";
+import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
 import { resolveBookingHolderName, type UserNameFields } from "./user";
-
-// The resolver lives in role-precedence.ts so client gates can share it; server
-// callers keep importing it from here.
-export { resolveMostPrivilegedRole };
 
 /**
  * The minimal booking projection needed to decide whether a requester is the
@@ -43,25 +39,43 @@ export type BookingCustodyLinks = {
  * This does not widen access beyond the index — it grants only where the
  * booking's custodian team-member row IS the requester.
  *
- * @param params.canSeeAllBookings - Whether the role may see every booking in
- *   the workspace (ADMIN/OWNER, or SELF_SERVICE/BASE with the override).
+ * @param params.access - The caller's access; `bookings.seeAll` covers roles
+ *   that see every booking and restricted roles whose workspace toggle is on.
  * @param params.booking - The booking's two custody links.
  * @param params.userId - The requester.
  * @returns `true` if the requester may see this booking.
  */
 export function canSeeBooking({
-  canSeeAllBookings,
+  access,
   booking,
   userId,
 }: {
-  canSeeAllBookings: boolean;
+  access: RoleAccess;
   booking: BookingCustodyLinks;
   userId: string;
 }): boolean {
-  if (canSeeAllBookings) {
-    return true;
-  }
+  return access.bookings.seeAll || isBookingCustodian({ booking, userId });
+}
 
+/**
+ * Whether the caller holds a booking, through EITHER custody link.
+ *
+ * A booking assigned by picking a team member can carry
+ * `custodianUserId = NULL`, so matching the user link alone misses bookings
+ * that belong to the caller. This is the custody half of {@link canSeeBooking},
+ * for callers that need "is it theirs" without the workspace see-toggle.
+ *
+ * @param params.booking - The booking's two custody links
+ * @param params.userId - The caller
+ * @returns `true` when either link names the caller
+ */
+export function isBookingCustodian({
+  booking,
+  userId,
+}: {
+  booking: BookingCustodyLinks;
+  userId: string;
+}): boolean {
   return (
     booking.custodianUserId === userId ||
     booking.custodianTeamMember?.userId === userId
@@ -69,54 +83,74 @@ export function canSeeBooking({
 }
 
 /**
- * The query-side mirror of {@link validateBookingOwnership}'s default check:
- * the set of bookings a caller may MUTATE (add assets/kits to, edit, …).
+ * Refuses a booking PDF / .ics download the caller may not have.
  *
- * `validateBookingOwnership` is a per-row gate that runs at submit time. A
- * picker whose whole purpose is to choose a mutation target has to offer that
- * SAME set, or the user selects a row the action then 403s on. Sharing the
- * predicate is what keeps the two from drifting: change the rule below and the
- * gate, and every picker follows.
+ * Roles whose policy grants `bookings.documentsForOthers` download any
+ * booking's documents; everyone else only a booking they are the custodian of
+ * (the user link). Creating the booking is not enough, and the booking
+ * see-toggle does not widen this.
  *
- * Deliberately independent of `canSeeAllBookings`. That workspace toggle
- * governs READ visibility only — `validateBookingOwnership` ignores it, so a
- * SELF_SERVICE user in a workspace with the toggle on can view another user's
- * booking but still cannot write to it. Gating a mutation-target picker on the
- * read rule is what produced the dead-end this mirrors away.
+ * @param params.access - The caller's access
+ * @param params.booking - The booking's user custody link
+ * @param params.userId - The caller
+ * @param params.action - Verb phrase for the refusal ("view", "download the calendar for")
+ * @throws {ShelfError} 403 when the caller may not download this booking's documents
+ */
+export function assertCanDownloadBookingDocuments({
+  access,
+  booking,
+  userId,
+  action,
+}: {
+  access: RoleAccess;
+  booking: { custodianUserId: string | null };
+  userId: string;
+  action: string;
+}): void {
+  if (
+    access.policy.bookings.documentsForOthers ||
+    booking.custodianUserId === userId
+  ) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    label: "Booking",
+    message: `You are not authorized to ${action} this booking.`,
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * The query-side mirror of {@link validateBookingOwnership}: the set of
+ * bookings a caller may MUTATE (add assets/kits to, edit, ...).
  *
- * KNOWN GAP, intentionally mirrored rather than fixed here: like
- * `validateBookingOwnership`, this matches only `custodianUserId` and NOT the
- * team-member custody link, so a legacy booking whose custody sits solely on
- * `custodianTeamMemberId` is excluded. That is a faithful reflection of what
- * the action accepts today — offering those rows would just restore the 403.
- * Widening both together (as {@link canSeeBooking} already does for reads) is a
- * separate change that has to sweep every `validateBookingOwnership` call site.
+ * A picker whose whole purpose is to choose a mutation target has to offer the
+ * SAME set the submit-time gate accepts, or the user selects a row the action
+ * then refuses. Both read `access.bookings.writeAll`, which the workspace
+ * see-toggles never widen.
  *
- * @param params.userId - The caller.
- * @param params.role - The caller's effective role in the workspace.
+ * Matches only `custodianUserId`, like the gate, not the team-member custody
+ * link: offering a row the gate refuses would restore the 403. Widening both
+ * together has to sweep every `validateBookingOwnership` call site.
+ *
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
  * @returns A `Prisma.BookingWhereInput` to AND into the query, or `undefined`
- *   for ADMIN / OWNER, who may write to every booking in the workspace.
+ *   when the caller may write every booking in the workspace
  */
 export function bookingWriteScopeClause({
   userId,
-  role,
+  access,
 }: {
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
 }): Prisma.BookingWhereInput | undefined {
-  // ALLOW-list, not a deny-list on SELF_SERVICE/BASE. A role added to the enum
-  // later defaults to RESTRICTED here, so the picker under-offers (a visible
-  // gap) rather than offering rows nobody checked. The gate below still
-  // deny-lists, matching what it has always enforced — so for a hypothetical
-  // new role this clause is deliberately the stricter of the two.
-  const canWriteToEveryBooking =
-    role === OrganizationRoles.ADMIN || role === OrganizationRoles.OWNER;
-
-  if (canWriteToEveryBooking) {
+  if (access.bookings.writeAll) {
     return undefined;
   }
-
-  // Mirrors the `checkCustodianOnly: false` branch below: creator OR custodian.
   return { OR: [{ creatorId: userId }, { custodianUserId: userId }] };
 }
 
@@ -126,41 +160,55 @@ interface ValidateBookingOwnershipParams {
     custodianUserId: string | null;
   };
   userId: string;
-  role: OrganizationRoles;
+  /** The caller's access; `bookings.writeAll` skips the ownership check. */
+  access: RoleAccess;
+  /** Verb phrase for the refusal message ("check out", "cancel", ...). */
   action: string;
-  /**
-   * When true, only checks custodianUserId (not creatorId).
-   * Used for operations like PDF/calendar download where only the custodian should have access.
-   * @default false
-   */
-  checkCustodianOnly?: boolean;
-  /**
-   * When true, BASE users are blocked entirely (used for destructive actions like extend/delete).
-   * When false, BASE users are checked for ownership like SELF_SERVICE (used for read operations).
-   * @default false
-   */
-  blockBaseEntirely?: boolean;
 }
 
 /**
- * Validates that a user has permission to perform an action on a booking based on their role and ownership.
+ * Whether the caller may write to this booking: every booking for roles with
+ * `bookings.writeAll`, otherwise only ones they created or hold through the
+ * user custody link. The non-throwing form of {@link validateBookingOwnership},
+ * for surfaces that decide which actions to offer.
  *
- * Authorization rules:
- * - BASE users: Blocked for write operations, ownership-checked for read operations
- * - SELF_SERVICE users: Only allowed on bookings they own (creator OR custodian)
- * - ADMIN/OWNER users: Allowed on all bookings
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @returns `true` when writes to this booking are allowed
+ */
+export function canWriteBooking({
+  booking,
+  userId,
+  access,
+}: Omit<ValidateBookingOwnershipParams, "action">): boolean {
+  return (
+    access.bookings.writeAll ||
+    booking.creatorId === userId ||
+    booking.custodianUserId === userId
+  );
+}
+
+/**
+ * Refuses a write to a booking the caller does not own.
  *
- * @throws {ShelfError} 403 if user is not authorized
+ * A caller whose access writes every booking passes. Everyone else must have
+ * created the booking or hold it through the user custody link. The workspace
+ * see-toggles do not widen this: seeing a booking never grants writing it.
+ *
+ * @param params.booking - The booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @param params.action - Verb phrase for the refusal message
+ * @throws {ShelfError} 403 when the caller may not write this booking
  */
 export function validateBookingOwnership({
   booking,
   userId,
-  role,
+  access,
   action,
-  checkCustodianOnly = false,
-  blockBaseEntirely = false,
 }: ValidateBookingOwnershipParams): void {
-  if (role === OrganizationRoles.BASE && blockBaseEntirely) {
+  if (!canWriteBooking({ booking, userId, access })) {
     throw new ShelfError({
       cause: null,
       label: "Booking",
@@ -169,89 +217,116 @@ export function validateBookingOwnership({
       shouldBeCaptured: false,
     });
   }
+}
 
-  if (
-    role === OrganizationRoles.SELF_SERVICE ||
-    role === OrganizationRoles.BASE
-  ) {
-    const isBookingOwner = checkCustodianOnly
-      ? booking.custodianUserId === userId
-      : booking.creatorId === userId || booking.custodianUserId === userId;
+/** The open statuses a booking can take new items in, for the most permissive role. */
+const OPEN_BOOKING_STATUSES = [
+  "DRAFT",
+  "RESERVED",
+  "ONGOING",
+  "OVERDUE",
+] as const satisfies readonly BookingStatusName[];
 
-    if (!isBookingOwner) {
-      throw new ShelfError({
-        cause: null,
-        label: "Booking",
-        message: `You are not authorized to ${action} this booking.`,
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
+/**
+ * Where-clause limiting an "add to existing booking" picker to the statuses the
+ * caller may add items in ({@link assertCanAddBookingItems}).
+ *
+ * Pickers AND this with {@link bookingWriteScopeClause} so the list offers only
+ * bookings the add action accepts; otherwise a restricted member picks a
+ * reserved booking and the action refuses it.
+ *
+ * @param params.access - The caller's access
+ * @returns `undefined` when every open status is addable, else a status filter
+ */
+export function bookingAddableStatusClause({
+  access,
+}: {
+  access: RoleAccess;
+}): Prisma.BookingWhereInput | undefined {
+  const addable = OPEN_BOOKING_STATUSES.filter((bookingStatus) =>
+    canManageBookingItems({ access, bookingStatus })
+  );
+  if (addable.length === OPEN_BOOKING_STATUSES.length) {
+    return undefined;
+  }
+  return { status: { in: [...addable] } };
+}
+
+/**
+ * Refuses adding items to a booking in a status the caller may not change.
+ *
+ * The manage-items rule (`canManageBookingItems`): every role adds items to a
+ * DRAFT, and only roles with `bookings.manageItemsAfterDraft` add them once the
+ * booking is reserved or under way. Every add path runs this after
+ * {@link validateBookingOwnership}: the manage-assets and manage-kits pages,
+ * and the "add to existing booking" flows for assets and kits, which would
+ * otherwise let a restricted member keep changing a reserved booking.
+ *
+ * @param params.access - The caller's access
+ * @param params.bookingStatus - The target booking's status
+ * @throws {ShelfError} 403 when the caller may not add items in this status
+ */
+export function assertCanAddBookingItems({
+  access,
+  bookingStatus,
+}: {
+  access: RoleAccess;
+  bookingStatus: BookingStatusName;
+}): void {
+  if (canManageBookingItems({ access, bookingStatus })) {
+    return;
   }
 
-  // ADMIN and OWNER roles are implicitly allowed - no check needed
+  throw new ShelfError({
+    cause: null,
+    label: "Booking",
+    message:
+      "You are unable to add items to this booking in its current status.",
+    additionalData: { bookingStatus },
+    status: 403,
+    shouldBeCaptured: false,
+  });
 }
 
 /**
- * Whether a role is one of the two restricted, "own records only" roles.
+ * Refuses deleting a booking the caller may not delete.
  *
- * @param role - Effective role from `resolveEffectiveRole` (web) or
- *   {@link resolveMostPrivilegedRole} (mobile).
- * @returns `true` for SELF_SERVICE and BASE.
+ * Ownership first ({@link validateBookingOwnership}), then the policy's draft
+ * rule: roles with `bookings.deleteOnlyDrafts` delete only DRAFT bookings.
+ * Every singular delete path runs this (the web booking page and the mobile
+ * endpoint), and bulk delete applies the same draft rule to its whole
+ * selection.
+ *
+ * @param params.access - The caller's access
+ * @param params.booking - Ownership links and status of the booking
+ * @param params.userId - The caller
+ * @throws {ShelfError} 403 when the caller may not delete this booking
  */
-export function isSelfServiceOrBaseRole(role: OrganizationRoles): boolean {
-  return (
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE
-  );
-}
-
-/**
- * Whether the caller may see bookings they are not the custodian of.
- *
- * ADMIN / OWNER always can. SELF_SERVICE and BASE only can when the workspace
- * has switched the corresponding setting on. This is the standard visibility
- * rule for bookings; every read path that can surface someone else's booking
- * gates on it, on web (`/bookings`, the command palette, CSV export) and on
- * mobile (the list, the calendar, the booking detail, the dashboard).
- *
- * Exported so callers outside `requirePermission` resolve it identically. A
- * surface that invents its own rule disagrees with the loader that seeded it -
- * a picker whose list changes the moment the user types, or two platforms that
- * disagree about which bookings exist.
- *
- * READ only. It never widens a mutation: a restricted user may legitimately
- * view a booking they cannot write to. Writes stay on the role's permission
- * grant plus {@link validateBookingOwnership} / {@link bookingWriteScopeClause}.
- *
- * Lives here rather than in `roles.server.ts` so the mobile API can reach it:
- * that module pulls in Sentry and the organization service, and through it
- * Stripe and the mailer, which no mobile route or its test can carry. This
- * module imports only Prisma types and two local helpers - keep it that way.
- *
- * @param args.role - The caller's effective role.
- * @param args.currentOrganization - Workspace whose override settings apply.
- * @returns `true` when bookings should NOT be restricted to the caller's own.
- */
-export function resolveCanSeeAllBookings({
-  role,
-  currentOrganization,
+export function assertCanDeleteBooking({
+  access,
+  booking,
+  userId,
 }: {
-  role: OrganizationRoles;
-  currentOrganization: {
-    selfServiceCanSeeBookings: boolean;
-    baseUserCanSeeBookings: boolean;
+  access: RoleAccess;
+  booking: {
+    creatorId: string | null;
+    custodianUserId: string | null;
+    status: BookingStatusName;
   };
-}): boolean {
-  return (
-    // Admin/Owner always can see all
-    !isSelfServiceOrBaseRole(role) ||
-    // SELF_SERVICE can see all if org setting allows
-    (role === OrganizationRoles.SELF_SERVICE &&
-      currentOrganization.selfServiceCanSeeBookings) ||
-    // BASE can see all if org setting allows
-    (role === OrganizationRoles.BASE &&
-      currentOrganization.baseUserCanSeeBookings)
-  );
+  userId: string;
+}): void {
+  validateBookingOwnership({ booking, userId, access, action: "delete" });
+
+  if (access.policy.bookings.deleteOnlyDrafts && booking.status !== "DRAFT") {
+    throw new ShelfError({
+      cause: null,
+      label: "Booking",
+      message:
+        "You are not authorized to delete this booking. Only draft bookings can be deleted.",
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
 }
 
 /**

@@ -29,7 +29,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -49,7 +49,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
       id,
       assetsIds,
       organizationId,
-      { userId, role }
+      { userId, access }
     );
 
     /**

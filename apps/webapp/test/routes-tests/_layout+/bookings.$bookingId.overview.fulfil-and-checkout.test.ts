@@ -16,6 +16,7 @@
 
 import { OrganizationRoles } from "@prisma/client";
 import { createBookingSettings } from "@factories";
+import { permissionContext } from "@helpers/role-access";
 
 // why: mocking Remix's data() so the action's error path returns a Response
 // whose status is assertable (React Router v7 single fetch).
@@ -102,7 +103,6 @@ function post({
   custodianUserId?: string;
   requireExplicitCheckoutForAdmin?: boolean;
 }) {
-  const role = roles[0];
   fulfilMock.mockResolvedValue({
     booking: { id: "booking-1", name: "Load-in", status: "ONGOING" },
     remainingAssetCount: 0,
@@ -110,13 +110,7 @@ function post({
   bookingSettingsMock.mockResolvedValue(
     createBookingSettings({ requireExplicitCheckoutForAdmin })
   );
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role,
-    isSelfServiceOrBase:
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE,
-  });
+  requirePermissionMock.mockResolvedValue(permissionContext({ roles }));
   bookingFindUniqueOrThrow.mockResolvedValue({
     from: new Date("2026-01-01T09:00:00Z"),
     to: new Date("2026-01-02T09:00:00Z"),

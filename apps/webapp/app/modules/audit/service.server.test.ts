@@ -886,21 +886,21 @@ describe("audit service", () => {
         ]);
       });
 
-      it("scopes to the user's assignments when isSelfServiceOrBase with userId", () => {
+      it("scopes to the user's assignments when assignedOnly with userId", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(where.assignments).toEqual({ some: { userId: "user-1" } });
       });
 
-      it("does not apply the assignments filter when isSelfServiceOrBase is false", () => {
+      it("does not apply the assignments filter when assignedOnly is false", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: false,
+          assignedOnly: false,
         });
 
         expect(where.assignments).toBeUndefined();
@@ -909,7 +909,7 @@ describe("audit service", () => {
       it("does not apply the assignments filter when userId is missing", () => {
         const where = getAuditWhereInput({
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(where.assignments).toBeUndefined();
@@ -1012,14 +1012,14 @@ describe("audit service", () => {
           currentSearchParams: "status=COMPLETED",
           organizationId: "org-1",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         const expectedWhere = getAuditWhereInput({
           organizationId: "org-1",
           currentSearchParams: "status=COMPLETED",
           userId: "user-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         });
 
         expect(mockDb.auditSession.findMany.mock.calls[0][0].where).toEqual(
@@ -1820,7 +1820,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: creatorId,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
@@ -1849,7 +1849,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: adminId,
-          isAdminOrOwner: true,
+          canManageOthers: true,
           hints,
         })
       ).resolves.toMatchObject({ status: AuditStatus.CANCELLED });
@@ -1861,7 +1861,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: stranger,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).rejects.toMatchObject({
@@ -1883,7 +1883,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: adminId,
-          isAdminOrOwner: true,
+          canManageOthers: true,
           hints,
         })
       ).rejects.toMatchObject({ status: 400 });
@@ -1894,7 +1894,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1921,7 +1921,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1953,7 +1953,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -1972,7 +1972,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: creatorId,
-        isAdminOrOwner: false,
+        canManageOthers: false,
         hints,
       });
 
@@ -1997,7 +1997,7 @@ describe("audit service", () => {
           auditSessionId,
           organizationId,
           userId: creatorId,
-          isAdminOrOwner: false,
+          canManageOthers: false,
           hints,
         })
       ).rejects.toMatchObject({
@@ -2021,7 +2021,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: adminId,
-        isAdminOrOwner: true,
+        canManageOthers: true,
         hints,
       });
 
@@ -2041,7 +2041,7 @@ describe("audit service", () => {
         auditSessionId,
         organizationId,
         userId: creatorId,
-        isAdminOrOwner: false,
+        canManageOthers: false,
         hints,
       });
 
@@ -2067,7 +2067,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "admin-user",
-        isSelfServiceOrBase: false,
+        assignedOnly: false,
         assignedToUserId: "admin-user",
       });
 
@@ -2084,7 +2084,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "admin-user",
-        isSelfServiceOrBase: false,
+        assignedOnly: false,
         assignedToUserId: null,
       });
 
@@ -2100,7 +2100,7 @@ describe("audit service", () => {
       await getAuditsForOrganization({
         organizationId: "org-1",
         userId: "base-user",
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
       });
 
       const findManyArgs = mockDb.auditSession.findMany.mock.calls[0]?.[0];
@@ -2112,7 +2112,7 @@ describe("audit service", () => {
       });
     });
 
-    it("throws when isSelfServiceOrBase is true but userId is missing", async () => {
+    it("throws when assignedOnly is true but userId is missing", async () => {
       // why: silently falling back to assignedToUserId (or null) when a
       // caller signals role-scoping but forgets the userId would leak
       // the whole org list to a BASE/SELF_SERVICE user. The guard fails
@@ -2120,7 +2120,7 @@ describe("audit service", () => {
       await expect(
         getAuditsForOrganization({
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
           // userId intentionally omitted
         })
       ).rejects.toThrow(/Missing user context/);
@@ -2774,7 +2774,7 @@ describe("audit service", () => {
 
     it("allows ADMIN/OWNER even when the audit has other assignees", async () => {
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: false })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: false })
       ).resolves.toBeUndefined();
 
       // why: the admin path must not depend on the assignee list at all —
@@ -2787,7 +2787,7 @@ describe("audit service", () => {
       mockSessionWithAssignments([{ userId: "user-1" }]);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).resolves.toBeUndefined();
     });
 
@@ -2795,7 +2795,7 @@ describe("audit service", () => {
       mockSessionWithAssignments([{ userId: "user-2" }]);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).rejects.toMatchObject({ status: 403 });
     });
 
@@ -2803,7 +2803,7 @@ describe("audit service", () => {
       mockDb.auditSession.findFirst.mockResolvedValue(null);
 
       await expect(
-        requireAuditAssignee({ ...baseArgs, isSelfServiceOrBase: true })
+        requireAuditAssignee({ ...baseArgs, assignedOnly: true })
       ).rejects.toMatchObject({ status: 404 });
     });
   });

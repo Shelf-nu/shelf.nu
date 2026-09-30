@@ -1,8 +1,10 @@
+import { OrganizationRoles } from "@prisma/client";
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 
 import { locationDescendantsMock } from "@mocks/location-descendants";
+import { permissionContext } from "@helpers/role-access";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
@@ -109,9 +111,12 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
     vi.clearAllMocks();
     requirePermissionMock.mockReset();
     addScannedAssetsToBookingMock.mockReset();
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({
+        organizationId: "org-1",
+        roles: [OrganizationRoles.ADMIN],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
     addScannedAssetsToBookingMock.mockResolvedValue(undefined as any);
   });
 

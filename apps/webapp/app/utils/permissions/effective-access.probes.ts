@@ -1,0 +1,1617 @@
+/**
+ * Effective-access probes: the characterization fixture for the role-policy
+ * refactor.
+ *
+ * `buildEffectiveAccessSnapshot()` evaluates every role-shaped decision that
+ * has a pure helper, for every role set, workspace toggle combination, booking
+ * relationship and booking status that matters, and returns one plain object.
+ * Its JSON is committed as `__snapshots__/effective-access.json`.
+ *
+ * The fixture is the proof that the refactor changes nothing it does not
+ * announce: a probe's IMPLEMENTATION may move from an old helper to the new
+ * policy API, but its KEY and its RECORDED VALUE may only change in a commit
+ * that names the intended behaviour change in its commit body.
+ *
+ * @see {@link file://./effective-access.characterization.test.ts}
+ */
+import { OrganizationRoles } from "@prisma/client";
+import { getDefaultModeForRole } from "~/modules/asset-index-settings/service.server";
+import { getBookingOwnershipScope } from "~/modules/booking/utils.server";
+import { resolveCalendarVisibility } from "~/modules/calendar-subscription/service.server";
+import { INVITABLE_ROLES } from "~/modules/invite/roles";
+import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
+import { announcementRole } from "~/modules/update/audience";
+import {
+  assertCanDeleteBooking,
+  assertCanDownloadBookingDocuments,
+  bookingWriteScopeClause,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
+import {
+  bookingCustodianIsSelf,
+  canScanAddBookingItems,
+  mayRemoveBookingItems,
+} from "~/utils/bookings";
+import { isOrganizationOwner } from "~/utils/roles.server";
+import type { AdminArea } from "./admin-areas";
+import { canSeeAdminArea } from "./admin-areas";
+import { userHasCustodyViewPermission } from "./custody-and-bookings-permissions.validator.client";
+import {
+  canAssignRole,
+  holdsRoleWhere,
+  roleChangeRequiresOwner,
+  roleChangeTransfers,
+} from "./membership-access";
+import { PermissionAction, PermissionEntity } from "./permission.data";
+import { userHasPermission } from "./permission.validator.client";
+import {
+  ROLE_LABELS,
+  ROLE_POLICIES,
+  ROLES_BY_RANK,
+  SSO_ASSIGNABLE_ROLES,
+  canManageBookingItems,
+  canPartialCheckInOut,
+  canRemoveBookingItems,
+  isExplicitScanRequired,
+  isWorkspaceOwner,
+  resolveRole,
+  resolveRoleAccess,
+  rolesWhere,
+  transfersOwnershipOnRoleChange,
+} from "./role-access";
+import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
+
+const R = OrganizationRoles;
+const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
+
+/** Key order of the recorded D-10 label map. */
+const D10_KEY_ORDER = [R.ADMIN, R.OWNER, R.BASE, R.SELF_SERVICE] as const;
+
+/** Every role set the fixture evaluates: singles, every ordered pair, empty, unknown. */
+export const ROLE_SETS: string[][] = [
+  ...SINGLE_ROLES.map((r) => [r]),
+  ...SINGLE_ROLES.flatMap((a) =>
+    SINGLE_ROLES.filter((b) => b !== a).map((b) => [a, b])
+  ),
+  [],
+  ["UNKNOWN_ROLE"],
+];
+
+/** The four workspace visibility toggles, all 16 combinations. */
+export const TOGGLE_COMBOS = Array.from({ length: 16 }, (_, i) => ({
+  selfServiceCanSeeBookings: Boolean(i & 1),
+  baseUserCanSeeBookings: Boolean(i & 2),
+  selfServiceCanSeeCustody: Boolean(i & 4),
+  baseUserCanSeeCustody: Boolean(i & 8),
+}));
+
+/** Caller vs booking relationships, each isolated from the other. */
+export const RELATIONSHIPS = {
+  custodianNotCreator: { creatorId: "someone-else", custodianUserId: "caller" },
+  creatorNotCustodian: { creatorId: "caller", custodianUserId: "someone-else" },
+  neither: { creatorId: "someone-else", custodianUserId: "someone-else" },
+} as const;
+
+export const BOOKING_STATUSES = [
+  "DRAFT",
+  "RESERVED",
+  "ONGOING",
+  "OVERDUE",
+  "COMPLETE",
+  "ARCHIVED",
+  "CANCELLED",
+] as const;
+
+const key = (roles: string[]) => (roles.length ? roles.join("+") : "(none)");
+const toggleKey = (t: (typeof TOGGLE_COMBOS)[number]) =>
+  [
+    t.selfServiceCanSeeBookings ? "ssB" : "",
+    t.baseUserCanSeeBookings ? "baB" : "",
+    t.selfServiceCanSeeCustody ? "ssC" : "",
+    t.baseUserCanSeeCustody ? "baC" : "",
+  ]
+    .filter(Boolean)
+    .join(",") || "none";
+
+/** The effective role every surface uses for a membership. */
+function webRole(roles: string[]): OrganizationRoles {
+  return resolveRole(roles);
+}
+
+/** Workspace toggles all off. */
+const OFF = TOGGLE_COMBOS[0];
+
+/** The access a membership resolves to under the given toggles. */
+function accessFor(
+  roles: string[],
+  workspace: (typeof TOGGLE_COMBOS)[number] = OFF
+) {
+  return resolveRoleAccess({ roles, workspace });
+}
+
+/**
+ * `access` with custody visibility forced to `seeAll`, for probes keyed on the
+ * visibility flag rather than on a toggle combination.
+ */
+function withCustodySeeAll(
+  access: ReturnType<typeof accessFor>,
+  seeAll: boolean
+) {
+  return { ...access, custody: { ...access.custody, seeAll } };
+}
+
+/** Runs a throwing guard and records whether it allowed the call. */
+function outcome(fn: () => unknown): "allowed" | "denied" {
+  try {
+    fn();
+    return "allowed";
+  } catch {
+    return "denied";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Mixed-role baseline
+//
+// Probes for every decision whose answer for a MIXED membership depends on
+// how the call site reads the role. Inline call sites are reproduced here with
+// the inputs the call site derives; each probe cites its source. A change to
+// a call site rewrites its probe to reproduce the new code, and any change to
+// a recorded value is an announced behaviour change.
+// ---------------------------------------------------------------------------
+
+const E = PermissionEntity;
+const A = PermissionAction;
+
+/** Statuses a booking can still be changed in. */
+const OPEN_STATUSES = ["DRAFT", "RESERVED", "ONGOING", "OVERDUE"] as const;
+
+/** Delete rules compare the status with DRAFT only: one draft, one not. */
+const DRAFT_OR_NOT = ["DRAFT", "RESERVED"] as const;
+
+/** Whether the caller is the booking's custodian. */
+const CUSTODIAN_CASES = ["caller", "someoneElse"] as const;
+
+/** Whether the caller holds the booking (edit form / assets column wording). */
+const HOLDER_CASES = ["holder", "notHolder"] as const;
+
+/** A bulk selection, by how many of its bookings are drafts. */
+const SELECTION_CASES = ["allDraft", "someDraft", "noneDraft"] as const;
+
+/** The caller's effective role on web membership screens (reached with teamMember:update). */
+const CALLER_ROLES = [R.OWNER, R.ADMIN] as const;
+
+type RelationshipName = keyof typeof RELATIONSHIPS;
+const RELATIONSHIP_NAMES = Object.keys(RELATIONSHIPS) as RelationshipName[];
+
+/** The four combinations of the two booking see-toggles (custody toggles off). */
+const BOOKING_TOGGLES = TOGGLE_COMBOS.filter(
+  (t) => !t.selfServiceCanSeeCustody && !t.baseUserCanSeeCustody
+);
+
+/** Nothing moves: an SSO transition that revokes, or keeps an owner as-is. */
+const NO_TRANSFER = { ownership: false, bookingsCreatedForOthers: false };
+
+/** How a route answered: allowed, or the first check that refused. */
+type Verdict =
+  | "allowed"
+  | "denied:gate"
+  | "denied:owner"
+  | "denied:self"
+  | "denied:custodian"
+  | "denied:status";
+
+/**
+ * Evaluates `fn` for every `ROLE_SETS` entry, keyed like the rest of the
+ * fixture. Every mixed-role probe is keyed by role set first.
+ */
+function perRoleSet<T>(
+  fn: (roles: OrganizationRoles[]) => T
+): Record<string, T> {
+  return Object.fromEntries(
+    ROLE_SETS.map((roles) => [key(roles), fn(roles as OrganizationRoles[])])
+  );
+}
+
+/** Evaluates `fn` for each named case. */
+function perCase<C extends string, T>(
+  cases: readonly C[],
+  fn: (c: C) => T
+): Record<C, T> {
+  return Object.fromEntries(cases.map((c) => [c, fn(c)])) as Record<C, T>;
+}
+
+/** Evaluates `fn` for each toggle combination, keyed by `toggleKey`. */
+function perToggle<T>(
+  toggles: typeof TOGGLE_COMBOS,
+  fn: (t: (typeof TOGGLE_COMBOS)[number]) => T
+): Record<string, T> {
+  return Object.fromEntries(toggles.map((t) => [toggleKey(t), fn(t)]));
+}
+
+/**
+ * The matrix grant `requirePermission` / `requireMobilePermission` check: the
+ * union over every held role, ADMIN/OWNER allow-all (`hasPermission` →
+ * `roleHasPermission`).
+ */
+function can(
+  roles: OrganizationRoles[],
+  entity: PermissionEntity,
+  action: PermissionAction | PermissionAction[]
+): boolean {
+  return userHasPermission({ roles, entity, action });
+}
+
+/** The first check that refuses, in call-site order; "allowed" when none does. */
+function firstRefusal(
+  checks: ReadonlyArray<readonly [Verdict, () => boolean]>
+): Verdict {
+  for (const [verdict, refuses] of checks) {
+    if (refuses()) return verdict;
+  }
+  return "allowed";
+}
+
+/** Whether a throwing guard refuses. */
+function throws(fn: () => unknown): boolean {
+  return outcome(fn) === "denied";
+}
+
+/** Whether the membership holds any of `set`: Prisma `roles: { hasSome: set }`. */
+function holdsAny(
+  roles: OrganizationRoles[],
+  set: OrganizationRoles[]
+): boolean {
+  return roles.some((role) => set.includes(role));
+}
+
+/**
+ * The per-booking write gate as its call sites run it. `checkCustodianOnly`
+ * selects the booking-documents rule (`assertCanDownloadBookingDocuments`),
+ * otherwise creator-or-custodian (`validateBookingOwnership`).
+ * `blockBaseEntirely` is the extend path: the `booking:extend` grant over every
+ * held role is checked first (`extendBooking`).
+ *
+ * @throws when the gate refuses
+ */
+function bookingWriteGate({
+  roles,
+  booking,
+  checkCustodianOnly,
+  blockBaseEntirely,
+}: {
+  roles: string[];
+  booking: { creatorId: string | null; custodianUserId: string | null };
+  checkCustodianOnly: boolean;
+  blockBaseEntirely: boolean;
+}): void {
+  const access = accessFor(roles);
+  if (
+    blockBaseEntirely &&
+    !can(roles as OrganizationRoles[], E.booking, A.extend)
+  ) {
+    throw new Error("no booking:extend grant");
+  }
+  if (checkCustodianOnly) {
+    assertCanDownloadBookingDocuments({
+      access,
+      booking,
+      userId: "caller",
+      action: "probe",
+    });
+  } else {
+    validateBookingOwnership({
+      access,
+      booking,
+      userId: "caller",
+      action: "probe",
+    });
+  }
+}
+
+/**
+ * Builds the complete effective-access snapshot.
+ *
+ * @returns A JSON-serializable object keyed by decision id
+ */
+export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
+  const snapshot: Record<string, unknown> = {};
+
+  // Matrix: every role set x entity x action (union semantics).
+  snapshot.matrix = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        Object.values(PermissionEntity).map((entity) => [
+          entity,
+          Object.values(PermissionAction).filter((action) =>
+            userHasPermission({
+              roles: roles as OrganizationRoles[],
+              entity,
+              action,
+            })
+          ),
+        ])
+      ),
+    ])
+  );
+
+  // D-01: effective role, web server and mobile/client resolvers.
+  snapshot["D-01"] = Object.fromEntries(
+    ROLE_SETS.filter((r) => !r.includes("UNKNOWN_ROLE")).map((roles) => [
+      key(roles),
+      {
+        web: webRole(roles),
+        mobile: resolveRole(roles),
+      },
+    ])
+  );
+  snapshot["D-01:precedence"] = ROLES_BY_RANK;
+
+  // D-01/B9: every membership decision read from one member's roles.
+  snapshot["D-01/B9:membership"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => {
+      const role = resolveRole(roles);
+      return [
+        key(roles),
+        {
+          effectiveRole: role,
+          label: ROLE_LABELS[role],
+          ownsWorkspace: isWorkspaceOwner(roles),
+          changeRequiresOwner:
+            ROLE_POLICIES[role].membership.changeRequiresOwner,
+          receivesTransfers: holdsRoleWhere(
+            roles,
+            (p) => p.membership.canReceiveTransfers
+          ),
+          eligibleAsNewOwner: holdsRoleWhere(
+            roles,
+            (p) => p.membership.eligibleAsNewOwner
+          ),
+        },
+      ];
+    })
+  );
+  snapshot["D-05:ssoAssignable"] = SSO_ASSIGNABLE_ROLES;
+  // The invitable list is recorded sorted, and the labels in a fixed key order,
+  // so the recorded values do not depend on the policy table's rank order.
+  snapshot["D-04:invitable"] = [...INVITABLE_ROLES].sort();
+  snapshot["D-10:labels"] = Object.fromEntries(
+    D10_KEY_ORDER.map((role) => [role, ROLE_LABELS[role]])
+  );
+
+  // D-02: ownership transfer on role change.
+  snapshot["D-02"] = Object.fromEntries(
+    SINGLE_ROLES.flatMap((from) =>
+      SINGLE_ROLES.filter((to) => to !== from).map((to) => [
+        `${from}->${to}`,
+        transfersOwnershipOnRoleChange({ from, to }),
+      ])
+    )
+  );
+
+  // D-14: booking visibility, every role set x toggles.
+  snapshot["D-14"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          accessFor(roles, t).bookings.seeAll,
+        ])
+      ),
+    ])
+  );
+
+  // D-28: custody visibility, every role set x toggles.
+  snapshot["D-28"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          accessFor(roles, t).custody.seeAll,
+        ])
+      ),
+    ])
+  );
+
+  // D-15: per-booking write gate, single roles x relationship x flags.
+  // The key's flags name the two call-site variants the gate has:
+  // `custodianOnly` is the booking-documents rule (documentsForOthers), and
+  // `blockBase` is the extend path, where the matrix grant `booking:extend`
+  // gates before ownership.
+  snapshot["D-15"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        Object.entries(RELATIONSHIPS).flatMap(([rel, booking]) =>
+          [false, true].flatMap((checkCustodianOnly) =>
+            [false, true].map((blockBaseEntirely) => [
+              `${rel}|custodianOnly=${checkCustodianOnly}|blockBase=${blockBaseEntirely}`,
+              outcome(() =>
+                bookingWriteGate({
+                  roles: [role],
+                  booking,
+                  checkCustodianOnly,
+                  blockBaseEntirely,
+                })
+              ),
+            ])
+          )
+        )
+      ),
+    ])
+  );
+
+  // D-16: query-side write scopes.
+  snapshot["D-16"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      {
+        writeScopeClause:
+          bookingWriteScopeClause({
+            userId: "caller",
+            access: accessFor([role]),
+          }) ?? null,
+        bulkOwnershipScope: getBookingOwnershipScope({
+          access: accessFor([role]),
+          userId: "caller",
+        }),
+      },
+    ])
+  );
+
+  // D-19 / D-29: custodian picker scopes.
+  snapshot["D-19/D-29"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        (
+          ["custody-filter", "custody-assignment", "booking-custodian"] as const
+        ).flatMap((purpose) =>
+          [false, true].map((canSeeAllCustody) => [
+            `${purpose}|seeAll=${canSeeAllCustody}`,
+            // The `seeAll=` half of a booking-custodian key never influences
+            // it: that purpose reads the role's booking policy only.
+            resolveCustodianPickerScope({
+              purpose,
+              access: withCustodySeeAll(accessFor([role]), canSeeAllCustody),
+              userId: "caller",
+            }),
+          ])
+        )
+      ),
+    ])
+  );
+
+  // D-20: add items after DRAFT. The two keys name the two call-site rules:
+  // `selfServiceFlag` is the scan page (bookings.scanAddAfterDraft), and
+  // `restrictedFlag` is manage-assets / manage-kits / mobile add
+  // (bookings.manageItemsAfterDraft).
+  snapshot["D-20"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        BOOKING_STATUSES.map((status) => [
+          status,
+          {
+            selfServiceFlag: canScanAddBookingItems({
+              access: accessFor([role]),
+              bookingStatus: status,
+            }),
+            restrictedFlag: canManageBookingItems({
+              access: accessFor([role]),
+              bookingStatus: status,
+            }),
+          },
+        ])
+      ),
+    ])
+  );
+
+  // D-21: removable statuses, every role set: the booking:update grant (which
+  // denies an empty or unknown membership) and the policy's statuses.
+  snapshot["D-21"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      BOOKING_STATUSES.filter((status) =>
+        mayRemoveBookingItems({
+          canUpdateBooking: userHasPermission({
+            roles: roles as OrganizationRoles[],
+            entity: PermissionEntity.booking,
+            action: PermissionAction.update,
+          }),
+          access: accessFor(roles),
+          bookingStatus: status,
+        })
+      ),
+    ])
+  );
+
+  // D-22: delete a booking, single roles x relationship x status
+  // (`assertCanDeleteBooking`: ownership, then the policy's drafts-only rule).
+  snapshot["D-22"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        Object.entries(RELATIONSHIPS).flatMap(([rel, booking]) =>
+          BOOKING_STATUSES.map((status) => [
+            `${rel}|${status}`,
+            outcome(() =>
+              assertCanDeleteBooking({
+                access: accessFor([role]),
+                booking: { ...booking, status },
+                userId: "caller",
+              })
+            ),
+          ])
+        )
+      ),
+    ])
+  );
+
+  // D-26: explicit check-out requirement.
+  snapshot["D-26"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [
+      role,
+      Object.fromEntries(
+        [false, true].flatMap((admin) =>
+          [false, true].map((selfService) => [
+            `admin=${admin}|selfService=${selfService}`,
+            isExplicitScanRequired({
+              access: accessFor([role]),
+              settings: {
+                requireExplicitCheckoutForAdmin: admin,
+                requireExplicitCheckoutForSelfService: selfService,
+                requireExplicitCheckinForAdmin: false,
+                requireExplicitCheckinForSelfService: false,
+              },
+              direction: "checkout",
+            }),
+          ])
+        )
+      ),
+    ])
+  );
+
+  // D-33: default asset index mode.
+  snapshot["D-33"] = Object.fromEntries(
+    SINGLE_ROLES.map((role) => [role, getDefaultModeForRole(role)])
+  );
+
+  // ===================== Bookings: visibility =====================
+
+  // B9:D-14: "view other bookings" link in the adjust-quantity dialog:
+  // `useRoleAccess().bookings.seeAll`
+  // (components/booking/adjust-booking-asset-quantity-dialog.tsx:113).
+  // Recorded per booking see-toggle pair, since the migrated gate reads them.
+  snapshot["B9:D-14:adjust-quantity-link"] = perRoleSet((roles) =>
+    perToggle(BOOKING_TOGGLES, (t) => accessFor(roles, t).bookings.seeAll)
+  );
+
+  // B9:F3: calendar feed visibility, the member's effective role folded with
+  // the workspace toggles (modules/calendar-subscription/service.server.ts:298-315,
+  // `resolveCalendarVisibility`). Calls the real function, so the probe
+  // tracks its body without a rewrite.
+  snapshot["B9:F3:calendar-feed"] = perRoleSet((roles) =>
+    perToggle(TOGGLE_COMBOS, (t) =>
+      resolveCalendarVisibility({ roles, organization: t })
+    )
+  );
+
+  // ===================== Bookings: write gates =====================
+
+  // B9:D-15: the web write gate for every membership (web callers pass the
+  // `access` requirePermission resolves, and the membership's roles for the
+  // extend grant).
+  snapshot["B9:D-15:web-server"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      RELATIONSHIP_NAMES.flatMap((rel) =>
+        [false, true].flatMap((checkCustodianOnly) =>
+          [false, true].map((blockBaseEntirely) => [
+            `${rel}|custodianOnly=${checkCustodianOnly}|blockBase=${blockBaseEntirely}`,
+            outcome(() =>
+              bookingWriteGate({
+                roles,
+                booking: RELATIONSHIPS[rel],
+                checkCustodianOnly,
+                blockBaseEntirely,
+              })
+            ),
+          ])
+        )
+      )
+    )
+  );
+
+  // B9:D-16: web query-side write scopes for every membership.
+  snapshot["B9:D-16:web-server"] = perRoleSet((roles) => ({
+    writeScopeClause:
+      bookingWriteScopeClause({ userId: "caller", access: accessFor(roles) }) ??
+      null,
+    bulkOwnershipScope: getBookingOwnershipScope({
+      access: accessFor(roles),
+      userId: "caller",
+    }),
+  }));
+
+  // B9:D-15: mobile archive (routes/api+/mobile+/bookings.archive.ts: gate
+  // booking:archive, then ownership on the context's `access`).
+  snapshot["B9:D-15:mobile-archive"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.archive)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access: accessFor(roles),
+                action: "archive",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-15: mobile cancel (bookings.cancel.ts: gate booking:cancel, then
+  // ownership on the context's `access`).
+  snapshot["B9:D-15:mobile-cancel"] = perRoleSet((roles) =>
+    perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.cancel)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access: accessFor(roles),
+                action: "cancel",
+              })
+            ),
+        ],
+      ])
+    )
+  );
+
+  // B9:D-22: mobile delete (bookings.delete.ts: gate booking:delete, then
+  // `assertCanDeleteBooking` on the context's `access`: ownership first, then
+  // the policy's drafts-only rule).
+  snapshot["B9:D-22:mobile-delete"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return Object.fromEntries(
+      RELATIONSHIP_NAMES.flatMap((rel) =>
+        DRAFT_OR_NOT.map((status) => [
+          `${rel}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.delete)],
+            [
+              "denied:owner",
+              () =>
+                throws(() =>
+                  validateBookingOwnership({
+                    booking: RELATIONSHIPS[rel],
+                    userId: "caller",
+                    access,
+                    action: "delete",
+                  })
+                ),
+            ],
+            [
+              "denied:status",
+              () =>
+                throws(() =>
+                  assertCanDeleteBooking({
+                    access,
+                    booking: { ...RELATIONSHIPS[rel], status },
+                    userId: "caller",
+                  })
+                ),
+            ],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-15/D-19: mobile duplicate (bookings.duplicate.ts: gate
+  // booking:create, ownership on the context's `access`, then a caller who may
+  // only book for themself must be the source booking's custodian).
+  snapshot["B9:D-15/D-19:mobile-duplicate"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.create)],
+        [
+          "denied:owner",
+          () =>
+            throws(() =>
+              validateBookingOwnership({
+                booking: RELATIONSHIPS[rel],
+                userId: "caller",
+                access,
+                action: "duplicate",
+              })
+            ),
+        ],
+        [
+          "denied:custodian",
+          () =>
+            bookingCustodianIsSelf(access) &&
+            RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ])
+    );
+  });
+
+  // B9:D-15: mobile model requests (bookings.$bookingId.model-requests.ts).
+  // Gate booking:update; a caller who does not write every booking must be
+  // the custodian.
+  snapshot["B9:D-15:mobile-model-requests"] = perRoleSet((roles) => {
+    const restricted = !accessFor(roles).bookings.writeAll;
+    return perCase(RELATIONSHIP_NAMES, (rel) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, A.update)],
+        [
+          "denied:owner",
+          () => restricted && RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ])
+    );
+  });
+
+  // B9:D-16: mobile available-models booking lookup (bookings.available-models.ts;
+  // no matrix gate): a caller who does not write every booking is limited to
+  // bookings in its custody scope.
+  snapshot["B9:D-16:mobile-available-models"] = perRoleSet((roles) =>
+    accessFor(roles).bookings.writeAll ? "workspace" : "custodian-scope"
+  );
+
+  // B9:D-15: web "can see actions" on a booking,
+  // `useRoleAccess().bookings.writeAll || holder`: editBookingForm
+  // (components/booking/forms/edit-booking-form.tsx) and bookingAssetsColumn
+  // (components/booking/booking-assets-column.tsx).
+  snapshot["B9:D-15:web-form-actions"] = perRoleSet((roles) => {
+    const { writeAll } = accessFor(roles).bookings;
+    return perCase(HOLDER_CASES, (holder) => {
+      const visible = writeAll || holder === "holder";
+      return { editBookingForm: visible, bookingAssetsColumn: visible };
+    });
+  });
+
+  // ===================== Bookings: custodian pickers =====================
+
+  // B9:D-19/D-29: picker scopes for every membership on the web, all read
+  // from the membership's access.
+  snapshot["B9:D-19/D-29:web-server"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      (
+        ["custody-filter", "custody-assignment", "booking-custodian"] as const
+      ).flatMap((purpose) =>
+        [false, true].map((canSeeAllCustody) => [
+          `${purpose}|seeAll=${canSeeAllCustody}`,
+          resolveCustodianPickerScope({
+            purpose,
+            access: withCustodySeeAll(accessFor(roles), canSeeAllCustody),
+            userId: "caller",
+          }),
+        ])
+      )
+    )
+  );
+
+  // B9:D-19: mobile booking-custodian picker (routes/api+/mobile+/team-members.ts,
+  // on the context's `access`).
+  snapshot["B9:D-19:mobile-team-members"] = perRoleSet(
+    (roles) =>
+      resolveCustodianPickerScope({
+        purpose: "booking-custodian",
+        access: accessFor(roles),
+        userId: "caller",
+      }).mode
+  );
+
+  // B9:D-19: mobile custodian self-lock on create (bookings.create.ts: gate
+  // booking:create, then `bookingCustodianIsSelf` on the context's `access`)
+  // and update (bookings.update.ts: gate booking:update, then the same lock;
+  // the booking itself is the caller's, so the custodian-only check passes
+  // and only the lock is probed).
+  snapshot["B9:D-19:mobile-self-lock"] = perRoleSet((roles) => {
+    const restricted = bookingCustodianIsSelf(accessFor(roles));
+    const lock = (action: PermissionAction, custodian: string) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, action)],
+        ["denied:self", () => restricted && custodian !== "caller"],
+      ]);
+    return perCase(CUSTODIAN_CASES, (custodian) => ({
+      create: lock(A.create, custodian),
+      update: lock(A.update, custodian),
+    }));
+  });
+
+  // B9:D-15: mobile update / reserve on another member's booking: a caller
+  // who does not write every booking must be the custodian. update
+  // bookings.update.ts (gate booking:update); reserve bookings.reserve.ts
+  // (gate booking:create).
+  snapshot["B9:D-15:mobile-update-reserve"] = perRoleSet((roles) => {
+    const restricted = !accessFor(roles).bookings.writeAll;
+    const custodianOnly = (rel: RelationshipName, action: PermissionAction) =>
+      firstRefusal([
+        ["denied:gate", () => !can(roles, E.booking, action)],
+        [
+          "denied:owner",
+          () => restricted && RELATIONSHIPS[rel].custodianUserId !== "caller",
+        ],
+      ]);
+    return perCase(RELATIONSHIP_NAMES, (rel) => ({
+      update: custodianOnly(rel, A.update),
+      reserve: custodianOnly(rel, A.create),
+    }));
+  });
+
+  // B9:D-25: mobile time-limit bypass, `access.policy.bookings.bypassTimeLimits`
+  // on the context's `access` (bookings.create.ts, bookings.update.ts,
+  // bookings.reserve.ts).
+  snapshot["B9:D-25:mobile-time-bypass"] = perRoleSet((roles) => {
+    const bypass = accessFor(roles).policy.bookings.bypassTimeLimits;
+    const gated = (action: PermissionAction) =>
+      can(roles, E.booking, action) ? bypass : "denied:gate";
+    return {
+      create: gated(A.create),
+      update: gated(A.update),
+      reserve: gated(A.create),
+    };
+  });
+
+  // B9:D-46: does a reservation made by this member trigger the org broadcast?
+  // Both the web reserve intent (bookings.$bookingId.overview.tsx) and the
+  // mobile reserve route (api+/mobile+/bookings.reserve.ts) pass
+  // `access.policy.notifications.reservationAlertsAdmins` as
+  // `alertsOrgOnReservation`; mobile first requires booking:create.
+  snapshot["B9:D-46:reservation-trigger"] = perRoleSet((roles) => ({
+    web: accessFor(roles).policy.notifications.reservationAlertsAdmins,
+    mobile: can(roles, E.booking, A.create)
+      ? accessFor(roles).policy.notifications.reservationAlertsAdmins
+      : "denied:gate",
+  }));
+
+  // B9:D-19: web custodian field lock / seed, `bookingCustodianIsSelf` on
+  // `useRoleAccess()`: edit-booking-form.tsx, new-booking-form.tsx,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx.
+  snapshot["B9:D-19:web-custodian-lock"] = perRoleSet((roles) => {
+    const locked = bookingCustodianIsSelf(accessFor(roles));
+    return {
+      editBookingForm: locked,
+      newBookingForm: locked,
+      createBookingForSelectedAssets: locked,
+    };
+  });
+
+  // ===================== Bookings: adding and removing items =====================
+
+  // B9:D-20: web add-items rule for every membership, per call-site rule:
+  // `selfServiceFlag` is the scan page (`canScanAddBookingItems`),
+  // `restrictedFlag` is manage-assets / manage-kits / the fulfil loader
+  // (`canManageBookingItems`), both on the request's `access`.
+  snapshot["B9:D-20:web-server"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return perCase(BOOKING_STATUSES, (status) => ({
+      selfServiceFlag: canScanAddBookingItems({
+        access,
+        bookingStatus: status,
+      }),
+      restrictedFlag: canManageBookingItems({ access, bookingStatus: status }),
+    }));
+  });
+
+  // B9:D-15/D-20: mobile add-scanned-assets (bookings.add-scanned-assets.ts).
+  // Gate booking:update; a caller who does not write every booking must be
+  // the custodian; then the manage-items rule on the context's `access`.
+  snapshot["B9:D-15/D-20:mobile-add-scanned"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.update)],
+            [
+              "denied:owner",
+              () => !access.bookings.writeAll && custodian !== "caller",
+            ],
+            [
+              "denied:status",
+              () => !canManageBookingItems({ access, bookingStatus: status }),
+            ],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-24: mobile partial check-in (bookings.partial-checkin.ts: gate
+  // booking:checkin; then `canPartialCheckInOut` on the context's `access`).
+  snapshot["B9:D-24:mobile-partial-checkin"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          firstRefusal([
+            ["denied:gate", () => !can(roles, E.booking, A.checkin)],
+            [
+              "denied:status",
+              () =>
+                !canPartialCheckInOut({
+                  access,
+                  booking: {
+                    status,
+                    custodianUserId:
+                      custodian === "caller" ? "caller" : "someone-else",
+                  },
+                  userId: "caller",
+                  direction: "checkin",
+                }),
+            ],
+          ]),
+        ])
+      )
+    );
+  });
+
+  // B9:D-20: booking assets column "can't manage items" on an open booking
+  // (booking-assets-column.tsx): `!canManageBookingItems` on `useRoleAccess()`.
+  snapshot["B9:D-20:web-assets-column"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return perCase(
+      OPEN_STATUSES,
+      (status) => !canManageBookingItems({ access, bookingStatus: status })
+    );
+  });
+
+  // B9:D-15/D-21: booking asset row actions (list-asset-content.tsx, kit
+  // membership aside): a caller who writes every booking sees them on every
+  // row; otherwise only the custodian, within `mayRemoveBookingItems`.
+  snapshot["B9:D-15/D-21:web-list-asset-actions"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    const canUpdateBooking = can(roles, E.booking, A.update);
+    return Object.fromEntries(
+      CUSTODIAN_CASES.flatMap((custodian) =>
+        BOOKING_STATUSES.map((status) => [
+          `custodian=${custodian}|${status}`,
+          access.bookings.writeAll
+            ? true
+            : custodian !== "caller"
+            ? false
+            : mayRemoveBookingItems({
+                canUpdateBooking,
+                access,
+                bookingStatus: status,
+              }),
+        ])
+      )
+    );
+  });
+
+  // B9:D-21 (+B2): kit row "Remove" menu (kit-row.tsx): `mayRemoveBookingItems`
+  // on the booking:update grant and `useRoleAccess()`.
+  snapshot["B9:D-21:web-kit-row-remove"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    const canUpdateBooking = can(roles, E.booking, A.update);
+    return perCase(BOOKING_STATUSES, (status) =>
+      mayRemoveBookingItems({ canUpdateBooking, access, bookingStatus: status })
+    );
+  });
+
+  // ===================== Bookings: check-out and check-in =====================
+
+  // B9:D-26: explicit check-out / check-in switch for every membership, read
+  // through `isExplicitScanRequired` with the caller's access on every surface.
+  // web: bookings.$bookingId.overview.tsx checkOut / checkOutRemaining
+  // (assertQuickCheckoutAllowed) and checkIn; bookings.$bookingId.overview.fulfil-and-checkout.tsx.
+  // mobile: bookings.checkout.ts, bookings.fulfil-and-checkout.ts,
+  // bookings.checkin.ts, api+/mobile+/bookings.$bookingId.ts (canQuickCheckin /
+  // canQuickCheckout). client: edit-booking-form.tsx (requireExplicitCheckout /
+  // requireExplicitCheckin).
+  snapshot["B9:D-26:explicit-scan"] = perRoleSet((roles) =>
+    Object.fromEntries(
+      [false, true].flatMap((admin) =>
+        [false, true].map((selfService) => {
+          const settings = {
+            requireExplicitCheckoutForAdmin: admin,
+            requireExplicitCheckoutForSelfService: selfService,
+            requireExplicitCheckinForAdmin: admin,
+            requireExplicitCheckinForSelfService: selfService,
+          };
+          const access = accessFor(roles);
+          const checkout = isExplicitScanRequired({
+            access,
+            settings,
+            direction: "checkout",
+          });
+          const checkin = isExplicitScanRequired({
+            access,
+            settings,
+            direction: "checkin",
+          });
+          return [
+            `admin=${admin}|selfService=${selfService}`,
+            {
+              webCheckout: checkout,
+              webCheckin: checkin,
+              mobileAndClientCheckout: checkout,
+              mobileAndClientCheckin: checkin,
+            },
+          ];
+        })
+      )
+    )
+  );
+
+  // B9:D-25: client time-limit bypass, `useRoleAccess().policy.bookings.bypassTimeLimits`:
+  // edit-booking-form.tsx, new-booking-form.tsx,
+  // components/assets/assets-index/create-booking-for-selected-assets-dialog.tsx,
+  // bookings.$bookingId.overview.duplicate.tsx, extend-booking-dialog.tsx.
+  snapshot["B9:D-25:web-client-time-bypass"] = perRoleSet(
+    (roles) => accessFor(roles).policy.bookings.bypassTimeLimits
+  );
+
+  // B9:D-17: bookings index bulk menu (bookings._index.tsx):
+  // `useRoleAccess().policy.bookings.showBulkActions`.
+  snapshot["B9:D-17:web-bookings-bulk-menu"] = perRoleSet(
+    (roles) => accessFor(roles).policy.bookings.showBulkActions
+  );
+
+  // B9:D-27: reservation presented as a request (`useReservationIsRequest`: a
+  // loaded membership without `booking:checkout`): edit-booking-form.tsx
+  // (process sidebar, button label), booking-status-badge.tsx (tooltip).
+  snapshot["B9:D-27:web-reservation-request"] = perRoleSet((roles) => {
+    const isRequest = roles.length > 0 && !can(roles, E.booking, A.checkout);
+    return {
+      processSidebar: isRequest,
+      reserveButtonLabel: isRequest,
+      statusBadgeTooltip: isRequest,
+    };
+  });
+
+  // ===================== Bookings: deletion =====================
+
+  // B9:D-22: booking Delete menu item (actions-dropdown.tsx):
+  // `!useRoleAccess().policy.bookings.deleteOnlyDrafts || isDraft`.
+  snapshot["B9:D-22:web-delete-menu"] = perRoleSet((roles) => {
+    const { deleteOnlyDrafts } = accessFor(roles).policy.bookings;
+    return perCase(
+      DRAFT_OR_NOT,
+      (status) => !deleteOnlyDrafts || status === "DRAFT"
+    );
+  });
+
+  // B9:D-17/D-22: bookings bulk delete: the menu renders only when
+  // `policy.bookings.showBulkActions` (bookings._index.tsx), and its Delete is
+  // disabled by `policy.bookings.deleteOnlyDrafts && !everyBookingInDraft`
+  // (bulk-actions-dropdown.tsx).
+  snapshot["B9:D-17/D-22:web-bulk-delete"] = perRoleSet((roles) => {
+    const { showBulkActions, deleteOnlyDrafts } =
+      accessFor(roles).policy.bookings;
+    return perCase(SELECTION_CASES, (selection) => {
+      if (!showBulkActions) return "no-menu";
+      const everyBookingInDraft = selection === "allDraft";
+      const deleteDisabled = deleteOnlyDrafts && !everyBookingInDraft;
+      return deleteDisabled ? "disabled" : "enabled";
+    });
+  });
+
+  // ===================== Custody & assets =====================
+
+  // B9:D-29/D-30: mobile custody routes judge "self only" by the membership's
+  // custody scope (`access.custody.assign`, effective role), after an
+  // asset:custody (kit:custody) gate: custody.assign.ts, custody.release.ts,
+  // custody.assign-quantity.ts (+ note wording, D-30), custody.release-quantity.ts,
+  // bulk-assign-custody.ts, bulk-release-custody.ts, kits.bulk-actions.ts.
+  snapshot["B9:D-29:mobile-custody"] = perRoleSet((roles) => {
+    const selfOnly = accessFor(roles).custody.assign === "self";
+    const scope = (entity: PermissionEntity) =>
+      !can(roles, entity, A.custody)
+        ? "denied:gate"
+        : selfOnly
+        ? "self"
+        : "anyone";
+    return {
+      "custody.assign": scope(E.asset),
+      "custody.release": scope(E.asset),
+      "custody.assign-quantity": scope(E.asset),
+      "custody.assign-quantity:note": scope(E.asset),
+      "custody.release-quantity": scope(E.asset),
+      "bulk-assign-custody": scope(E.asset),
+      "bulk-release-custody": scope(E.asset),
+      "kits.bulk-actions": scope(E.kit),
+    };
+  });
+
+  // B9:D-33: mobile routes pass the effective role (`access.role`) to
+  // getAssetIndexSettings: custody.assign.ts, bulk-assign-custody.ts,
+  // bulk-release-custody.ts (asset:custody gate), bulk-update-location.ts
+  // (asset:update gate).
+  snapshot["B9:D-33:mobile-index-mode"] = perRoleSet((roles) => {
+    const mode = (action: PermissionAction) =>
+      can(roles, E.asset, action)
+        ? getDefaultModeForRole(accessFor(roles).role)
+        : "denied:gate";
+    return {
+      "custody.assign": mode(A.custody),
+      "bulk-assign-custody": mode(A.custody),
+      "bulk-release-custody": mode(A.custody),
+      "bulk-update-location": mode(A.update),
+    };
+  });
+
+  // B9:D-29/D-30: web custody UI "self only" / "Take" wording =
+  // `useRoleAccess().custody.assign === "self"` (effective role):
+  // components/assets/actions-dropdown.tsx; components/assets/bulk-actions-dropdown.tsx;
+  // components/assets/bulk-assign-custody-dialog.tsx; components/kits/actions-dropdown.tsx;
+  // components/kits/bulk-actions-dropdown.tsx; components/kits/bulk-assign-custody-dialog.tsx;
+  // components/scanner/drawer/uses/assign-custody-drawer.tsx;
+  // routes/_layout+/assets.$assetId.overview.assign-custody.tsx;
+  // assets.$assetId.overview.release-custody.tsx; kits.$kitId.assets.assign-custody.tsx;
+  // kits.$kitId.assets.release-custody.tsx; assets.$assetId.overview.tsx.
+  snapshot["B9:D-29:web-client-self-only"] = perRoleSet(
+    (roles) => accessFor(roles).custody.assign === "self"
+  );
+
+  // ===================== Assets: index mode =====================
+
+  // B9:D-33: default index mode on the web (effective role) for every membership.
+  snapshot["B9:D-33:web-server"] = perRoleSet((roles) =>
+    getDefaultModeForRole(webRole(roles))
+  );
+
+  // B9:D-33: index mode seeded when an invite is accepted, from the invite's
+  // effective role (modules/user/service.server.ts, `ensureAssetIndexModeForRole`
+  // with `resolveRole(roles)`).
+  snapshot["B9:D-33:invite-accept"] = perRoleSet((roles) =>
+    getDefaultModeForRole(resolveRole(roles))
+  );
+
+  // B9:D-34: asset write affordances, each an `asset:update` matrix check:
+  // codePreview (components/code-preview/code-preview.tsx, `userHasPermission`);
+  // sequentialIdPrompt (routes/_layout+/_layout.tsx, `hasPermission`);
+  // sequentialIdEndpoint (routes/api+/generate-sequential-ids.tsx, `hasPermission`);
+  // scannerLocations (routes/_layout+/scanner.tsx, `hasPermission`).
+  // The palette's Create asset/kit entries are in B9:D-38:palette.
+  snapshot["B9:D-34:asset-write-affordances"] = perRoleSet((roles) => {
+    const mayUpdateAssets = can(roles, E.asset, A.update);
+    return {
+      codePreview: mayUpdateAssets,
+      sequentialIdPrompt: mayUpdateAssets,
+      sequentialIdEndpoint: mayUpdateAssets,
+      scannerLocations: mayUpdateAssets,
+    };
+  });
+
+  // B9:D-35: asset index bulk menu (components/assets/assets-index/assets-list.tsx):
+  // any of `asset:custody`, `asset:update`, `asset:delete`.
+  snapshot["B9:D-35:assets-bulk-menu"] = perRoleSet((roles) =>
+    can(roles, E.asset, [A.custody, A.update, A.delete])
+  );
+
+  // B9:D-36: kit index bulk menu (routes/_layout+/kits._index.tsx):
+  // any of `kit:custody`, `kit:update`, `kit:delete`.
+  snapshot["B9:D-36:kits-bulk-menu"] = perRoleSet((roles) =>
+    can(roles, E.kit, [A.custody, A.update, A.delete])
+  );
+
+  // B9:D-37: "Set reminder" (components/assets/actions-dropdown.tsx):
+  // `assetReminders:create`.
+  snapshot["B9:D-37:set-reminder"] = perRoleSet((roles) =>
+    can(roles, E.assetReminders, A.create)
+  );
+
+  // ===================== Audits =====================
+
+  // B9:D-42: mobile audit scope from `access.audits.seeAll`: audits.ts gates
+  // audit:read; audits.complete.ts and audits.record-scan.ts gate
+  // audit:update.
+  snapshot["B9:D-42:mobile-audits"] = perRoleSet((roles) => {
+    const scope = accessFor(roles).audits.seeAll ? "all" : "assigned";
+    const gatedOn = (action: PermissionAction) =>
+      can(roles, E.audit, action) ? scope : "denied:gate";
+    return {
+      audits: gatedOn(A.read),
+      "audits.complete": gatedOn(A.update),
+      "audits.record-scan": gatedOn(A.update),
+    };
+  });
+
+  // B9:D-43: web audit management. The detail loader opens an unassigned
+  // audit on `access.audits.seeAll` and the overview lets a non-creator remove
+  // assets on `access.policy.audits.manageOthers` (audits.$auditId.tsx,
+  // audits.$auditId.overview.tsx); cancel reads `manageOthers` as well.
+  snapshot["B9:D-43:web-audit-admin"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    return {
+      detailAndOverviewAllowList:
+        access.audits.seeAll && access.policy.audits.manageOthers,
+      effectiveRoleDenyList: access.policy.audits.manageOthers,
+    };
+  });
+
+  // ===================== Admin areas =====================
+
+  // B9:D-38: settings tabs for a team workspace, as the Settings layout loader
+  // computes them (routes/_layout+/settings.tsx): each tab shows with the
+  // matrix grant of the page it opens.
+  snapshot["B9:D-38:settings-tabs"] = perRoleSet((roles) =>
+    visibleSettingsTabs({ roles, isPersonalOrg: false }).map((t) => t.to)
+  );
+
+  // B9:D-38: sidebar (hooks/use-sidebar-nav-items.tsx): each admin area shows
+  // with the matrix grant of the page it opens (`canSeeAdminArea`); Team with
+  // any visible Team tab in a team workspace; Workspace settings with any
+  // visible settings tab other than Team; the Organization label with either.
+  snapshot["B9:D-38:sidebar"] = perRoleSet((roles) => {
+    const area = (a: AdminArea) => canSeeAdminArea({ roles, area: a });
+    const team = visibleTeamTabs({ roles, isPersonalOrg: false }).length > 0;
+    const workspaceSettings = visibleSettingsTabs({
+      roles,
+      isPersonalOrg: false,
+    }).some((t) => t.to !== "team");
+    return {
+      home: area("home"),
+      categories: area("categories"),
+      tags: area("tags"),
+      locations: area("locations"),
+      audits: area("audits"),
+      reminders: area("reminders"),
+      reports: area("reports"),
+      organization: team || workspaceSettings,
+      team,
+      workspaceSettings,
+    };
+  });
+
+  // B9:D-38/D-34: command-palette quick-nav (components/layout/command-palette/
+  // command-palette.tsx, `isVisible` over `CommandContext`), for a team
+  // workspace: admin areas and Create asset/kit follow `canSeeAdminArea`,
+  // Settings any visible settings tab, Team the Users tab, Invite user
+  // `teamMember:create`.
+  snapshot["B9:D-38:palette"] = perRoleSet((roles) => {
+    const area = (a: AdminArea) => canSeeAdminArea({ roles, area: a });
+    return {
+      audits: area("audits"),
+      team: visibleTeamTabs({ roles, isPersonalOrg: false }).some(
+        (t) => t.to === "users"
+      ),
+      settings: visibleSettingsTabs({ roles, isPersonalOrg: false }).length > 0,
+      home: area("home"),
+      createAsset: area("createAsset"),
+      createKit: area("createKit"),
+      inviteUser: can(roles, E.teamMember, A.create),
+    };
+  });
+
+  // B9:D-39: admin list bulk menus, each shown with the grant of the actions it
+  // offers: categories.tsx, tags.tsx and settings.asset-models.index.tsx
+  // (Delete); locations._index.tsx (Delete, Create audit);
+  // settings.custom-fields.index.tsx (Activate/Deactivate). The NRM list
+  // (settings.team.nrm.tsx) shows its bulk menu with
+  // `nonRegisteredMember:delete`, the only bulk action it offers.
+  snapshot["B9:D-39:admin-bulk-menus"] = perRoleSet((roles) => ({
+    categories: can(roles, E.category, A.delete),
+    tags: can(roles, E.tag, A.delete),
+    locations:
+      can(roles, E.location, A.delete) || can(roles, E.audit, A.create),
+    customFields: can(roles, E.customField, A.update),
+    assetModels: can(roles, E.assetModel, A.delete),
+    nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
+  }));
+
+  // ===================== Membership =====================
+
+  // B9:D-01/D-10: how a membership is shown, always as its effective role:
+  // teamList modules/settings/service.server.ts (getPaginatedAndFilterableSettingUsers)
+  // + settings.team.users.tsx UserRow (row menu hidden for an owning role);
+  // inviteList modules/invite/service.server.ts (getPaginatedAndFilterableSettingInvites)
+  // + settings.team.invites.tsx UserRow;
+  // memberPage routes/_layout+/settings.team.users.$userId.tsx (badge, actions
+  // hidden for an OWNER-holding membership, dropdown roleEnum);
+  // calendarFeedRole modules/calendar-subscription/service.server.ts getMemberCalendarFeeds.
+  snapshot["B9:D-01:membership-display"] = perRoleSet((roles) => {
+    const role = resolveRole(roles);
+    const rowActions = !ROLE_POLICIES[role].membership.ownsWorkspace;
+    return {
+      teamList: { roleEnum: role, label: ROLE_LABELS[role], rowActions },
+      inviteList: { roleEnum: role, label: ROLE_LABELS[role], rowActions },
+      memberPage: {
+        roleEnum: role,
+        label: ROLE_LABELS[role],
+        showActions: !isWorkspaceOwner(roles),
+      },
+      calendarFeedRole: role,
+    };
+  });
+
+  // B9:D-07: team member row menu, caller × target
+  // (components/workspace/users-actions-dropdown.tsx, change role and revoke):
+  // locked when the caller does not own the workspace and the target's
+  // team-list roleEnum (its effective role) needs the owner to change it. The
+  // page needs teamMember:read (settings.team.users.tsx loader); the row menu
+  // is hidden when the target's effective role owns the workspace
+  // (settings.team.users.tsx UserRow).
+  snapshot["B9:D-07:users-menu"] = perRoleSet((caller) => {
+    const { ownsWorkspace } = accessFor(caller);
+    const reachesPage = can(caller, E.teamMember, A.read);
+    return perRoleSet((target) => {
+      const roleEnum = resolveRole(target);
+      if (!reachesPage) return "no-page";
+      if (ROLE_POLICIES[roleEnum].membership.ownsWorkspace) return "no-menu";
+      return !ownsWorkspace && roleChangeRequiresOwner(roleEnum)
+        ? "locked"
+        : "open";
+    });
+  });
+
+  // B9:D-07: server revoke (modules/user/utils.server.ts resolveUserAction,
+  // revokeAccess: refused when the target's effective role needs the owner and
+  // the caller does not own the workspace), then revokeAccessToOrganization
+  // refusing any OWNER-holding membership (modules/user/service.server.ts).
+  snapshot["B9:D-07:revoke-guard"] = perRoleSet((target) =>
+    perCase(CALLER_ROLES, (caller) =>
+      (roleChangeRequiresOwner(resolveRole(target)) &&
+        !isWorkspaceOwner([caller])) ||
+      target.includes(R.OWNER)
+        ? "refused"
+        : "allowed"
+    )
+  );
+
+  // B9:D-07: changeUserRole guards (modules/user/service.server.ts), changing
+  // the member to BASE: a membership holding OWNER is refused; otherwise the
+  // new role and the member's effective role must not need the owner unless
+  // the caller owns the workspace.
+  snapshot["B9:D-07:change-role-guard"] = perRoleSet((target) =>
+    perCase(CALLER_ROLES, (caller) => {
+      const actorOwnsWorkspace = isWorkspaceOwner([caller]);
+      const refused =
+        isWorkspaceOwner(target) ||
+        !canAssignRole({ actorOwnsWorkspace, role: R.BASE }) ||
+        (!actorOwnsWorkspace && roleChangeRequiresOwner(resolveRole(target)));
+      return refused ? "refused" : "allowed";
+    })
+  );
+
+  // B9:D-02/D-03: does a manual role change transfer the member's entities?
+  // Server: modules/user/service.server.ts transferOnRoleChange, from the roles
+  // read under the membership lock; dialog:
+  // components/workspace/change-role-dialog.tsx, from the member's full
+  // membership. Both ask roleChangeTransfers; true when anything moves.
+  snapshot["B9:D-02/D-03:role-change-transfers"] = perRoleSet((roles) =>
+    perCase([R.ADMIN, R.SELF_SERVICE, R.BASE] as const, (to) => {
+      const moves = roleChangeTransfers({ fromRoles: roles, to });
+      const transfers = moves.ownership || moves.bookingsCreatedForOthers;
+      return { server: transfers, dialog: transfers };
+    })
+  );
+
+  // B9:D-05 (+F6, F12): SSO group-claim transition, `reconcileSsoGroupMembership`
+  // (modules/user/service.server.ts), deciding from the membership read under
+  // its lock. A membership holding OWNER is kept as-is whatever the groups map
+  // to, reporting its effective role (F12). Otherwise no mapped group revokes
+  // (`revokeMembershipInTx`), and a mapped group sets the single role
+  // (`changeUserRole`) and moves what `transferOnRoleChange` moves for a manual
+  // change from the effective role (F6, B9).
+  snapshot["B9:D-05:sso-transition"] = perRoleSet((current) =>
+    perCase(["ADMIN", "SELF_SERVICE", "BASE", "none"] as const, (desired) => {
+      if (isWorkspaceOwner(current)) {
+        return {
+          rolesAfter: current,
+          newRole: resolveRole(current),
+          transfers: NO_TRANSFER,
+        };
+      }
+      if (desired === "none") {
+        return { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
+      }
+      return {
+        rolesAfter: [desired],
+        newRole: desired,
+        transfers: roleChangeTransfers({ fromRoles: current, to: desired }),
+      };
+    })
+  );
+
+  // B9:F4: announcement audience role. The layout badge
+  // (routes/_layout+/_layout.tsx) and the updates page
+  // (routes/_layout+/updates.tsx, routes/api+/updates.tsx, via
+  // requirePermission's `access.role`) both read `announcementRole`.
+  snapshot["B9:F4:announcements"] = perRoleSet((roles) => ({
+    layoutBadgeRole: announcementRole(roles),
+    updatesPageRole: announcementRole(roles),
+  }));
+
+  // F4: the role announcements target for every membership.
+  snapshot["F4:announcementRole"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [key(roles), announcementRole(roles)])
+  );
+
+  // B9:D-06/D-08/D-09: "held anywhere" membership reads: owner
+  // (`isOrganizationOwner` in utils/roles.server.ts, which asks
+  // `isWorkspaceOwner`), new-owner eligibility (`transferOwnership` and
+  // `getOrganizationAdmins` in modules/organization/service.server.ts: any role
+  // whose policy is eligible as the new owner), transfer recipients
+  // (routes/api+/user.transfer-recipients.ts and assertTransferRecipient in
+  // modules/user/service.server.ts: any role whose policy may receive transfers).
+  snapshot["B9:D-06/D-08/D-09:owner-and-recipients"] = perRoleSet((roles) => ({
+    ownsWorkspace: isOrganizationOwner({
+      userOrganizations: [{ organization: { id: "org" }, roles }],
+      organizationId: "org",
+    }),
+    eligibleAsNewOwner: holdsRoleWhere(
+      roles,
+      (p) => p.membership.eligibleAsNewOwner
+    ),
+    receivesTransfers: holdsRoleWhere(
+      roles,
+      (p) => p.membership.canReceiveTransfers
+    ),
+  }));
+
+  // ===================== Notifications =====================
+
+  // B9:D-45/D-48/D-49: Prisma audience filters, `roles: { hasSome: rolesWhere(...) }`:
+  // orgBookingBroadcasts and lowStock modules/organization/service.server.ts
+  // (getOrganizationNotificationAudience, audiences `orgBookingBroadcasts` and
+  // `inventoryAlerts`); bookingNotifyPicker modules/team-member/service.server.ts
+  // (getTeamMembersForNotify); reminderPicker routes/api+/reminders.team-members.ts;
+  // modelFiltersRecipients routes/api+/model-filters.ts (selectableRecipientsOnly).
+  // The last three read `notifications.selectableAsRecipient`.
+  snapshot["B9:D-45/D-48/D-49:audiences"] = perRoleSet((roles) => ({
+    orgBookingBroadcasts: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.orgBookingBroadcasts)
+    ),
+    lowStock: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.inventoryAlerts)
+    ),
+    bookingNotifyPicker: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
+    reminderPicker: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
+    modelFiltersRecipients: holdsAny(
+      roles,
+      rolesWhere((p) => p.notifications.selectableAsRecipient)
+    ),
+  }));
+
+  // B9:D-47: manage a booking's recipients, `notifications.manageBookingRecipients`
+  // on the effective role at every site: actionsDropdown
+  // (components/booking/actions-dropdown.tsx, `useRoleAccess()`); recipientsField
+  // (components/booking/forms/fields/notification-recipients.tsx, `useRoleAccess()`);
+  // the overview loader and updateNotificationRecipients action
+  // (bookings.$bookingId.overview.tsx) and the bookings.new action, on
+  // requirePermission's `access`.
+  snapshot["B9:D-47:manage-recipients"] = perRoleSet((roles) => {
+    const manages =
+      accessFor(roles).policy.notifications.manageBookingRecipients;
+    return {
+      actionsDropdown: manages,
+      recipientsField: manages,
+      overviewLoaderAndAction: manages,
+      bookingsNewAction: manages,
+    };
+  });
+
+  // ===================== Companion =====================
+  // Reproduced here because the webapp cannot import the companion. Each probe
+  // reads the same `resolveRoleAccess` answer the companion's
+  // lib/role-access.ts `accessForOrganization` resolves (toggles off), and
+  // apps/companion/lib/role-access.test.ts pins the same rows.
+
+  // B8:D-20/D-21: booking detail item actions (apps/companion/app/(tabs)/bookings/[id].tsx):
+  // add = manage models / scan to add / browse to add (`canAddItemsToBooking`:
+  // the `booking:update` grant and `canManageBookingItems`); remove = select to
+  // remove (`canRemoveItemsFromBooking`: the grant and `canRemoveBookingItems`);
+  // fulfilCta = RESERVED and add.
+  snapshot["B8:D-20/D-21:companion-booking-items"] = perRoleSet((roles) => {
+    const access = accessFor(roles);
+    const mayUpdate = can(roles, E.booking, A.update);
+    return perCase(BOOKING_STATUSES, (status) => {
+      const add =
+        mayUpdate && canManageBookingItems({ access, bookingStatus: status });
+      return {
+        add,
+        remove:
+          mayUpdate && canRemoveBookingItems({ access, bookingStatus: status }),
+        fulfilCta: status === "RESERVED" && add,
+      };
+    });
+  });
+
+  // B8:D-15: companion "writes only own bookings" (bookings/[id].tsx
+  // `isRestrictedToOwnBookings = !access.bookings.writeAll`).
+  snapshot["B8:D-15:companion-own-writes"] = perRoleSet(
+    (roles) => !accessFor(roles).bookings.writeAll
+  );
+
+  // B8:D-29: companion custody "take for yourself only"
+  // (`access.custody.assign === "self"`; app/(tabs)/scanner.tsx,
+  // app/(tabs)/assets/[id].tsx).
+  snapshot["B8:D-29:companion-self-custody"] = perRoleSet(
+    (roles) => accessFor(roles).custody.assign === "self"
+  );
+
+  // B8:D-42: companion "All audits" toggle (app/(tabs)/audits/index.tsx,
+  // `access.audits.seeAll`).
+  snapshot["B8:D-42:companion-audit-scope"] = perRoleSet(
+    (roles) => accessFor(roles).audits.seeAll
+  );
+
+  // ===================== Custody and asset list =====================
+
+  // D-28:client: the CLIENT's custody visibility (custody filters,
+  // availability columns, custody chips), every role set x toggles. Reads
+  // `userHasCustodyViewPermission`
+  // (custody-and-bookings-permissions.validator.client.ts): the effective
+  // role's `access.custody.seeAll`, and nothing for a membership with no known
+  // role.
+  snapshot["D-28:client"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      Object.fromEntries(
+        TOGGLE_COMBOS.map((t) => [
+          toggleKey(t),
+          userHasCustodyViewPermission({
+            roles: roles as OrganizationRoles[],
+            organization: t,
+          }),
+        ])
+      ),
+    ])
+  );
+
+  // D-29:assign: the WEB custody-assignment scope, every role set. Services,
+  // routes and the assignment picker all pass the caller's access to
+  // `resolveCustodianPickerScope` (modules/team-member/service.server.ts).
+  snapshot["D-29:assign"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      resolveCustodianPickerScope({
+        purpose: "custody-assignment",
+        access: accessFor(roles),
+        userId: "caller",
+      }).mode,
+    ])
+  );
+
+  // D-31: the web asset index lists only bookable assets. Both index loaders
+  // (modules/asset/data.server.ts, simple and advanced) read the caller's
+  // `access.policy.assets.listScope`.
+  snapshot["D-31"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      accessFor(roles).policy.assets.listScope,
+    ])
+  );
+
+  // D-32: the advanced asset index is available. The index loader refuses
+  // ADVANCED mode when `access.policy.ui.advancedAssetIndex` is off
+  // (routes/_layout+/assets._index.tsx).
+  snapshot["D-32"] = Object.fromEntries(
+    ROLE_SETS.map((roles) => [
+      key(roles),
+      accessFor(roles).policy.ui.advancedAssetIndex,
+    ])
+  );
+
+  return snapshot;
+}

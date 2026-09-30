@@ -73,6 +73,7 @@ import {
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
@@ -226,9 +227,10 @@ function ScannerContent() {
     [currentOrg?.roles]
   );
 
-  // Self-service users may only assign custody to themselves (mirrors the
+  const access = useRoleAccess();
+  // Custody this member may only take for themselves: no picker (mirrors the
   // web scanner, which pre-selects self and disables the custodian picker).
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
 
   // Native claim / link-existing is gated on qr:update — effectively
   // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
@@ -1730,8 +1732,8 @@ function ScannerContent() {
     if (scannedItems.length === 0 || blockers.length > 0) return;
 
     if (action === "assign_custody") {
-      if (isSelfService) {
-        // Self-service: no picker — resolve own team-member record and assign.
+      if (takesCustodyForSelfOnly) {
+        // Self-only custody: no picker; resolve own team-member record and assign.
         void assignCustodyToSelf();
       } else {
         setShowCustodyPicker(true);
@@ -1752,9 +1754,9 @@ function ScannerContent() {
   };
 
   /**
-   * Self-service custody assignment: the mobile team-members endpoint returns
-   * only the caller's own record for SELF_SERVICE roles, so resolve it and go
-   * straight to the confirm dialog — no picker.
+   * Self-only custody assignment: the mobile team-members endpoint returns
+   * only the caller's own record when their custody scope is self, so resolve
+   * it and go straight to the confirm dialog, with no picker.
    */
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
@@ -1780,14 +1782,14 @@ function ScannerContent() {
 
     const confirmLabel = batchLabel();
     Alert.alert(
-      isSelfService ? "Take Custody" : "Assign Custody",
-      isSelfService
+      takesCustodyForSelfOnly ? "Take Custody" : "Assign Custody",
+      takesCustodyForSelfOnly
         ? `Take custody of ${confirmLabel}?`
         : `Assign ${confirmLabel} to ${displayName}?`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: isSelfService ? "Take" : "Assign",
+          text: takesCustodyForSelfOnly ? "Take" : "Assign",
           onPress: async () => {
             setIsSubmitting(true);
             // Fan out per entity type — assets and kits have separate bulk
@@ -1826,7 +1828,7 @@ function ScannerContent() {
                   : "";
               Alert.alert(
                 "Done",
-                isSelfService
+                takesCustodyForSelfOnly
                   ? `You have custody of ${confirmLabel}.${skippedNote}`
                   : `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
               );
@@ -2556,7 +2558,9 @@ function ScannerContent() {
   const submitLabelMap: Record<ScannerAction, string> = {
     view: "",
     // Self-service users can only take custody themselves — no picker step.
-    assign_custody: isSelfService ? "Take Custody" : "Choose Custodian",
+    assign_custody: takesCustodyForSelfOnly
+      ? "Take Custody"
+      : "Choose Custodian",
     release_custody: "Release All",
     update_location: "Choose Location",
   };

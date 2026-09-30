@@ -2,7 +2,6 @@ import {
   AssetStatus,
   BookingStatus,
   TagUseFor,
-  OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
 import type {
@@ -86,13 +85,11 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  assertCanDeleteBooking,
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import {
-  calculateTotalValueOfAssets,
-  canRoleRemoveBookingAssets,
-} from "~/utils/bookings";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -121,6 +118,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import {
+  canRemoveBookingItems,
+  isExplicitScanRequired,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
 
@@ -144,19 +145,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { perPage } = cookie;
 
   try {
-    const {
-      organizationId,
-      isSelfServiceOrBase,
-      currentOrganization,
-      userOrganizations,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, userOrganizations, access } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     // Get the booking with basic asset information
     const [booking, tags, notifyData] = await Promise.all([
@@ -175,12 +170,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
-          // Only include notification recipients for admin/owner users.
-          // Self-service/base users don't need this data (they can't see or
-          // manage notification settings).
-          ...(isSelfServiceOrBase
-            ? {}
-            : {
+          // Recipients are loaded only for members who may view and manage
+          // them (notifications.manageBookingRecipients).
+          ...(access.policy.notifications.manageBookingRecipients
+            ? {
                 notificationRecipients: {
                   select: {
                     id: true,
@@ -194,7 +187,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                     },
                   },
                 },
-              }),
+              }
+            : {}),
         },
       }),
       db.tag.findMany({
@@ -207,13 +201,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
-      // Only fetch notification team members for admin/owner users
-      isSelfServiceOrBase
-        ? Promise.resolve({
+      // The recipient picker's roster, only for members who manage recipients
+      access.policy.notifications.manageBookingRecipients
+        ? getTeamMembersForNotify({ organizationId })
+        : Promise.resolve({
             teamMembersForNotify: [],
             totalTeamMembersForNotify: 0,
-          })
-        : getTeamMembersForNotify({ organizationId }),
+          }),
     ]);
 
     // Exclude custodian from the notification recipients picker since
@@ -254,7 +248,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     if (
       !canSeeBooking({
-        canSeeAllBookings,
+        access,
         booking,
         userId: authSession.userId,
       })
@@ -419,11 +413,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        // A sidebar FILTER, so the custody read-visibility rule governs — the
-        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
-        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
-        // the search endpoint.
-        filterByUserId: !canSeeAllCustody,
+        // A sidebar FILTER, so custody visibility governs (including the
+        // workspace toggles): only the caller's own team member unless custody
+        // is visible to them, matching the search endpoint.
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
 
@@ -431,7 +424,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getTeamMemberForForm({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        access,
         custodianUserId: booking.custodianUserId || undefined,
         custodianTeamMemberId: booking.custodianTeamMemberId || undefined,
         bookingStatus: booking.status,
@@ -1411,16 +1404,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateNotificationRecipients: PermissionAction.update,
     };
 
-    const { organizationId, role, isSelfServiceOrBase } =
+    const { organizationId, access, userOrganizations } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: intent2ActionMap[intent],
       });
-
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
 
     const user = await getUserByID(userId, {
       select: {
@@ -1441,39 +1431,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      if (isSelfServiceOrBase) {
-        /**
-         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
-         * They have delete permissions but shouldnt be able to delete other people's bookings
-         * Practically they should not be able to even view/access another booking but this is just an extra security measure
-         */
+      // A caller who writes every booking and may delete any status needs no
+      // lookup. Everyone else is held to their own bookings, and roles whose
+      // policy limits delete to drafts are held to drafts.
+      if (
+        !access.bookings.writeAll ||
+        access.policy.bookings.deleteOnlyDrafts
+      ) {
         const b = await getBooking({ id, organizationId, request });
-        validateBookingOwnership({
-          booking: b,
-          userId,
-          role,
-          action: "delete",
-        });
-
-        // BASE users can only delete DRAFT bookings
-        if (
-          role === OrganizationRoles.BASE &&
-          b.status !== BookingStatus.DRAFT
-        ) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-            status: 403,
-            label: "Booking",
-          });
-        }
+        assertCanDeleteBooking({ access, booking: b, userId });
       }
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId
+        userId,
+        // Re-checked at write time: the booking may have left DRAFT since.
+        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });
@@ -1537,9 +1511,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * rules is cosmetic, and a crafted POST reaches this action directly.
      *
      * A closed booking (COMPLETE / ARCHIVED / CANCELLED) is immutable for
-     * everyone. Below that, a restricted role is bounded by status — removing
-     * from a live booking reconciles the asset back to available, which is a
-     * check-in, and BASE holds no `booking:checkin`.
+     * everyone. Below that, a caller is bounded by the statuses its policy
+     * lists (`bookings.removableItemStatuses`): removing from a live booking
+     * reconciles the asset back to available, which is a check-in, and BASE
+     * holds no `booking:checkin`.
      *
      * WHO owns the booking is still settled below by `validateBookingOwnership`.
      */
@@ -1550,10 +1525,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
     if (
       removeIntents.includes(intent) &&
-      // `[role]` is safe here, unlike on the mobile endpoint: `requirePermission`
-      // resolves through `resolveEffectiveRole`, which returns the MOST
-      // PRIVILEGED role on the membership rather than `roles[0]`.
-      !canRoleRemoveBookingAssets({ roles: [role], booking: basicBookingInfo })
+      !canRemoveBookingItems({ access, bookingStatus: basicBookingInfo.status })
     ) {
       throw new ShelfError({
         cause: null,
@@ -1563,7 +1535,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
           id,
           intent,
-          role,
+          role: access.role,
           status: basicBookingInfo.status,
         },
         label: "Booking",
@@ -1584,19 +1556,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * ownership references -- so this is the only thing standing between a
      * restricted role and someone else's booking.
      *
-     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
-     * before this point, with its own check, because it must not fetch the
-     * booking first. The compiler confirms it: `intent` has already narrowed to
-     * exclude it.
+     * `delete` is not reachable here: it returns before this point, with its
+     * own check, because it must not fetch the booking first. The compiler
+     * confirms it: `intent` has already narrowed to exclude it.
+     *
+     * No-op when `access.bookings.writeAll`.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: basicBookingInfo,
-        userId,
-        role,
-        action: intent,
-      });
-    }
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: intent,
+    });
 
     switch (intent) {
       case "save": {
@@ -1615,10 +1586,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             prefs,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1674,10 +1645,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1699,7 +1670,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianUserId: parsedData.custodian?.userId,
           custodianTeamMemberId: parsedData.custodian?.id,
           hints: getClientHint(request),
-          isSelfServiceOrBase,
+          alertsOrgOnReservation:
+            access.policy.notifications.reservationAlertsAdmins,
           tags,
           userId,
         });
@@ -1717,8 +1689,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "checkOut": {
         // The one-click check-out is refused when the workspace requires the
-        // explicit flow (scan or select) for this role.
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        // explicit flow (scan or select) for this caller.
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         const booking = await checkoutBooking({
           id,
@@ -1761,7 +1733,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // progressive partial-checkout path, which writes notes/events.
         // Being one click, it is refused under the explicit check-out
         // requirement, the same as "Check out".
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         return await checkoutRemainingAssets({
           formData,
@@ -1773,24 +1745,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn": {
-        // Enforce explicit check-in requirement based on role and settings
+        // Refuse the one-click check-in when the workspace requires the
+        // explicit flow for this caller.
         if (
-          role === OrganizationRoles.ADMIN &&
-          bookingSettings.requireExplicitCheckinForAdmin
-        ) {
-          throw new ShelfError({
-            cause: null,
-            title: "Not allowed to quick check-in",
-            message:
-              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
-            status: 403,
-            label: "Booking",
-            shouldBeCaptured: false,
-          });
-        }
-        if (
-          role === OrganizationRoles.SELF_SERVICE &&
-          bookingSettings.requireExplicitCheckinForSelfService
+          isExplicitScanRequired({
+            access,
+            settings: bookingSettings,
+            direction: "checkin",
+          })
         ) {
           throw new ShelfError({
             cause: null,
@@ -1889,7 +1851,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assetId: z.string(),
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1947,7 +1909,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           formData,
           CancelBookingSchema,
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
         const cancelledBooking = await cancelBooking({
@@ -1992,7 +1954,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
-          additionalData: { userId, id, organizationId, role },
+          additionalData: { userId, id, organizationId, role: access.role },
         });
 
         const kit = await db.kit.findUniqueOrThrow({
@@ -2073,7 +2035,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             prefs,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
             additionalData: { userId, organizationId },
@@ -2088,7 +2050,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate: endDate,
           userId,
-          role,
+          access,
+          roles:
+            userOrganizations.find((o) => o.organization.id === organizationId)
+              ?.roles ?? [],
         });
 
         sendNotification({
@@ -2101,7 +2066,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "updateNotificationRecipients": {
-        if (isSelfServiceOrBase) {
+        if (!access.policy.notifications.manageBookingRecipients) {
           throw new ShelfError({
             cause: null,
             message:

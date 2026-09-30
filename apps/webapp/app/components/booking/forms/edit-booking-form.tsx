@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
@@ -10,14 +9,16 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -28,6 +29,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { Form } from "../../custom-form";
 import { CustodianField } from "./fields/custodian";
@@ -162,13 +164,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const {
-    roles,
-    isBaseOrSelfService,
-    isBase,
-    isAdministratorOrOwner,
-    effectiveRole,
-  } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
+  const reservationIsRequest = useReservationIsRequest();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -180,7 +178,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       status,
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -255,18 +253,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   }
 
   /**
-   * Check whether the user can see actions
-   * 1. Admin/Owner always can see all
-   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
-   * 3. BASE can see actions if they are the custodian of the booking
-   * This is also used to disabled the name & description fields
-   *
+   * Whether the user can see the booking actions:
+   * - Members who write every booking always see them.
+   * - Everyone else only on a booking they hold.
+   * This also decides whether the name and description fields are disabled.
    */
   const canSeeActions =
-    !isBaseOrSelfService ||
-    (isBaseOrSelfService &&
-      (defaultTeamMember?.userId === userId ||
-        defaultTeamMember?.id === userId));
+    roleAccess.bookings.writeAll ||
+    defaultTeamMember?.userId === userId ||
+    defaultTeamMember?.id === userId;
 
   return (
     <Form
@@ -280,7 +275,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
           <div className="flex flex-1 items-center justify-between gap-2">
-            <When truthy={isBase}>
+            <When truthy={reservationIsRequest}>
               <BookingProcessSidebar />
             </When>
 
@@ -354,7 +349,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                {reservationIsRequest ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 
@@ -442,9 +437,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
-                    requireExplicitCheckout={isExplicitCheckoutRequired({
-                      role: effectiveRole,
-                      bookingSettings,
+                    requireExplicitCheckout={isExplicitScanRequired({
+                      access: roleAccess,
+                      settings: bookingSettings,
+                      direction: "checkout",
                     })}
                   />
                 );
@@ -467,12 +463,11 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   from: startDateAsDate,
                 }}
                 disabled={disabled || isLoadingWorkingHours}
-                requireExplicitCheckin={
-                  (effectiveRole === OrganizationRoles.ADMIN &&
-                    bookingSettings.requireExplicitCheckinForAdmin) ||
-                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-                    bookingSettings.requireExplicitCheckinForSelfService)
-                }
+                requireExplicitCheckin={isExplicitScanRequired({
+                  access: roleAccess,
+                  settings: bookingSettings,
+                  direction: "checkin",
+                })}
               />
             </When>
           </div>
@@ -538,7 +533,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   disabled={
                     disabled ||
                     isLoadingWorkingHours ||
-                    isBaseOrSelfService ||
+                    bookingCustodianIsSelf(roleAccess) ||
                     inputFieldIsDisabled
                   }
                   userCanSeeCustodian={userCanSeeCustodian}

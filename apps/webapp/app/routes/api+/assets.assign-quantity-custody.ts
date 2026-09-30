@@ -11,7 +11,6 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { checkOutQuantity } from "~/modules/asset/service.server";
@@ -55,7 +54,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -85,11 +84,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only assign custody to themselves */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
+    /** A caller whose custody scope is `self` may assign only to themselves */
+    const assignsSelfOnly = access.custody.assign === "self";
+    if (assignsSelfOnly && teamMember.userId !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -107,7 +104,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       quantity,
       userId,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       note,
     });
 
@@ -125,8 +122,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       const actor = wrapUserLinkForNote(user);
       const custodianDisplay = wrapCustodianForNote({ teamMember });
 
-      const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-      const baseLine = isSelfService
+      const baseLine = assignsSelfOnly
         ? `${actor} took custody of **${quantity}** unit(s).`
         : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay}.`;
       const noteContent = appendUserTextToNote(baseLine, note);

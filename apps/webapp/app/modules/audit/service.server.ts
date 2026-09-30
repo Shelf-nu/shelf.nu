@@ -2529,7 +2529,8 @@ export async function completeAuditSession({
 export async function getAuditsForOrganization(params: {
   organizationId: AuditSession["organizationId"];
   userId?: string;
-  isSelfServiceOrBase?: boolean;
+  /** Restrict to audits assigned to `userId` (the caller's `audits.seeAll` is false). */
+  assignedOnly?: boolean;
   /** Page number. Starts at 1 */
   page?: number;
   /** Items to be loaded per page */
@@ -2562,7 +2563,7 @@ export async function getAuditsForOrganization(params: {
   const {
     organizationId,
     userId,
-    isSelfServiceOrBase,
+    assignedOnly,
     page = 1,
     perPage = 8,
     search,
@@ -2573,16 +2574,14 @@ export async function getAuditsForOrganization(params: {
     prioritizeDeadlines = false,
   } = params;
 
-  // why: BASE/SELF_SERVICE roles MUST be scoped to their own assignments.
-  // If a caller signals "scope to role" but forgets to pass userId, the
-  // predicate would silently collapse to null and leak the whole org list.
-  // Fail loud — and OUTSIDE the try/catch below so the precise error reaches
-  // the caller (the catch wraps everything in a generic "fetch failed").
-  if (isSelfServiceOrBase && !userId) {
+  // why: a caller limited to assigned audits MUST pass `userId`: without it
+  // the predicate would collapse to null and list the whole workspace. Fails
+  // loud, outside the try/catch, so the precise error reaches the caller.
+  if (assignedOnly && !userId) {
     throw new ShelfError({
       cause: null,
       message: "Missing user context for assignment-scoped audit query.",
-      additionalData: { organizationId, isSelfServiceOrBase },
+      additionalData: { organizationId, assignedOnly },
       label,
       status: 400,
     });
@@ -2594,15 +2593,11 @@ export async function getAuditsForOrganization(params: {
 
     const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-    // Filter by assignee for BASE/SELF_SERVICE users, OR when the caller
-    // explicitly asks for "assigned to me". Both paths use the same
-    // `assignments.some.userId` predicate so an admin/owner who opts into
-    // the filter via `assignedToUserId` gets the same scoping the role
-    // check would apply automatically for low-permission users. The
-    // BASE/SELF_SERVICE branch can rely on `userId` being non-null
-    // thanks to the guard above.
+    // Filter by assignee when the caller is limited to assigned audits, or
+    // asks for "assigned to me". Both use the same predicate. The first
+    // branch relies on `userId` being non-null thanks to the guard above.
     const assigneeFilterUserId =
-      (isSelfServiceOrBase ? userId : null) ?? assignedToUserId ?? null;
+      (assignedOnly ? userId : null) ?? assignedToUserId ?? null;
     if (assigneeFilterUserId) {
       where.assignments = {
         some: {
@@ -2665,31 +2660,29 @@ export async function getAuditsForOrganization(params: {
 /**
  * Validates that the user may act on the audit session.
  *
- * ADMIN/OWNER users (isSelfServiceOrBase = false) always pass: they manage
- * every audit in their workspace, mirroring both
- * requireAuditAssigneeForBaseSelfService and the ADMIN/OWNER allow-all
- * short-circuit in @shelf/permissions. BASE/SELF_SERVICE users must be
- * assignees of the audit.
+ * Callers who see every audit (`access.audits.seeAll`) always pass; everyone
+ * else must be an assignee.
  *
- * @throws {ShelfError} 403 error if a BASE/SELF_SERVICE user is not an assignee
+ * @throws {ShelfError} 404 if the audit is not in the workspace, 403 if a
+ *   caller limited to assigned audits is not an assignee
  */
 export async function requireAuditAssignee({
   auditSessionId,
   organizationId,
   userId,
-  isSelfServiceOrBase = true,
+  assignedOnly = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
-  isSelfServiceOrBase?: boolean;
+  /** When true, the caller must be an assignee; when false (the caller's `audits.seeAll`), always allowed. */
+  assignedOnly?: boolean;
 }): Promise<void> {
-  // ADMIN/OWNER act on any audit in their workspace. Returning before the
-  // session fetch is safe: every caller's downstream service re-verifies the
-  // session against organizationId (recordAuditScan, completeAuditSession,
-  // requireAuditAssetInSession all 404 on cross-org ids).
-  if (!isSelfServiceOrBase) {
+  // Callers who see every audit act on any audit in their workspace.
+  // Returning before the fetch is safe: every downstream service re-verifies
+  // the session against organizationId (recordAuditScan,
+  // completeAuditSession, requireAuditAssetInSession all 404 on cross-org ids).
+  if (!assignedOnly) {
     return;
   }
 
@@ -2747,23 +2740,29 @@ export async function requireAuditAssignee({
 }
 
 /**
- * Validates that a BASE/SELF_SERVICE user is assigned to an audit.
- * For ADMIN/OWNER users, this check is skipped (they can access all audits).
+ * Refuses an audit the caller is not assigned to when the caller is limited
+ * to assigned audits (`!access.audits.seeAll`). Callers who see every audit
+ * pass unchecked.
  *
- * @throws {ShelfError} If BASE/SELF_SERVICE user is not assigned to the audit
+ * @param args.audit - The audit, with its assignments already loaded
+ * @param args.userId - The caller
+ * @param args.assignedOnly - The caller sees only audits assigned to them
+ * @param args.auditId - The audit id, for error context
+ * @throws {ShelfError} 403 if the caller is limited to assigned audits and is
+ *   not an assignee
  */
-export function requireAuditAssigneeForBaseSelfService({
+export function requireAuditAssigneeForScopedViewer({
   audit,
   userId,
-  isSelfServiceOrBase,
+  assignedOnly,
   auditId,
 }: {
   audit: { assignments: { userId: string }[] };
   userId: string;
-  isSelfServiceOrBase: boolean;
+  assignedOnly: boolean;
   auditId: string;
 }) {
-  if (isSelfServiceOrBase) {
+  if (assignedOnly) {
     const isAssignee = audit.assignments.some(
       (assignment) => assignment.userId === userId
     );
@@ -2785,31 +2784,31 @@ export function requireAuditAssigneeForBaseSelfService({
 /**
  * Cancels an audit session.
  *
- * The creator of an audit can always cancel it. Workspace admins and owners
- * can also cancel any audit in their org (regardless of who created it) so
- * that team-managed audits don't get stuck when the creator is unavailable
- * or no longer responsible — this matches archive/delete permissions.
+ * The creator of an audit can always cancel it. A caller who manages audits
+ * created by others can also cancel any audit in the workspace, so
+ * team-managed audits don't get stuck when the creator is unavailable or no
+ * longer responsible. This matches archive/delete permissions.
  *
  * Cannot cancel an audit that is already COMPLETED, CANCELLED, or ARCHIVED.
  *
- * @param isAdminOrOwner - Whether the acting user is admin/owner in the
- *   audit's organization. The route layer derives this from the workspace
- *   role and passes it in; the service trusts it.
+ * @param canManageOthers - The caller may manage audits created by others
+ *   (`access.policy.audits.manageOthers`). The route layer derives this from
+ *   the membership and passes it in; the service trusts it.
  * @throws {ShelfError} 404 if the audit isn't found, 403 if the user is
- *   neither the creator nor an admin/owner, 400 if the audit is in a
- *   terminal status that can't be cancelled.
+ *   neither the creator nor allowed to manage others' audits, 400 if the
+ *   audit is in a terminal status that can't be cancelled.
  */
 export async function cancelAuditSession({
   auditSessionId,
   organizationId,
   userId,
-  isAdminOrOwner,
+  canManageOthers,
   hints,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  isAdminOrOwner: boolean;
+  canManageOthers: boolean;
   hints: ClientHint;
 }) {
   try {
@@ -2876,10 +2875,10 @@ export async function cancelAuditSession({
       organizationId,
     });
 
-    // Allow the creator to cancel their own audit. Also allow workspace
-    // admins/owners to cancel any audit in the org — needed when team
-    // members create audits the supervisor needs to clean up later.
-    if (auditSession.createdById !== userId && !isAdminOrOwner) {
+    // The creator may cancel their own audit. A caller who manages others'
+    // audits may cancel any audit in the workspace, so a supervisor can clean
+    // up audits team members created.
+    if (auditSession.createdById !== userId && !canManageOthers) {
       throw new ShelfError({
         cause: null,
         message:
@@ -3023,13 +3022,11 @@ export async function cancelAuditSession({
     }
 
     // Use email helper to send cancellation emails with HTML template.
-    // The fallback is role-aware: when the acting user has no resolvable
-    // display name (e.g. a freshly-created account), pick a label that
-    // matches who actually cancelled — "a workspace admin" for the
-    // admin/owner branch, "the audit creator" otherwise. Avoids the
-    // earlier hard-coded "an admin" mis-attributing creator-cancels.
+    // The fallback names who cancelled when the acting user has no
+    // resolvable display name: "a workspace admin" when the caller manages
+    // others' audits, "the audit creator" otherwise.
     const resolvedCancellerName = resolveUserDisplayName(actingUser);
-    const fallbackCancellerName = isAdminOrOwner
+    const fallbackCancellerName = canManageOthers
       ? "a workspace admin"
       : "the audit creator";
     sendAuditCancelledEmails({
@@ -3644,25 +3641,26 @@ export async function archiveAuditSession({
  * @param organizationId - The organization ID for scoping
  * @param currentSearchParams - Serialized URL search params from the index page
  * @param userId - The current user (used for assignment-scoped filters)
- * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
- *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
+ * @param assignedOnly - When true (the caller's `audits.seeAll` is false),
+ *   restrict to audits assigned to userId (mirrors the loader's behavior in
+ *   {@link getAuditsForOrganization})
  */
 export function getAuditWhereInput({
   organizationId,
   currentSearchParams,
   userId,
-  isSelfServiceOrBase,
+  assignedOnly,
 }: {
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
   userId?: string;
-  isSelfServiceOrBase?: boolean;
+  assignedOnly?: boolean;
 }): Prisma.AuditSessionWhereInput {
   const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-  // Filter by assignee for BASE/SELF_SERVICE users so select-all
-  // never pulls in audits outside the user's visible scope
-  if (isSelfServiceOrBase && userId) {
+  // Callers limited to assigned audits: select-all must never reach an
+  // audit outside their visible scope
+  if (assignedOnly && userId) {
     where.assignments = {
       some: {
         userId,
@@ -3719,8 +3717,9 @@ export function getAuditWhereInput({
  * @param params.organizationId - Scoping organization
  * @param params.userId - The user performing the archive (for activity notes)
  * @param params.currentSearchParams - Serialized URL params for select-all filtering
- * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
- *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @param params.assignedOnly - When true (the caller's `audits.seeAll` is
+ *   false), restrict select-all resolution to audits assigned to userId
+ *   (matches the index loader's assignment scope)
  * @throws {ShelfError} If the selection is empty or any selected audit is not
  *   in a terminal state
  */
@@ -3729,13 +3728,13 @@ export async function bulkArchiveAudits({
   organizationId,
   userId,
   currentSearchParams,
-  isSelfServiceOrBase,
+  assignedOnly,
 }: {
   auditIds: AuditSession["id"][];
   organizationId: Organization["id"];
   userId: string;
   currentSearchParams?: string | null;
-  isSelfServiceOrBase?: boolean;
+  assignedOnly?: boolean;
 }) {
   try {
     /** When all items are selected, resolve from filters instead of IDs */
@@ -3746,7 +3745,7 @@ export async function bulkArchiveAudits({
           currentSearchParams,
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          assignedOnly,
         })
       : { id: { in: auditIds }, organizationId };
 
@@ -4072,10 +4071,10 @@ export async function deleteAuditSession({
  * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
  * so non-archived audits in the filtered view can never be pulled in.
  *
- * Note: `isSelfServiceOrBase` is intentionally not a parameter here.
- * `PermissionAction.delete` on the audit entity is ADMIN/OWNER-only
- * (see `permission.data.ts`), so by the time we reach this function the
- * caller is already guaranteed not to be self-service/base. Wiring the
+ * Note: `assignedOnly` is intentionally not a parameter here.
+ * `PermissionAction.delete` on the audit entity is granted only to roles
+ * that see every audit (see `permission.data.ts`), so by the time we reach
+ * this function the caller is not limited to assigned audits. Wiring the
  * flag through would be dead plumbing that implies a policy choice
  * (delete-your-assigned-archives) no one has actually made.
  *

@@ -20,6 +20,16 @@ export type Organization = {
    * every mobile audit endpoint returns 403.
    */
   auditsEnabled: boolean;
+  /**
+   * The workspace's visibility toggles for restricted roles, from
+   * `/api/mobile/me`. Each widens what one role may SEE (bookings or custody),
+   * never what it may change. Absent on servers older than this field; the app
+   * then reads them as `false`, which only ever under-offers.
+   */
+  selfServiceCanSeeBookings?: boolean;
+  baseUserCanSeeBookings?: boolean;
+  selfServiceCanSeeCustody?: boolean;
+  baseUserCanSeeCustody?: boolean;
 };
 
 export type MeResponse = {
@@ -921,6 +931,8 @@ export type BookingDetail = {
   custodianTeamMember: {
     id: string;
     name: string;
+    /** The team member's user, once they have accepted an invite. */
+    userId?: string | null;
   } | null;
   tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];

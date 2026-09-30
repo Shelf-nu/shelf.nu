@@ -18,12 +18,13 @@ import type { ComponentProps, ReactNode } from "react";
 import { BookingStatus, KitStatus, OrganizationRoles } from "@prisma/client";
 import { cleanup, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import KitRow from "./kit-row";
 
 const mockUseLoaderData = vi.fn();
-const mockUseUserRoleHelper = vi.fn();
+const mockUseOrganizationRoles = vi.fn();
 
 // why: the real hook reads the booking off route loader data, which needs a
 // router context these component tests don't mount.
@@ -37,8 +38,17 @@ vi.mock("react-router", async () => {
 
 // why: each case picks the roles under test; the checkbox is gated on what
 // those roles may do with a selection.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockUseOrganizationRoles(),
+}));
+
+/** The roles the organization-roles mock returns; the access mock reads the same. */
+let mockRoles: OrganizationRoles[] = [];
+
+// why: the row and the bulk-actions hook read the member's access from the
+// layout loader; drive it from the same roles the organization-roles mock returns
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor(mockRoles),
 }));
 
 // why: useCurrentOrganization reads route loader data under the hood; a minimal
@@ -67,63 +77,62 @@ vi.mock("../shared/button", () => ({
 // why: image rendering resolves signed URLs and is irrelevant to gating.
 vi.mock("../kits/kit-image", () => ({ default: () => <div /> }));
 
-// why: the row's own actions menu has separate gating and its own coverage.
-vi.mock("./kit-row-actions-dropdown", () => ({ default: () => <td /> }));
+// why: the row's Remove menu pulls in dialogs and a fetcher; a marker is enough
+// to observe whether the row offers it. A span, not a cell, so the
+// column-alignment test counts only the row's own cells.
+vi.mock("./kit-row-actions-dropdown", () => ({
+  default: () => <span data-testid="kit-row-actions" />,
+}));
 
 // why: expanded rows render the asset list, which has its own test file.
 vi.mock("./list-asset-content", () => ({ default: () => <tr /> }));
 
+// `status` is a KitStatus and the row reads only these fields; the cast keeps
+// the fixture to what the component actually touches.
+const kit = {
+  id: "kit-1",
+  name: "Camera Kit",
+  image: null,
+  imageExpiration: null,
+  status: KitStatus.AVAILABLE,
+  category: null,
+  location: null,
+  qrCodes: [],
+  barcodes: [],
+} as ComponentProps<typeof KitRow>["kit"];
+
+const assets = [
+  { id: "asset-1", title: "Camera", status: "AVAILABLE", bookings: [] },
+] as unknown as AssetWithBooking[];
+
+/** Renders one collapsed kit row on a booking in `status`, as `roles`. */
+const renderRow = (status: BookingStatus, roles: OrganizationRoles[]) => {
+  mockRoles = roles;
+  mockUseOrganizationRoles.mockReturnValue(roles);
+  mockUseLoaderData.mockReturnValue({
+    booking: { id: "booking-1", status, assets: [], custodianUser: null },
+  });
+
+  render(
+    <table>
+      <tbody>
+        <KitRow
+          kit={kit}
+          isExpanded={false}
+          bookingStatus={status}
+          bookingId="booking-1"
+          assets={assets}
+          partialCheckinDetails={{}}
+          shouldShowCheckinColumns={false}
+          partialCheckoutDetails={{}}
+          shouldShowCheckoutColumns={false}
+        />
+      </tbody>
+    </table>
+  );
+};
+
 describe("KitRow bulk-selection checkbox", () => {
-  // `status` is a KitStatus and the row reads only these fields; the cast keeps
-  // the fixture to what the component actually touches.
-  const kit = {
-    id: "kit-1",
-    name: "Camera Kit",
-    image: null,
-    imageExpiration: null,
-    status: KitStatus.AVAILABLE,
-    category: null,
-    location: null,
-    qrCodes: [],
-    barcodes: [],
-  } as ComponentProps<typeof KitRow>["kit"];
-
-  const assets = [
-    { id: "asset-1", title: "Camera", status: "AVAILABLE", bookings: [] },
-  ] as unknown as AssetWithBooking[];
-
-  const renderRow = (status: BookingStatus, roles: OrganizationRoles[]) => {
-    mockUseUserRoleHelper.mockReturnValue({
-      isBase: roles.includes(OrganizationRoles.BASE),
-      isSelfService: roles.includes(OrganizationRoles.SELF_SERVICE),
-      isBaseOrSelfService:
-        roles.includes(OrganizationRoles.BASE) ||
-        roles.includes(OrganizationRoles.SELF_SERVICE),
-      roles,
-    });
-    mockUseLoaderData.mockReturnValue({
-      booking: { id: "booking-1", status, assets: [], custodianUser: null },
-    });
-
-    render(
-      <table>
-        <tbody>
-          <KitRow
-            kit={kit}
-            isExpanded={false}
-            bookingStatus={status}
-            bookingId="booking-1"
-            assets={assets}
-            partialCheckinDetails={{}}
-            shouldShowCheckinColumns={false}
-            partialCheckoutDetails={{}}
-            shouldShowCheckoutColumns={false}
-          />
-        </tbody>
-      </table>
-    );
-  };
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -172,6 +181,31 @@ describe("KitRow bulk-selection checkbox", () => {
 });
 
 /**
+ * The kit row's Remove menu follows the server's remove gate: the
+ * booking:update grant and the statuses the caller's policy lists.
+ */
+describe("KitRow Remove menu", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    // [roles, status, shown]
+    [[OrganizationRoles.BASE], BookingStatus.DRAFT, true],
+    [[OrganizationRoles.BASE], BookingStatus.RESERVED, false],
+    [[OrganizationRoles.SELF_SERVICE], BookingStatus.RESERVED, true],
+    [[OrganizationRoles.SELF_SERVICE], BookingStatus.ONGOING, false],
+    [[OrganizationRoles.ADMIN], BookingStatus.ONGOING, true],
+    [[OrganizationRoles.ADMIN], BookingStatus.OVERDUE, true],
+    [[OrganizationRoles.ADMIN], BookingStatus.COMPLETE, false],
+  ])("%j on a %s booking -> menu shown: %s", (roles, status, shown) => {
+    renderRow(status, roles);
+
+    expect(Boolean(screen.queryByTestId("kit-row-actions"))).toBe(shown);
+  });
+});
+
+/**
  * "Already booked" signal for a kit made only of QUANTITY_TRACKED members.
  *
  * `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets — several
@@ -205,12 +239,8 @@ describe("KitRow already-booked signal (QT-only kit)", () => {
     assets: AssetWithBooking[],
     kit: ComponentProps<typeof KitRow>["kit"] = checkedOutKit
   ) => {
-    mockUseUserRoleHelper.mockReturnValue({
-      isBase: false,
-      isSelfService: false,
-      isBaseOrSelfService: false,
-      roles: [OrganizationRoles.ADMIN],
-    });
+    mockUseOrganizationRoles.mockReturnValue([OrganizationRoles.ADMIN]);
+    mockRoles = [OrganizationRoles.ADMIN];
     // RESERVED (not ONGOING/OVERDUE): the "Already booked" badge is
     // withheld while THIS booking is itself in progress, since a kit it
     // already holds needs no such warning.

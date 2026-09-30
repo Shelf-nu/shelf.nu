@@ -35,7 +35,7 @@
  * failure can never roll back a committed stock change.
  *
  * @see {@link file://./service.server.ts} - adjustQuantity that triggers this check
- * @see {@link file://../organization/service.server.ts} - getOrganizationAdminsForNotification
+ * @see {@link file://../organization/service.server.ts} - getOrganizationNotificationAudience
  * @see {@link file://../../utils/emitter/send-notification.server.ts} - notification emitter
  * @see {@link file://../../emails/low-stock-alert.tsx} - low-stock alert email template
  * @see {@link file://../../emails/low-stock-recovered.tsx} - recovered email template
@@ -48,7 +48,7 @@ import {
   lowStockRecoveredText,
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -57,15 +57,16 @@ import { Logger } from "~/utils/logger";
 type LowStockEmailVariant = "alert" | "recovered";
 
 /**
- * Sends the low-stock alert (or recovered notice) email to every OWNER and
- * ADMIN of the organization. Resilient by design:
+ * Sends the low-stock alert (or recovered notice) email to every member whose
+ * role receives inventory alerts (`notifications.inventoryAlerts`). Resilient
+ * by design:
  *   - the whole block is wrapped in try/catch so an email failure can never
  *     break the caller (which has already committed the stock change);
  *   - each per-recipient send is ALSO wrapped so one bad address can't abort
  *     the loop for the remaining recipients.
  *
  * @param params.variant - "alert" (crossed into low stock) or "recovered"
- * @param params.organizationId - Organization whose admins/owner receive the email
+ * @param params.organizationId - Organization whose inventory-alert audience receives the email
  * @param params.assetId - Asset the notice is about (used for the "View Asset" link)
  * @param params.assetTitle - Asset display title
  * @param params.available - Current available quantity (total minus in-custody)
@@ -91,16 +92,18 @@ async function sendLowStockEmails({
 }): Promise<void> {
   try {
     /**
-     * Recipients: owner + admins. `getOrganizationAdminsForNotification`
-     * returns both OWNER and ADMIN role holders (the owner included), which
-     * widens the previous owner-only alerting.
+     * Recipients: every member whose role receives inventory alerts
+     * (`notifications.inventoryAlerts`).
      */
     const [org, recipients] = await Promise.all([
       db.organization.findUnique({
         where: { id: organizationId },
         select: { name: true },
       }),
-      getOrganizationAdminsForNotification({ organizationId }),
+      getOrganizationNotificationAudience({
+        organizationId,
+        audience: "inventoryAlerts",
+      }),
     ]);
 
     const organizationName = org?.name ?? "your organization";

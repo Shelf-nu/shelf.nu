@@ -831,3 +831,81 @@ describe("fulfilAndCheckOut", () => {
     );
   });
 });
+
+/**
+ * The flow each booking status takes through `fulfilAndCheckOut`, with and
+ * without the explicit check-out requirement.
+ *
+ * Neither fulfil guard (web action, mobile endpoint) reads the booking's
+ * status, so this table is what refuses a DRAFT or a closed booking on those
+ * paths. It also decides which flow a status takes: this is the service half
+ * of the check-out/check-in contract, the counterpart to the route guards in
+ * `checkinout-service-status.test.ts`.
+ */
+describe("fulfilAndCheckOut, the flow each booking status takes", () => {
+  type Flow = "full" | "scanned-only" | "refused";
+
+  const FLOWS: Record<"rule off" | "rule on", Record<BookingStatus, Flow>> = {
+    "rule off": {
+      DRAFT: "refused",
+      RESERVED: "full",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+    "rule on": {
+      DRAFT: "refused",
+      RESERVED: "scanned-only",
+      ONGOING: "scanned-only",
+      OVERDUE: "scanned-only",
+      COMPLETE: "refused",
+      ARCHIVED: "refused",
+      CANCELLED: "refused",
+    },
+  };
+
+  const cases = (Object.keys(FLOWS) as (keyof typeof FLOWS)[]).flatMap((rule) =>
+    Object.values(BookingStatus).map(
+      (status) => [rule, status, FLOWS[rule][status]] as const
+    )
+  );
+
+  it.each(cases)("%s, %s booking -> %s", async (rule, status, expected) => {
+    primeRulePath();
+    vi.mocked(db.booking.findFirst).mockResolvedValue({ status } as never);
+    vi.mocked(fulfilModelRequestsAndCheckout).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status: BookingStatus.ONGOING,
+    } as never);
+
+    const flow = await fulfilAndCheckOut({
+      ...baseArgs,
+      requireExplicitCheckout: rule === "rule on",
+    }).then(
+      (): Flow =>
+        vi.mocked(fulfilModelRequestsAndCheckout).mock.calls.length > 0
+          ? "full"
+          : "scanned-only",
+      (cause: unknown): Flow => {
+        expect(cause).toMatchObject({
+          status: 400,
+          message: expect.stringMatching(
+            /can't be checked out in its current status/
+          ),
+        });
+        return "refused";
+      }
+    );
+
+    expect(flow).toBe(expected);
+    if (flow === "refused") {
+      expect(addScannedAssetsToBooking).not.toHaveBeenCalled();
+    }
+    if (flow === "scanned-only") {
+      expect(partialCheckoutBooking).toHaveBeenCalledTimes(1);
+    }
+  });
+});

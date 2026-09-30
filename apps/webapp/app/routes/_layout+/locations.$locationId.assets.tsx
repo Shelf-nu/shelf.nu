@@ -60,7 +60,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
@@ -104,7 +104,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations, canSeeAllCustody } =
+    const { organizationId, userOrganizations, access } =
       await requirePermission({
         request,
         userId,
@@ -150,7 +150,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
         // When the user cannot see all custody, only return their own team member
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
     ]);
@@ -283,7 +283,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function LocationAssets() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { location } = useLoaderData<typeof loader>();
   const userRoleCanManageAssets = userHasPermission({
     roles,

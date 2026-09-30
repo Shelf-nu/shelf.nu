@@ -12,6 +12,7 @@
  */
 import { action } from "~/routes/api+/mobile+/custody.assign-quantity";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -160,10 +161,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     });
 
     (getTeamMember as any).mockResolvedValue({
@@ -266,10 +266,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
 
   it("returns 403 when a SELF_SERVICE user assigns to someone else", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",
@@ -296,10 +295,9 @@ describe("POST /api/mobile/custody/assign-quantity", () => {
 
   it("allows a SELF_SERVICE user to assign to themselves", async () => {
     (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     });
     (getTeamMember as any).mockResolvedValue({
       id: "tm-1",

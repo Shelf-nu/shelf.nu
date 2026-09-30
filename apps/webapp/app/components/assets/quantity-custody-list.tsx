@@ -92,9 +92,12 @@ export interface QuantityCustodyListProps {
   consumptionType?: ConsumptionType | null;
   /** Quantity currently available for checkout */
   availableQuantity?: number;
-  /** Whether the current user is self-service */
-  isSelfService?: boolean;
-  /** The current user's ID (used for self-service filtering) */
+  /**
+   * Only the caller's own rows may be acted on: the caller's custody scope is
+   * `self`.
+   */
+  ownRowsOnly?: boolean;
+  /** The current user's ID (used by `ownRowsOnly`) */
   currentUserId?: string;
   /** Whether the user has permission to view other people's custody */
   canViewAllCustody?: boolean;
@@ -122,7 +125,7 @@ export function QuantityCustodyList({
   unitOfMeasure,
   consumptionType,
   availableQuantity,
-  isSelfService = false,
+  ownRowsOnly = false,
   currentUserId,
   canViewAllCustody = true,
   canCustody = true,
@@ -153,12 +156,12 @@ export function QuantityCustodyList({
   const noneAvailable = availableQuantity != null && availableQuantity <= 0;
 
   /**
-   * Self-service users can only release their own custody.
-   * Admins/owners can release anyone's.
+   * A caller limited to their own rows may release only their own custody;
+   * anyone else with custody rights may release any row.
    */
   const canRelease = (record: CustodyRecord) => {
     if (!canCustody) return false;
-    if (isSelfService) return record.custodian.userId === currentUserId;
+    if (ownRowsOnly) return record.custodian.userId === currentUserId;
     return true;
   };
 

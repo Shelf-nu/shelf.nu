@@ -20,7 +20,7 @@ import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
 import { UserNotes } from "~/components/user/notes";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getTeamMemberNotes } from "~/modules/team-member-note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -107,7 +107,7 @@ export const handle = {
  */
 export default function UserNotesPage() {
   const { notes } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadNotes = userHasPermission({
     roles,
     entity: PermissionEntity.teamMemberNote,

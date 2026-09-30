@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -72,14 +71,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       Math.max(1, parseInt(url.searchParams.get("perPage") || "50", 10) || 50)
     );
 
-    // Self-service / base users may only pick models against a booking they
-    // own, so an unowned booking 404s here instead of leaking its models and
-    // reservations. Deliberately the WRITE scope, not the read scope: see the
-    // module docblock.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // A caller who does not write every booking may only pick models against
+    // a booking they hold, so an unowned booking 404s here instead of leaking
+    // its models and reservations. Deliberately the WRITE scope, not the read
+    // scope: see the module docblock.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const booking = await db.booking.findFirst({
       where: {
@@ -99,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
            * is itself an OR — it joins this AND rather than sitting beside it,
            * where the two ORs would collide.
            */
-          ...(isSelfServiceOrBase
+          ...(!access.bookings.writeAll
             ? [
                 custodianScopeClause(
                   await resolveCustodianScope({

@@ -21,7 +21,6 @@ import {
   ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
-  OrganizationRoles,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -147,6 +146,7 @@ import {
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
   createSignedUrl,
   parseFileFormData,
@@ -4286,7 +4286,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeLocationQuery = false,
   filters = "",
-  isSelfService,
+  availableToBookOnly,
   canSeeAllCustody,
   userId,
 }: {
@@ -4301,11 +4301,12 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery?: boolean;
   filters?: string;
 
-  isSelfService?: boolean;
+  /** Limit the list to assets available to book (the caller's `assets.listScope` is "bookable"). */
+  availableToBookOnly?: boolean;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required so
-   * the custodian filter seed is scoped by the rule rather than by a role
-   * check — `isSelfService` is false for BASE, which left the seed unscoped.
+   * the custodian filter seed is scoped by the custody rule for every
+   * restricted role, never by a role check.
    */
   canSeeAllCustody: boolean;
   userId?: string;
@@ -4388,10 +4389,9 @@ export async function getPaginatedAndFilterableAssets({
         // unscoped id here would fetch that person's row back.
         selectedTeamMembers: scopedTeamMemberIds,
         getAll: getAllEntries.includes("teamMember"),
-        // A read FILTER, so the resolved custody rule governs — NOT the role.
-        // `isSelfService` was false for BASE, which left this seed unscoped
-        // and shipped the whole roster to a BASE user with
-        // `baseUserCanSeeCustody` off. Same shape as the /scanner seed.
+        // A read FILTER, so the resolved custody rule governs, never the role:
+        // a member who may not see others' custody gets only their own row.
+        // Same shape as the /scanner seed.
         filterByUserId: !canSeeAllCustody,
         userId,
       }),
@@ -4413,7 +4413,7 @@ export async function getPaginatedAndFilterableAssets({
         teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
-        availableToBookOnly: isSelfService,
+        availableToBookOnly,
       }),
     ]);
 
@@ -6212,7 +6212,7 @@ export async function bulkDeleteAssets({
  */
 export async function bulkCheckOutAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   custodianId,
   custodianName,
@@ -6224,13 +6224,11 @@ export async function bulkCheckOutAssets({
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route. When
-   * `SELF_SERVICE` the service rejects assignments to anyone other than the
-   * calling user — symmetric counterpart on the release side lives in the
-   * route today (see `routes/api+/assets.bulk-release-custody.ts`).
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   custodianId: TeamMember["id"];
   custodianName: TeamMember["name"];
@@ -6302,15 +6300,10 @@ export async function bulkCheckOutAssets({
     ]);
 
     /**
-     * SELF_SERVICE guard: a self-service user can only assign custody to
-     * themselves. Centralised in the service so every caller (web + mobile)
-     * is covered — previously this lived only in the web route and the mobile
-     * routes bypassed it. Both routes just pass `role` through.
+     * A caller whose scope is `self` may assign only to themselves. Enforced
+     * here so every caller, web and mobile, gets it.
      */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      custodianTeamMember?.user?.id !== userId
-    ) {
+    if (custodyAssign === "self" && custodianTeamMember?.user?.id !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -6513,7 +6506,7 @@ export async function bulkCheckOutAssets({
  */
 export async function bulkCheckInAssets({
   userId,
-  role,
+  custodyAssign,
   assetIds,
   organizationId,
   currentSearchParams,
@@ -6523,12 +6516,11 @@ export async function bulkCheckInAssets({
 }: {
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route — when
-   * `SELF_SERVICE` the service rejects release of custody assigned to anyone
-   * other than the calling user.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
@@ -6623,13 +6615,12 @@ export async function bulkCheckInAssets({
       });
     }
 
-    // Self-service users may only release custody of assets assigned to them.
-    // `Asset.custody` is a `Custody[]` post Phase 2 widening (multi-custodian
-    // for QUANTITY_TRACKED). For INDIVIDUAL there's exactly one row; for
-    // qty-tracked we'd reject if ANY row belongs to someone else — but
-    // qty-tracked rows are filtered out above anyway.
+    // A caller whose scope is `self` may release only custody assigned to
+    // them. `Asset.custody` is a `Custody[]` (several custodians for
+    // QUANTITY_TRACKED); the check rejects if ANY row belongs to someone else,
+    // though quantity-tracked assets are filtered out above.
     if (
-      role === OrganizationRoles.SELF_SERVICE &&
+      custodyAssign === "self" &&
       assets.some((asset) =>
         (asset.custody ?? []).some((c) => c.custodian?.userId !== userId)
       )
@@ -8363,14 +8354,13 @@ type CheckOutQuantityArgs = {
   /** The organization owning the asset (used for validation) */
   organizationId: string;
   /**
-   * The acting user's role in this organization.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the caller may only assign custody to themselves.
    *
-   * Required, not optional: a SELF_SERVICE caller may only assign custody to
-   * themselves, and a missing role would silently fall open. Making the
-   * compiler demand it is what stops a new call site from reaching the write
-   * without the policy being considered.
+   * Required, not optional: a missing scope would silently fall open, so the
+   * compiler makes every call site consider it.
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   /** Optional note explaining the checkout */
   note?: string;
 };
@@ -8396,7 +8386,7 @@ export async function checkOutQuantity({
   quantity,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
 }: CheckOutQuantityArgs) {
   try {
@@ -8471,10 +8461,7 @@ export async function checkOutQuantity({
         });
       }
 
-      if (
-        role === OrganizationRoles.SELF_SERVICE &&
-        custodianTeamMember.user?.id !== userId
-      ) {
+      if (custodyAssign === "self" && custodianTeamMember.user?.id !== userId) {
         throw new ShelfError({
           cause: null,
           title: "Action not allowed",
@@ -8656,16 +8643,16 @@ type ReleaseQuantityArgs = {
   /** The organization owning the asset (used for validation) */
   organizationId: string;
   /**
-   * The acting user's role in this organization.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the caller may only release custody they hold themselves.
    *
-   * Required, not optional: a SELF_SERVICE caller may only release custody
-   * they hold themselves, and a missing role would silently fall open. The
+   * Required, not optional: a missing scope would silently fall open. The
    * bulk route deliberately does NOT judge quantity-tracked rows in its own
    * guard: they are released per asset, so refusing the whole selection over
    * one would reject work nobody asked for, which leaves this the only place
    * the restriction can be applied to them.
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   /** Optional note explaining the release */
   note?: string;
   /**
@@ -8716,7 +8703,7 @@ export async function releaseQuantity({
   quantity,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
   consumed,
 }: ReleaseQuantityArgs) {
@@ -8770,7 +8757,7 @@ export async function releaseQuantity({
        * are taken off them. The lookup is org-scoped, so a team member from
        * another workspace is refused here rather than written into a log.
        */
-      if (role === OrganizationRoles.SELF_SERVICE) {
+      if (custodyAssign === "self") {
         const holder = await tx.teamMember.findFirst({
           where: { id: teamMemberId, organizationId },
           select: { user: { select: { id: true } } },

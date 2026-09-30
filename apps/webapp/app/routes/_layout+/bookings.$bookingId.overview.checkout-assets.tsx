@@ -1,4 +1,4 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -30,7 +30,6 @@ import {
 } from "~/modules/booking/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
@@ -39,6 +38,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canPartialCheckInOut } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -47,38 +48,36 @@ export const links: LinksFunction = () => [
 ];
 
 /**
- * Checkout-eligibility guard shared by the loader and the action.
+ * Check-out guard shared by the loader and the action of the partial
+ * check-out page.
  *
- * Self-service users may check out only their OWN (custodian) booking and only
- * in a checkout-eligible status; everyone else is gated by
- * `canUserManageBookingAssets`. This MUST run in the action too, not just the
- * loader: a Remix action can be POSTed directly (bypassing the loader), and
- * `PermissionAction.checkout` alone is granted to SELF_SERVICE — so without it a
- * self-service user could check out assets in another user's booking in the
- * same organization.
+ * `canPartialCheckInOut` answers it: the manage-items rule, or, for roles
+ * whose policy has `bookings.partialScanAsCustodian`, a RESERVED, ONGOING or
+ * OVERDUE booking the caller is the custodian of. Creating the booking is not
+ * enough. It MUST run in the action as well as the loader: an action can be
+ * POSTed directly, and `booking:checkout` alone lets SELF_SERVICE reach any
+ * booking in the workspace.
  *
  * @throws {ShelfError} 403 when the caller may not check out this booking
- * @returns the loaded booking (so the loader can reuse it without re-fetching)
+ * @returns the loaded booking, so the loader can reuse it
  */
 async function assertUserCanCheckoutBooking({
   bookingId,
   organizationId,
   userId,
-  role,
+  access,
   userOrganizations,
   request,
 }: {
   bookingId: string;
   organizationId: string;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
   userOrganizations: Awaited<
     ReturnType<typeof requirePermission>
   >["userOrganizations"];
   request: Request;
 }) {
-  const isSelfService = role === OrganizationRoles.SELF_SERVICE;
-
   const booking = await getBooking({
     id: bookingId,
     organizationId,
@@ -86,19 +85,15 @@ async function assertUserCanCheckoutBooking({
     request,
   });
 
-  // Self-service users are allowed when the booking is reservable/ongoing/overdue
-  // AND they are the custodian. The generic canUserManageBookingAssets blocks
-  // self-service on non-draft bookings, but that restriction is for
-  // adding/removing assets, not for checking out.
-  const isCheckoutEligible =
-    booking.status === "RESERVED" ||
-    booking.status === "ONGOING" ||
-    booking.status === "OVERDUE";
-  const isCustodian = booking.custodianUserId === userId;
-  const canCheckout =
-    isSelfService && isCheckoutEligible && isCustodian
-      ? true
-      : canUserManageBookingAssets(booking, isSelfService);
+  const canCheckout = canPartialCheckInOut({
+    access,
+    booking: {
+      status: booking.status,
+      custodianUserId: booking.custodianUserId,
+    },
+    userId,
+    direction: "checkout",
+  });
 
   if (!canCheckout) {
     throw new ShelfError({
@@ -123,20 +118,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
+      });
 
     const booking = await assertUserCanCheckoutBooking({
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
     });
@@ -385,14 +379,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
+      });
 
     // Re-apply the same custodian/eligibility guard as the loader. The action
     // is directly POST-able and PermissionAction.checkout is granted to
@@ -402,7 +395,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       userOrganizations,
       request,
     });

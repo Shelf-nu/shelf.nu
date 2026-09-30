@@ -9,6 +9,7 @@
  */
 
 import { AssetType, OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -166,11 +167,9 @@ beforeEach(() => {
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", () => {
   it("rejects SELF_SERVICE user adjusting someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -188,11 +187,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("rejects BASE user adjusting someone else's booking with 403", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.BASE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.BASE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -210,11 +207,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("allows SELF_SERVICE user to adjust their own (creator) booking", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -232,11 +227,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("allows SELF_SERVICE user when they're the custodian (not creator)", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -254,11 +247,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("returns 404 when bookingAsset isn't found in this org", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(null);
 
@@ -271,11 +262,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("skips the ownership check entirely for ADMIN users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -293,11 +282,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
   });
 
   it("skips the ownership check entirely for OWNER users", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.OWNER] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({
@@ -317,11 +304,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — ownership guard", ()
 
 describe("api/bookings/:bookingId/adjust-asset-quantity — TOCTOU re-read", () => {
   it("measures availability against the re-read quantity under the lock, not the stale snapshot", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
 
     // Outside-tx snapshot reports 5 units (stale HIGH).
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
@@ -342,11 +327,9 @@ describe("api/bookings/:bookingId/adjust-asset-quantity — TOCTOU re-read", () 
   });
 
   it("returns 404 when the slice vanishes under the lock (concurrent removal)", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+    );
 
     dbMocks.bookingAssetFindFirst.mockResolvedValue(
       buildBookingAsset({ creatorId: "user-current", custodianUserId: null })

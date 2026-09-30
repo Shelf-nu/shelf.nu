@@ -26,13 +26,18 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetCodeBadge } from "../asset-code-badge";
 import { AssetImage } from "../asset-image";
@@ -71,7 +76,17 @@ export const AssetsList = ({
   const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { isBase } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  /** The bulk menu holds custody, edit and delete actions; any one opens it. */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -214,7 +229,7 @@ export const AssetsList = ({
               ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
               customPagination={<AssetIndexPagination />}
               bulkActions={
-                disableBulkActions || isBase ? undefined : (
+                disableBulkActions || !canBulkAct ? undefined : (
                   <BulkActionsDropdown />
                 )
               }

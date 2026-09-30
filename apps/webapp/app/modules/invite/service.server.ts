@@ -19,7 +19,7 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
+import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
 import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
@@ -37,7 +37,8 @@ import { id } from "~/utils/id/id.server";
 import type { ImportPreflightResult } from "~/utils/import-row-errors";
 import { getParamsValues } from "~/utils/list";
 import { validEmail } from "~/utils/misc";
-import { organizationRolesMap } from "~/utils/organization-roles";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
 import {
   caseInsensitiveEmailFilter,
@@ -249,6 +250,11 @@ export async function createInvite(
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
     extraMessage?: string | null;
+    /**
+     * `access.ownsWorkspace` of the inviter; only the owner may grant an
+     * owner-only role.
+     */
+    actorOwnsWorkspace: boolean;
   }
 ) {
   let {
@@ -260,11 +266,15 @@ export async function createInvite(
     teamMemberId,
     userId,
     extraMessage,
+    actorOwnsWorkspace,
   } = payload;
 
   inviteeEmail = normalizeInviteEmail(inviteeEmail);
 
   try {
+    // Authorize the actor before any read or write.
+    assertCanAssignRoles({ actorOwnsWorkspace, roles, organizationId });
+
     // Add SSO validation before proceeding with invite
     await validateInvite(inviteeEmail, organizationId);
 
@@ -732,15 +742,17 @@ export async function getPaginatedAndFilterableSettingInvites({
      * Create the same structure for the invites
      */
     const items = invites.map((invite) => {
-      const roleEnum = invite.roles[0] ?? OrganizationRoles.BASE;
+      // The invite's effective role; an invite with no role resolves to BASE.
+      const roleEnum = resolveRole(invite.roles);
       return {
         id: invite.id,
         name: invite.inviteeTeamMember.name,
         img: "/static/images/default_pfp.jpg",
         email: invite.inviteeEmail,
         status: invite.status,
-        role: organizationRolesMap[roleEnum],
+        role: ROLE_LABELS[roleEnum],
         roleEnum,
+        roles: invite.roles,
         userId: null,
         sso: false,
         inviteMessage: invite.inviteMessage,
@@ -802,12 +814,18 @@ export async function bulkInviteUsers({
   userId,
   organizationId,
   extraMessage,
+  actorOwnsWorkspace,
 }: {
   /** The CSV rows as parsed, before any validation. */
   users: ImportUserCsvRow[];
   userId: User["id"];
   organizationId: Organization["id"];
   extraMessage?: string | null;
+  /**
+   * `access.ownsWorkspace` of the inviter; only the owner may grant an
+   * owner-only role.
+   */
+  actorOwnsWorkspace: boolean;
 }) {
   try {
     // Validate and sanitize invitation message
@@ -847,6 +865,17 @@ export async function bulkInviteUsers({
         organizationId,
       });
     }
+
+    // The actor rule, before any lookup: only the workspace owner may grant an
+    // owner-only role, and one such row refuses the whole file. Rows whose
+    // role is not invitable at all are left to the preflight to report.
+    assertCanAssignRoles({
+      actorOwnsWorkspace,
+      roles: users
+        .map((user) => (user.role ?? "").trim().toUpperCase())
+        .filter(isInvitableRole),
+      organizationId,
+    });
 
     const csvTeamMemberIds = [
       ...new Set(

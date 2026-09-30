@@ -1,6 +1,6 @@
-import {
-  type AssetType,
-  type ConsumptionType,
+import type {
+  AssetType,
+  ConsumptionType,
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
@@ -14,24 +14,20 @@ import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
-import {
-  isSelfServiceOrBaseRole,
-  resolveCanSeeAllBookings,
-  resolveMostPrivilegedRole,
-} from "~/utils/booking-authorization.server";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import {
   assertCanUseBookings,
   canUseAudits,
   canUseBarcodes,
 } from "~/utils/subscription.server";
 import {
-  computeCanSeeAllCustody,
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "./mobile-custody-visibility.server";
@@ -152,6 +148,12 @@ export async function requireMobileAuth(request: Request) {
  * no longer valid) so the app can distinguish "the server picked for me" from
  * "I chose this workspace" without re-deriving the hierarchy.
  *
+ * Each organization also carries the four workspace visibility toggles
+ * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
+ * resolve the same `RoleAccess` the server does for that workspace via
+ * `resolveRoleAccess`.
+ *
  * @param userId - the authenticated user
  * @returns organizations in landing order, plus the explicit last-selected id
  */
@@ -175,6 +177,13 @@ export async function getUserOrganizations(userId: string) {
           imageId: true,
           barcodesEnabled: true,
           auditsEnabled: true,
+          // why: the four workspace visibility toggles a RoleAccess resolves
+          // against. Without them here the companion has no way to widen a
+          // restricted role's own-scope for a given workspace.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+          baseUserCanSeeCustody: true,
         },
       },
     },
@@ -287,24 +296,17 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the caller's roles and the org capability and visibility flags that
- * every mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the
- * canonical subscription.server predicates so mobile matches webapp gating
- * exactly.
+ * Fetches the caller's roles, reach and the org capability flags that every
+ * mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the canonical
+ * subscription.server predicates so mobile matches webapp gating exactly.
  *
- * Two visibility answers come off the same organization row, and they are
- * independent — a workspace may grant either without the other:
- *
- * - `canSeeAllBookings` — whether the caller may READ a booking they do not
- *   hold (`selfServiceCanSeeBookings` / `baseUserCanSeeBookings`).
- * - `canSeeAllCustody` — whether the caller may see WHO holds something
- *   (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`).
- *
- * ADMIN and OWNER get both. Both are the mobile twins of the flags web's
- * `requirePermission` returns, resolved through the same shared helpers so the
- * two platforms cannot disagree about what a workspace has granted. Neither
- * widens a MUTATION: writes stay on the role's permission grant plus
- * `validateBookingOwnership`.
+ * `access` folds the membership's policy (read from its highest-rank role)
+ * with the workspace's visibility toggles, resolved by the same
+ * `resolveRoleAccess` web's `requirePermission` uses, so the two platforms
+ * cannot disagree about what a workspace has granted. Its booking and custody
+ * visibility answers are independent: a workspace may grant either without
+ * the other. Neither widens a MUTATION: writes stay on the role's permission
+ * grant plus `validateBookingOwnership`.
  *
  * Used by mobile routes that call service layer functions requiring
  * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and by
@@ -314,31 +316,12 @@ export async function getMobileUserContext(
   userId: string,
   organizationId: string
 ): Promise<{
-  role: OrganizationRoles;
-  /**
-   * Every role on this membership. `role` is `roles[0]`, which is wrong for
-   * any authorization decision: a membership ordered `[SELF_SERVICE, ADMIN]`
-   * resolves to SELF_SERVICE and an actual admin gets treated as restricted.
-   * Read `effectiveRole` for a privilege decision; this array is for callers
-   * that pass the whole membership on, such as `hasPermission`.
-   */
+  /** Every role on this membership, for matrix checks (`hasPermission`), which union held roles. */
   roles: OrganizationRoles[];
-  /**
-   * The most privileged role on this membership, and the only one any gate
-   * here should read. `role` above is `roles[0]`.
-   */
-  effectiveRole: OrganizationRoles;
-  /** `effectiveRole` is SELF_SERVICE or BASE. */
-  isSelfServiceOrBase: boolean;
+  /** The member's reach: effective role, booking/custody/audit scopes. Every gate reads this. */
+  access: RoleAccess;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
-  canSeeAllCustody: boolean;
-  /**
-   * Whether the caller may READ bookings they are not the custodian of.
-   * Never widens a mutation: writes stay on `validateBookingOwnership` and
-   * the role's permission grant.
-   */
-  canSeeAllBookings: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -373,32 +356,14 @@ export async function getMobileUserContext(
     });
   }
 
-  // why: roles is an array but we always operate on the first role; mirror
-  // the convention used in roles.server.ts and invite/service.server.ts so
-  // an empty array doesn't surface as `undefined` to downstream callers.
-  const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
-
-  // why: gates read the most privileged role, never roles[0]. A membership
-  // ordered [SELF_SERVICE, ADMIN] reads as SELF_SERVICE by position, which
-  // refuses a genuine admin. `role` keeps the positional value for the callers
-  // that still read it.
-  const effectiveRole = resolveMostPrivilegedRole(userOrg.roles);
-
   return {
-    role,
     roles: userOrg.roles,
-    effectiveRole,
-    isSelfServiceOrBase: isSelfServiceOrBaseRole(effectiveRole),
+    access: resolveRoleAccess({
+      roles: userOrg.roles,
+      workspace: userOrg.organization,
+    }),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
-    canSeeAllCustody: computeCanSeeAllCustody({
-      role: effectiveRole,
-      organization: userOrg.organization,
-    }),
-    canSeeAllBookings: resolveCanSeeAllBookings({
-      role: effectiveRole,
-      currentOrganization: userOrg.organization,
-    }),
   };
 }
 
@@ -817,7 +782,7 @@ export type MobileAssetForViewer = MobileAssetResponse & {
  * @param args.assetId - The asset to fetch (org-scoped)
  * @param args.organizationId - The caller's active organization
  * @param args.viewerUserId - The authenticated caller's user id
- * @param args.canSeeAllCustody - From {@link getMobileUserContext}
+ * @param args.canSeeAllCustody - The viewer's `access.custody.seeAll`, from {@link getMobileUserContext}
  * @returns The viewer-shaped asset, or null when not found in the org
  */
 export async function getMobileAssetForViewer({

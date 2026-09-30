@@ -35,7 +35,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         request,
         userId,
@@ -90,9 +90,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * Validate the custodian belongs to the same organization (early 404).
-     * We don't keep the result around any more — the SELF_SERVICE
-     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
-     * share one implementation). The lookup here is still needed: it 404s
+     * The result is not kept: the "assign only to yourself" guard lives in
+     * the custody services, shared by web and mobile. The lookup still 404s
      * the request if the requested custodianId is from another org or
      * doesn't exist.
      */
@@ -118,10 +117,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * The SELF_SERVICE "assign-to-self" guard lives inside the services
-     * themselves: `bulkCheckOutAssets` for whole assets and
-     * `checkOutQuantity` for the per-unit path, so web and mobile share one
-     * source of truth. The route passes `role` through to both.
+     * The caller's custody scope is enforced inside the services themselves:
+     * `bulkCheckOutAssets` for whole assets and `checkOutQuantity` for the
+     * per-unit path, so web and mobile share one source of truth. The route
+     * passes `access.custody.assign` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -188,14 +187,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
         quantity: quantities[assetId],
         userId,
         organizationId,
-        role,
+        custodyAssign: access.custody.assign,
       });
     }
 
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           custodianId: custodian.id,
           custodianName: custodian.name,
@@ -210,7 +209,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             teamMemberIds: new URLSearchParams(
               currentSearchParams ?? ""
             ).getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
           }),

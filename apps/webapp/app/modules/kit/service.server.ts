@@ -18,7 +18,6 @@ import {
   ErrorCorrection,
   KitStatus,
   NoteType,
-  OrganizationRoles,
 } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { LoaderFunctionArgs } from "react-router";
@@ -68,6 +67,7 @@ import {
   assertLocationBelongsToOrg,
   assertTeamMemberBelongsToOrg,
 } from "~/utils/org-validation.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { createSignedUrl, parseFileFormData } from "~/utils/storage.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
@@ -3525,7 +3525,7 @@ export async function bulkReleaseKitCustody({
   kitIds,
   organizationId,
   userId,
-  role,
+  custodyAssign,
   currentSearchParams,
   allowedTeamMemberIds,
 }: {
@@ -3533,14 +3533,13 @@ export async function bulkReleaseKitCustody({
   organizationId: Kit["organizationId"];
   userId: User["id"];
   /**
-   * Caller's role. The SELF_SERVICE "release only your own custody" rule is
-   * enforced HERE rather than in the route, because it has to run against the
-   * RESOLVED kits. The route version queried `kitCustody` with the raw
-   * `kitIds`, which is `["all-selected"]` on a select-all — zero rows matched,
-   * so the guard silently passed and every matched kit was released.
-   * Mirrors `bulkCheckInAssets`, where the guard already lives in the service.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile). Checked here against the RESOLVED
+   * kits: on a select-all the raw `kitIds` is `["all-selected"]`, which
+   * matches no custody row.
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   currentSearchParams?: string | null;
   /** See the twin parameter on `bulkAssignKitCustody`. */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
@@ -3614,15 +3613,13 @@ export async function bulkReleaseKitCustody({
     }));
 
     /**
-     * SELF_SERVICE may release only custody they hold themselves.
+     * A caller whose scope is `self` may release only custody they hold.
      *
-     * This runs on the RESOLVED kits, which is the whole point of it living
-     * here: the route-level version queried `kitCustody` with the raw
-     * `kitIds`, so a select-all (`["all-selected"]`) matched zero rows, the
-     * guard passed, and a self-service user could release custody on kits
-     * held by anyone — targeted precisely by pairing it with `?teamMember=`.
+     * Runs on the RESOLVED kits: a check against the raw `kitIds` would see
+     * `["all-selected"]` on a select-all, match no custody row and let every
+     * matched kit through.
      */
-    if (role === OrganizationRoles.SELF_SERVICE) {
+    if (custodyAssign === "self") {
       const someoneElsesCustody = kits.some(
         (kit) => kit.custody?.custodian?.userId !== userId
       );

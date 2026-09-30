@@ -66,24 +66,22 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetIds } = parsed.data;
 
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    const { canUseBarcodes, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
-    /**
-     * Pass `role` so the service-level SELF_SERVICE guard fires.
-     * Without it, a SELF_SERVICE user could release custody on any
-     * team member's asset (hex-security r3202161632).
-     */
+    /** The service enforces the caller's custody scope. */
     const { skippedQuantityTracked } = await bulkCheckInAssets({
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       assetIds,
       organizationId,
       currentSearchParams: "",
@@ -96,7 +94,7 @@ export async function action({ request }: ActionFunctionArgs) {
        * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
        * they can still filter by their OWN custody.
        */
-      allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+      allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
     });
 
     // Additive: the service silently skips QUANTITY_TRACKED assets on mixed

@@ -13,7 +13,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -586,7 +586,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -748,7 +748,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);

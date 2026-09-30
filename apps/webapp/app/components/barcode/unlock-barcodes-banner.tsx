@@ -6,7 +6,7 @@ import type { PriceWithProduct } from "~/components/subscription/prices";
 import { BARCODE_ADDON } from "~/config/addon-copy";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader as pricesLoader } from "~/routes/api+/barcode-addon-prices";
 import { formatCurrency } from "~/utils/currency";
 import { tw } from "~/utils/tw";
@@ -166,7 +166,7 @@ export function UnlockBarcodesModal({
 
 /** Inline banner with "Learn more" that opens the unlock modal */
 export function UnlockBarcodesBanner() {
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
 
   if (!isOwner) {
     return (

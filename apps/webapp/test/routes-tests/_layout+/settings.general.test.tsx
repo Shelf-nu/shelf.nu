@@ -1,5 +1,6 @@
 import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs, createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -126,10 +127,8 @@ describe("settings.general loader", () => {
       organizations: [baseOrganization()],
       currentOrganization: baseOrganization(),
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -196,10 +195,8 @@ describe("settings.general loader", () => {
       organizations: [personalOrg],
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -236,10 +233,8 @@ describe("settings.general loader", () => {
       organizations: [personalOrg],
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.OWNER]),
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -298,11 +293,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: baseOrganization(),
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -409,11 +402,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: orgWithBrandingOff,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [orgWithBrandingOff],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -464,11 +455,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -522,11 +511,9 @@ describe("settings.general action", () => {
       organizationId: "org-1",
       currentOrganization: personalOrg,
       role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       organizations: [personalOrg],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
 
@@ -609,11 +596,9 @@ describe("settings.general transfer-ownership authorization", () => {
       organizationId: "org-1",
       currentOrganization: baseOrganization(),
       role,
+      access: accessFor([role]),
       organizations: [baseOrganization()],
-      isSelfServiceOrBase: false,
       userOrganizations: [],
-      canSeeAllBookings: true,
-      canSeeAllCustody: true,
       canUseBarcodes: false,
     } as any);
   }

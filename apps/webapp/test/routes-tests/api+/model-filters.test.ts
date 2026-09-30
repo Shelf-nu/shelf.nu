@@ -169,6 +169,12 @@ const WRITE_SCOPE = {
 };
 
 /**
+ * STATUS restriction for the add-to-booking pickers: SELF_SERVICE and BASE may
+ * add items to drafts only, so the search offers nothing else.
+ */
+const DRAFTS_ONLY = { status: { in: ["DRAFT"] } };
+
+/**
  * Points the session at a workspace where the caller holds `role`.
  *
  * @param role - Caller's role in the workspace.
@@ -554,6 +560,7 @@ describe("GET /api/model-filters", () => {
           DRAFT_VISIBILITY,
           CUSTODIAN_SCOPE,
           WRITE_SCOPE,
+          DRAFTS_ONLY,
         ]);
       }
     );
@@ -616,6 +623,7 @@ describe("GET /api/model-filters", () => {
         DRAFT_VISIBILITY,
         CUSTODIAN_SCOPE,
         WRITE_SCOPE,
+        DRAFTS_ONLY,
       ]);
     });
   });
@@ -759,7 +767,11 @@ describe("GET /api/model-filters", () => {
 
         // Without this the picker offers bookings `validateBookingOwnership`
         // then rejects with a 403 — a dead end for the user.
-        expect(lastWhere().AND).toEqual([DRAFT_VISIBILITY, WRITE_SCOPE]);
+        expect(lastWhere().AND).toEqual([
+          DRAFT_VISIBILITY,
+          WRITE_SCOPE,
+          DRAFTS_ONLY,
+        ]);
       }
     );
 
@@ -771,6 +783,7 @@ describe("GET /api/model-filters", () => {
       // Asserting on the clause, not on the string "creatorId" — the
       // draft-visibility clause legitimately carries that key.
       expect(lastWhere().AND).not.toContainEqual(WRITE_SCOPE);
+      expect(lastWhere().AND).not.toContainEqual(DRAFTS_ONLY);
     });
 
     it("does not leak into non-booking searches", async () => {
@@ -780,5 +793,17 @@ describe("GET /api/model-filters", () => {
 
       expect(lastWhere().AND).toBeUndefined();
     });
+  });
+
+  it("selectableRecipientsOnly narrows team members to roles that may be picked as recipients", async () => {
+    dbMocks.dynamicFindMany.mockResolvedValue([]);
+
+    await callLoader(
+      "name=teamMember&queryKey=name&queryValue=a&selectableRecipientsOnly=true"
+    );
+
+    expect(JSON.stringify(lastWhere().AND)).toContain(
+      '"hasSome":["OWNER","ADMIN"]'
+    );
   });
 });
