@@ -21,7 +21,7 @@ import {
   readSignupIntent,
   signupIntentHeaders,
 } from "~/modules/signup-intent/cookie.server";
-import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
@@ -92,7 +92,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         const authSession = await verifyOtpAndSignin(email, otp);
-        const existingUser = await findUserByEmail(email);
+        // Whether this person already has an account is decided by the
+        // authenticated id, never by the address typed: the same person can
+        // type it with different capitals, and each spelling must reach the
+        // same account instead of creating another.
+        const existingUser = await findUserById(authSession.userId);
         const userExists = Boolean(existingUser);
 
         // What the signup link asked for, carried by cookie. A new account
@@ -121,11 +125,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
               signupIntent,
             });
           } catch (createError) {
-            // Handle race condition: if a concurrent request already
-            // created this user, verify they exist and proceed.
-            // This can happen when two OTP verification requests
-            // run simultaneously for the same user.
-            const userNowExists = Boolean(await findUserByEmail(email));
+            // Two sign-ins for the same person can run at once: if the other
+            // one created the account first, carry on with it.
+            const userNowExists = Boolean(
+              await findUserById(authSession.userId)
+            );
             if (!userNowExists) {
               throw createError;
             }
