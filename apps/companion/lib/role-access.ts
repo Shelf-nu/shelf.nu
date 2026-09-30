@@ -189,3 +189,28 @@ export function mayRemoveBookingItemsAsCustodian({
   if (!userId) return false;
   return custodianUserId === userId || custodianTeamMemberUserId === userId;
 }
+
+/**
+ * Whether the member may release an asset's current custody.
+ *
+ * A member whose custody reach is "self" may take custody only for themselves
+ * and release only their own; the release endpoint refuses anyone else's. Any
+ * other custody reach releases whoever holds it.
+ *
+ * @param args.access - The member's access
+ * @param args.userId - The signed-in user; missing while loading
+ * @param args.custodianUserId - The custodian's user; null for a non-registered member
+ * @returns `true` when the release would be accepted for this custodian
+ */
+export function mayReleaseAssetCustody({
+  access,
+  userId,
+  custodianUserId,
+}: {
+  access: RoleAccess;
+  userId: string | undefined;
+  custodianUserId: string | null | undefined;
+}): boolean {
+  if (access.custody.assign !== "self") return true;
+  return !!userId && custodianUserId === userId;
+}

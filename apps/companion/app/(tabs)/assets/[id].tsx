@@ -56,6 +56,7 @@ import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
 import { useRoleAccess } from "@/hooks/use-role-access";
+import { mayReleaseAssetCustody } from "@/lib/role-access";
 import { useImageUpload } from "@/hooks/use-image-upload";
 import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 
@@ -603,6 +604,11 @@ export default function AssetDetailScreen() {
               }
             }}
             onReleaseCustody={handleReleaseCustody}
+            canReleaseCustody={mayReleaseAssetCustody({
+              access,
+              userId: user?.id,
+              custodianUserId: asset.custody?.custodian?.userId,
+            })}
             onLocationPress={() =>
               isQtyTracked
                 ? setShowPlacementsSheet(true)

@@ -294,6 +294,8 @@ export type AssetDetail = {
     custodian: {
       id: string;
       name: string;
+      /** The custodian's user; null for a non-registered member. */
+      userId?: string | null;
       user: {
         firstName: string | null;
         lastName: string | null;
@@ -1033,6 +1035,12 @@ export type BookingDetailResponse = {
    * same gates regardless.
    */
   bookingActions: {
+    /**
+     * Whether the caller may edit this booking (open, and one they write).
+     * Optional: servers that predate the flag omit it, and the app then keeps
+     * offering Edit as before.
+     */
+    canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
     canDuplicate: boolean;

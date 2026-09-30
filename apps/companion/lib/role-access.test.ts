@@ -26,6 +26,7 @@ import {
   accessForOrganization,
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
+  mayReleaseAssetCustody,
   mayRemoveBookingItemsAsCustodian,
   mayWriteBookingItems,
 } from "./role-access";
@@ -327,6 +328,60 @@ describe("mayRemoveBookingItemsAsCustodian", () => {
         userId: "user-1",
         custodianUserId: "user-2",
         custodianTeamMemberUserId: undefined,
+      }),
+      true
+    );
+  });
+});
+
+describe("mayReleaseAssetCustody", () => {
+  test("a self-only member releases their own custody", () => {
+    assert.equal(
+      mayReleaseAssetCustody({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: "user-1",
+      }),
+      true
+    );
+  });
+
+  test("a self-only member is not offered someone else's custody", () => {
+    assert.equal(
+      mayReleaseAssetCustody({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: "user-2",
+      }),
+      false
+    );
+    assert.equal(
+      mayReleaseAssetCustody({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: "user-1",
+        custodianUserId: null,
+      }),
+      false
+    );
+  });
+
+  test("an unknown signed-in user is refused", () => {
+    assert.equal(
+      mayReleaseAssetCustody({
+        access: accessOf(["SELF_SERVICE"]),
+        userId: undefined,
+        custodianUserId: undefined,
+      }),
+      false
+    );
+  });
+
+  test("an administrator releases anyone's custody", () => {
+    assert.equal(
+      mayReleaseAssetCustody({
+        access: accessOf(["ADMIN"]),
+        userId: "user-1",
+        custodianUserId: "user-2",
       }),
       true
     );

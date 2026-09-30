@@ -286,6 +286,7 @@ describe("GET /api/mobile/bookings/:id — actions on a booking the caller only 
       const flags = await actionFlags();
 
       expect(flags).toMatchObject({
+        canEdit: false,
         canCancel: false,
         canArchive: false,
         canDuplicate: false,
@@ -307,6 +308,7 @@ describe("GET /api/mobile/bookings/:id — actions on a booking the caller only 
 
     const flags = await actionFlags();
 
+    expect(flags.canEdit).toBe(true);
     expect(flags.canCancel).toBe(true);
     expect(flags.canDuplicate).toBe(true);
   });

@@ -730,6 +730,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       writesBooking && isActiveBooking && canCheckinPerm && canQuickCheckin;
 
     const bookingActions = {
+      // Edit: an open booking this caller writes. `booking:update` is held by
+      // every role, so writing THIS booking is the whole rule; a booking the
+      // workspace only lets them see offers no edit the save would refuse.
+      canEdit:
+        !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
+        writesBooking,
       // Cancel: RESERVED/ONGOING/OVERDUE + cancel permission.
       canCancel:
         (booking.status === "RESERVED" ||

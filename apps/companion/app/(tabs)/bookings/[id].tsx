@@ -29,6 +29,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   api,
   type BookingDetail,
+  type BookingDetailResponse,
   type BookingAsset,
   type CheckoutDisposition,
   type CheckinDisposition,
@@ -133,7 +134,9 @@ export default function BookingDetailScreen() {
   const [canQuickCheckout, setCanQuickCheckout] = useState(true);
   // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
-  const [bookingActions, setBookingActions] = useState({
+  const [bookingActions, setBookingActions] = useState<
+    BookingDetailResponse["bookingActions"]
+  >({
     canCancel: false,
     canArchive: false,
     canDuplicate: false,
@@ -1718,21 +1721,26 @@ export default function BookingDetailScreen() {
               booking.status
             ) && (
               <View style={styles.manageRow}>
-                <TouchableOpacity
-                  style={[styles.actionButtonOutline, styles.manageRowItem]}
-                  onPress={() =>
-                    router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
-                  }
-                  accessibilityLabel="Edit booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="create-outline"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>Edit</Text>
-                </TouchableOpacity>
+                {/* Only on a booking this caller writes; a booking the
+                    workspace only lets them see offers no edit the save would
+                    refuse. Servers without the flag keep offering it. */}
+                {bookingActions.canEdit !== false && (
+                  <TouchableOpacity
+                    style={[styles.actionButtonOutline, styles.manageRowItem]}
+                    onPress={() =>
+                      router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
+                    }
+                    accessibilityLabel="Edit booking"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={18}
+                      color={colors.buttonSecondaryText}
+                    />
+                    <Text style={styles.actionButtonOutlineText}>Edit</Text>
+                  </TouchableOpacity>
+                )}
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
