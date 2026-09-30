@@ -14889,7 +14889,10 @@ async function createNotesForScannedAssetsAndKits({
  * @param args.bookingId - Booking being modified
  * @param args.organizationId - Organization scope for the booking + assets
  * @param args.userId - User performing the scan (attributed on materialized logs)
- * @returns `{ id, name, status }` of the updated booking
+ * @returns The updated booking's `{ id, name, status }`, `addedAssetIds` (assets
+ *   that gained a new `BookingAsset` row on this call) and `claimedAssetIds`
+ *   (assets whose pre-existing row answered a reservation without a new row).
+ *   A scan that touched nothing new returns both arrays empty.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function addScannedAssetsToBookingWithinTx(
@@ -15357,8 +15360,16 @@ async function addScannedAssetsToBookingWithinTx(
     preExistingStandaloneScannedIds.has(assetId)
   );
 
+  /**
+   * Assets whose pre-existing row answered a reservation on this call,
+   * without a new `BookingAsset` row. Empty is the ordinary outcome, not a
+   * failure: a rescanned unit that already carries a stamp claims nothing.
+   * Callers use this alongside `addedAssetIds` to tell "counted toward a
+   * reservation" apart from "this scan changed nothing at all".
+   */
+  let claimedAssetIds: string[] = [];
   if (preExistingScannedAssetIds.length > 0) {
-    await claimUnstampedBookingRows(
+    const claimedRequestIdByAssetId = await claimUnstampedBookingRows(
       {
         bookingId,
         assetIds: preExistingScannedAssetIds,
@@ -15367,6 +15378,7 @@ async function addScannedAssetsToBookingWithinTx(
       },
       tx
     );
+    claimedAssetIds = Array.from(claimedRequestIdByAssetId.keys());
   }
 
   /**
@@ -15564,8 +15576,10 @@ async function addScannedAssetsToBookingWithinTx(
 
   // `addedAssetIds` travels out because the notes are written post-commit, by
   // callers that only hold the raw scan and so cannot tell an arrival from a
-  // rescan.
-  return { booking, addedAssetIds };
+  // rescan. `claimedAssetIds` travels out for the same reason a caller that
+  // wants to report what a scan actually did (as opposed to what it asked
+  // for) needs both sets, not just one.
+  return { booking, addedAssetIds, claimedAssetIds };
 }
 
 /**
@@ -15578,6 +15592,12 @@ async function addScannedAssetsToBookingWithinTx(
  * @param {string} params.bookingId - The ID of the booking to update.
  * @param {string} params.organizationId - The organization ID associated with the booking.
  * @param {string} params.userId - The ID of the user performing the action.
+ * @returns An object carrying the updated `booking` (`{ id, name, status }`)
+ *   alongside `addedAssetIds` and `claimedAssetIds`, widened from the plain
+ *   booking this function used to return so a caller can tell a genuine add
+ *   apart from a rescan that only answered a reservation, or from a scan that
+ *   changed nothing at all. Existing callers that only `await` the call and
+ *   never read its result are unaffected by the shape change.
  */
 export async function addScannedAssetsToBooking({
   assetIds,
@@ -15622,17 +15642,20 @@ export async function addScannedAssetsToBooking({
      * overlap-conflict guard main added inline here was moved INTO the helper
      * so both call sites get it atomically with the writes.
      */
-    const { booking: updatedBooking, addedAssetIds } = await db.$transaction(
-      async (tx) =>
-        addScannedAssetsToBookingWithinTx(tx, {
-          assetIds,
-          kitIds,
-          bookingId,
-          organizationId,
-          userId,
-          quantities,
-          kitSlices,
-        })
+    const {
+      booking: updatedBooking,
+      addedAssetIds,
+      claimedAssetIds,
+    } = await db.$transaction(async (tx) =>
+      addScannedAssetsToBookingWithinTx(tx, {
+        assetIds,
+        kitIds,
+        bookingId,
+        organizationId,
+        userId,
+        quantities,
+        kitSlices,
+      })
     );
 
     /**
@@ -15650,7 +15673,7 @@ export async function addScannedAssetsToBooking({
       userId,
     });
 
-    return updatedBooking;
+    return { booking: updatedBooking, addedAssetIds, claimedAssetIds };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
