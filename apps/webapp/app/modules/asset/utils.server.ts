@@ -634,6 +634,16 @@ export function applyCustodianAllowList(
     : kept;
 }
 
+/**
+ * Prisma `where` clause for "select all" and bulk actions, built from a
+ * serialized list query string.
+ *
+ * It mirrors the simple-mode list filters (search, status, category, tag,
+ * location, custodian), always scoped to the organization, so a bulk action
+ * acts on the rows the list showed.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,

@@ -1,5 +1,5 @@
 /**
- * "Include assets from child locations" — server side.
+ * "Include assets from child locations": server side.
  *
  * Turns the ticked `location` values of a request into the set of location ids
  * an asset query should match when the opt-in is on, and answers whether any
@@ -7,7 +7,7 @@
  * offered).
  *
  * Every surface that offers the checkbox must feed the SAME resolved set to
- * each query it builds from the URL — the visible list and any "select all"
+ * each query it builds from the URL: the visible list and any "select all"
  * where-clause alike. Two queries reading the same URL through this resolver
  * cannot disagree about which locations are in scope.
  *
@@ -17,7 +17,7 @@
 import type { Organization } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { isIncludingChildLocations } from "./child-locations-filter";
-import { getLocationDescendantIds } from "./descendants.server";
+import { getDescendantIdsOfLocations } from "./descendants.server";
 
 /**
  * Filter value meaning "assets placed nowhere". It names a state, not a
@@ -28,13 +28,19 @@ const WITHOUT_LOCATION = "without-location";
 /**
  * The ticked `location` values that name a real location.
  *
+ * The URL is request input, so a value may repeat; each id comes back once.
+ *
  * @param searchParams - The request's search params
- * @returns Every `location` value except the "without location" state
+ * @returns Every distinct `location` value except the "without location" state
  */
 function getTickedLocationIds(searchParams: URLSearchParams): string[] {
-  return searchParams
-    .getAll("location")
-    .filter((value) => value !== WITHOUT_LOCATION);
+  return [
+    ...new Set(
+      searchParams
+        .getAll("location")
+        .filter((value) => value !== WITHOUT_LOCATION)
+    ),
+  ];
 }
 
 /**
@@ -42,7 +48,7 @@ function getTickedLocationIds(searchParams: URLSearchParams): string[] {
  *
  * Returns `undefined` when the opt-in is off or no real location is ticked.
  * Callers pass that straight through as "no override", which leaves the query
- * builders on the URL's own `location` values — the exact-match behaviour.
+ * builders on the URL's own `location` values, which is the exact-match behaviour.
  *
  * When on, the result is the ticked values plus every descendant of each. The
  * ticked values always stay in the set: an id that resolves to nothing (another
@@ -73,15 +79,13 @@ export async function resolveLocationFilterIds({
     return undefined;
   }
 
-  const descendantIds = await Promise.all(
-    tickedLocationIds.map((locationId) =>
-      getLocationDescendantIds({ organizationId, locationId })
-    )
-  );
+  // One query for every ticked location, however many the URL repeats.
+  const descendantIds = await getDescendantIdsOfLocations({
+    organizationId,
+    locationIds: tickedLocationIds,
+  });
 
-  return [
-    ...new Set([...searchParams.getAll("location"), ...descendantIds.flat()]),
-  ];
+  return [...new Set([...searchParams.getAll("location"), ...descendantIds])];
 }
 
 /**

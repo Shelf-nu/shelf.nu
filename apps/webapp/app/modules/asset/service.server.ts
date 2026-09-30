@@ -4282,6 +4282,17 @@ export async function getAllEntriesForCreateAndEdit({
   }
 }
 
+/**
+ * One page of assets for a simple-mode list, plus the data its filter
+ * dropdowns need.
+ *
+ * Reads the filters from `filters` when given, otherwise from the request
+ * URL. `locationIdsOverride` replaces only the location ids the asset query
+ * matches; the dropdown seeds keep reading the URL.
+ *
+ * @returns The page of assets, paging info, and the category, tag, location
+ *   and asset model seeds for the filter dropdowns
+ */
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,

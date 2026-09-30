@@ -1,5 +1,5 @@
 /**
- * "Include assets from child locations" — the URL contract.
+ * "Include assets from child locations": the URL contract.
  *
  * A Locations filter matches the exact locations a user ticks. This param is
  * the explicit opt-in that widens each ticked location to itself plus every

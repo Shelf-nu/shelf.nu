@@ -14,7 +14,7 @@ import * as bookingService from "~/modules/booking/service.server";
 import * as modelRequestService from "~/modules/booking-model-request/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
-import { getLocationDescendantIds } from "~/modules/location/descendants.server";
+import { getDescendantIdsOfLocations } from "~/modules/location/descendants.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -62,7 +62,7 @@ vi.mock("~/database/db.server", () => ({
 // why: the descendant lookup is a recursive SQL query against Postgres, which
 // the unit suite cannot reach. Tests stand in a location tree for it.
 vi.mock("~/modules/location/descendants.server", () => ({
-  getLocationDescendantIds: vi.fn(),
+  getDescendantIdsOfLocations: vi.fn(),
 }));
 
 vi.mock("~/modules/booking/service.server", () => ({
@@ -2025,8 +2025,13 @@ describe("manage-assets: include assets from child locations", () => {
     vi.mocked(httpServer.getParams).mockReturnValue({
       bookingId: "booking123",
     });
-    vi.mocked(getLocationDescendantIds).mockImplementation(({ locationId }) =>
-      Promise.resolve(SELF_AND_DESCENDANTS[locationId] ?? [])
+    vi.mocked(getDescendantIdsOfLocations).mockImplementation(
+      ({ locationIds }) =>
+        Promise.resolve([
+          ...new Set(
+            locationIds.flatMap((id) => SELF_AND_DESCENDANTS[id] ?? [])
+          ),
+        ])
     );
     vi.mocked(db.location.findFirst).mockResolvedValue(null);
 
@@ -2091,6 +2096,7 @@ describe("manage-assets: include assets from child locations", () => {
     });
   });
 
+  /** Makes the loader and the action read `query` as the request URL. */
   function openUrl(query: string) {
     vi.mocked(httpServer.getCurrentSearchParams).mockReturnValue(
       new URLSearchParams(query)
@@ -2140,7 +2146,7 @@ describe("manage-assets: include assets from child locations", () => {
 
     expect(await listLocationIds(query)).toBeUndefined();
     expect(await selectAllLocationIds(query)).toBeUndefined();
-    expect(getLocationDescendantIds).not.toHaveBeenCalled();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
     // No override: the builder matches the URL's own value, as for every
     // other caller.
     expect(await clauseLocationIds(query, undefined)).toEqual(["campus"]);

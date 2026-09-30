@@ -40,6 +40,7 @@ vi.mock("~/hooks/search-params", () => ({
   useSearchParams: () => [mockSearchParams.value, mockSetSearchParams],
 }));
 
+/** The checkbox, found by its visible label. */
 function checkbox() {
   return screen.getByRole("checkbox", {
     name: "Include assets from child locations",

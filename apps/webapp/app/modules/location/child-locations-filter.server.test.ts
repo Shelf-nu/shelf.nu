@@ -1,5 +1,5 @@
 /**
- * "Include assets from child locations" — resolver behaviour.
+ * "Include assets from child locations": resolver behaviour.
  *
  * Pins what the resolver hands to the asset query builders for a URL: nothing
  * when the opt-in is off (so the builders stay on exact match), and the ticked
@@ -15,7 +15,7 @@ import {
   hasTickedLocationWithChildren,
   resolveLocationFilterIds,
 } from "./child-locations-filter.server";
-import { getLocationDescendantIds } from "./descendants.server";
+import { getDescendantIdsOfLocations } from "./descendants.server";
 
 // why: the module graph reaches `db.server`, which opens a real Prisma
 // connection on import. Only `location.findFirst` is ever called here.
@@ -28,7 +28,7 @@ vi.mock("~/database/db.server", () => ({
 // honours the same workspace scoping, and assert what the resolver does with
 // the answer.
 vi.mock("./descendants.server", () => ({
-  getLocationDescendantIds: vi.fn(),
+  getDescendantIdsOfLocations: vi.fn(),
 }));
 
 const ORG = "org-1";
@@ -53,7 +53,7 @@ const CHILDREN_BY_ORG: Record<string, Record<string, string[]>> = {
   },
 };
 
-/** Mirrors the real helper: self plus all descendants, within one workspace. */
+/** Self plus all descendants of one root, within one workspace. */
 function descendantsInTree(organizationId: string, locationId: string) {
   const tree = CHILDREN_BY_ORG[organizationId] ?? {};
   if (!(locationId in tree)) return [];
@@ -68,6 +68,7 @@ function descendantsInTree(organizationId: string, locationId: string) {
   return ids;
 }
 
+/** Resolves `query` for the test workspace. */
 function resolve(query: string) {
   return resolveLocationFilterIds({
     organizationId: ORG,
@@ -77,17 +78,22 @@ function resolve(query: string) {
 
 beforeEach(() => {
   vi.mocked(db.location.findFirst).mockReset();
-  vi.mocked(getLocationDescendantIds)
+  // Mirrors the real helper: every root plus its descendants, each id once.
+  vi.mocked(getDescendantIdsOfLocations)
     .mockReset()
-    .mockImplementation(({ organizationId, locationId }) =>
-      Promise.resolve(descendantsInTree(organizationId, locationId))
+    .mockImplementation(({ organizationId, locationIds }) =>
+      Promise.resolve([
+        ...new Set(
+          locationIds.flatMap((id) => descendantsInTree(organizationId, id))
+        ),
+      ])
     );
 });
 
 describe("resolveLocationFilterIds", () => {
   it("returns no override when the checkbox is off, and reads nothing", async () => {
     expect(await resolve("location=campus")).toBeUndefined();
-    expect(getLocationDescendantIds).not.toHaveBeenCalled();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
   });
 
   it("treats any value other than the on-value as off", async () => {
@@ -97,12 +103,12 @@ describe("resolveLocationFilterIds", () => {
     expect(
       await resolve("location=campus&includeChildLocations=")
     ).toBeUndefined();
-    expect(getLocationDescendantIds).not.toHaveBeenCalled();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
   });
 
   it("returns no override when the checkbox is on but nothing is ticked", async () => {
     expect(await resolve("includeChildLocations=true")).toBeUndefined();
-    expect(getLocationDescendantIds).not.toHaveBeenCalled();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
   });
 
   it("widens a ticked parent to itself plus descendants two levels deep", async () => {
@@ -124,6 +130,24 @@ describe("resolveLocationFilterIds", () => {
     );
   });
 
+  it("looks up every ticked location in one call, each id once", async () => {
+    const repeated = Array.from({ length: 200 }, () => "location=campus").join(
+      "&"
+    );
+    const ids = await resolve(
+      `${repeated}&location=building-a&includeChildLocations=true`
+    );
+
+    expect(getDescendantIdsOfLocations).toHaveBeenCalledTimes(1);
+    expect(getDescendantIdsOfLocations).toHaveBeenCalledWith({
+      organizationId: ORG,
+      locationIds: ["campus", "building-a"],
+    });
+    expect([...ids!].sort()).toEqual(
+      ["building-a", "building-b", "campus", "room-a1"].sort()
+    );
+  });
+
   it("leaves a ticked leaf as itself", async () => {
     expect(
       await resolve("location=building-b&includeChildLocations=true")
@@ -139,10 +163,10 @@ describe("resolveLocationFilterIds", () => {
       ["building-a", "room-a1", "without-location"].sort()
     );
     // It names a state, not a location, so it is never looked up.
-    expect(getLocationDescendantIds).toHaveBeenCalledTimes(1);
-    expect(getLocationDescendantIds).toHaveBeenCalledWith({
+    expect(getDescendantIdsOfLocations).toHaveBeenCalledTimes(1);
+    expect(getDescendantIdsOfLocations).toHaveBeenCalledWith({
       organizationId: ORG,
-      locationId: "building-a",
+      locationIds: ["building-a"],
     });
   });
 
@@ -150,7 +174,7 @@ describe("resolveLocationFilterIds", () => {
     expect(
       await resolve("location=without-location&includeChildLocations=true")
     ).toBeUndefined();
-    expect(getLocationDescendantIds).not.toHaveBeenCalled();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
   });
 
   it("adds nothing for a location that belongs to another workspace", async () => {
@@ -159,9 +183,9 @@ describe("resolveLocationFilterIds", () => {
     );
 
     // The lookup is scoped to the caller's workspace, never the id's owner.
-    expect(getLocationDescendantIds).toHaveBeenCalledWith({
+    expect(getDescendantIdsOfLocations).toHaveBeenCalledWith({
       organizationId: ORG,
-      locationId: "other-org-site",
+      locationIds: ["other-org-site", "building-a"],
     });
     expect(ids).not.toContain("other-org-room");
     expect([...ids!].sort()).toEqual(
@@ -172,7 +196,7 @@ describe("resolveLocationFilterIds", () => {
   it("never empties the set when every ticked id resolves to nothing", async () => {
     // An empty set reads as "no location filter" to the query builders, which
     // would list every asset in the workspace. The unresolvable id stays, and
-    // keeps matching nothing — the same result as with the checkbox off.
+    // keeps matching nothing, the same result as with the checkbox off.
     expect(
       await resolve("location=other-org-site&includeChildLocations=true")
     ).toEqual(["other-org-site"]);
@@ -180,6 +204,7 @@ describe("resolveLocationFilterIds", () => {
 });
 
 describe("hasTickedLocationWithChildren", () => {
+  /** Whether the checkbox is offered for `query` in the test workspace. */
   function offered(query: string) {
     return hasTickedLocationWithChildren({
       organizationId: ORG,
@@ -225,6 +250,21 @@ describe("hasTickedLocationWithChildren", () => {
 
     expect(db.location.findFirst).toHaveBeenCalledWith({
       where: { organizationId: ORG, parentId: { in: ["building-a"] } },
+      select: { id: true },
+    });
+  });
+
+  it("asks about each ticked location once, however often it repeats", async () => {
+    vi.mocked(db.location.findFirst).mockResolvedValue(null);
+
+    await offered("location=campus&location=campus&location=building-a");
+
+    expect(db.location.findFirst).toHaveBeenCalledTimes(1);
+    expect(db.location.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: ORG,
+        parentId: { in: ["campus", "building-a"] },
+      },
       select: { id: true },
     });
   });

@@ -20,6 +20,7 @@ import { getAssetsWhereInput } from "./utils.server";
 
 const ORG = "org-1";
 
+/** The select-all clause for `currentSearchParams`, with an optional override. */
 function build(currentSearchParams: string, locationIdsOverride?: string[]) {
   return getAssetsWhereInput({
     organizationId: ORG,

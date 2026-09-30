@@ -57,6 +57,7 @@ export function IncludeChildLocationsCheckbox({
     pendingSearchParams ?? searchParams
   );
 
+  /** Writes the new state to the URL and returns the list to its first page. */
   function handleChange(nextChecked: boolean) {
     setSearchParams(
       (prev) => {

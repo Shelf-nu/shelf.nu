@@ -276,6 +276,16 @@ export const meta = () => [{ title: appendToMetaTitle("Manage assets") }];
 
 export const links: LinksFunction = () => [{ rel: "stylesheet", href: styles }];
 
+/**
+ * Loads the booking's "Add assets" drawer.
+ *
+ * Returns one page of assets filtered by the URL (with the Locations filter
+ * widened to child locations when that checkbox is on), the booking, the
+ * Models tab data, and whether the child-locations checkbox is offered.
+ *
+ * @throws An error response when the caller may not update this booking or
+ *   the booking is not in this workspace
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -303,8 +313,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     /**
      * With "Include assets from child locations" on, each ticked location
-     * matches itself plus everything nested under it. `undefined` — the
-     * checkbox is off, or nothing is ticked — leaves the list on the ticked
+     * matches itself plus everything nested under it. `undefined` (the
+     * checkbox is off, or nothing is ticked) leaves the list on the ticked
      * locations exactly. The action's select-all resolves the same URL through
      * the same function, so it acts on the set this list shows.
      */
@@ -679,6 +689,18 @@ const quantitiesSchema = z.record(
   z.number().int().positive().max(1_000_000)
 );
 
+/**
+ * Saves the drawer's selection onto the booking.
+ *
+ * Adds the newly selected assets, removes the unselected ones and updates
+ * changed quantities, then writes the activity notes. "Select all" resolves
+ * its assets from the same URL filters the loader used, so it adds exactly
+ * the set the list showed.
+ *
+ * @returns A redirect back to the booking, or an error response when the
+ *   caller may not update this booking, its status forbids changes, or a new
+ *   asset is checked out elsewhere
+ */
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -1704,7 +1726,7 @@ export default function AddAssetsToNewBooking() {
               )}
             />
           </div>
-          {/* Modifies the Locations filter, so it sits under it — in the
+          {/* Modifies the Locations filter, so it sits under it, in the
               filter row, never inside the dropdown's list of locations. */}
           {tickedLocationHasChildren ? (
             <div className="flex justify-end border-b px-3 pb-3">
