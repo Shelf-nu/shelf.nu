@@ -453,11 +453,14 @@ function AssetTitleAndStatus({
    *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
    *  3. Progressively checked out, NO returns yet →
    *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
-   *     required") — new branch for the sidebar.
+   *     required").
    *  4. Otherwise the asset's raw status, except that `IN_CUSTODY` on a
    *     quantity-tracked asset reads `AVAILABLE`: custody covers units held
    *     by a team member outside this booking, so it says nothing about
-   *     the units this booking took. Mirrors `getBookingContextAssetStatus`.
+   *     the units this booking took. This matches the quantity-tracked
+   *     custody rule in `getBookingContextAssetStatus`, but not its
+   *     DRAFT/RESERVED override to `AVAILABLE`, which the sidebar does not
+   *     apply.
    *
    * Order matters: the check-IN branches must win at the aggregate
    * level so a multi-slice asset with mixed in/out slices reads
