@@ -199,6 +199,7 @@ type DataWithInit = {
   init?: { status?: number } | null;
 };
 
+/** Whether a loader result is a react-router `data()` value rather than a raw Response. */
 function isDataWithInit(value: unknown): value is DataWithInit {
   return typeof value === "object" && value !== null && "data" in value;
 }

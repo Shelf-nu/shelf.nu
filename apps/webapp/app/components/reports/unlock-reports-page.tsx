@@ -19,12 +19,12 @@
 
 import { FileBarChartIcon } from "lucide-react";
 
+import { Button } from "~/components/shared/button";
 import { REPORTS_PLAN_TITLE } from "~/modules/reports/plan-copy";
 import { REPORT_CATEGORIES } from "~/modules/reports/registry";
 import type { ReportDefinition } from "~/modules/reports/types";
 
 import { ReportIcon } from "./report-icon";
-import { Button } from "../shared/button";
 
 /** Props for {@link UnlockReportsPage}. */
 type UnlockReportsPageProps = {

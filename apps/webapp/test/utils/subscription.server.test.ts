@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 /** Stand-in for the owner's tier lookup, re-created for every module load. */
 let getOrganizationTierLimitMock = vi.fn();
 
+/**
+ * Loads a fresh copy of `subscription.server` with premium features on or off.
+ * `premiumIsEnabled` is read once at import, so each case needs its own load.
+ *
+ * @param enablePremium - The `ENABLE_PREMIUM_FEATURES` value for this load
+ */
 async function loadSubscriptionModule(enablePremium: boolean) {
   vi.resetModules();
   getOrganizationTierLimitMock = vi.fn();

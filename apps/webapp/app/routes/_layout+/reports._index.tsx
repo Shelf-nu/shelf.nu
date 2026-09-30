@@ -103,6 +103,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   }
 }
 
+/**
+ * The reports index page. Shows the unlock page when the workspace's plan does
+ * not include reports, and the report cards grouped by category otherwise.
+ */
 export default function ReportsIndex() {
   const loaderData = useLoaderData<typeof loader>();
 
@@ -167,6 +171,12 @@ export default function ReportsIndex() {
   );
 }
 
+/**
+ * One report on the index: a link to the report when it is enabled, or a muted
+ * "Coming soon" card when it is not.
+ *
+ * @param props.report - The report's registry entry
+ */
 function ReportCard({ report }: { report: ReportDefinition }) {
   const cardContent = (
     <div

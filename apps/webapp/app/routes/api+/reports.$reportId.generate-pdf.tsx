@@ -88,6 +88,14 @@ function formatReturnStatus(
   return latenessMs > 0 ? `${value} late` : `${value} early`;
 }
 
+/**
+ * Returns the data the client renders into a report PDF, with the same filters
+ * as the report page and every row instead of one page.
+ *
+ * @returns `{ pdfMeta }` for the report named by `reportId`
+ * @throws {ShelfError} 403 when the caller lacks `reports: export` or the
+ *   workspace's plan does not include reports; 404 for an unknown report
+ */
 export const loader = async ({
   context,
   request,
@@ -114,13 +122,9 @@ export const loader = async ({
       action: PermissionAction.export,
     });
 
-    const [, prefs] = await Promise.all([
-      // Reports are part of the Plus and Team plans; refuse the data with a 403.
-      assertUserCanUseReports({ organizationId, organizations }),
-      // Acting user's resolved prefs drive both the timeframe label ordering and
-      // the PDF table date formatter below (resolved once, reused twice).
-      resolveUserFormatPrefsById(userId, getClientHint(request)),
-    ]);
+    // Reports are part of the Plus and Team plans. Refuse the data with a 403
+    // before anything else is read for this request.
+    await assertUserCanUseReports({ organizationId, organizations });
 
     // Validate report exists
     const reportDef = getReportById(reportId);
@@ -139,6 +143,13 @@ export const loader = async ({
       (searchParams.get("timeframe") as TimeframePreset) || "last_30d";
     const customFrom = searchParams.get("from");
     const customTo = searchParams.get("to");
+
+    // Acting user's resolved prefs drive both the timeframe label ordering and
+    // the PDF table date formatter below (resolved once, reused twice).
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
 
     const timeframe = resolveTimeframe(
       timeframePreset,
