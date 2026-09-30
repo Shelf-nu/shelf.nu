@@ -13472,6 +13472,99 @@ describe("bulkArchiveBookings", () => {
     );
   });
 
+  it("treats bookings that are already archived as done, not as a failure", async () => {
+    // A repeat click, or a list still showing rows the first click archived,
+    // sends bookings that are ARCHIVED already. Archiving them again is a
+    // no-op, not an error.
+    // why: every selected booking is already archived.
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b-archived-1",
+        status: BookingStatus.ARCHIVED,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b-archived-2",
+        status: BookingStatus.ARCHIVED,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["b-archived-1", "b-archived-2"],
+        organizationId: "org-1",
+        userId: "user-1",
+        role: OrganizationRoles.OWNER,
+      })
+    ).resolves.toBeUndefined();
+
+    expect(db.booking.updateMany).not.toHaveBeenCalled();
+    expect(bookingNoteService.createSystemBookingNote).not.toHaveBeenCalled();
+  });
+
+  it("archives the rest of a selection that includes already-archived bookings", async () => {
+    // why: one booking is archived already, one is completed.
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b-archived",
+        status: BookingStatus.ARCHIVED,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+      {
+        id: "b-complete",
+        status: BookingStatus.COMPLETE,
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+    // why: the guarded write flips the one COMPLETE row.
+    //@ts-expect-error mock setup
+    db.booking.updateMany.mockResolvedValue({ count: 1 });
+
+    await bulkArchiveBookings({
+      bookingIds: ["b-archived", "b-complete"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+    });
+
+    expect(db.booking.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["b-complete"] } }),
+      })
+    );
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an ineligible selection as the user's error, not a server fault", async () => {
+    // why: an ONGOING booking cannot be archived.
+    //@ts-expect-error mock setup
+    db.booking.findMany.mockResolvedValue([
+      {
+        id: "b-ongoing",
+        status: BookingStatus.ONGOING,
+        to: new Date(),
+        custodianUserId: null,
+        activeSchedulerReference: null,
+      },
+    ]);
+
+    await expect(
+      bulkArchiveBookings({
+        bookingIds: ["b-ongoing"],
+        organizationId: "org-1",
+        userId: "user-1",
+        role: OrganizationRoles.OWNER,
+      })
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
   it("throws if any selected booking is not archivable (e.g. ONGOING)", async () => {
     expect.assertions(1);
     //@ts-expect-error mock setup
