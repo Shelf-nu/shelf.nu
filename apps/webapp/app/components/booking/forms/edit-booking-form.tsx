@@ -63,7 +63,7 @@ const MAX_NAMED_UNAVAILABLE_ASSETS = 5;
  * booking to find a flag that is invisible on the row itself, because a
  * not-bookable asset still reads as AVAILABLE.
  */
-function UnavailableAssetsReason({
+export function UnavailableAssetsReason({
   assets,
 }: {
   assets: UnavailableAssetRow[];
