@@ -10,7 +10,6 @@
 
 import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ASSET_QUANTITY_FIGURE_LABELS } from "@shelf/labels";
 import { useReactToPrint } from "react-to-print";
 
 import { Dialog, DialogPortal } from "~/components/layout/dialog";
@@ -553,7 +552,7 @@ function AssetInventoryPreview({
             })}
           />
           <MetricBox
-            label={ASSET_QUANTITY_FIGURE_LABELS.FREE_NOW}
+            label="Available"
             value={pdfMeta.statusBreakdown.available}
           />
           <MetricBox
