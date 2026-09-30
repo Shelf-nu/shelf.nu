@@ -19,6 +19,7 @@ import { createSystemBookingNote } from "~/modules/booking-note/service.server";
 import { ShelfError } from "~/utils/error";
 import {
   assertModelUnitsNotReservedElsewhere,
+  assertOutstandingModelRequestsFit,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   getAssetModelAvailability,
@@ -3877,5 +3878,313 @@ describe("assertModelUnitsNotReservedElsewhere", () => {
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.message).toContain('"Dell Latitude 5550"');
     expect(error.message).toContain('"Arterial Puncture Simulator"');
+  });
+});
+
+describe("assertOutstandingModelRequestsFit", () => {
+  const OTHER_MODEL_ID = "model-0";
+
+  type RequestRow = {
+    assetModelId: string;
+    quantity: number;
+    fulfilledQuantity: number;
+  };
+
+  /** Stages a pool for every model the guard measures in the case. */
+  function stagePool({
+    total,
+    inCustody = 0,
+    namedElsewhere = 0,
+    requestedElsewhere = 0,
+  }: {
+    total: number;
+    inCustody?: number;
+    /** Units of the model other bookings hold as concrete `BookingAsset` rows. */
+    namedElsewhere?: number;
+    /** Units other bookings are still owed by model. */
+    requestedElsewhere?: number;
+  }) {
+    // @ts-expect-error mocked
+    db.asset.count.mockResolvedValue(total);
+    // @ts-expect-error mocked
+    db.custody.aggregate.mockResolvedValue({ _sum: { quantity: inCustody } });
+    // @ts-expect-error mocked
+    db.bookingAsset.aggregate.mockResolvedValue({
+      _sum: { quantity: namedElsewhere },
+    });
+    // @ts-expect-error mocked
+    db.bookingModelRequest.aggregate.mockResolvedValue({
+      _sum: { quantity: requestedElsewhere, fulfilledQuantity: 0 },
+    });
+  }
+
+  /** Stages the reservations this booking still carries. */
+  function stageOwnRequests(rows: RequestRow[]) {
+    // @ts-expect-error mocked
+    db.bookingModelRequest.findMany.mockResolvedValue(rows);
+  }
+
+  /** Stages units this booking holds by name, and which of them are in custody. */
+  function stageHeldUnits(
+    assetIds: string[],
+    { inCustodyIds = [] }: { inCustodyIds?: string[] } = {}
+  ) {
+    // @ts-expect-error mocked
+    db.asset.findMany.mockImplementation((args: unknown) => {
+      const requested =
+        (args as { where?: { assetModelId?: { in?: string[] } } })?.where
+          ?.assetModelId?.in ?? [];
+      return Promise.resolve(
+        assetIds.map((assetId) => ({
+          id: assetId,
+          assetModelId: requested[0] ?? MODEL_ID,
+          custody: inCustodyIds.includes(assetId) ? [{ id: "custody-1" }] : [],
+        }))
+      );
+    });
+  }
+
+  /** Every `AssetModel` id the guard locked, in the order it locked them. */
+  function lockedModelIds() {
+    return rawStatements()
+      .filter((statement) => statement.sql.includes('"AssetModel"'))
+      .map((statement) => statement.values[0]);
+  }
+
+  function guard({
+    window = { from, to },
+    action = "reserve booking",
+    alsoLockAssetModelIds,
+  }: {
+    window?: { from: Date | null; to: Date | null };
+    action?: string;
+    alsoLockAssetModelIds?: string[];
+  } = {}) {
+    return assertOutstandingModelRequestsFit({
+      bookingId: BOOKING_ID,
+      organizationId: ORG_ID,
+      from: window.from,
+      to: window.to,
+      action,
+      alsoLockAssetModelIds,
+      // why: the mocked `db` stands in for the interactive transaction, the
+      // same way `$transaction` hands the callback `db` in this file.
+      tx: db as never,
+    });
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // The org-scoped lock finds every model it is asked for.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db.$queryRaw as any).mockResolvedValue([{ id: MODEL_ID }]);
+    stageOwnRequests([]);
+    // @ts-expect-error mocked
+    db.asset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mocked
+    db.assetModel.findMany.mockResolvedValue([
+      { id: MODEL_ID, name: "Dell Latitude 5550" },
+      { id: OTHER_MODEL_ID, name: "Arterial Puncture Simulator" },
+    ]);
+    stagePool({ total: 3 });
+  });
+
+  it("does nothing when the booking has no dates yet", async () => {
+    expect.assertions(2);
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 9, fulfilledQuantity: 0 },
+    ]);
+
+    await guard({ window: { from: null, to: null } });
+
+    // Nothing to overlap, so the reservations are not even read.
+    expect(db.bookingModelRequest.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("reads only this workspace's reservations for this booking", async () => {
+    expect.assertions(1);
+
+    await guard();
+
+    expect(db.bookingModelRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bookingId: BOOKING_ID,
+          booking: { organizationId: ORG_ID },
+          fulfilledAt: null,
+        }),
+      })
+    );
+  });
+
+  it("measures nothing when every reserved unit is already assigned", async () => {
+    expect.assertions(2);
+    // A pool with nothing free. The reservation is fully served by units the
+    // booking holds by name, so it owes nothing and takes nothing more.
+    stagePool({ total: 2, namedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 2 },
+    ]);
+
+    await expect(guard()).resolves.toBeUndefined();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("locks every model, in sorted order, before measuring any pool", async () => {
+    expect.assertions(3);
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+      { assetModelId: OTHER_MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    await guard();
+
+    // Values follow the template: [assetModelId, organizationId].
+    expect(lockedModelIds()).toEqual([OTHER_MODEL_ID, MODEL_ID]);
+    expect(
+      rawStatements().every((statement) => statement.values[1] === ORG_ID)
+    ).toBe(true);
+
+    const lastLock = (db.$queryRaw as ReturnType<typeof vitest.fn>).mock
+      .invocationCallOrder[1];
+    const firstRead = (db.asset.count as ReturnType<typeof vitest.fn>).mock
+      .invocationCallOrder[0];
+    expect(lastLock).toBeLessThan(firstRead);
+  });
+
+  it("takes the caller's next models in the same lock pass", async () => {
+    expect.assertions(1);
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    // The by-name guard measures `OTHER_MODEL_ID` after this one returns. A
+    // second sorted pass could hold what a concurrent transaction waits for, so
+    // both models are locked here, in one order.
+    await guard({ alsoLockAssetModelIds: [OTHER_MODEL_ID] });
+
+    expect(lockedModelIds()).toEqual([OTHER_MODEL_ID, MODEL_ID]);
+  });
+
+  it("refuses a model whose pool is fully booked by name elsewhere", async () => {
+    expect.assertions(5);
+    // Nobody else has RESERVED this model BY MODEL, so a guard that only
+    // measured models with foreign reservations would wave this through. The
+    // units are gone all the same: another booking holds all three by name.
+    stagePool({ total: 3, namedElsewhere: 3, requestedElsewhere: 0 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 3, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard().catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({ status: 400, shouldBeCaptured: false });
+    expect(error.message).toContain("Cannot reserve booking.");
+    expect(error.message).toContain(
+      '"Dell Latitude 5550": 3 units still to assign, but only 0 can be booked.'
+    );
+    expect(error.message).toContain(
+      "3 units booked by name on other bookings counts against the pool"
+    );
+  });
+
+  it("allows outstanding units that still fit the free pool", async () => {
+    expect.assertions(2);
+    // Three units, one booked by name elsewhere: two are free and two are owed.
+    stagePool({ total: 3, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+
+    await expect(guard()).resolves.toBeUndefined();
+    expect(db.asset.count).toHaveBeenCalled();
+  });
+
+  it("counts only the units still unassigned on the booking's own reservation", async () => {
+    expect.assertions(1);
+    // Two free units, a reservation of four with two already delivered. The
+    // delivered pair is named on the booking, so only the remaining two
+    // compete; counting all four would refuse a booking that fits.
+    stagePool({ total: 4, namedElsewhere: 2 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 4, fulfilledQuantity: 2 },
+    ]);
+
+    await expect(guard()).resolves.toBeUndefined();
+  });
+
+  it("charges the units the booking already holds by name", async () => {
+    expect.assertions(2);
+    // Three free units, two of them already on this booking by name, two more
+    // still owed by model. Four units for a pool of three.
+    stagePool({ total: 3 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+    stageHeldUnits(["asset-1", "asset-2"]);
+
+    const error = await guard().catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.message).toContain(
+      "This booking also holds 2 units of it by name."
+    );
+  });
+
+  it("does not charge a named unit that a custodian holds", async () => {
+    expect.assertions(1);
+    // Three units, one in custody: two are promisable. The booking holds the
+    // in-custody unit by name, which the pool already deducted, so charging it
+    // again would refuse a booking that takes only the two free units.
+    stagePool({ total: 3, inCustody: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 2, fulfilledQuantity: 0 },
+    ]);
+    stageHeldUnits(["asset-held"], { inCustodyIds: ["asset-held"] });
+
+    await expect(guard()).resolves.toBeUndefined();
+  });
+
+  it("refuses a model that is not in the caller's workspace", async () => {
+    expect.assertions(2);
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db.$queryRaw as any).mockResolvedValue([]);
+
+    await expect(guard()).rejects.toMatchObject({ status: 404 });
+    expect(db.asset.count).not.toHaveBeenCalled();
+  });
+
+  it("names every model that does not fit in one refusal", async () => {
+    expect.assertions(3);
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+      { assetModelId: OTHER_MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard().catch((cause) => cause);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.message).toContain('"Dell Latitude 5550"');
+    expect(error.message).toContain('"Arterial Puncture Simulator"');
+  });
+
+  it("completes the refusal with the caller's own verb", async () => {
+    expect.assertions(1);
+    stagePool({ total: 1, namedElsewhere: 1 });
+    stageOwnRequests([
+      { assetModelId: MODEL_ID, quantity: 1, fulfilledQuantity: 0 },
+    ]);
+
+    const error = await guard({ action: "check out booking" }).catch(
+      (cause) => cause
+    );
+
+    expect(error.message).toContain("Cannot check out booking.");
   });
 });
