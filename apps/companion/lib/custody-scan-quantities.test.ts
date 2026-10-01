@@ -475,11 +475,13 @@ test("kits and assets are reported apart, since they are two requests", () => {
   assert.deepEqual(summary.rowErrors, { "qr-2": "Kit is not in custody." });
 });
 
-test("a quantity row whose scan had no type does not hide the rows that moved", () => {
-  // The untyped row went as a whole asset and the server skipped it; the
-  // typed row's units moved. Only the server's moved ids decide that.
+test("an untyped row the server may have skipped stays, and the rows that moved leave", () => {
+  // The untyped row went as a whole asset and the server skipped one
+  // quantity-tracked asset; the typed row's units moved. Only the server's
+  // moved ids decide the quantity rows, and the untyped row stays.
   const plan = planCustodySubmit("assign_custody", [
     { ...individualRow("qr-1", "Old scan"), assetType: undefined },
+    individualRow("qr-3", "Tripod"),
     qtyRow("qr-2", "Cable", facts(), 2),
   ]);
   const summary = summarizeCustodySubmit(
@@ -493,9 +495,10 @@ test("a quantity row whose scan had no type does not hide the rows that moved", 
     },
     { custodianName: "Jane", isSelfService: false }
   );
-  assert.deepEqual(summary.rowErrors, {});
-  assert.ok(summary.succeededQrIds.includes("qr-2"));
-  assert.ok(summary.message.includes("1 quantity-tracked asset skipped."));
+  assert.equal(summary.title, "Partly done");
+  assert.deepEqual(summary.succeededQrIds.sort(), ["qr-2", "qr-3"]);
+  assert.deepEqual(Object.keys(summary.rowErrors), ["qr-1"]);
+  assert.ok(summary.rowErrors["qr-1"].startsWith("The server skipped"));
 });
 
 test("a server that ignores quantities keeps the quantity rows and says why", () => {

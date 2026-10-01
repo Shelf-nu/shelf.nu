@@ -325,7 +325,8 @@ type CustodySubmitOutcome = {
   kitError: string | null;
   /**
    * Quantity-tracked assets the asset request skipped: rows that went as
-   * whole assets because their scan carried no asset type.
+   * whole assets because their scan carried no asset type. The server gives
+   * only the count, so every untyped row stays in the list when it is set.
    */
   skippedQuantityTracked?: number;
   /**
@@ -340,6 +341,10 @@ type CustodySubmitOutcome = {
    */
   refusedQuantities?: { assetId: string; message: string }[];
 };
+
+/** Shown on rows that may have been skipped as quantity-tracked assets. */
+const SKIPPED_UNTYPED_ERROR =
+  "The server skipped quantity-tracked assets sent without a unit count, and this may be one. Scan it again to check.";
 
 /** Shown on quantity rows a server without `quantities` support skipped. */
 const UNITS_NOT_SUPPORTED_ERROR =
@@ -469,8 +474,27 @@ export function summarizeCustodySubmit(
         outcome.assetError
       );
     } else {
-      succeededQrIds.push(...plan.individual.map((row) => row.qrId));
-      done.individual = plan.individual.map((row) => row.title);
+      // A skipped count means some rows went as whole assets although they
+      // are tracked by quantity; only a row whose scan carried no asset type
+      // can be one of them. The server does not say which, so every such row
+      // stays in the list. Retrying one that did move is refused by the
+      // server, so keeping it cannot move anything twice.
+      const skipped = (outcome.skippedQuantityTracked ?? 0) > 0;
+      const unconfirmed = plan.individual.filter(
+        (row) => skipped && row.assetType === undefined
+      );
+      const confirmed = plan.individual.filter(
+        (row) => !unconfirmed.includes(row)
+      );
+      succeededQrIds.push(...confirmed.map((row) => row.qrId));
+      done.individual = confirmed.map((row) => row.title);
+      if (unconfirmed.length) {
+        fail(
+          unconfirmed.map((row) => row.qrId),
+          describeItems({ individual: unconfirmed.map((row) => row.title) }),
+          SKIPPED_UNTYPED_ERROR
+        );
+      }
 
       if (plan.quantityRows.length && !outcome.movedQuantityAssetIds) {
         // The server did not report moving any units, so it predates
@@ -524,19 +548,6 @@ export function summarizeCustodySubmit(
   }
   // A server that sends no asset type makes quantity-tracked rows read as
   // whole assets, which it then skips. Say so rather than claim they moved.
-  // Skipped rows are quantity-tracked assets whose scan carried no asset
-  // type, so they went as whole assets. A server that ignored `quantities`
-  // altogether is already reported on the quantity rows above.
-  const skipped = outcome.skippedQuantityTracked ?? 0;
-  const unitsIgnored =
-    plan.quantityRows.length > 0 && !outcome.movedQuantityAssetIds;
-  if (skipped > 0 && !unitsIgnored) {
-    paragraphs.push(
-      `${skipped} quantity-tracked asset${skipped === 1 ? "" : "s"} skipped. ${
-        mode === "assign_custody" ? "Assign" : "Release"
-      } quantities from the asset's detail screen.`
-    );
-  }
   if (failureLines.length > 0) {
     paragraphs.push(
       ["Still in your list:", ...failureLines.map((line) => `• ${line}`)].join(
