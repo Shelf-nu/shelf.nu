@@ -5119,6 +5119,13 @@ export async function createAssetsFromContentImport({
  * ones that are missing. Names match regardless of case, the same way the
  * database's unique index on location names compares them.
  *
+ * The lower-cased key only groups the file's spellings and matches the batch
+ * lookup. A name the batch missed is looked up once more on its own before it
+ * is created, so the database decides what counts as the same name:
+ * JavaScript and Postgres can lower-case a letter differently (`İ`, or a
+ * word-final `Σ`), and a create the unique index sees as a repeat would fail
+ * the restore.
+ *
  * @param args.names - Location names from the backup file, repeats allowed.
  * @returns Location ids keyed by lower-cased name.
  */
@@ -5147,24 +5154,28 @@ async function findOrCreateLocationsByName({
   // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
   // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
   // location name act as wildcards.
-  const existing = await db.location.findMany({
-    where: {
-      organizationId,
-      name: { in: [...spellings.values()], mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  for (const location of existing) {
+  const findByNames = (locationNames: string[]) =>
+    db.location.findMany({
+      where: {
+        organizationId,
+        name: { in: locationNames, mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+  for (const location of await findByNames([...spellings.values()])) {
     locationIds.set(location.name.toLowerCase(), location.id);
   }
 
   for (const [key, name] of spellings) {
     if (locationIds.has(key)) continue;
-    const created = await db.location.create({
-      data: { ...details.get(key), name, organizationId, userId },
-      select: { id: true },
-    });
-    locationIds.set(key, created.id);
+    const [existing] = await findByNames([name]);
+    const location =
+      existing ??
+      (await db.location.create({
+        data: { ...details.get(key), name, organizationId, userId },
+        select: { id: true },
+      }));
+    locationIds.set(key, location.id);
   }
 
   return locationIds;
@@ -5315,14 +5326,14 @@ export async function createAssetsFromBackupImport({
         backupType !== AssetType.QUANTITY_TRACKED
       ) {
         const modelPayload = asset.assetModel as { name: string };
+        // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+        // Asset model names are not unique, so the oldest match wins.
         const existingModel = await db.assetModel.findFirst({
           where: {
             organizationId,
-            name: {
-              equals: modelPayload.name.trim(),
-              mode: "insensitive",
-            },
+            name: { in: [modelPayload.name.trim()], mode: "insensitive" },
           },
+          orderBy: { createdAt: "asc" },
         });
         if (existingModel) {
           Object.assign(d.data, { assetModelId: existingModel.id });
@@ -5396,6 +5407,27 @@ export async function createAssetsFromBackupImport({
             quantity,
           }));
         Object.assign(d.data, { assetLocations: { create: placements } });
+      }
+
+      /** A pool's placements can hold more units than its stock: when a
+       * consume cannot tell which of several locations lost the units, the
+       * app lowers the stock and leaves the placements as they were (see
+       * `reconcileManualPlacementsForStockDecrease`). The restore takes the
+       * same two steps: it creates the pool with stock for its placements,
+       * then lowers the stock to the backup's quantity. Trimming a placement
+       * instead would record a location's count that was never true. */
+      const placedUnits = [...unitsByLocationId.values()].reduce(
+        (sum, units) => sum + units,
+        0
+      );
+      const stockBelowPlacements =
+        backupType === AssetType.QUANTITY_TRACKED &&
+        backupQuantity !== undefined &&
+        placedUnits > backupQuantity
+          ? backupQuantity
+          : undefined;
+      if (stockBelowPlacements !== undefined) {
+        Object.assign(d.data, { quantity: placedUnits });
       }
 
       /** Custody. Custodians travel by name, matched regardless of case like
@@ -5524,6 +5556,15 @@ export async function createAssetsFromBackupImport({
 
       /** Create the Asset */
       const { id: assetId } = await db.asset.create(d);
+      if (stockBelowPlacements !== undefined) {
+        // A write of its own, after the create has committed: the placement
+        // check is deferred to commit, and lowering the stock writes no
+        // placement, so nothing checks the sum again.
+        await db.asset.update({
+          where: { id: assetId, organizationId },
+          data: { quantity: stockBelowPlacements },
+        });
+      }
 
       // Activity event: ASSET_CREATED at the moment of creation.
       // The per-note createMany below restores HISTORICAL notes with
