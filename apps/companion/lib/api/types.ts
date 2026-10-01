@@ -733,6 +733,11 @@ export type BulkActionResponse = {
    * for them; the rest of the request was. Absent when every write landed.
    */
   refusedQuantities?: { assetId: string; title: string; message: string }[];
+  /**
+   * Bulk custody: asset ids whose units the server moved. Present on every
+   * response from a server that takes `quantities`; absent from older ones.
+   */
+  movedQuantityAssetIds?: string[];
 };
 
 export type BookingStatus =

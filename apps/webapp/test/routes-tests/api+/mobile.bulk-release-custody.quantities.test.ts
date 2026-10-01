@@ -154,7 +154,11 @@ describe("POST /api/mobile/bulk-release-custody with quantities", () => {
     });
 
     expect(status).toBe(200);
-    expect(body).toEqual({ success: true, skippedQuantityTracked: 0 });
+    expect(body).toEqual({
+      success: true,
+      skippedQuantityTracked: 0,
+      movedQuantityAssetIds: ["qty-1"],
+    });
     expect(releaseQuantity).toHaveBeenCalledTimes(1);
     expect(releaseQuantity).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -291,6 +295,7 @@ describe("POST /api/mobile/bulk-release-custody with quantities", () => {
         message: "Cannot release 3 units. Only 1 unit in custody.",
       },
     ]);
+    expect(body.movedQuantityAssetIds).toEqual(["qty-2"]);
     expect(releaseQuantity).toHaveBeenCalledTimes(2);
   });
 

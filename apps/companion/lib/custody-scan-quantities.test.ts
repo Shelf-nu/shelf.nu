@@ -324,7 +324,11 @@ test("the success message counts assets and units separately", () => {
   const summary = summarizeCustodySubmit(
     "assign_custody",
     plan,
-    { assetError: null, kitError: null },
+    {
+      assetError: null,
+      kitError: null,
+      movedQuantityAssetIds: ["asset-qr-4", "asset-qr-5"],
+    },
     { custodianName: "Jane", isSelfService: false }
   );
 
@@ -367,7 +371,11 @@ test("mixed units are counted as units", () => {
   const summary = summarizeCustodySubmit(
     "release_custody",
     plan,
-    { assetError: null, kitError: null },
+    {
+      assetError: null,
+      kitError: null,
+      movedQuantityAssetIds: ["asset-qr-1", "asset-qr-2"],
+    },
     { isSelfService: false }
   );
   assert.equal(
@@ -383,7 +391,11 @@ test("one quantity row is named with its units", () => {
   const summary = summarizeCustodySubmit(
     "assign_custody",
     plan,
-    { assetError: null, kitError: null },
+    {
+      assetError: null,
+      kitError: null,
+      movedQuantityAssetIds: ["asset-qr-1"],
+    },
     { isSelfService: true }
   );
   assert.equal(summary.message, 'You have custody of 5 pcs of "Cable".');
@@ -424,6 +436,7 @@ test("a quantity row the server refused after its checks stays with the reason, 
     {
       assetError: null,
       kitError: null,
+      movedQuantityAssetIds: ["asset-qr-3"],
       refusedQuantities: [{ assetId: "asset-qr-2", message: reason }],
     },
     { custodianName: "Jane", isSelfService: false }
@@ -462,7 +475,30 @@ test("kits and assets are reported apart, since they are two requests", () => {
   assert.deepEqual(summary.rowErrors, { "qr-2": "Kit is not in custody." });
 });
 
-test("a server that skips the units keeps the quantity rows and says why", () => {
+test("a quantity row whose scan had no type does not hide the rows that moved", () => {
+  // The untyped row went as a whole asset and the server skipped it; the
+  // typed row's units moved. Only the server's moved ids decide that.
+  const plan = planCustodySubmit("assign_custody", [
+    { ...individualRow("qr-1", "Old scan"), assetType: undefined },
+    qtyRow("qr-2", "Cable", facts(), 2),
+  ]);
+  const summary = summarizeCustodySubmit(
+    "assign_custody",
+    plan,
+    {
+      assetError: null,
+      kitError: null,
+      skippedQuantityTracked: 1,
+      movedQuantityAssetIds: ["asset-qr-2"],
+    },
+    { custodianName: "Jane", isSelfService: false }
+  );
+  assert.deepEqual(summary.rowErrors, {});
+  assert.ok(summary.succeededQrIds.includes("qr-2"));
+  assert.ok(summary.message.includes("1 quantity-tracked asset skipped."));
+});
+
+test("a server that ignores quantities keeps the quantity rows and says why", () => {
   const plan = planCustodySubmit("assign_custody", [
     individualRow("qr-1", "Tripod"),
     qtyRow("qr-2", "Cable", facts(), 2),

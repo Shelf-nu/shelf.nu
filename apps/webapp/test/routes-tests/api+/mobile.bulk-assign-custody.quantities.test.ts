@@ -158,7 +158,11 @@ describe("POST /api/mobile/bulk-assign-custody with quantities", () => {
     });
 
     expect(status).toBe(200);
-    expect(body).toEqual({ success: true, skippedQuantityTracked: 0 });
+    expect(body).toEqual({
+      success: true,
+      skippedQuantityTracked: 0,
+      movedQuantityAssetIds: ["qty-1"],
+    });
     expect(checkOutQuantity).toHaveBeenCalledTimes(1);
     expect(checkOutQuantity).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -183,7 +187,11 @@ describe("POST /api/mobile/bulk-assign-custody with quantities", () => {
     });
 
     expect(status).toBe(200);
-    expect(body).toEqual({ success: true, skippedQuantityTracked: 0 });
+    expect(body).toEqual({
+      success: true,
+      skippedQuantityTracked: 0,
+      movedQuantityAssetIds: ["qty-1", "qty-2"],
+    });
     expect(checkOutQuantity).toHaveBeenCalledTimes(2);
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
@@ -249,6 +257,7 @@ describe("POST /api/mobile/bulk-assign-custody with quantities", () => {
     expect(body).toEqual({
       success: true,
       skippedQuantityTracked: 0,
+      movedQuantityAssetIds: ["qty-2"],
       refusedQuantities: [
         {
           assetId: "qty-1",

@@ -324,11 +324,15 @@ type CustodySubmitOutcome = {
   /** The kit request's error; null when it succeeded or was not sent. */
   kitError: string | null;
   /**
-   * Quantity-tracked assets the asset request skipped. A server that takes a
-   * `quantities` map never skips a row that carries one, so a count here
-   * means the server predates the map and moved none of the units.
+   * Quantity-tracked assets the asset request skipped: rows that went as
+   * whole assets because their scan carried no asset type.
    */
   skippedQuantityTracked?: number;
+  /**
+   * Asset ids whose units the server moved. Absent from a server that
+   * predates `quantities`, which then moved none of them.
+   */
+  movedQuantityAssetIds?: string[];
   /**
    * Quantity rows whose write the server refused after its checks passed (a
    * concurrent change to that asset). Nothing was written for them; the rest
@@ -468,26 +472,29 @@ export function summarizeCustodySubmit(
       succeededQrIds.push(...plan.individual.map((row) => row.qrId));
       done.individual = plan.individual.map((row) => row.title);
 
-      if (
-        (outcome.skippedQuantityTracked ?? 0) > 0 &&
-        plan.quantityRows.length
-      ) {
+      if (plan.quantityRows.length && !outcome.movedQuantityAssetIds) {
+        // The server did not report moving any units, so it predates
+        // `quantities` and ignored them: none of these rows moved.
         fail(
           plan.quantityRows.map((row) => row.qrId),
           describeItems({ quantityRows: plan.quantityRows }),
           UNITS_NOT_SUPPORTED_ERROR
         );
       } else {
+        const moved = new Set(outcome.movedQuantityAssetIds ?? []);
         const refused = new Map(
           (outcome.refusedQuantities ?? []).map((r) => [r.assetId, r.message])
         );
         for (const row of plan.quantityRows) {
-          const reason = refused.get(row.assetId);
-          if (reason) {
-            fail([row.qrId], describeItems({ quantityRows: [row] }), reason);
-          } else {
+          if (moved.has(row.assetId)) {
             succeededQrIds.push(row.qrId);
             done.quantityRows.push(row);
+          } else {
+            fail(
+              [row.qrId],
+              describeItems({ quantityRows: [row] }),
+              refused.get(row.assetId) ?? "Not moved. Please try again."
+            );
           }
         }
       }
@@ -517,8 +524,13 @@ export function summarizeCustodySubmit(
   }
   // A server that sends no asset type makes quantity-tracked rows read as
   // whole assets, which it then skips. Say so rather than claim they moved.
+  // Skipped rows are quantity-tracked assets whose scan carried no asset
+  // type, so they went as whole assets. A server that ignored `quantities`
+  // altogether is already reported on the quantity rows above.
   const skipped = outcome.skippedQuantityTracked ?? 0;
-  if (skipped > 0 && plan.quantityRows.length === 0) {
+  const unitsIgnored =
+    plan.quantityRows.length > 0 && !outcome.movedQuantityAssetIds;
+  if (skipped > 0 && !unitsIgnored) {
     paragraphs.push(
       `${skipped} quantity-tracked asset${skipped === 1 ? "" : "s"} skipped. ${
         mode === "assign_custody" ? "Assign" : "Release"

@@ -1915,6 +1915,7 @@ function ScannerContent() {
         kitError: kitResult.error,
         skippedQuantityTracked: assetResult.data?.skippedQuantityTracked ?? 0,
         refusedQuantities: assetResult.data?.refusedQuantities,
+        movedQuantityAssetIds: assetResult.data?.movedQuantityAssetIds,
       },
       audience
     );

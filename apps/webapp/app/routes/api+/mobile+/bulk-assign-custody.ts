@@ -34,7 +34,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * consistent behavior (status updates, notes, validation).
  *
  * Body: { assetIds: string[], custodianId: string, quantities?: Record<assetId, units> }
- * Response: { success: true, skippedQuantityTracked, refusedQuantities? }
+ * Response: { success: true, skippedQuantityTracked, movedQuantityAssetIds, refusedQuantities? }
  *
  * `quantities` comes from the companion's Scan tab, which gives each
  * quantity-tracked row a unit count. An asset named there is assigned unit by
@@ -181,9 +181,15 @@ export async function action({ request }: ActionFunctionArgs) {
     // count so the app can say so, as the web's assets.bulk-assign-custody.ts
     // does. `refusedQuantities` is present only when a per-unit write was
     // refused; nothing was written for those assets.
+    // `movedQuantityAssetIds` tells the app which unit rows went, so it never
+    // reads a skipped count as "this server ignored the units".
+    const refusedIds = new Set(refusedQuantities.map((r) => r.assetId));
     return data({
       success: true,
       skippedQuantityTracked,
+      movedQuantityAssetIds: quantityAssetIds.filter(
+        (id) => !refusedIds.has(id)
+      ),
       ...(refusedQuantities.length ? { refusedQuantities } : {}),
     });
   } catch (cause) {
