@@ -38,6 +38,7 @@ import { PickerField } from "@/components/asset-edit/picker-field";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { ValuationField } from "@/components/asset-edit/valuation-field";
+import { valuationFromInput } from "@/lib/asset-valuation";
 
 /**
  * Build the JSON value payload for a single custom field update.
@@ -182,9 +183,7 @@ export default function EditAssetScreen() {
     }
 
     // Valuation
-    const numVal = form.valuation.trim()
-      ? parseFloat(form.valuation.trim())
-      : null;
+    const numVal = valuationFromInput(form.valuation);
     const origVal = form.originalAsset?.valuation ?? null;
     if (numVal !== origVal) {
       payload.valuation = numVal;
