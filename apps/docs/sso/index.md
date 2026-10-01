@@ -21,9 +21,9 @@ Most customers create a dedicated account for this purpose using an address such
 
 If you already have a workspace that was used for testing or trials (for example one created with a few standard accounts), decide whether you want to **keep it together with all the assets inside it**, or start fresh. Let your Shelf contact know so the right workspace is connected to SSO.
 
-### 3. Existing standard accounts on the domain must be removed [#](#3-existing-standard-accounts)
+### 3. Existing standard accounts on the domain [#](#3-existing-standard-accounts)
 
-Any existing **standard (non-SSO) accounts** that use the SSO domain — for example `jane@yourdomain.com` and `joe@yourdomain.com` — must be removed so that new accounts can be created through SSO login. Once an email is linked to a standard account it cannot log in via SSO, and once the domain is an SSO domain no new standard accounts can be created on it. Share the list of these accounts with your Shelf contact, who will take care of removing them at the right point in the setup.
+Any existing **standard (non-SSO) accounts** that use the SSO domain, for example `jane@yourdomain.com` and `joe@yourdomain.com`, cannot log in via SSO as they are, and once the domain is an SSO domain no new standard accounts can be created on it. Shelf can convert these accounts to SSO while keeping their data and memberships (see [Existing standard accounts on your domain](#existing-standard-accounts-on-your-domain)). Share the list of these accounts with your Shelf contact, who will convert them at the right point in the setup.
 
 ### 4. Plan your group-to-role mapping [#](#4-plan-group-mapping)
 
@@ -62,8 +62,19 @@ Accounts signing in with SSO have certain limitations. The following sections ou
 - An SSO user will not be able to update or reset their password since the company administrator manages their access via the identity provider.
 - An SSO user will not be able to buy their own subscription to Shelf.
 - If an SSO user with the following email of huis@zaans.com attempts to sign in with email, they will be refused access to shelf. Once a email is linked to an SSO account, they are not able to create a normal account with the same email
-- If a user with email huis@zaans.com already exists as a standard user, they will not be able to login via SSO. Please contact support to get this resolved.
 - An SSO user will see and be added only to organizations that are mapped to their groups inside the IDP
+
+### Existing standard accounts on your domain [#](#existing-standard-accounts-on-your-domain)
+
+If users on your domain already have standard (email/password) Shelf accounts, for example from earlier testing, Shelf can convert them to SSO during onboarding. The account keeps the same identity, data and workspace memberships: only the login method changes to SSO.
+
+- Conversion is performed by Shelf staff from the admin dashboard once your SSO provider is configured for the domain.
+- **Workspace owners are not converted.** At least one non-SSO owner must remain per workspace as an administrative fallback. Re-assign ownership first if an owner needs SSO.
+- Converting an account signs the user out of every existing session and removes their password. From then on they sign in only via SSO.
+- **Group mappings decide the role.** If the workspace's SSO settings map identity provider groups to roles (the Administrator, Self service and Base group fields), every SSO login sets the user's role from their groups. A converted user whose groups do not map to any role loses access to that workspace at their first SSO login. If no group mappings are configured, existing workspace memberships and roles are kept as they are. Set up the groups (or leave the mappings empty) before converting.
+- If a converted user signs in via SSO before the conversion completes, Shelf reconciles their account automatically on that login and asks them to sign in once more.
+
+For SSO to match converted accounts seamlessly, your identity provider's **NameID value must be the user's email address** (see the provider setup guides). If it is not, the account is reconciled on the first SSO login and the user is asked to sign in once more.
 
 ### Disable SSO for your team [#](#disable-sso-for-your-team)
 

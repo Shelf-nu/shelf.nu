@@ -6,6 +6,7 @@ import {
   deleteAuthAccount,
   getAuthUserById,
 } from "~/modules/auth/service.server";
+import { reconcileDuplicateSsoLogin } from "~/modules/auth/sso-conversion.server";
 import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
@@ -23,10 +24,29 @@ import { emailMatchesDomains, isValidDomain, parseDomains } from "./misc";
  * - Throwing an error if the user is already connected to an email account
  * - Linking the user to the correct org if SCIM is configured
  *
+ * Order of checks for an existing Shelf user (matched by email):
+ * 1. The authenticated auth user IS the Shelf user (`authSession.userId === user.id`):
+ *    a normal login, including an account converted to SSO whose pre-seeded
+ *    identity matched. Update from SSO without looking up the auth user.
+ * 2. Look up the Shelf user's auth account. Only a genuine 404 counts as
+ *    "no auth account"; any other failure is rethrown.
+ * 3. No auth account and the ids differ: a SCIM-provisioned placeholder. Re-key
+ *    the Shelf user to the SSO auth UUID.
+ * 4. Auth account exists, the ids differ and the user is approved for SSO
+ *    (`user.sso`): Supabase created a duplicate SSO auth user. Reconcile it onto
+ *    the original account via `reconcileDuplicateSsoLogin`, then reject with a
+ *    400 asking the user to sign in again, because the current session belongs
+ *    to the deleted duplicate. The caller must not issue that session.
+ * 5. Auth account is an email/password account and the user is not approved:
+ *    reject and point the user to support.
+ * 6. Anything else: update from SSO.
+ *
  * Cases to handle:
  * - [x] Auth Account & User exists in our database - we just login the user
  * - [x] Auth Account exists but User doesn't exist in our database - we create a new user connecting it to authUser and login the user
  * - [x] Auth Account(SSO version) doesn't exist but User exists in our database - We show an error as we dont allow SSO users to have an email based identity
+ * - [x] Standard account converted to SSO logs in and Supabase links the pre-seeded identity - normal login on the original UUID
+ * - [x] Standard account converted to SSO logs in and Supabase creates a duplicate SSO auth user - reconcile onto the original and ask the user to sign in again
  * - [x] Auth account exists but is not present in IDP - an employee gets removed from an app. This is handled by IDP
  * - [x] Auth account DOESN'T exist and is not added to IDP - this is handled by IDP. They give an error if its not authenticated
  * - [x] User tries to reset password for a user that is only SSO
@@ -72,10 +92,23 @@ export async function resolveUserAndOrgForSsoCallback({
       select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
-    // If user exists, check if they're trying to convert from email to SSO
     if (user) {
+      // The authenticated auth user is this Shelf user. This also covers a
+      // converted account: Supabase matched the pre-seeded SSO identity and
+      // signed in the original UUID, whose auth `provider` can still read
+      // "email", so the provider checks below must not run for it.
+      if (authSession.userId === user.id) {
+        const response = await updateUserFromSSO(authSession, user, {
+          firstName,
+          lastName,
+          groups,
+          contactInfo,
+        });
+        return { user: response.user, org: response.org };
+      }
+
       // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
-      // Supabase auth account yet). Only swallow a genuine 404 — rethrow
+      // Supabase auth account yet). Only swallow a genuine 404. Rethrow
       // transient Supabase/admin errors so they aren't misread as a missing
       // user and trigger the destructive ID rewrite below.
       let authUser;
@@ -88,17 +121,6 @@ export async function resolveUserAndOrgForSsoCallback({
         } else {
           throw error;
         }
-      }
-
-      if (authUser?.app_metadata?.provider === "email") {
-        throw new ShelfError({
-          cause: null,
-          title: "User already exists",
-          message:
-            "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
-          label: "Auth",
-          shouldBeCaptured: false,
-        });
       }
 
       // SCIM-provisioned user: Shelf user exists but has no Supabase auth
@@ -123,6 +145,42 @@ export async function resolveUserAndOrgForSsoCallback({
           contactInfo,
         });
         return { user: response.user, org: response.org };
+      }
+
+      // A different auth user authenticated for an account approved for SSO:
+      // Supabase created a duplicate SSO auth user because no pre-seeded
+      // identity matched. Merge it back onto the original account. Only
+      // `user.sso` accounts are merged automatically; un-approved accounts
+      // fall through to the support message below.
+      if (user.sso) {
+        await reconcileDuplicateSsoLogin({
+          authSession,
+          existingUser: { id: user.id, email: user.email, sso: user.sso },
+        });
+
+        // The current session belongs to the duplicate that was just deleted,
+        // and a session for the original cannot be minted server-side. The
+        // next SSO login matches the moved identity and lands on the original.
+        throw new ShelfError({
+          cause: null,
+          status: 400,
+          title: "Your account is now SSO-enabled",
+          message:
+            "We've moved your account to single sign-on. Please sign in again with your organization's SSO to continue.",
+          label: "Auth",
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (authUser?.app_metadata?.provider === "email") {
+        throw new ShelfError({
+          cause: null,
+          title: "User already exists",
+          message:
+            "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
+          label: "Auth",
+          shouldBeCaptured: false,
+        });
       }
 
       // Existing SSO user - update their info

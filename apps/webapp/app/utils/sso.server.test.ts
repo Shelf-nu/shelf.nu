@@ -32,9 +32,16 @@ vi.mock("~/modules/user/service.server", () => ({
   updateUserFromSSO: vi.fn(),
 }));
 
+// why: the reconcile engine writes to the auth schema and is covered by its own
+// tests; here we only verify when the callback hands off to it
+vi.mock("~/modules/auth/sso-conversion.server", () => ({
+  reconcileDuplicateSsoLogin: vi.fn(),
+}));
+
 const mockDb = await import("~/database/db.server");
 const mockAuth = await import("~/modules/auth/service.server");
 const mockUser = await import("~/modules/user/service.server");
+const mockConversion = await import("~/modules/auth/sso-conversion.server");
 
 import {
   checkDomainSSOStatus,
@@ -70,6 +77,12 @@ const shelfUser = {
 };
 
 /**
+ * A standard (email/password) account whose Shelf id is its own auth UUID,
+ * different from the SSO auth user that just authenticated.
+ */
+const ORIGINAL_UUID = "original-standard-account-uuid";
+
+/**
  * Mirrors how getAuthUserById wraps its cause: ShelfError with the
  * underlying AuthApiError attached as `cause`.
  */
@@ -87,12 +100,16 @@ beforeEach(() => {
 
 describe("resolveUserAndOrgForSsoCallback", () => {
   describe("existing user flows", () => {
-    it("rejects when the email is linked to an email-auth account", async () => {
+    it("rejects an un-approved email-auth account without reconciling it", async () => {
       // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(shelfUser);
+      mockDb.db.user.findUnique.mockResolvedValue({
+        ...shelfUser,
+        id: ORIGINAL_UUID,
+        sso: false,
+      });
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockResolvedValue({
-        id: shelfUser.id,
+        id: ORIGINAL_UUID,
         app_metadata: { provider: "email" },
       });
 
@@ -100,18 +117,22 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         /linked to a personal account/
       );
 
+      expect(mockAuth.getAuthUserById).toHaveBeenCalledWith(ORIGINAL_UUID);
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
       expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
     });
 
-    it("updates an existing SSO user when the Supabase auth account already exists", async () => {
+    it("updates a user whose id is the authenticated auth UUID without looking up the auth user", async () => {
       // @ts-expect-error - vitest mock type
       mockDb.db.user.findUnique.mockResolvedValue(shelfUser);
+      // A converted account keeps its original auth user, whose provider can
+      // still read "email". The same-UUID login must not reach that check.
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockResolvedValue({
         id: shelfUser.id,
-        app_metadata: { provider: "sso:abc-provider" },
+        app_metadata: { provider: "email" },
       });
       const updated = {
         user: { id: shelfUser.id, email: shelfUser.email },
@@ -122,6 +143,8 @@ describe("resolveUserAndOrgForSsoCallback", () => {
 
       const result = await resolveUserAndOrgForSsoCallback(baseInput);
 
+      expect(mockAuth.getAuthUserById).not.toHaveBeenCalled();
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).toHaveBeenCalledWith(
         baseAuthSession,
@@ -136,9 +159,12 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
 
     it("rewrites a SCIM-placeholder user ID to match the Supabase UUID when no auth account exists", async () => {
+      // sso=true, so this also proves a missing auth account takes the re-key
+      // path rather than the duplicate reconcile.
       const scimPlaceholderUser = {
         ...shelfUser,
         id: "cuid-placeholder-from-scim",
+        sso: true,
       };
       // @ts-expect-error - vitest mock type
       mockDb.db.user.findUnique.mockResolvedValue(scimPlaceholderUser);
@@ -162,6 +188,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         SUPABASE_UUID,
         "cuid-placeholder-from-scim"
       );
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).toHaveBeenCalledWith(
         baseAuthSession,
         expect.objectContaining({ id: SUPABASE_UUID }),
@@ -184,6 +211,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
 
       await resolveUserAndOrgForSsoCallback(baseInput);
 
+      expect(mockAuth.getAuthUserById).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockDb.db.user.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).toHaveBeenCalledWith(
@@ -191,6 +219,43 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         shelfUser,
         expect.any(Object)
       );
+    });
+  });
+
+  describe("duplicate SSO auth user for an approved account", () => {
+    it("reconciles the duplicate, then asks the user to sign in again", async () => {
+      const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: true };
+      // @ts-expect-error - vitest mock type
+      mockDb.db.user.findUnique.mockResolvedValue(approvedUser);
+      // @ts-expect-error - vitest mock type
+      mockAuth.getAuthUserById.mockResolvedValue({
+        id: ORIGINAL_UUID,
+        app_metadata: { provider: "email" },
+      });
+      // @ts-expect-error - vitest mock type
+      mockConversion.reconcileDuplicateSsoLogin.mockResolvedValue(undefined);
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({
+        status: 400,
+        title: "Your account is now SSO-enabled",
+        message: expect.stringMatching(/sign in again/),
+        shouldBeCaptured: false,
+      });
+      expect(mockConversion.reconcileDuplicateSsoLogin).toHaveBeenCalledWith({
+        authSession: baseAuthSession,
+        existingUser: {
+          id: ORIGINAL_UUID,
+          email: approvedUser.email,
+          sso: true,
+        },
+      });
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+      expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
     });
   });
 
@@ -237,9 +302,8 @@ describe("resolveUserAndOrgForSsoCallback", () => {
   });
 
   describe("transient getAuthUserById errors", () => {
-    // Regression guard: before this was fixed, any error from getAuthUserById
-    // was swallowed and authUser set to null, which then triggered the
-    // destructive `UPDATE "User" SET id = ...` for SCIM-placeholder users.
+    // Only a genuine 404 may be read as "no auth account": that reading
+    // triggers the destructive `UPDATE "User" SET id = ...` re-key.
 
     it("rethrows non-404 Supabase errors instead of treating them as 'user not found'", async () => {
       const scimPlaceholderUser = {
@@ -264,7 +328,10 @@ describe("resolveUserAndOrgForSsoCallback", () => {
 
     it("rethrows generic (non-AuthApiError) failures from getAuthUserById", async () => {
       // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(shelfUser);
+      mockDb.db.user.findUnique.mockResolvedValue({
+        ...shelfUser,
+        id: ORIGINAL_UUID,
+      });
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockRejectedValue(new Error("network timeout"));
 
@@ -272,6 +339,8 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         resolveUserAndOrgForSsoCallback(baseInput)
       ).rejects.toThrow();
 
+      expect(mockAuth.getAuthUserById).toHaveBeenCalledWith(ORIGINAL_UUID);
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
     });
