@@ -199,6 +199,15 @@ beforeEach(() => {
   dbMocks.custody.findFirst.mockResolvedValue(null);
   dbMocks.custody.deleteMany.mockReset();
   dbMocks.custody.deleteMany.mockResolvedValue({ count: 0 });
+  // The action reads the asset's `type` before the transaction and the same
+  // mock answers the in-tx title read, so a test that overrides it must not
+  // leak into the next one. Default: an existing individual asset.
+  dbMocks.asset.findFirst.mockReset();
+  dbMocks.asset.findFirst.mockResolvedValue({
+    type: "INDIVIDUAL",
+    status: "AVAILABLE",
+    title: "Test Asset",
+  });
 
   // Reset service mocks
   getAssetMock.mockReset();
@@ -296,12 +305,6 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
       userOrganizations: [{ organizationId: "org-1" }],
-    } as any);
-
-    // Asset validation passes (same org)
-    getAssetMock.mockResolvedValue({
-      id: "asset-123",
-      organizationId: "org-1",
     } as any);
 
     // Custodian validation fails (different org)
@@ -492,11 +495,6 @@ describe("assets.$assetId.overview.assign-custody action", () => {
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
-    getAssetMock.mockResolvedValue({
-      id: "asset-123",
-      organizationId: "org-1",
-    } as any);
-
     // Valid team member from same org, but different user
     mockGetTeamMember.mockResolvedValue({
       id: "team-member-456",
@@ -639,9 +637,13 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
       data: { status: AssetStatus.IN_CUSTODY },
     });
 
-    // The happy path must not pay for a status read — it only runs when the
-    // claim is refused.
-    expect(dbMocks.asset.findFirst).not.toHaveBeenCalled();
+    // The happy path reads only the asset's type, before the transaction. The
+    // title read runs only when the claim is refused.
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledTimes(1);
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledWith({
+      where: { id: TEST_ASSET_ID, organizationId: TEST_ORG_ID },
+      select: { type: true },
+    });
   });
 });
 
@@ -685,11 +687,7 @@ describe("assign-custody — quantity-tracked assets", () => {
       role: OrganizationRoles.ADMIN,
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
-    getAssetMock.mockResolvedValue({
-      id: TEST_ASSET_ID,
-      organizationId: TEST_ORG_ID,
-      type: "QUANTITY_TRACKED",
-    } as any);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
     mockGetTeamMember.mockResolvedValue({
       id: TEST_TEAM_MEMBER_ID,
       userId: "user-456",
@@ -703,13 +701,11 @@ describe("assign-custody — quantity-tracked assets", () => {
     const body = await response.json();
     expect(body.error.message).toContain(QT_MESSAGE);
 
-    // The type is read org-scoped, the same way the loader reads it.
-    expect(getAssetMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: TEST_ASSET_ID,
-        organizationId: TEST_ORG_ID,
-      })
-    );
+    // The type is read org-scoped.
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledWith({
+      where: { id: TEST_ASSET_ID, organizationId: TEST_ORG_ID },
+      select: { type: true },
+    });
     expectNoCustodyWrites();
   });
 
@@ -719,11 +715,7 @@ describe("assign-custody — quantity-tracked assets", () => {
       role: OrganizationRoles.SELF_SERVICE,
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
-    getAssetMock.mockResolvedValue({
-      id: TEST_ASSET_ID,
-      organizationId: TEST_ORG_ID,
-      type: "QUANTITY_TRACKED",
-    } as any);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
     // Their own team member: the self-service check alone would let this pass.
     mockGetTeamMember.mockResolvedValue({
       id: "own-team-member",
@@ -747,11 +739,7 @@ describe("assign-custody — quantity-tracked assets", () => {
       role: OrganizationRoles.ADMIN,
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
-    getAssetMock.mockResolvedValue({
-      id: TEST_ASSET_ID,
-      organizationId: TEST_ORG_ID,
-      type: "INDIVIDUAL",
-    } as any);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "INDIVIDUAL" });
     mockGetTeamMember.mockResolvedValue({
       id: TEST_TEAM_MEMBER_ID,
       userId: "user-456",
@@ -786,6 +774,26 @@ describe("assign-custody — quantity-tracked assets", () => {
       })
     );
     expect(createNoteMock).toHaveBeenCalled();
+  });
+
+  it("answers 404 when the asset is not in the workspace", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    // why: null is what the org-scoped read returns for a deleted asset or one
+    // in another workspace.
+    dbMocks.asset.findFirst.mockResolvedValue(null);
+
+    const response = (await action(
+      postCustodian({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    )) as Response;
+
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.error.message).toContain("could not be found");
+    expectNoCustodyWrites();
   });
 
   it("does not serve the page for a quantity-tracked asset", async () => {

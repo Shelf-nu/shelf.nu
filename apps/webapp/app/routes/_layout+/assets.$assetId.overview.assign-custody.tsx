@@ -208,21 +208,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.custody,
-      }
-    );
-
-    const targetAsset = await getAsset({
-      id: assetId,
-      organizationId,
-      userOrganizations,
+    const { organizationId, role } = await requirePermission({
+      userId,
       request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.custody,
     });
+
+    /**
+     * Only `type` is needed here, so read it org-scoped rather than through
+     * `getAsset`, whose not-found path carries no status and would surface a
+     * missing asset as a 500.
+     */
+    const targetAsset = await db.asset.findFirst({
+      where: { id: assetId, organizationId },
+      select: { type: true },
+    });
+
+    if (!targetAsset) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset not found",
+        message: "This asset could not be found in your workspace.",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
 
     assertNotQuantityTracked(targetAsset, { userId, assetId });
 
