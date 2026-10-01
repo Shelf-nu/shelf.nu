@@ -262,4 +262,12 @@ describe("audit receipt PDF: photos", () => {
     expect(img.className).toContain("w-full");
     expect(img.className).not.toContain("object-cover");
   });
+
+  it("scales a photo taller than most of the page down to fit it", () => {
+    renderWithPhotos();
+
+    const img = screen.getByAltText("Photo of Camera");
+    expect(img.className).toMatch(/max-h-\[\d+mm\]/);
+    expect(img.className).toContain("object-contain");
+  });
 });

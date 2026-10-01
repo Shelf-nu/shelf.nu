@@ -4,10 +4,11 @@
  *
  * @see {@link file://./../../../app/components/image-with-preview/image-preview-dialog.tsx}
  */
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { Sheet, SheetContent, SheetTitle } from "~/components/shared/sheet";
 
 const photo = {
   id: "image-1",
@@ -33,10 +34,6 @@ function renderThumbnail(images?: (typeof photo)[]) {
 const preview = () => screen.queryByRole("dialog");
 
 describe("image preview", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("opens the full image, not the thumbnail, when the thumbnail is clicked", async () => {
     const user = userEvent.setup();
     await user.click(renderThumbnail());
@@ -81,18 +78,17 @@ describe("image preview", () => {
     expect(preview()).toBeNull();
 
     await user.click(thumbnail);
-    fireEvent.keyDown(window, { key: "Escape" });
+    await user.keyboard("{Escape}");
     expect(preview()).toBeNull();
   });
 
-  it("locks the page scroll while open and restores it on close", async () => {
+  it("locks the page scroll while open and releases it on close", async () => {
     const user = userEvent.setup();
-    document.body.style.overflow = "auto";
     await user.click(renderThumbnail());
 
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body.hasAttribute("data-scroll-locked")).toBe(true);
     await user.click(screen.getByRole("button", { name: "Close preview" }));
-    expect(document.body.style.overflow).toBe("auto");
+    expect(document.body.hasAttribute("data-scroll-locked")).toBe(false);
   });
 
   it("pages through a set with the arrow keys", async () => {
@@ -106,7 +102,7 @@ describe("image preview", () => {
     await user.click(renderThumbnail([photo, second]));
 
     expect(screen.getByText("1 of 2 image(s)")).toBeTruthy();
-    fireEvent.keyDown(window, { key: "ArrowRight" });
+    await user.keyboard("{ArrowRight}");
     expect(preview()?.querySelector("img")?.getAttribute("src")).toBe(
       second.imageUrl
     );
@@ -126,33 +122,48 @@ describe("image preview", () => {
     expect(backdrop?.className).toContain("pointer-events-auto");
   });
 
-  it("keeps Tab inside the preview and skips controls hidden at this width", async () => {
-    // why: Happy DOM lays nothing out, so every element has no boxes. Give
-    // boxes to everything except elements hidden by the `hidden` class, which
-    // is what a browser does below `lg` for the footer Close button.
-    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
-      function (this: HTMLElement) {
-        const hidden = this.closest(".hidden") !== null;
-        return (hidden ? [] : [{}]) as unknown as DOMRectList;
-      }
-    );
+  it("keeps Tab inside the preview and focuses the close button on open", async () => {
     const user = userEvent.setup();
-    const second = {
-      id: "image-2",
-      imageUrl: "https://storage.test/audits/second.webp",
-      thumbnailUrl: "https://storage.test/audits/second-thumbnail.webp",
-      alt: "Second photo",
-    };
-    await user.click(renderThumbnail([photo, second]));
+    await user.click(renderThumbnail());
 
     const close = screen.getByRole("button", { name: "Close preview" });
-    const next = screen.getByRole("button", { name: "Next" });
-
-    next.focus();
-    fireEvent.keyDown(window, { key: "Tab" });
     expect(document.activeElement).toBe(close);
 
-    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(next);
+    // Shift+Tab from the first control wraps to the last one inside the
+    // preview, and Tab from there wraps back: focus never reaches the page.
+    await user.tab({ shift: true });
+    const last = document.activeElement as HTMLElement;
+    expect(preview()?.contains(last)).toBe(true);
+    expect(last).not.toBe(close);
+
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+  });
+
+  it("takes focus and Escape from a sheet it opens from, then hands them back", async () => {
+    const user = userEvent.setup();
+    render(
+      <Sheet open>
+        <SheetContent aria-describedby={undefined}>
+          <SheetTitle>Booking assets</SheetTitle>
+          <ImageWithPreview
+            imageUrl={photo.imageUrl}
+            thumbnailUrl={photo.thumbnailUrl}
+            alt={photo.alt}
+            withPreview
+          />
+        </SheetContent>
+      </Sheet>
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: `Open preview for ${photo.alt}` })
+    );
+    const close = screen.getByRole("button", { name: "Close preview" });
+    expect(document.activeElement).toBe(close);
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("button", { name: "Close preview" })).toBeNull();
+    expect(screen.getByText("Booking assets")).toBeTruthy();
   });
 });

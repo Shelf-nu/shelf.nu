@@ -12,20 +12,22 @@
  * page behind does not scroll. From `lg` up the same markup lays out as a
  * centred panel with a title bar and a footer over the dimmed page.
  *
+ * Built on the Radix dialog primitive, like the app's sheets. That is what
+ * keeps it usable when it opens from inside a sheet: Radix stacks the two
+ * focus scopes and dismissal layers, so focus, Escape and outside taps belong
+ * to the preview while it is open and return to the sheet when it closes.
  * Escape closes it, Tab stays inside it, and with `onPrevious` / `onNext` the
  * arrow keys page through.
  *
  * @see {@link file://./image-with-preview.tsx}
  * @see {@link file://../assets/asset-image/component.tsx}
  * @see {@link file://../kits/kit-image.tsx}
+ * @see {@link file://../shared/sheet.tsx} the sheets it may open from
  */
-import type { MouseEvent, ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { ChevronRight, XIcon } from "~/components/icons/library";
-import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
-import { DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 
 /** Props of {@link ImagePreviewDialog}. */
@@ -59,52 +61,30 @@ type ImagePreviewDialogProps = {
  */
 export function ImagePreviewDialog({
   open,
+  onClose,
   disablePortal = false,
-  ...overlayProps
+  ...panelProps
 }: ImagePreviewDialogProps) {
-  if (!open) return null;
+  const layers = <PreviewLayers onClose={onClose} {...panelProps} />;
 
-  const overlay = <PreviewOverlay {...overlayProps} />;
-  return disablePortal ? overlay : <DialogPortal>{overlay}</DialogPortal>;
+  return (
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      {disablePortal ? (
+        layers
+      ) : (
+        <DialogPrimitive.Portal>{layers}</DialogPrimitive.Portal>
+      )}
+    </DialogPrimitive.Root>
+  );
 }
 
-/** Controls that can take keyboard focus. */
-const FOCUSABLE =
-  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-/**
- * Keeps Tab and Shift+Tab inside the preview, wrapping from the last visible
- * control to the first and back. Controls hidden at the current width (the
- * footer Close button below `lg`) are skipped: they render no boxes.
- *
- * @param event - The Tab keydown
- * @param dialog - The preview's dialog element
- */
-function keepFocusInside(event: KeyboardEvent, dialog: HTMLElement | null) {
-  if (!dialog) return;
-  const controls = Array.from(
-    dialog.querySelectorAll<HTMLElement>(FOCUSABLE)
-  ).filter((control) => control.getClientRects().length > 0);
-  const first = controls[0];
-  const last = controls[controls.length - 1];
-  if (!first || !last) return;
-
-  const active = document.activeElement;
-  const outside = !dialog.contains(active);
-  if (event.shiftKey && (active === first || outside)) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && (active === last || outside)) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
-/**
- * The open preview. Mounted only while open, so the scroll lock, the key
- * bindings and the focus move are taken on open and released on close.
- */
-function PreviewOverlay({
+/** The dimmed backdrop and the panel holding the image. */
+function PreviewLayers({
   onClose,
   imageUrl,
   alt,
@@ -114,46 +94,6 @@ function PreviewOverlay({
   onNext,
   actions,
 }: Omit<ImagePreviewDialogProps, "open" | "disablePortal">) {
-  const closeButtonRef = useAutoFocus<HTMLButtonElement>();
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Read through a ref so the listener below is bound once per opening.
-  const handlersRef = useRef({ onClose, onPrevious, onNext });
-  handlersRef.current = { onClose, onPrevious, onNext };
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    function handleKeyDown(event: KeyboardEvent) {
-      const handlers = handlersRef.current;
-      if (event.key === "Tab") {
-        keepFocusInside(event, dialogRef.current);
-      } else if (event.key === DIALOG_CLOSE_SHORTCUT) {
-        event.preventDefault();
-        event.stopPropagation();
-        handlers.onClose();
-      } else if (event.key === "ArrowLeft" && handlers.onPrevious) {
-        event.preventDefault();
-        handlers.onPrevious();
-      } else if (event.key === "ArrowRight" && handlers.onNext) {
-        event.preventDefault();
-        handlers.onNext();
-      }
-    }
-
-    // Capture on `window`, like `Dialog`: it runs before an enclosing
-    // overlay's own Escape handler.
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown, { capture: true });
-      document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus?.({ preventScroll: true });
-    };
-  }, []);
-
   /** Closes only when the tap landed on the element itself, not a child. */
   function closeOnOwnClick(event: MouseEvent<HTMLElement>) {
     if (event.target === event.currentTarget) {
@@ -161,50 +101,55 @@ function PreviewOverlay({
     }
   }
 
-  // The backdrop and the stage around the image close on a tap. They are a
-  // pointer shortcut only, so they stay presentational: keyboard users close
-  // with Escape or the close button, which takes focus on open.
-  //
-  // `pointer-events-auto` is load-bearing: a modal Radix Sheet sets
-  // `pointer-events: none` on <body>, and this overlay portals there, so
-  // without it a preview opened from a sheet ignores every tap.
-  // `data-image-preview-backdrop` marks it as a dialog for the sheets that
-  // check before closing (see `contextual-sidebar.tsx`).
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowLeft" && onPrevious) {
+      event.preventDefault();
+      onPrevious();
+    } else if (event.key === "ArrowRight" && onNext) {
+      event.preventDefault();
+      onNext();
+    }
+  }
+
   return (
-    <div
-      role="presentation"
-      className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center overscroll-contain bg-gray-950 lg:bg-black/50 lg:p-8 lg:backdrop-blur-sm"
-      onClick={closeOnOwnClick}
-      data-image-preview-backdrop
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={alt}
-        className="relative flex size-full flex-col lg:w-[90%] lg:overflow-hidden lg:rounded lg:bg-white lg:shadow-lg"
+    <>
+      {/* Visible only around the panel from `lg` up; Radix closes the preview
+          on a tap here. `pointer-events-auto` keeps it tappable under a modal
+          sheet, which sets `pointer-events: none` on <body>.
+          `data-image-preview-backdrop` marks it as a dialog for the sheets that
+          check before closing (see `contextual-sidebar.tsx`). */}
+      <DialogPrimitive.Overlay
+        className="pointer-events-auto fixed inset-0 z-[100] bg-gray-950 lg:bg-black/50 lg:backdrop-blur-sm"
+        data-image-preview-backdrop
+      />
+      {/* The stage around the image closes on a tap too. That is a pointer
+          shortcut only: keyboard users close with Escape or the close button,
+          which Radix focuses on open. */}
+      <DialogPrimitive.Content
+        aria-describedby={undefined}
+        onKeyDown={handleKeyDown}
         onClick={closeOnOwnClick}
+        className="fixed inset-0 z-[100] flex flex-col focus:outline-none lg:inset-x-[5%] lg:inset-y-8 lg:overflow-hidden lg:rounded lg:bg-white lg:shadow-lg"
       >
         <div className="absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pb-8 pt-[max(1rem,env(safe-area-inset-top))] text-white lg:static lg:border-b lg:border-gray-200 lg:bg-white lg:bg-none lg:px-6 lg:py-3 lg:text-gray-900">
           <div className="min-w-0">
-            <div className="truncate text-base font-semibold lg:text-lg">
+            {/* Colour set here, not inherited: the global `h2` style would
+                paint it dark on the black phone overlay. */}
+            <DialogPrimitive.Title className="truncate text-base font-semibold text-white lg:text-lg lg:text-gray-900">
               {title ?? alt}
-            </div>
+            </DialogPrimitive.Title>
             {subtitle ? (
               <div className="text-sm text-white/80 lg:text-gray-600">
                 {subtitle}
               </div>
             ) : null}
           </div>
-          <button
-            ref={closeButtonRef}
-            type="button"
-            onClick={onClose}
+          <DialogPrimitive.Close
             aria-label="Close preview"
             className="flex size-11 shrink-0 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 lg:size-9 lg:bg-transparent lg:text-gray-500 lg:hover:bg-gray-100"
           >
             <XIcon />
-          </button>
+          </DialogPrimitive.Close>
         </div>
 
         <div
@@ -258,7 +203,7 @@ function PreviewOverlay({
             Close
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogPrimitive.Content>
+    </>
   );
 }

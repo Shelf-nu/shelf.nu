@@ -148,7 +148,9 @@ export const AuditReceiptPDF = ({
 
 /**
  * Audit photos on the receipt, two to a row, each at the full width of its
- * cell and its natural aspect ratio.
+ * cell and its natural aspect ratio. A photo taller than most of the page is
+ * scaled down to fit (`max-h` with `object-contain`), because a photo taller
+ * than the printable area cannot be kept whole on one page.
  *
  * Always the full stored image: the thumbnail is a small square crop, which
  * would print as a blur and cut off the capture stamp burned into a photo's
@@ -175,7 +177,7 @@ function AuditPdfPhotos({
           <img
             src={img.imageUrl}
             alt={img.description || alt}
-            className="h-auto w-full"
+            className="h-auto max-h-[230mm] w-full object-contain"
           />
           {img.description && (
             <p className="mt-1 text-xs text-gray-600">{img.description}</p>
