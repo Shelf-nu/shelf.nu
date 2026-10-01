@@ -328,6 +328,32 @@ describe("BookingAssetsSidebar QT stock badges", () => {
     expect(screen.queryByText("Insufficient stock")).not.toBeInTheDocument();
     expect(screen.queryByText("Checked out elsewhere")).not.toBeInTheDocument();
   });
+
+  it("renders a quantity-tracked asset with units in custody as Available on an ONGOING booking", async () => {
+    // Custody on a quantity-tracked asset is held by a team member outside
+    // this booking, so the row reads by this booking's own progress and must
+    // not inherit the pool's custody label.
+    const asset = makeQtAsset({ status: "IN_CUSTODY" });
+    const booking = makeBooking({ status: "ONGOING" });
+    fetcher.data = makePayload({ asset, bookedQuantity: 2 });
+
+    render(
+      <BookingAssetsSidebar
+        booking={booking}
+        availableUnitsByAsset={{
+          [asset.id]: { bookable: 10, physicalNow: 5, reserved: 0 },
+        }}
+      />
+    );
+
+    await openSidebar();
+    // The badge stub renders the status it was handed, so the assertion is on
+    // the resolved status rather than on the user-facing label.
+    const badge = await screen.findByTestId("asset-status-badge");
+
+    expect(badge).toHaveTextContent("AVAILABLE");
+    expect(badge).not.toHaveTextContent("IN_CUSTODY");
+  });
 });
 
 describe("BookingAssetsSidebar lazy loading", () => {

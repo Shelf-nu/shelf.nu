@@ -126,7 +126,10 @@ export function WorkspacePlansTable({
                 </Td>
                 <Td>{row.roleLabel}</Td>
                 <Td>
-                  <PaidByLabel row={row} onUpgradePersonal={onUpgradePersonal} />
+                  <PaidByLabel
+                    row={row}
+                    onUpgradePersonal={onUpgradePersonal}
+                  />
                 </Td>
               </tr>
             ))}
