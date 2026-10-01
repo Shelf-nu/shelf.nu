@@ -17,13 +17,12 @@ import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 
 import {
+  refuseAuthenticatedLegacySession,
+  revokeSession,
   sendResetPasswordLink,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
-import {
-  createSsoRequiredError,
-  getLegacyLoginDecision,
-} from "~/modules/auth/sso-enforcement.server";
+import { createSsoRequiredError } from "~/modules/auth/sso-enforcement.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
@@ -201,14 +200,25 @@ export async function action({ request, context }: ActionFunctionArgs) {
         }
 
         /**
+         * Verifying the code opened a recovery session. Every refusal or
+         * failure from here on revokes it, so it never outlives the request.
+         */
+        const recoveryAccessToken = otpData.session.access_token;
+
+        /**
          * A code sent before the address was refused (a deploy, a domain newly
          * configured for SSO) must not set a password. Checked only after the
          * code verifies, so the refusal is never an answer about an address to
-         * someone who does not hold its code.
+         * someone who does not hold its code. A refusal, or a decision that
+         * fails, revokes the recovery session.
          */
-        const decision = await getLegacyLoginDecision(email);
-        if (!decision.allowed) {
-          throw createSsoRequiredError(decision.reason);
+        const refusal = await refuseAuthenticatedLegacySession({
+          // The address the code verified, which is the session's own.
+          email: otpData.user.email ?? email,
+          accessToken: recoveryAccessToken,
+        });
+        if (refusal) {
+          throw createSsoRequiredError(refusal);
         }
 
         /**
@@ -217,11 +227,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * access token so the explicit `signOut(…, "others")` defense-in-depth
          * layer can run before the update (see `updateAccountPassword`).
          */
-        await updateAccountPassword(
-          otpData.user.id,
-          password,
-          otpData.session.access_token
-        );
+        try {
+          await updateAccountPassword(
+            otpData.user.id,
+            password,
+            recoveryAccessToken
+          );
+        } catch (cause) {
+          await revokeSession(recoveryAccessToken);
+          throw cause;
+        }
 
         context.destroySession();
         return redirect("/login?password_reset=true");

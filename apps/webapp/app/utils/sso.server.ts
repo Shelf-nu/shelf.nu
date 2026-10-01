@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
+  revokeSession,
 } from "~/modules/auth/service.server";
 import { reconcileDuplicateSsoLogin } from "~/modules/auth/sso-conversion.server";
 import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
@@ -55,6 +56,295 @@ async function findSsoCallbackUserByEmail(email: string) {
 }
 
 /**
+ * Looks up a Shelf user's Supabase auth user, reading a genuine 404 as "no auth
+ * account" (a SCIM-provisioned user has none yet). Any other failure is
+ * rethrown so a transient Supabase error is never mistaken for a missing user,
+ * which would send the callback down the destructive id re-key.
+ *
+ * @param userId - the Shelf user id, which is also the auth user id when one exists
+ * @returns the auth user, or null when Supabase answers 404
+ * @throws {ShelfError} for any failure other than a 404
+ */
+async function findAuthUserOrNull(userId: string) {
+  try {
+    return await getAuthUserById(userId);
+  } catch (error) {
+    const innerCause = isLikeShelfError(error) ? error.cause : error;
+    if (isAuthApiError(innerCause) && innerCause.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * The refusal for an SSO login that lands on an email/password account not
+ * approved for SSO. The account stays as it is; support moves it.
+ */
+function createEmailAccountExistsError() {
+  return new ShelfError({
+    cause: null,
+    title: "User already exists",
+    message:
+      "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
+    label: "Auth",
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * The `amr` method GoTrue records for a sign-in completed through a SAML IdP.
+ * It is carried by every access token refreshed from that session.
+ *
+ * Only SAML SSO is supported today. Supporting OIDC SSO means accepting its
+ * `amr` method here too, or every OIDC sign-in is refused at the callback.
+ */
+const SSO_SAML_AMR_METHOD = "sso/saml";
+
+/**
+ * Reads the authentication methods from an access token's `amr` claim. GoTrue
+ * writes either `{ method, timestamp }` entries or bare strings (custom access
+ * token hooks), so both are accepted.
+ *
+ * The signature is not checked: the token comes straight from GoTrue in a
+ * server-side refresh, never from the client.
+ *
+ * @param accessToken - a JWT issued by GoTrue
+ * @returns the method names, or an empty list when the token cannot be read
+ */
+function readAmrMethods(accessToken: string): string[] {
+  const [, payloadSegment] = accessToken.split(".");
+  if (!payloadSegment) return [];
+  try {
+    const payload: unknown = JSON.parse(
+      Buffer.from(payloadSegment, "base64url").toString("utf8")
+    );
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      !("amr" in payload) ||
+      !Array.isArray(payload.amr)
+    ) {
+      return [];
+    }
+    return payload.amr.flatMap((entry: unknown) => {
+      if (typeof entry === "string") return [entry];
+      if (
+        entry &&
+        typeof entry === "object" &&
+        "method" in entry &&
+        typeof entry.method === "string"
+      ) {
+        return [entry.method];
+      }
+      return [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Refuses an SSO callback whose session was not obtained through SSO.
+ *
+ * The callback routes accept a refresh token posted by the browser, and any
+ * Supabase refresh token refreshes into a session, including one from a
+ * password or email-code sign-in. Only a session whose access token records a
+ * SAML sign-in may provision users or sync roles. A refused session is revoked
+ * (scope `local`) before the error is thrown, so the session the refresh just
+ * opened does not outlive the request. Call it right after
+ * `refreshAccessToken` and before anything else reads the session.
+ *
+ * @param authSession - the session just refreshed server-side
+ * @throws {ShelfError} 403 when the session's `amr` has no SAML entry
+ */
+export async function assertSsoAuthenticatedSession(
+  authSession: AuthSession
+): Promise<void> {
+  if (readAmrMethods(authSession.accessToken).includes(SSO_SAML_AMR_METHOD)) {
+    return;
+  }
+  await revokeSession(authSession.accessToken);
+  throw new ShelfError({
+    cause: null,
+    status: 403,
+    title: "Single sign-on required",
+    message: "Please sign in with your organization's single sign-on.",
+    additionalData: { userId: authSession.userId },
+    label: "Auth",
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Normalises a stored `groups` claim to a list of group names. A SAML attribute
+ * with one value is stored as a bare string, several as an array.
+ *
+ * @param value - the raw `custom_claims.groups` JSON value
+ * @returns the group names; anything unreadable yields none
+ */
+export function normalizeSsoGroups(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.filter((group): group is string => typeof group === "string");
+  }
+  return [];
+}
+
+/** The contact fields an SSO identity can carry, in Shelf's field names. */
+type SsoContactInfo = {
+  phone: string;
+  street: string;
+  city: string;
+  stateProvince: string;
+  zipPostalCode: string;
+  countryRegion: string;
+};
+
+/** The profile and role claims an SSO callback acts on. */
+export type SsoCallbackClaims = {
+  /** From the identity of the domain's own provider only; none otherwise. */
+  groups: string[];
+  /** Null when no SSO identity of the user carries both names. */
+  firstName: string | null;
+  lastName: string | null;
+  /** Undefined when no SSO identity of the user carries both names. */
+  contactInfo?: SsoContactInfo;
+};
+
+/**
+ * Reads one string claim, trying each key in order (IdPs differ in casing).
+ *
+ * @param claims - the identity's `custom_claims` object
+ * @param keys - the claim names to try
+ * @returns the first non-empty string value, or an empty string
+ */
+function readStringClaim(
+  claims: Record<string, unknown>,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    const value = claims[key];
+    if (typeof value === "string" && value.trim() !== "") return value;
+  }
+  return "";
+}
+
+/**
+ * Narrows a stored `custom_claims` JSON value to an object.
+ *
+ * @param value - the raw JSON value
+ * @returns the claims object, or an empty one when the value is not an object
+ */
+function asClaimsObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * Reads the profile fields from one identity's claims.
+ *
+ * @param claims - the identity's `custom_claims` object
+ * @returns the names and contact info, or null unless both names are present
+ */
+function readProfileClaims(claims: Record<string, unknown>) {
+  const firstName = readStringClaim(claims, "firstname", "firstName");
+  const lastName = readStringClaim(claims, "lastname", "lastName");
+  if (!firstName || !lastName) return null;
+  return {
+    firstName,
+    lastName,
+    contactInfo: {
+      phone: readStringClaim(claims, "mobilephone"),
+      street: readStringClaim(claims, "streetAddress"),
+      city: readStringClaim(claims, "city"),
+      stateProvince: readStringClaim(claims, "stateProvince"),
+      zipPostalCode: readStringClaim(claims, "postalCode"),
+      countryRegion: readStringClaim(claims, "country"),
+    },
+  };
+}
+
+/**
+ * Reads the claims an SSO callback acts on from the SSO identities GoTrue wrote
+ * out of SAML assertions. They come from here only:
+ * - never from request input, which the browser controls;
+ * - never from `user_metadata`, which the user can edit through Supabase's
+ *   public API.
+ *
+ * Groups decide workspace roles, so they are read strictly from the identity
+ * of the SSO provider registered for the session email's domain
+ * (`provider = 'sso:<id>'`), the same binding the account conversion uses. A
+ * domain with no registered provider yields no groups. When the user has two
+ * identities from that provider (the NameID changed), the one signed in most
+ * recently wins.
+ *
+ * Names and contact info only edit the user's own profile, so they fall back:
+ * the bound identity when it carries both names, otherwise the most recently
+ * signed-in SSO identity of the user that does. With neither they are absent,
+ * and the resolver keeps what the account already has.
+ *
+ * Identities without `custom_claims` are skipped: one pre-seeded when an
+ * account was converted to SSO carries none until the IdP signs it in.
+ *
+ * @param args.authUserId - the authenticated Supabase auth user id
+ * @param args.email - the session's authenticated email; its domain selects
+ *   the provider whose groups count
+ * @returns the groups, and the names and contact info when any identity has them
+ * @throws {ShelfError} when a lookup fails
+ */
+export async function getSsoClaimsForAuthUser({
+  authUserId,
+  email,
+}: {
+  authUserId: string;
+  email: string;
+}): Promise<SsoCallbackClaims> {
+  try {
+    const { ssoProviderId } = await checkDomainSSOStatus(email);
+    const boundProvider = ssoProviderId ? `sso:${ssoProviderId}` : null;
+
+    // Every SSO identity of the user that carries claims, most recent first.
+    // A user has a handful at most, one per IdP subject.
+    const rows = await db.$queryRaw<{ provider: string; claims: unknown }[]>`
+      SELECT provider, identity_data -> 'custom_claims' AS claims
+      FROM auth.identities
+      WHERE user_id = ${authUserId}::uuid
+        AND provider LIKE 'sso:%'
+        AND identity_data -> 'custom_claims' IS NOT NULL
+      ORDER BY last_sign_in_at DESC NULLS LAST
+    `;
+
+    const boundRow = boundProvider
+      ? rows.find((row) => row.provider === boundProvider)
+      : undefined;
+    const boundClaims = boundRow ? asClaimsObject(boundRow.claims) : null;
+
+    const profile =
+      (boundClaims && readProfileClaims(boundClaims)) ??
+      rows
+        .map((row) => readProfileClaims(asClaimsObject(row.claims)))
+        .find((candidate) => candidate !== null) ??
+      null;
+
+    return {
+      groups: boundClaims ? normalizeSsoGroups(boundClaims.groups) : [],
+      firstName: profile?.firstName ?? null,
+      lastName: profile?.lastName ?? null,
+      contactInfo: profile?.contactInfo,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to read the single sign-on claims for this account",
+      additionalData: { authUserId },
+      label: "SSO",
+    });
+  }
+}
+
+/**
  * Marks the error raised after a duplicate SSO login was merged onto the
  * original account. The merge succeeded and the next SSO sign-in lands on the
  * original, so the callback routes render this as a success notice, not as a
@@ -86,7 +376,8 @@ export function isSsoAccountLinkedError(cause: unknown): cause is ShelfError {
  * Order of checks:
  * 1. A Shelf user whose id is the authenticated auth UUID: a normal login,
  *    including an account converted to SSO whose pre-seeded identity matched.
- *    Update from SSO without looking up the auth user.
+ *    Update from SSO. An account not approved for SSO (`!user.sso`) whose auth
+ *    user is an email/password account is refused instead.
  *
  * Otherwise the Shelf user is matched by email without regard to letter case
  * (see `findSsoCallbackUserByEmail`); no match means a new user. For a match:
@@ -136,8 +427,14 @@ export async function resolveUserAndOrgForSsoCallback({
   formatPrefs,
 }: {
   authSession: AuthSession;
-  firstName: string;
-  lastName: string;
+  /**
+   * Names from {@link getSsoClaimsForAuthUser}; null when no SSO identity
+   * carries them. An existing account then keeps its stored names, and a new
+   * account is refused.
+   */
+  firstName: string | null;
+  lastName: string | null;
+  /** IdP groups from {@link getSsoClaimsForAuthUser}; never request input. */
   groups: string[];
   contactInfo?: {
     phone?: string;
@@ -150,11 +447,27 @@ export async function resolveUserAndOrgForSsoCallback({
   /** Browser-detected prefs; only applied on the new-user (createUserFromSSO) branch. */
   formatPrefs?: DetectedFormatPrefs;
 }) {
+  /**
+   * The update for an existing account: the SSO names when the IdP provided
+   * them, otherwise the names the account already has, so a missing claim
+   * never blanks a stored name.
+   */
+  const updateDataFor = (existing: {
+    firstName: string | null;
+    lastName: string | null;
+  }) => ({
+    firstName: firstName ?? existing.firstName ?? "",
+    lastName: lastName ?? existing.lastName ?? "",
+    groups,
+    contactInfo,
+  });
+
   try {
     // The authenticated auth user's own Shelf account: a normal login. This
     // also covers a converted account, where Supabase matched the pre-seeded
     // SSO identity and signed in the original UUID, whose auth `provider` can
-    // still read "email", so the provider checks below must not run for it.
+    // still read "email", so the provider is consulted only for an account
+    // not approved for SSO.
     // Matching by id first keeps the login working when the IdP's email for
     // the user differs from the one stored in Shelf.
     const ownAccount = await db.user.findUnique({
@@ -163,33 +476,28 @@ export async function resolveUserAndOrgForSsoCallback({
     });
 
     if (ownAccount) {
-      const response = await updateUserFromSSO(authSession, ownAccount, {
-        firstName,
-        lastName,
-        groups,
-        contactInfo,
-      });
+      // An account not approved for SSO whose auth user signs in by password
+      // must not be updated from SSO claims; the callback only accepts SAML
+      // sessions, and this holds even if that check is bypassed.
+      if (!ownAccount.sso) {
+        const ownAuthUser = await findAuthUserOrNull(ownAccount.id);
+        if (ownAuthUser?.app_metadata?.provider === "email") {
+          throw createEmailAccountExistsError();
+        }
+      }
+
+      const response = await updateUserFromSSO(
+        authSession,
+        ownAccount,
+        updateDataFor(ownAccount)
+      );
       return { user: response.user, org: response.org };
     }
 
     const user = await findSsoCallbackUserByEmail(authSession.email);
 
     if (user) {
-      // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
-      // Supabase auth account yet). Only swallow a genuine 404. Rethrow
-      // transient Supabase/admin errors so they aren't misread as a missing
-      // user and trigger the destructive ID rewrite below.
-      let authUser;
-      try {
-        authUser = await getAuthUserById(user.id);
-      } catch (error) {
-        const innerCause = isLikeShelfError(error) ? error.cause : error;
-        if (isAuthApiError(innerCause) && innerCause.status === 404) {
-          authUser = null;
-        } else {
-          throw error;
-        }
-      }
+      const authUser = await findAuthUserOrNull(user.id);
 
       // SCIM-provisioned user: Shelf user exists but has no Supabase auth
       // account (user.id is a placeholder cuid). Update the user's ID to
@@ -206,12 +514,11 @@ export async function resolveUserAndOrgForSsoCallback({
           where: { id: authSession.userId },
           select: USER_WITH_SSO_DETAILS_SELECT,
         });
-        const response = await updateUserFromSSO(authSession, updatedUser, {
-          firstName,
-          lastName,
-          groups,
-          contactInfo,
-        });
+        const response = await updateUserFromSSO(
+          authSession,
+          updatedUser,
+          updateDataFor(updatedUser)
+        );
         return { user: response.user, org: response.org };
       }
 
@@ -245,27 +552,33 @@ export async function resolveUserAndOrgForSsoCallback({
       }
 
       if (authUser?.app_metadata?.provider === "email") {
-        throw new ShelfError({
-          cause: null,
-          title: "User already exists",
-          message:
-            "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
-          label: "Auth",
-          shouldBeCaptured: false,
-        });
+        throw createEmailAccountExistsError();
       }
 
       // Existing SSO user - update their info
-      const response = await updateUserFromSSO(authSession, user, {
-        firstName,
-        lastName,
-        groups,
-        contactInfo,
-      });
+      const response = await updateUserFromSSO(
+        authSession,
+        user,
+        updateDataFor(user)
+      );
       return { user: response.user, org: response.org };
     }
 
-    // New user case - create them with SSO
+    // New user case - create them with SSO. There is no stored name to fall
+    // back on, so an IdP that sends none cannot create an account.
+    if (!firstName || !lastName) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        title: "Missing name",
+        message:
+          "Your organization's single sign-on did not provide your first and last name. Please contact your workspace administrator.",
+        additionalData: { userId: authSession.userId },
+        label: "SSO",
+        shouldBeCaptured: false,
+      });
+    }
+
     try {
       const response = await createUserFromSSO(
         authSession,

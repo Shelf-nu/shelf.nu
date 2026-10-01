@@ -21,8 +21,12 @@
 const { mockSendResetPasswordLink } = vi.hoisted(() => ({
   mockSendResetPasswordLink: vi.fn().mockResolvedValue(undefined),
 }));
-// why: sends a real email, and is the sink these tests assert on.
-vi.mock("~/modules/auth/service.server", () => ({
+// why: sendResetPasswordLink sends a real email and is the sink these tests
+// assert on; updateAccountPassword writes to Supabase Auth. The real
+// refuseAuthenticatedLegacySession and revokeSession stay, because which
+// failures end the recovery session is what the confirm tests pin.
+vi.mock("~/modules/auth/service.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/modules/auth/service.server")>()),
   sendResetPasswordLink: mockSendResetPasswordLink,
   updateAccountPassword: vi.fn(),
   signInWithEmail: vi.fn(),
@@ -44,11 +48,16 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   };
 });
 
-const { mockVerifyOtp } = vi.hoisted(() => ({ mockVerifyOtp: vi.fn() }));
-// why: the confirm step verifies the recovery code with Supabase Auth, a
-// network call.
+const { mockVerifyOtp, mockSignOut } = vi.hoisted(() => ({
+  mockVerifyOtp: vi.fn(),
+  mockSignOut: vi.fn(),
+}));
+// why: the confirm step verifies the recovery code with Supabase Auth and ends
+// the recovery session it opened on refusal; both are network calls.
 vi.mock("~/integrations/supabase/client", () => ({
-  getSupabaseAdmin: () => ({ auth: { verifyOtp: mockVerifyOtp } }),
+  getSupabaseAdmin: () => ({
+    auth: { verifyOtp: mockVerifyOtp, admin: { signOut: mockSignOut } },
+  }),
 }));
 
 const { mockUserFindFirst } = vi.hoisted(() => ({
@@ -61,6 +70,7 @@ vi.mock("~/database/db.server", () => ({
 
 import { updateAccountPassword } from "~/modules/auth/service.server";
 import { action } from "~/routes/_auth+/forgot-password";
+import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 /** POSTs a password-reset request for `email`. */
@@ -252,6 +262,7 @@ describe("forgot-password confirm step", () => {
       },
       error: null,
     });
+    mockSignOut.mockResolvedValue({ error: null });
   });
 
   it("refuses to set a password for an address that must use SSO", async () => {
@@ -267,6 +278,59 @@ describe("forgot-password confirm step", () => {
       "This email address signs in with single sign-on. Please use Login with SSO."
     );
     expect(updateAccountPassword).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledWith("recovery-token", "local");
+  });
+
+  it("revokes the recovery session and answers generically when the decision fails", async () => {
+    mockGetLegacyLoginDecision.mockRejectedValue(new Error("database down"));
+
+    const res = observable(await confirmReset("member@sso-corp.com"));
+
+    expect(res.status).toBe(500);
+    expect(res.errorMessage).toBe(
+      "Something went wrong. Please try again later or contact support."
+    );
+    expect(updateAccountPassword).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledWith("recovery-token", "local");
+  });
+
+  it("revokes the recovery session when the password update refuses an SSO account", async () => {
+    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
+    vi.mocked(updateAccountPassword).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        message: "You cannot update the password of an SSO user.",
+        label: "Auth",
+      })
+    );
+    const destroySession = vi.fn();
+
+    const res = observable(
+      await confirmReset("member@sso-corp.com", destroySession)
+    );
+
+    expect(res.errorMessage).toBe(
+      "You cannot update the password of an SSO user."
+    );
+    expect(mockSignOut).toHaveBeenCalledWith("recovery-token", "local");
+    expect(destroySession).not.toHaveBeenCalled();
+  });
+
+  it("asks the decision about the address the code verified", async () => {
+    mockVerifyOtp.mockResolvedValue({
+      data: {
+        user: { id: "user-1", email: "verified@sso-corp.com" },
+        session: { access_token: "recovery-token" },
+      },
+      error: null,
+    });
+    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
+
+    await confirmReset("posted@sso-corp.com");
+
+    expect(mockGetLegacyLoginDecision).toHaveBeenCalledWith(
+      "verified@sso-corp.com"
+    );
   });
 
   it("asks the decision only after the code verifies", async () => {
@@ -294,5 +358,6 @@ describe("forgot-password confirm step", () => {
       "recovery-token"
     );
     expect(res.location).toBe("/login?password_reset=true");
+    expect(mockSignOut).not.toHaveBeenCalled();
   });
 });

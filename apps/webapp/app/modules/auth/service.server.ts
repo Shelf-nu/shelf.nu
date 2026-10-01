@@ -55,15 +55,16 @@ function createInvalidOtpError(cause: unknown, email: string): ShelfError {
 
 /**
  * Ends the one session behind `accessToken` (scope `local`), leaving the
- * account's other sessions alone.
+ * account's other sessions alone. Use it for a session opened server-side
+ * whose flow is then refused or fails, so it does not outlive the request.
  *
- * Best-effort: the caller refuses the sign-in whether or not this succeeds,
+ * Best-effort: the caller refuses the request whether or not this succeeds,
  * and the tokens are never handed to the client, so a failure is logged rather
  * than thrown.
  *
  * @param accessToken - the access token of the session to end
  */
-async function revokeSession(accessToken: string): Promise<void> {
+export async function revokeSession(accessToken: string): Promise<void> {
   try {
     const { error } = await getSupabaseAdmin().auth.admin.signOut(
       accessToken,
@@ -77,7 +78,7 @@ async function revokeSession(accessToken: string): Promise<void> {
       new ShelfError({
         cause,
         message:
-          "Failed to revoke a session opened by a refused legacy sign-in. The tokens were not returned to the client.",
+          "Failed to revoke a session opened by a refused or failed sign-in. The tokens were not returned to the client.",
         label,
       })
     );
@@ -93,12 +94,13 @@ async function revokeSession(accessToken: string): Promise<void> {
  * fails, the session is ended too: an unanswered check never lets one through.
  *
  * @param authSession - the session Supabase just opened; the decision is asked
- *   about its authenticated address
+ *   about its authenticated address. `email` must be that session's own
+ *   authenticated address, never one taken from the request.
  * @returns null when the sign-in may proceed, otherwise why it is refused
  * @throws {ShelfError} If the decision fails (the session is already revoked)
  */
-async function refuseAuthenticatedLegacySession(
-  authSession: AuthSession
+export async function refuseAuthenticatedLegacySession(
+  authSession: Pick<AuthSession, "email" | "accessToken">
 ): Promise<LegacyLoginRefusalReason | null> {
   const { email, accessToken } = authSession;
   let decision: LegacyLoginDecision;

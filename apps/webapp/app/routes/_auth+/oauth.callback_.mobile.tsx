@@ -41,6 +41,8 @@ import {
   readFormData,
 } from "~/utils/http.server";
 import {
+  assertSsoAuthenticatedSession,
+  getSsoClaimsForAuthUser,
   isSsoAccountLinkedError,
   resolveUserAndOrgForSsoCallback,
 } from "~/utils/sso.server";
@@ -50,34 +52,15 @@ const MOBILE_CALLBACK_URL = "shelf://auth-callback";
 
 /**
  * Mirrors the web callback's payload: the client reads the Supabase session
- * from the URL fragment and posts the refresh token + SAML claims. We re-derive
- * the session server-side and never trust the client-supplied tokens.
+ * from the URL fragment and posts only the refresh token. We re-derive the
+ * session server-side and never trust the client-supplied tokens. Every claim
+ * the action acts on (groups, names, contact info) is read server-side with
+ * `getSsoClaimsForAuthUser`, never from the form.
  */
 const MobileCallbackSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  groups: z
-    .union([
-      z.string().transform((str) => {
-        try {
-          const parsed = JSON.parse(str);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      }),
-      z.array(z.string()),
-    ])
-    .default([]),
   refreshToken: z.string().min(1),
   // `createSSOFormData` always includes a redirectTo; it is unused on mobile.
   redirectTo: z.string().optional(),
-  phone: z.string().optional(),
-  streetAddress: z.string().optional(),
-  city: z.string().optional(),
-  stateProvince: z.string().optional(),
-  postalCode: z.string().optional(),
-  country: z.string().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -108,31 +91,22 @@ export async function action({ request }: ActionFunctionArgs) {
         // why: readFormData (not request.formData()) so a malformed body / wrong
         // Content-Type is downgraded to a non-captured 400, rather than a
         // TypeError that logException would otherwise surface as a captured 5xx.
-        const {
-          refreshToken,
-          firstName,
-          lastName,
-          groups,
-          phone,
-          streetAddress,
-          city,
-          stateProvince,
-          postalCode,
-          country,
-        } = parseData(await readFormData(request), MobileCallbackSchema);
+        const { refreshToken } = parseData(
+          await readFormData(request),
+          MobileCallbackSchema
+        );
 
-        // Don't trust client tokens — re-derive the session from the refresh
+        // Don't trust client tokens: re-derive the session from the refresh
         // token server-side (same trust boundary as the web callback).
         const authSession = await refreshAccessToken(refreshToken);
-
-        const contactInfo = {
-          phone,
-          street: streetAddress,
-          city,
-          stateProvince,
-          zipPostalCode: postalCode,
-          countryRegion: country,
-        };
+        // Any Supabase refresh token refreshes, so refuse a session that was
+        // not obtained through SSO before anything is provisioned or synced.
+        await assertSsoAuthenticatedSession(authSession);
+        const { groups, firstName, lastName, contactInfo } =
+          await getSsoClaimsForAuthUser({
+            authUserId: authSession.userId,
+            email: authSession.email,
+          });
 
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
@@ -229,7 +203,7 @@ export default function MobileLoginCallback() {
         const refreshToken = supabaseSession?.refresh_token;
         if (!refreshToken) return;
 
-        const formData = createSSOFormData(supabaseSession, refreshToken, "");
+        const formData = createSSOFormData(refreshToken, "");
         void fetcher.submit(formData, { method: "post" });
       }
     });
