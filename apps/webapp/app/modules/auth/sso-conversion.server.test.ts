@@ -1,9 +1,10 @@
 // @vitest-environment node
 /**
  * Tests for the SSO account conversion engine: the admin-initiated conversion
- * (`convertAccountToSso`), the callback merge of a duplicate SSO auth user
- * (`reconcileDuplicateSsoLogin`), and the candidate listing
- * (`findEligibleAccountsForSsoConversion`).
+ * (`convertAccountToSso`), Convert all (`convertAllEligibleOnDomain`), the
+ * revert to a standard account (`revertAccountToStandard`), the callback merge
+ * of a duplicate SSO auth user (`reconcileDuplicateSsoLogin`), and the
+ * candidate listing (`findEligibleAccountsForSsoConversion`).
  *
  * @see {@link file://./sso-conversion.server.ts}
  */
@@ -51,8 +52,10 @@ import { getAuthUserById } from "~/modules/auth/service.server";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 import {
   convertAccountToSso,
+  convertAllEligibleOnDomain,
   findEligibleAccountsForSsoConversion,
   reconcileDuplicateSsoLogin,
+  revertAccountToStandard,
 } from "./sso-conversion.server";
 
 const PROVIDER_ID = "11111111-1111-1111-1111-111111111111";
@@ -191,23 +194,25 @@ describe("convertAccountToSso", () => {
     expect(db.user.update).not.toHaveBeenCalled();
   });
 
-  it("refuses to convert a workspace owner", async () => {
+  it("converts a workspace owner", async () => {
     vi.mocked(db.organization.count).mockResolvedValue(1);
 
-    await expect(convertAccountToSso({ userId: ORIGINAL_ID })).rejects.toThrow(
-      /owner/i
-    );
-    expect(db.$executeRaw).not.toHaveBeenCalled();
-    expect(db.user.update).not.toHaveBeenCalled();
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: ORIGINAL_ID },
+      data: { sso: true, onboarded: true },
+    });
   });
 
-  it("refuses an OWNER role on a team membership", async () => {
+  it("converts a user with an OWNER role on a team membership", async () => {
     vi.mocked(db.userOrganization.count).mockResolvedValue(1);
 
-    await expect(convertAccountToSso({ userId: ORIGINAL_ID })).rejects.toThrow(
-      /owner/i
-    );
-    expect(db.$executeRaw).not.toHaveBeenCalled();
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+    rawCallMatching("UPDATE auth.users");
   });
 
   it("refuses when the domain is not configured for SSO", async () => {
@@ -420,5 +425,251 @@ describe("convertAccountToSso when the SSO identity already exists", () => {
 
     expect(result.status).toBe("converted");
     expect(db.$queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("convertAllEligibleOnDomain", () => {
+  /** Candidate rows as `db.user.findMany` returns them for the listing. */
+  const listed = [
+    { id: "u-std-1", email: "one@acme.com", sso: false },
+    { id: "u-owner", email: "owner@acme.com", sso: false },
+    { id: "u-sso", email: "sso@acme.com", sso: true },
+    { id: "u-std-2", email: "two@acme.com", sso: false },
+    { id: "u-std-3", email: "three@acme.com", sso: false },
+  ].map((u) => ({ ...u, firstName: null, lastName: null, displayName: null }));
+
+  beforeEach(() => {
+    vi.mocked(db.user.findMany).mockResolvedValue(
+      listed as unknown as Awaited<ReturnType<typeof db.user.findMany>>
+    );
+    vi.mocked(db.organization.findMany).mockResolvedValue([
+      { userId: "u-owner" },
+    ] as unknown as Awaited<ReturnType<typeof db.organization.findMany>>);
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([]);
+    // Each conversion re-reads its own user by id.
+    vi.mocked(db.user.findUnique).mockImplementation(((args: {
+      where: { id: string };
+    }) => {
+      const row = listed.find((u) => u.id === args.where.id);
+      return Promise.resolve(
+        row ? { id: row.id, email: row.email, sso: row.sso } : null
+      );
+    }) as unknown as typeof db.user.findUnique);
+  });
+
+  /** User ids whose SSO identity INSERT ran, in order. */
+  function seededUserIds(): unknown[] {
+    return rawCalls()
+      .filter((c) => c.sql.includes("INSERT INTO auth.identities"))
+      .map((c) => c.values[0]);
+  }
+
+  it("converts only standard non-owner accounts, one after another", async () => {
+    const result = await convertAllEligibleOnDomain({
+      domain: " ACME.com ",
+      actorUserId: "admin-id",
+    });
+
+    expect(result).toEqual({ converted: 3, pendingReconcile: 0, failed: [] });
+    expect(seededUserIds()).toEqual(["u-std-1", "u-std-2", "u-std-3"]);
+    expect(db.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          deletedAt: null,
+          email: { endsWith: "@acme.com", mode: "insensitive" },
+        },
+      })
+    );
+    expect(db.$transaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps going after one account fails and reports it", async () => {
+    vi.mocked(getAuthUserById).mockImplementation(((id: string) =>
+      Promise.resolve(
+        id === "u-std-2" ? null : { id, app_metadata: { provider: "email" } }
+      )) as unknown as typeof getAuthUserById);
+
+    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
+
+    expect(result.converted).toBe(2);
+    expect(result.failed).toEqual([
+      {
+        userId: "u-std-2",
+        email: "two@acme.com",
+        message: "No auth account found for this user.",
+      },
+    ]);
+    expect(seededUserIds()).toEqual(["u-std-1", "u-std-3"]);
+  });
+
+  it("counts a pending reconcile as converted and tallies it", async () => {
+    // Only u-std-3's identity is already held, by an earlier SSO auth user.
+    vi.mocked(db.$executeRaw).mockImplementation(((
+      strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) =>
+      Promise.resolve(
+        strings.join("").includes("INSERT INTO auth.identities") &&
+          values[0] === "u-std-3"
+          ? 0
+          : 1
+      )) as unknown as typeof db.$executeRaw);
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: DUPLICATE_ID }]);
+
+    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
+
+    expect(result).toEqual({ converted: 3, pendingReconcile: 1, failed: [] });
+  });
+
+  it("throws once, before touching any account, when the domain has no SSO provider", async () => {
+    vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+      ssoProviderId: null,
+    });
+
+    await expect(
+      convertAllEligibleOnDomain({ domain: "acme.com" })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/not configured for sso/i),
+    });
+    expect(checkDomainSSOStatus).toHaveBeenCalledTimes(1);
+    expect(checkDomainSSOStatus).toHaveBeenCalledWith("@acme.com");
+    expect(db.user.findMany).not.toHaveBeenCalled();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe("revertAccountToStandard", () => {
+  beforeEach(() => {
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      ...baseUser,
+      sso: true,
+    } as unknown as Awaited<ReturnType<typeof db.user.findUnique>>);
+  });
+
+  it("refuses an account that is not SSO", async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue(
+      baseUser as unknown as Awaited<ReturnType<typeof db.user.findUnique>>
+    );
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "This account is not an SSO account.",
+    });
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for an unknown user", async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue(null);
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("refuses a non-owner whose domain still uses SSO", async () => {
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/only a workspace owner/i),
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+    expect(db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("reverts a workspace owner on an SSO domain", async () => {
+    vi.mocked(db.organization.count).mockResolvedValue(1);
+
+    const result = await revertAccountToStandard({
+      userId: ORIGINAL_ID,
+      actorUserId: "admin-id",
+    });
+
+    expect(result).toEqual({
+      userId: ORIGINAL_ID,
+      email: baseUser.email,
+      status: "reverted",
+    });
+
+    const identityDelete = rawCallMatching("DELETE FROM auth.identities");
+    expect(identityDelete.sql).toContain("provider LIKE 'sso:%'");
+    expect(identityDelete.values).toEqual([ORIGINAL_ID]);
+
+    const insert = rawCallMatching("INSERT INTO auth.identities");
+    expect(insert.sql).toContain("'email'");
+    expect(insert.sql).toContain("'email_verified', true");
+    expect(insert.sql).toContain(
+      "ON CONFLICT (provider_id, provider) DO NOTHING"
+    );
+    // user_id, provider_id, sub, email (lowercased)
+    expect(insert.values).toEqual([
+      ORIGINAL_ID,
+      ORIGINAL_ID,
+      ORIGINAL_ID,
+      "jane.doe@acme.com",
+    ]);
+
+    const authUser = rawCallMatching("UPDATE auth.users");
+    expect(authUser.sql).toContain("is_sso_user = false");
+    expect(authUser.sql).toContain("'provider', 'email'");
+    expect(authUser.sql).not.toContain("encrypted_password");
+    expect(authUser.values).toEqual([ORIGINAL_ID]);
+
+    expect(rawCallMatching("DELETE FROM auth.sessions").values).toEqual([
+      ORIGINAL_ID,
+    ]);
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: ORIGINAL_ID },
+      data: { sso: false },
+    });
+  });
+
+  it("reverts a non-owner once the domain no longer uses SSO", async () => {
+    vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+      ssoProviderId: null,
+    });
+
+    const result = await revertAccountToStandard({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("reverted");
+    // The owner queries are not needed once the domain is off SSO.
+    expect(db.organization.count).not.toHaveBeenCalled();
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: ORIGINAL_ID },
+      data: { sso: false },
+    });
+  });
+
+  it("returns 409 when another standard account already uses the email", async () => {
+    vi.mocked(db.organization.count).mockResolvedValue(1);
+    // Shape of the Prisma error a raw unique violation surfaces as.
+    const uniqueViolation = Object.assign(
+      new Error(
+        'Raw query failed. Code: `23505`. Message: `ERROR: duplicate key value violates unique constraint "users_email_partial_key"`'
+      ),
+      { code: "P2010", meta: { code: "23505" } }
+    );
+    vi.mocked(db.$executeRaw).mockImplementation(((
+      strings: TemplateStringsArray
+    ) =>
+      strings.join("").includes("UPDATE auth.users")
+        ? Promise.reject(uniqueViolation)
+        : Promise.resolve(1)) as unknown as typeof db.$executeRaw);
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/another standard account/i),
+    });
+    expect(db.user.update).not.toHaveBeenCalled();
   });
 });

@@ -174,6 +174,8 @@ export default function IndexLoginForm() {
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const acceptedInvite = searchParams.get("acceptedInvite");
   const passwordReset = searchParams.get("password_reset");
+  /** Set by the app layout when it ends a session whose address must use SSO. */
+  const ssoRequired = searchParams.get("sso_required");
   const data = useActionData<typeof action>();
 
   const navigation = useNavigation();
@@ -195,6 +197,13 @@ export default function IndexLoginForm() {
         <div className="mb-8 text-center text-success-600">
           You have successfully reset your password. You can now use your new
           password to login.
+        </div>
+      ) : null}
+
+      {ssoRequired ? (
+        <div role="alert" className="mb-8 text-center text-error-600">
+          This email address signs in with single sign-on. Please use Login with
+          SSO.
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">

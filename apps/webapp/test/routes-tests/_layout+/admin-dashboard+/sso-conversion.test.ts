@@ -1,6 +1,6 @@
 /**
  * Admin SSO conversion route: admin gating, the loader's view of a domain, and
- * the action's hand-off to the conversion engine.
+ * the action's hand-off to the conversion engine for each intent.
  *
  * @see {@link file://./../../../../app/routes/_layout+/admin-dashboard+/sso-conversion.tsx}
  */
@@ -16,7 +16,9 @@ import { ShelfError } from "~/utils/error";
 // file tests the route around it.
 vi.mock("~/modules/auth/sso-conversion.server", () => ({
   convertAccountToSso: vi.fn(),
+  convertAllEligibleOnDomain: vi.fn(),
   findEligibleAccountsForSsoConversion: vi.fn(),
+  revertAccountToStandard: vi.fn(),
 }));
 // why: checkDomainSSOStatus reads auth.sso_domains with raw SQL.
 vi.mock("~/utils/sso.server", () => ({
@@ -51,7 +53,9 @@ vi.mock("react-router", async () => ({
 
 import {
   convertAccountToSso,
+  convertAllEligibleOnDomain,
   findEligibleAccountsForSsoConversion,
+  revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
@@ -208,7 +212,9 @@ describe("admin sso-conversion route", () => {
     it("refuses a non-admin with 403 and converts nothing", async () => {
       vi.mocked(requireAdmin).mockRejectedValue(forbidden());
 
-      const response = await action(actionArgs({ targetUserId: "user-1" }));
+      const response = await action(
+        actionArgs({ intent: "convert-one", targetUserId: "user-1" })
+      );
 
       expect(asResponse(response).status).toBe(403);
       expect(convertAccountToSso).not.toHaveBeenCalled();
@@ -221,7 +227,9 @@ describe("admin sso-conversion route", () => {
         status: "converted",
       });
 
-      const result = await action(actionArgs({ targetUserId: "user-1" }));
+      const result = await action(
+        actionArgs({ intent: "convert-one", targetUserId: "user-1" })
+      );
 
       expect(convertAccountToSso).toHaveBeenCalledWith({
         userId: "user-1",
@@ -238,29 +246,152 @@ describe("admin sso-conversion route", () => {
       vi.mocked(convertAccountToSso).mockRejectedValue(
         new ShelfError({
           cause: null,
-          message: "Workspace owners cannot be converted to SSO.",
+          message: "This email domain is not configured for SSO.",
           label: "SSO",
           status: 400,
           shouldBeCaptured: false,
         })
       );
 
-      const response = await action(actionArgs({ targetUserId: "owner-1" }));
+      const response = await action(
+        actionArgs({ intent: "convert-one", targetUserId: "user-1" })
+      );
       const body = (await asResponse(response).json()) as {
         error?: { message?: string };
       };
 
       expect(asResponse(response).status).toBe(400);
       expect(body.error?.message).toBe(
-        "Workspace owners cannot be converted to SSO."
+        "This email domain is not configured for SSO."
       );
     });
 
     it("refuses a submission without a target user", async () => {
-      const response = await action(actionArgs({}));
+      const response = await action(actionArgs({ intent: "convert-one" }));
 
       expect(asResponse(response).status).toBe(400);
       expect(convertAccountToSso).not.toHaveBeenCalled();
+    });
+
+    it("refuses an unknown or missing intent with 400 and runs nothing", async () => {
+      const cases: Record<string, string>[] = [
+        { intent: "delete-everyone", targetUserId: "user-1" },
+        { targetUserId: "user-1" },
+      ];
+      for (const fields of cases) {
+        const response = await action(actionArgs(fields));
+        expect(asResponse(response).status).toBe(400);
+      }
+
+      expect(convertAccountToSso).not.toHaveBeenCalled();
+      expect(convertAllEligibleOnDomain).not.toHaveBeenCalled();
+      expect(revertAccountToStandard).not.toHaveBeenCalled();
+    });
+
+    describe("convert-all", () => {
+      it("refuses a non-admin with 403 and converts nothing", async () => {
+        vi.mocked(requireAdmin).mockRejectedValue(forbidden());
+
+        const response = await action(
+          actionArgs({ intent: "convert-all", domain: "acme.com" })
+        );
+
+        expect(asResponse(response).status).toBe(403);
+        expect(convertAllEligibleOnDomain).not.toHaveBeenCalled();
+      });
+
+      it("converts the domain, records the admin as the actor and returns the summary", async () => {
+        const summary = {
+          converted: 3,
+          pendingReconcile: 1,
+          failed: [
+            { userId: "user-9", email: "kim@acme.com", message: "Boom." },
+          ],
+        };
+        vi.mocked(convertAllEligibleOnDomain).mockResolvedValue(summary);
+
+        const result = await action(
+          actionArgs({ intent: "convert-all", domain: "acme.com" })
+        );
+
+        expect(convertAllEligibleOnDomain).toHaveBeenCalledWith({
+          domain: "acme.com",
+          actorUserId: ADMIN_ID,
+        });
+        expect(convertAccountToSso).not.toHaveBeenCalled();
+        expect(result).toEqual(
+          expect.objectContaining({ intent: "convert-all", result: summary })
+        );
+      });
+
+      it("refuses a submission without a domain", async () => {
+        const response = await action(
+          actionArgs({ intent: "convert-all", domain: "  " })
+        );
+
+        expect(asResponse(response).status).toBe(400);
+        expect(convertAllEligibleOnDomain).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("revert", () => {
+      it("refuses a non-admin with 403 and reverts nothing", async () => {
+        vi.mocked(requireAdmin).mockRejectedValue(forbidden());
+
+        const response = await action(
+          actionArgs({ intent: "revert", targetUserId: "user-1" })
+        );
+
+        expect(asResponse(response).status).toBe(403);
+        expect(revertAccountToStandard).not.toHaveBeenCalled();
+      });
+
+      it("reverts the target user and records the admin as the actor", async () => {
+        vi.mocked(revertAccountToStandard).mockResolvedValue({
+          userId: "owner-1",
+          email: "olu@acme.com",
+          status: "reverted",
+        });
+
+        const result = await action(
+          actionArgs({ intent: "revert", targetUserId: "owner-1" })
+        );
+
+        expect(revertAccountToStandard).toHaveBeenCalledWith({
+          userId: "owner-1",
+          actorUserId: ADMIN_ID,
+        });
+        expect(result).toEqual(
+          expect.objectContaining({
+            intent: "revert",
+            result: expect.objectContaining({ status: "reverted" }),
+          })
+        );
+      });
+
+      it("answers with the engine's status when the revert is refused", async () => {
+        const message =
+          "Only a workspace owner, or an account whose domain no longer uses SSO, can be reverted.";
+        vi.mocked(revertAccountToStandard).mockRejectedValue(
+          new ShelfError({
+            cause: null,
+            message,
+            label: "SSO",
+            status: 400,
+            shouldBeCaptured: false,
+          })
+        );
+
+        const response = await action(
+          actionArgs({ intent: "revert", targetUserId: "user-1" })
+        );
+        const body = (await asResponse(response).json()) as {
+          error?: { message?: string };
+        };
+
+        expect(asResponse(response).status).toBe(400);
+        expect(body.error?.message).toBe(message);
+      });
     });
   });
 });

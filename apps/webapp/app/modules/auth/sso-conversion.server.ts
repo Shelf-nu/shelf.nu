@@ -19,6 +19,12 @@
  * duplicate SSO auth user. `reconcileDuplicateSsoLogin` merges it back onto the
  * original account from the SSO callback.
  *
+ * Workspace owners may be converted one at a time, but `convertAllEligibleOnDomain`
+ * skips them: an unconverted owner keeps password login on an SSO domain, which
+ * is every customer's administrative fallback when their IdP is unavailable.
+ * `revertAccountToStandard` turns a converted account back into an email
+ * account for that same recovery case.
+ *
  * All writes are DML on the `auth` schema inside a Prisma transaction: no
  * schema change is involved.
  *
@@ -34,6 +40,7 @@ import { OrganizationRoles, OrganizationType } from "@prisma/client";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
+import { userOwnsTeamOrg } from "~/modules/auth/sso-enforcement.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -74,30 +81,36 @@ export type SsoConversionCandidate = {
   alreadySso: boolean;
 };
 
-/**
- * Returns true when the user owns at least one TEAM organization, either as the
- * `Organization.owner` (userId) or through an `OWNER` role on a TEAM
- * membership. Owners stay non-SSO as the administrative fallback, so they are
- * never eligible for conversion.
- *
- * @param userId - the Shelf `User.id` to check
- * @returns `true` when the user owns a TEAM org and is therefore ineligible
- */
-export async function userOwnsTeamOrg(userId: string): Promise<boolean> {
-  const ownedTeamOrgs = await db.organization.count({
-    where: { userId, type: OrganizationType.TEAM },
-  });
-  if (ownedTeamOrgs > 0) return true;
+/** One account that `convertAllEligibleOnDomain` could not convert. */
+export type SsoConvertAllFailure = {
+  userId: string;
+  email: string;
+  message: string;
+};
 
-  const ownerMembership = await db.userOrganization.count({
-    where: {
-      userId,
-      roles: { has: OrganizationRoles.OWNER },
-      organization: { type: OrganizationType.TEAM },
-    },
-  });
-  return ownerMembership > 0;
-}
+/**
+ * Summary of a Convert all run. `converted` counts every account converted,
+ * including the `pendingReconcile` ones that need one extra SSO sign-in.
+ */
+export type SsoConvertAllResult = {
+  converted: number;
+  pendingReconcile: number;
+  failed: SsoConvertAllFailure[];
+};
+
+/** Result of reverting a converted account to a standard email account. */
+export type SsoRevertResult = {
+  userId: string;
+  email: string;
+  status: "reverted";
+};
+
+/**
+ * The unique index on `auth.users.email` that only covers non-SSO users. A
+ * revert that trips it means another standard account already holds the
+ * address.
+ */
+const AUTH_USERS_EMAIL_UNIQUE_CONSTRAINT = "users_email_partial_key";
 
 /**
  * Raw-SQL core shared by both conversion paths. Given the auth user id that
@@ -176,9 +189,11 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  * auth account so their next SSO login lands on the original UUID, then seals
  * the account as SSO-only and signs out its current sessions.
  *
- * Guards: skips users already SSO (idempotent); refuses workspace owners;
- * requires the domain to have a configured SSO provider; requires the auth
- * account to exist.
+ * Guards: skips users already SSO (idempotent); requires the domain to have a
+ * configured SSO provider; requires the auth account to exist. Workspace owners
+ * are converted like anyone else; a converted owner loses the password login
+ * an unconverted owner keeps on an SSO domain, and support can undo it with
+ * `revertAccountToStandard`.
  *
  * The seeded `provider_id` is the lowercased email. Stored email case is not
  * normalized, and an IdP that sends a different case is handled by
@@ -220,18 +235,6 @@ export async function convertAccountToSso({
         email: user.email,
         status: "skipped_already_sso",
       };
-    }
-
-    if (await userOwnsTeamOrg(user.id)) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "This user owns a team workspace and cannot be converted to SSO. A workspace owner must remain a non-SSO account.",
-        additionalData: { userId, email: user.email },
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
     }
 
     const ssoProviderId = await requireSsoProviderIdForEmail(user.email);
@@ -435,8 +438,8 @@ export async function reconcileDuplicateSsoLogin({
 /**
  * Lists candidate accounts for the admin conversion UI: every non-deleted Shelf
  * user whose email domain matches `domain` (case-insensitive), annotated with
- * whether they already use SSO and whether they own a team org (and are
- * therefore ineligible).
+ * whether they already use SSO and whether they own a team org (which Convert
+ * all skips).
  *
  * @param domain - the email domain to match (e.g. "acme.com")
  * @returns the matching accounts with eligibility annotations, ordered by email
@@ -493,4 +496,272 @@ export async function findEligibleAccountsForSsoConversion(
     alreadySso: u.sso,
     ownsTeamOrg: ownerIds.has(u.id),
   }));
+}
+
+/**
+ * Converts every eligible account on a domain, one after another, each in its
+ * own transaction. Eligible means not already SSO and not a workspace owner,
+ * recomputed here from the database rather than taken from the client, so the
+ * admin page cannot widen the set. Owners are left on password login and can
+ * be converted individually with `convertAccountToSso`.
+ *
+ * One account failing does not stop the rest: its error is collected and the
+ * run continues.
+ *
+ * @param args.domain - the email domain to convert (case and surrounding
+ *   whitespace are ignored)
+ * @param args.actorUserId - the admin performing the conversion, for the log
+ * @returns how many accounts converted, how many of those await a reconcile at
+ *   their next SSO sign-in, and the accounts that failed with their messages
+ * @throws {ShelfError} 400 when the domain has no configured SSO provider,
+ *   raised once before any account is touched
+ */
+export async function convertAllEligibleOnDomain({
+  domain,
+  actorUserId,
+}: {
+  domain: string;
+  actorUserId?: string;
+}): Promise<SsoConvertAllResult> {
+  const normalized = domain.trim().toLowerCase();
+
+  // `checkDomainSSOStatus` reads the domain from an address.
+  await requireSsoProviderIdForEmail(`@${normalized}`);
+
+  const candidates = await findEligibleAccountsForSsoConversion(normalized);
+  const eligible = candidates.filter((c) => !c.alreadySso && !c.ownsTeamOrg);
+
+  const result: SsoConvertAllResult = {
+    converted: 0,
+    pendingReconcile: 0,
+    failed: [],
+  };
+
+  for (const candidate of eligible) {
+    try {
+      const { status } = await convertAccountToSso({
+        userId: candidate.id,
+        actorUserId,
+      });
+      if (status === "converted") {
+        result.converted += 1;
+      } else if (status === "converted_pending_reconcile") {
+        result.converted += 1;
+        result.pendingReconcile += 1;
+      }
+    } catch (cause) {
+      result.failed.push({
+        userId: candidate.id,
+        email: candidate.email,
+        message:
+          cause instanceof Error ? cause.message : "Failed to convert account.",
+      });
+    }
+  }
+
+  Logger.info(
+    `SSO conversion: convert all on ${normalized} by ${
+      actorUserId ?? "unknown"
+    }: ${eligible.length} eligible, ${result.converted} converted (${
+      result.pendingReconcile
+    } pending reconcile), ${result.failed.length} failed`
+  );
+
+  return result;
+}
+
+/**
+ * Returns true when `cause`, or anything in its cause chain, is the unique
+ * violation on `auth.users.email` for non-SSO users. Prisma reports raw-query
+ * failures as `P2010`, which covers every raw error, so this matches the
+ * constraint name in the message instead.
+ *
+ * @param cause - any thrown value
+ */
+function isStandardEmailTakenError(cause: unknown): boolean {
+  const visited = new Set<object>();
+  let current = cause;
+  while (typeof current === "object" && current !== null) {
+    if (visited.has(current)) return false;
+    visited.add(current);
+    const error = current as {
+      message?: unknown;
+      meta?: { message?: unknown };
+      cause?: unknown;
+    };
+    if (
+      (typeof error.message === "string" &&
+        error.message.includes(AUTH_USERS_EMAIL_UNIQUE_CONSTRAINT)) ||
+      (typeof error.meta?.message === "string" &&
+        error.meta.message.includes(AUTH_USERS_EMAIL_UNIQUE_CONSTRAINT))
+    ) {
+      return true;
+    }
+    current = error.cause;
+  }
+  return false;
+}
+
+/**
+ * Support recovery tool: turns a converted SSO account back into a standard
+ * email account, keeping its UUID. Meant for a customer whose IdP is
+ * unavailable. Afterwards the account has no password; the user sets one
+ * through Forgot password.
+ *
+ * Only allowed when the reverted account could then use password login, per
+ * the same rules as `getLegacyLoginDecision`: the account owns a team
+ * workspace, or its domain is no longer configured for SSO. Anyone else on an
+ * SSO domain would be reverted into an account that cannot sign in at all.
+ *
+ * In one transaction it removes the account's SSO identities, adds an `email`
+ * identity, clears `is_sso_user` and points the app metadata at the email
+ * provider (the password stays empty), signs out every session, and clears
+ * `User.sso`.
+ *
+ * @param args.userId - the Shelf `User.id` (same as the auth UUID) to revert
+ * @param args.actorUserId - the admin performing the revert, for the log
+ * @returns the reverted account
+ * @throws {ShelfError} 404 when the user does not exist, 400 when it is not an
+ *   SSO account or could not use password login after the revert, 409 when
+ *   another standard account already uses the email address
+ */
+export async function revertAccountToStandard({
+  userId,
+  actorUserId,
+}: {
+  userId: string;
+  actorUserId?: string;
+}): Promise<SsoRevertResult> {
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, sso: true },
+    });
+
+    if (!user) {
+      throw new ShelfError({
+        cause: null,
+        message: "User not found.",
+        additionalData: { userId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (!user.sso) {
+      throw new ShelfError({
+        cause: null,
+        message: "This account is not an SSO account.",
+        additionalData: { userId, email: user.email },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // The domain check runs first: the owner queries are only needed when the
+    // domain still uses SSO.
+    const { isConfiguredForSSO } = await checkDomainSSOStatus(user.email);
+    const canUsePasswordLogin =
+      !isConfiguredForSSO || (await userOwnsTeamOrg(user.id));
+
+    if (!canUsePasswordLogin) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Only a workspace owner, or an account whose domain no longer uses SSO, can be reverted. Anyone else on an SSO domain still could not sign in with a password.",
+        additionalData: { userId, email: user.email },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const email = user.email.toLowerCase();
+
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw`
+        DELETE FROM auth.identities
+        WHERE user_id = ${user.id}::uuid
+          AND provider LIKE 'sso:%'
+      `;
+
+      // An email identity's provider_id is the user id. ON CONFLICT keeps a
+      // re-run idempotent.
+      await tx.$executeRaw`
+        INSERT INTO auth.identities
+          (user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
+        VALUES (
+          ${user.id}::uuid,
+          ${user.id}::text,
+          'email',
+          jsonb_build_object(
+            'sub', ${user.id}::text,
+            'email', ${email}::text,
+            'email_verified', true,
+            'phone_verified', false
+          ),
+          now(), now(), now()
+        )
+        ON CONFLICT (provider_id, provider) DO NOTHING
+      `;
+
+      // `||` merges into the existing jsonb without dropping other keys. The
+      // password stays NULL until the user sets one.
+      await tx.$executeRaw`
+        UPDATE auth.users
+        SET
+          is_sso_user = false,
+          raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb)
+            || jsonb_build_object(
+                 'provider', 'email',
+                 'providers', jsonb_build_array('email')
+               )
+        WHERE id = ${user.id}::uuid
+      `;
+
+      await tx.$executeRaw`
+        DELETE FROM auth.sessions
+        WHERE user_id = ${user.id}::uuid
+      `;
+
+      await tx.user.update({
+        where: { id: user.id },
+        data: { sso: false },
+      });
+    });
+
+    Logger.info(
+      `SSO conversion: reverted user ${user.id} (${
+        user.email
+      }) to a standard account, performed by ${actorUserId ?? "unknown"}`
+    );
+
+    return { userId: user.id, email: user.email, status: "reverted" };
+  } catch (cause) {
+    if (isStandardEmailTakenError(cause)) {
+      throw new ShelfError({
+        cause,
+        message:
+          "Another standard account already uses this email address. Resolve that account before reverting.",
+        additionalData: { userId, actorUserId },
+        label,
+        status: 409,
+        shouldBeCaptured: true,
+      });
+    }
+
+    throw new ShelfError({
+      cause,
+      message:
+        cause instanceof ShelfError
+          ? cause.message
+          : "Failed to revert account to a standard account.",
+      additionalData: { userId, actorUserId },
+      label,
+      shouldBeCaptured:
+        cause instanceof ShelfError ? cause.shouldBeCaptured : true,
+    });
+  }
 }

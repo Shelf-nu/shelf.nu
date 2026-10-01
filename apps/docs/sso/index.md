@@ -23,7 +23,7 @@ If you already have a workspace that was used for testing or trials (for example
 
 ### 3. Existing standard accounts on the domain [#](#3-existing-standard-accounts)
 
-Any existing **standard (non-SSO) accounts** that use the SSO domain, for example `jane@yourdomain.com` and `joe@yourdomain.com`, cannot log in via SSO as they are, and once the domain is an SSO domain no new standard accounts can be created on it. Shelf can convert these accounts to SSO while keeping their data and memberships (see [Existing standard accounts on your domain](#existing-standard-accounts-on-your-domain)). Share the list of these accounts with your Shelf contact, who will convert them at the right point in the setup.
+Any existing **standard (non-SSO) accounts** that use the SSO domain, for example `jane@yourdomain.com` and `joe@yourdomain.com`, cannot log in via SSO as they are. Once the domain is an SSO domain, no new standard accounts can be created on it, and existing standard accounts can no longer sign in with a password, an email code or a password reset (workspace owners excepted). Shelf converts these accounts to SSO while keeping their data and memberships (see [Existing standard accounts on your domain](#existing-standard-accounts-on-your-domain)). Share the list of these accounts with your Shelf contact, who will convert them at the right point in the setup.
 
 ### 4. Plan your group-to-role mapping [#](#4-plan-group-mapping)
 
@@ -68,9 +68,11 @@ Accounts signing in with SSO have certain limitations. The following sections ou
 
 If users on your domain already have standard (email/password) Shelf accounts, for example from earlier testing, Shelf can convert them to SSO during onboarding. The account keeps the same identity, data and workspace memberships: only the login method changes to SSO.
 
-- Conversion is performed by Shelf staff from the admin dashboard once your SSO provider is configured for the domain.
-- **Workspace owners are not converted.** At least one non-SSO owner must remain per workspace as an administrative fallback. Re-assign ownership first if an owner needs SSO.
+- Conversion is performed by Shelf staff from the admin dashboard once your SSO provider is configured for the domain. Staff can convert accounts one at a time, or convert every eligible account on the domain at once so nobody is missed.
+- **Workspace owners can keep standard login.** An owner who is not converted keeps signing in with their password, which gives you an administrative fallback if your identity provider is unavailable. Converting an owner is optional and done individually, on request: converting all accounts on a domain always skips workspace owners.
 - Converting an account signs the user out of every existing session and removes their password. From then on they sign in only via SSO.
+- **Once a domain is configured for SSO, legacy sign-in is refused on it.** Password login, email codes (OTP) and password reset stop working for every account on the domain, in the web app and in the mobile app, except for workspace owners who have not been converted. A refused account that is still signed in from before is signed out on its next page load and asked to use SSO. Convert accounts as soon as the domain is configured, so your team is not locked out in between.
+- **If your identity provider becomes unavailable**, Shelf support can revert a converted workspace owner to standard login. The owner then sets a new password with **Forgot password** on the login page and signs in with it. Other accounts on an SSO domain cannot be reverted while the domain is configured for SSO, because they would still be refused a password login.
 - **Group mappings decide the role.** If the workspace's SSO settings map identity provider groups to roles (the Administrator, Self service and Base group fields), every SSO login sets the user's role from their groups. A converted user whose groups do not map to any role loses access to that workspace at their first SSO login. If no group mappings are configured, existing workspace memberships and roles are kept as they are. Set up the groups (or leave the mappings empty) before converting.
 - If a user tries to sign in via SSO before their account is converted, the sign-in is refused and they are asked to contact support. Once the account is converted, their next SSO sign-in reconciles it automatically and asks them to sign in once more; after that they sign in normally. Convert accounts before announcing SSO to your team so nobody hits the refusal.
 

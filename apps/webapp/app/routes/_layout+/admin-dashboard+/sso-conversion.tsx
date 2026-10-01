@@ -4,16 +4,25 @@
  * Lets Shelf staff convert a customer's existing standard (email/password)
  * accounts into SSO-only accounts that keep their original UUID and all data.
  * Staff enter an email domain to list every matching Shelf account, annotated
- * with whether it is already SSO or belongs to a workspace owner (and therefore
- * ineligible), then convert eligible accounts one at a time.
+ * with whether it is already SSO or belongs to a workspace owner, then either
+ * convert accounts one at a time or convert every eligible account at once.
+ * "Convert all" skips workspace owners, who may keep password login; an owner
+ * can still be converted individually.
+ *
+ * Already-SSO accounts can be reverted to standard login as a recovery tool,
+ * for example when a customer's identity provider is unavailable. A revert is
+ * only allowed when the account could then sign in with a password: a workspace
+ * owner, or any account whose domain no longer uses SSO.
  *
  * The page also lists the workspaces that claim the domain and flags the ones
  * with SSO group mappings: at a converted user's first SSO login, membership in
  * those workspaces is re-derived from the user's IdP groups, so a user whose
  * groups map to no role loses access there.
  *
- * Conversion is delegated to {@link convertAccountToSso}; the candidate list and
- * eligibility annotations come from {@link findEligibleAccountsForSsoConversion}.
+ * The action dispatches on an `intent` field (`convert-one`, `convert-all`,
+ * `revert`) to {@link convertAccountToSso}, {@link convertAllEligibleOnDomain}
+ * and {@link revertAccountToStandard}, which enforce every eligibility rule;
+ * the candidate list comes from {@link findEligibleAccountsForSsoConversion}.
  * The page is gated to ADMIN users in both the loader and the action.
  *
  * @see {@link file://./../../../modules/auth/sso-conversion.server.ts}
@@ -42,10 +51,14 @@ import { useDisabled } from "~/hooks/use-disabled";
 import type {
   SsoConversionCandidate,
   SsoConversionResult,
+  SsoConvertAllResult,
+  SsoRevertResult,
 } from "~/modules/auth/sso-conversion.server";
 import {
   convertAccountToSso,
+  convertAllEligibleOnDomain,
   findEligibleAccountsForSsoConversion,
+  revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -136,12 +149,41 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 }
 
 /**
- * Converts a single account to SSO. Parses `targetUserId` from the submitted
- * form and delegates to {@link convertAccountToSso}, which enforces the
- * eligibility guards (workspace owner, already SSO, domain not configured).
+ * The action's form contract, one branch per `intent`. An unknown or missing
+ * intent fails validation with a 400.
+ */
+const SsoConversionActionSchema = z.discriminatedUnion("intent", [
+  z.object({
+    intent: z.literal("convert-one"),
+    targetUserId: z.string().min(1),
+  }),
+  z.object({
+    intent: z.literal("convert-all"),
+    domain: z.string().trim().min(1),
+  }),
+  z.object({
+    intent: z.literal("revert"),
+    targetUserId: z.string().min(1),
+  }),
+]);
+
+/**
+ * Runs one SSO conversion operation, selected by the submitted `intent`:
  *
- * @returns A `payload` with the conversion result on success, or an `error`
- *   response carrying the failure status
+ * - `convert-one`: converts `targetUserId` via {@link convertAccountToSso}
+ *   (owners included);
+ * - `convert-all`: converts every eligible account on `domain` via
+ *   {@link convertAllEligibleOnDomain}, which recomputes eligibility itself and
+ *   skips owners and SSO accounts;
+ * - `revert`: reverts `targetUserId` to standard login via
+ *   {@link revertAccountToStandard}.
+ *
+ * The admin check runs before the form is read, for every intent. The engine
+ * functions enforce the eligibility rules; their refusals come back with the
+ * engine's status.
+ *
+ * @returns A `payload` carrying the `intent` and its result, so the client can
+ *   narrow on `intent`, or an `error` response carrying the failure status
  */
 export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -149,27 +191,68 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     await requireAdmin(userId);
 
-    const { targetUserId } = parseData(
+    const submission = parseData(
       await request.formData(),
-      z.object({ targetUserId: z.string().min(1) })
+      SsoConversionActionSchema
     );
 
-    // `userId` is the admin performing the conversion; `targetUserId` is the
-    // account being converted.
-    const result = await convertAccountToSso({
-      userId: targetUserId,
-      actorUserId: userId,
-    });
+    // Throughout, `userId` is the admin performing the operation and
+    // `targetUserId` is the account being changed.
+    switch (submission.intent) {
+      case "convert-one": {
+        const result = await convertAccountToSso({
+          userId: submission.targetUserId,
+          actorUserId: userId,
+        });
 
-    const copy = describeConversionResult(result);
-    sendNotification({
-      title: copy.title,
-      message: copy.message,
-      icon: { name: "success", variant: "success" },
-      senderId: userId,
-    });
+        const copy = describeConversionResult(result);
+        sendNotification({
+          title: copy.title,
+          message: copy.message,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
 
-    return payload({ result });
+        return payload({ intent: "convert-one" as const, result });
+      }
+
+      case "convert-all": {
+        const result = await convertAllEligibleOnDomain({
+          domain: submission.domain,
+          actorUserId: userId,
+        });
+
+        const copy = describeConvertAllResult(result);
+        sendNotification({
+          title: copy.title,
+          message: copy.message,
+          icon:
+            result.failed.length > 0
+              ? { name: "x", variant: "error" }
+              : { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ intent: "convert-all" as const, result });
+      }
+
+      case "revert": {
+        const result = await revertAccountToStandard({
+          userId: submission.targetUserId,
+          actorUserId: userId,
+        });
+
+        const copy = describeRevertResult(result);
+        sendNotification({
+          title: copy.title,
+          message: copy.message,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({ intent: "revert" as const, result });
+      }
+    }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -211,20 +294,80 @@ function describeConversionResult(result: SsoConversionResult): {
   }
 }
 
+/**
+ * Toast copy for a "Convert all" run. The per-account failures are listed on
+ * the page itself, so the toast only carries the counts.
+ *
+ * @param result - the outcome of {@link convertAllEligibleOnDomain}
+ * @returns the toast title and message
+ */
+function describeConvertAllResult(result: SsoConvertAllResult): {
+  title: string;
+  message: string;
+} {
+  const converted = pluralizeAccounts(result.converted);
+  const failed = result.failed.length;
+
+  return {
+    title:
+      failed > 0
+        ? `Converted ${converted}, ${failed} failed`
+        : `Converted ${converted} to SSO`,
+    message:
+      failed > 0
+        ? "See the summary on the page for the accounts that failed."
+        : "Every eligible account on the domain now signs in via SSO.",
+  };
+}
+
+/**
+ * User-facing copy for a revert, shared by the toast the action sends and the
+ * line under the reverted row.
+ *
+ * @param result - the outcome of {@link revertAccountToStandard}
+ * @returns the toast title and message, and the short text for the row
+ */
+function describeRevertResult(result: SsoRevertResult): {
+  title: string;
+  message: string;
+  rowText: string;
+} {
+  return {
+    title: "Account reverted to standard login",
+    message: `${result.email} was signed out and can set a password with Forgot password.`,
+    rowText: "Reverted. They set a password with Forgot password.",
+  };
+}
+
+/**
+ * "1 account" / "3 accounts".
+ *
+ * @param count - the number of accounts
+ */
+function pluralizeAccounts(count: number) {
+  return `${count} ${count === 1 ? "account" : "accounts"}`;
+}
+
 export default function SsoConversionPage() {
   const { domain, isConfiguredForSSO, candidates, linkedWorkspaces } =
     useLoaderData<typeof loader>();
   const mappedWorkspaces = linkedWorkspaces.filter((w) => w.hasGroupMappings);
+  // Mirrors the server's own selection in convertAllEligibleOnDomain, which is
+  // what actually decides; this count only labels the button.
+  const eligibleCount = candidates.filter(
+    (c) => !c.alreadySso && !c.ownsTeamOrg
+  ).length;
 
   return (
     <div className="flex flex-col gap-4 p-4">
       <div>
         <h1 className="text-xl font-semibold">Convert accounts to SSO</h1>
         <p className="text-sm text-gray-600">
-          Enter an email domain to list its Shelf accounts. Eligible accounts
-          can be converted to SSO-only sign-in while keeping all of their data.
-          Workspace owners and accounts that are already SSO cannot be
-          converted.
+          Enter an email domain to list its Shelf accounts. Converted accounts
+          sign in only via SSO and keep all of their data. Workspace owners can
+          keep password login: Convert all skips them, but each one can still be
+          converted on its own. SSO accounts can be reverted to standard login
+          when that would let them sign in with a password.
         </p>
       </div>
 
@@ -306,23 +449,35 @@ export default function SsoConversionPage() {
       ) : null}
 
       {candidates.length > 0 ? (
-        <Table>
-          <thead>
-            <Tr>
-              <Th>Email</Th>
-              <Th>Name</Th>
-              <Th>Status</Th>
-              <Th>
-                <span className="sr-only">Actions</span>
-              </Th>
-            </Tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate) => (
-              <CandidateRow key={candidate.id} candidate={candidate} />
-            ))}
-          </tbody>
-        </Table>
+        <>
+          <ConvertAllControl
+            domain={domain}
+            eligibleCount={eligibleCount}
+            isConfiguredForSSO={isConfiguredForSSO}
+          />
+          <Table>
+            <thead>
+              <Tr>
+                <Th>Email</Th>
+                <Th>Name</Th>
+                <Th>Status</Th>
+                <Th>
+                  <span className="sr-only">Actions</span>
+                </Th>
+              </Tr>
+            </thead>
+            <tbody>
+              {candidates.map((candidate) => (
+                <CandidateRow
+                  key={candidate.id}
+                  candidate={candidate}
+                  domain={domain}
+                  isConfiguredForSSO={isConfiguredForSSO}
+                />
+              ))}
+            </tbody>
+          </Table>
+        </>
       ) : domain && isConfiguredForSSO ? (
         <p className="text-sm text-gray-600">No accounts found for {domain}.</p>
       ) : null}
@@ -331,65 +486,66 @@ export default function SsoConversionPage() {
 }
 
 /**
- * One candidate account row: name, eligibility status and a Convert action
- * behind a confirmation dialog.
+ * The "Convert all eligible (N)" button, its confirmation dialog, and the
+ * summary of the last run.
  *
- * Each row owns its fetcher, so an in-flight conversion only disables its own
- * button, and the row shows its own result or error (a page-level
- * `useActionData` never sees fetcher submissions).
+ * It owns its fetcher so the run's summary survives the loader revalidation
+ * that follows the submission (which refreshes the rows below). The server
+ * recomputes which accounts are eligible; `eligibleCount` only labels the
+ * button and the confirmation.
  *
- * @param props.candidate - The eligibility-annotated account to render
+ * @param props.domain - the searched domain, submitted with the form
+ * @param props.eligibleCount - accounts that are neither SSO nor owners
+ * @param props.isConfiguredForSSO - whether the domain has an SSO provider
  */
-function CandidateRow({ candidate }: { candidate: SsoConversionCandidate }) {
+function ConvertAllControl({
+  domain,
+  eligibleCount,
+  isConfiguredForSSO,
+}: {
+  domain: string;
+  eligibleCount: number;
+  isConfiguredForSSO: boolean;
+}) {
   const fetcher = useFetcher<typeof action>();
   const submitting = useDisabled(fetcher);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const ineligible = candidate.ownsTeamOrg || candidate.alreadySso;
-  const status = candidate.alreadySso
-    ? "Already SSO"
-    : candidate.ownsTeamOrg
-    ? "Workspace owner, cannot convert"
-    : "Eligible";
-
   const fetcherError = fetcher.data?.error ?? null;
-  const result =
-    fetcher.data && "result" in fetcher.data ? fetcher.data.result : null;
+  const summary =
+    fetcher.data &&
+    "intent" in fetcher.data &&
+    fetcher.data.intent === "convert-all"
+      ? fetcher.data.result
+      : null;
 
   return (
-    <Tr>
-      <Td>{candidate.email}</Td>
-      <Td>{resolveUserDisplayName(candidate)}</Td>
-      <Td>
-        <div className="flex flex-col gap-1">
-          <span>{status}</span>
-          {fetcherError ? (
-            <span className="text-xs text-error-500" role="alert">
-              {fetcherError.message}
-            </span>
-          ) : result ? (
-            <span className="text-xs text-success-600" role="status">
-              {describeConversionResult(result).rowText}
-            </span>
-          ) : null}
-        </div>
-      </Td>
-      <Td className="text-right">
+    <div className="flex flex-col gap-2">
+      <div>
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogTrigger asChild>
-            <Button type="button" size="sm" disabled={ineligible || submitting}>
-              {submitting ? "Converting..." : "Convert"}
+            <Button
+              type="button"
+              disabled={
+                !isConfiguredForSSO || eligibleCount === 0 || submitting
+              }
+            >
+              {submitting
+                ? "Converting..."
+                : `Convert all eligible (${eligibleCount})`}
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                Convert {candidate.email} to SSO?
+                Convert {pluralizeAccounts(eligibleCount)} on {domain} to SSO?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                This removes the account's password and signs it out of every
-                session. From then on it can only sign in through the domain's
-                SSO provider. The account keeps its data and user id.
+                {eligibleCount === 1 ? "This account" : "These accounts"} will
+                lose password login and be signed out of every session. From
+                then on they can only sign in through the domain's SSO provider,
+                and they keep their data and user id. Workspace owners are
+                skipped and keep their password login.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -402,15 +558,276 @@ function CandidateRow({ candidate }: { candidate: SsoConversionCandidate }) {
                 method="post"
                 onSubmit={() => setConfirmOpen(false)}
               >
-                <input type="hidden" name="targetUserId" value={candidate.id} />
+                <input type="hidden" name="intent" value="convert-all" />
+                <input type="hidden" name="domain" value={domain} />
                 <Button type="submit" disabled={submitting}>
-                  Convert to SSO
+                  Convert all
                 </Button>
               </fetcher.Form>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      </div>
+
+      {fetcherError ? (
+        <p className="text-sm text-error-500" role="alert">
+          {fetcherError.message}
+        </p>
+      ) : summary ? (
+        <ConvertAllSummary summary={summary} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The outcome of a "Convert all" run: how many converted, how many of those
+ * need one extra sign-in, and every account that failed with its reason.
+ *
+ * @param props.summary - the result of {@link convertAllEligibleOnDomain}
+ */
+function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
+  return (
+    <div role="status" className="flex flex-col gap-1 text-sm text-gray-700">
+      <p className="font-semibold text-gray-900">
+        Converted {pluralizeAccounts(summary.converted)}.
+      </p>
+      {summary.pendingReconcile > 0 ? (
+        <p>
+          {pluralizeAccounts(summary.pendingReconcile)} tried SSO before
+          conversion. Their first SSO sign-in merges that attempt and asks them
+          to sign in once more.
+        </p>
+      ) : null}
+      {summary.failed.length > 0 ? (
+        <div className="text-error-500">
+          <p className="font-semibold">
+            {pluralizeAccounts(summary.failed.length)} could not be converted:
+          </p>
+          <ul className="list-inside list-disc">
+            {summary.failed.map((failure) => (
+              <li key={failure.userId}>
+                {failure.email}: {failure.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One candidate account row: name, status and a single action behind a
+ * confirmation dialog. A standard account offers Convert (with owner-specific
+ * wording for workspace owners); an SSO account offers Revert to standard.
+ *
+ * Each row owns its fetcher, so an in-flight operation only disables its own
+ * button, and the row shows its own result or error (a page-level
+ * `useActionData` never sees fetcher submissions).
+ *
+ * @param props.candidate - The eligibility-annotated account to render
+ * @param props.domain - The searched domain, for the revert explanation
+ * @param props.isConfiguredForSSO - Whether the domain has an SSO provider
+ */
+function CandidateRow({
+  candidate,
+  domain,
+  isConfiguredForSSO,
+}: {
+  candidate: SsoConversionCandidate;
+  domain: string;
+  isConfiguredForSSO: boolean;
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const submitting = useDisabled(fetcher);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const status = candidate.alreadySso
+    ? candidate.ownsTeamOrg
+      ? "Already SSO (workspace owner)"
+      : "Already SSO"
+    : candidate.ownsTeamOrg
+    ? "Workspace owner, can keep password login"
+    : "Eligible";
+
+  const fetcherError = fetcher.data?.error ?? null;
+  const resultText =
+    fetcher.data && "intent" in fetcher.data
+      ? fetcher.data.intent === "convert-one"
+        ? describeConversionResult(fetcher.data.result).rowText
+        : fetcher.data.intent === "revert"
+        ? describeRevertResult(fetcher.data.result).rowText
+        : null
+      : null;
+
+  return (
+    <Tr>
+      <Td>{candidate.email}</Td>
+      <Td>{resolveUserDisplayName(candidate)}</Td>
+      <Td>
+        <div className="flex flex-col gap-1">
+          <span>{status}</span>
+          {fetcherError ? (
+            <span className="text-xs text-error-500" role="alert">
+              {fetcherError.message}
+            </span>
+          ) : resultText ? (
+            <span className="text-xs text-success-600" role="status">
+              {resultText}
+            </span>
+          ) : null}
+        </div>
+      </Td>
+      <Td className="text-right">
+        {candidate.alreadySso ? (
+          <RevertAction
+            candidate={candidate}
+            domain={domain}
+            isConfiguredForSSO={isConfiguredForSSO}
+            fetcher={fetcher}
+            submitting={submitting}
+            confirmOpen={confirmOpen}
+            setConfirmOpen={setConfirmOpen}
+          />
+        ) : (
+          <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                disabled={!isConfiguredForSSO || submitting}
+              >
+                {submitting ? "Converting..." : "Convert"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Convert {candidate.email} to SSO?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {candidate.ownsTeamOrg
+                    ? "This account owns a workspace and could keep password login. After conversion it can only sign in via SSO, and it is signed out of every session. If the identity provider becomes unavailable, Shelf support can revert it to standard login. The account keeps its data and user id."
+                    : "This removes the account's password and signs it out of every session. From then on it can only sign in through the domain's SSO provider. The account keeps its data and user id."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </Button>
+                </AlertDialogCancel>
+                <fetcher.Form
+                  method="post"
+                  onSubmit={() => setConfirmOpen(false)}
+                >
+                  <input type="hidden" name="intent" value="convert-one" />
+                  <input
+                    type="hidden"
+                    name="targetUserId"
+                    value={candidate.id}
+                  />
+                  <Button type="submit" disabled={submitting}>
+                    Convert to SSO
+                  </Button>
+                </fetcher.Form>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </Td>
     </Tr>
+  );
+}
+
+/**
+ * The "Revert to standard" button for an SSO account, with its confirmation.
+ *
+ * A non-owner on a domain that still uses SSO could not sign in with a
+ * password after a revert, so the button is disabled with the reason shown
+ * beside it. The server enforces the same rule; this only explains it up front.
+ *
+ * @param props.candidate - The SSO account to revert
+ * @param props.domain - The searched domain, named in the disabled reason
+ * @param props.isConfiguredForSSO - Whether the domain has an SSO provider
+ * @param props.fetcher - The owning row's fetcher, which shows the result
+ * @param props.submitting - Whether that fetcher is in flight
+ * @param props.confirmOpen - Whether the confirmation dialog is open
+ * @param props.setConfirmOpen - Opens or closes the confirmation dialog
+ */
+function RevertAction({
+  candidate,
+  domain,
+  isConfiguredForSSO,
+  fetcher,
+  submitting,
+  confirmOpen,
+  setConfirmOpen,
+}: {
+  candidate: SsoConversionCandidate;
+  domain: string;
+  isConfiguredForSSO: boolean;
+  fetcher: ReturnType<typeof useFetcher<typeof action>>;
+  submitting: boolean;
+  confirmOpen: boolean;
+  setConfirmOpen: (open: boolean) => void;
+}) {
+  const blocked = isConfiguredForSSO && !candidate.ownsTeamOrg;
+  const reasonId = `revert-reason-${candidate.id}`;
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogTrigger asChild>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={blocked || submitting}
+            aria-describedby={blocked ? reasonId : undefined}
+          >
+            {submitting ? "Reverting..." : "Revert to standard"}
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Revert {candidate.email} to standard login?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the account's SSO login and signs it out of every
+              session. The account has no password afterwards: the user sets one
+              with Forgot password on the login page. The account keeps its data
+              and user id.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button type="button" variant="secondary" disabled={submitting}>
+                Cancel
+              </Button>
+            </AlertDialogCancel>
+            <fetcher.Form method="post" onSubmit={() => setConfirmOpen(false)}>
+              <input type="hidden" name="intent" value="revert" />
+              <input type="hidden" name="targetUserId" value={candidate.id} />
+              <Button type="submit" variant="danger" disabled={submitting}>
+                Revert to standard
+              </Button>
+            </fetcher.Form>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {blocked ? (
+        <span id={reasonId} className="max-w-xs text-xs text-gray-600">
+          Only workspace owners can be reverted while {domain} uses SSO. Anyone
+          else could not sign in with a password.
+        </span>
+      ) : null}
+    </div>
   );
 }

@@ -10,9 +10,14 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
+import { assertLegacyLoginAllowed } from "./sso-enforcement.server";
 
 const label: ErrorLabel = "Auth";
 
@@ -168,8 +173,23 @@ export async function resendVerificationEmail(email: string) {
   }
 }
 
+/**
+ * Signs in with email and password.
+ *
+ * Refuses an address that must use SSO before Supabase is asked, so a refused
+ * account never gets a session. This covers web login, the accept-invite
+ * sign-in and the onboarding re-login.
+ *
+ * @param email - the address to sign in with
+ * @param password - the plaintext password
+ * @returns the mapped auth session, or null when the email is not confirmed
+ * @throws {ShelfError} 403 when the address must use SSO (passed through
+ *   unchanged), otherwise a wrapped Supabase failure
+ */
 export async function signInWithEmail(email: string, password: string) {
   try {
+    await assertLegacyLoginAllowed(email);
+
     const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
       email,
       password,
@@ -187,6 +207,9 @@ export async function signInWithEmail(email: string, password: string) {
 
     return mapAuthSession(session);
   } catch (cause) {
+    // The SSO refusal is written for the user: keep its status and message.
+    rethrowIfClientError(cause);
+
     const isInvalidCredentials =
       isAuthApiError(cause) && cause.message === "Invalid login credentials";
     // Supabase 504s and intermittent fetch failures surface as
@@ -265,32 +288,17 @@ export async function signInWithSSO(
 }
 
 /**
- * Helper function to check if user is SSO-only and throw appropriate error
- * @param email User's email address
- * @throws ShelfError if user exists and is SSO-only
+ * Sends a one-time sign-in code by email.
+ *
+ * Refuses an address that must use SSO before Supabase sends anything.
+ *
+ * @param email - the address to send the code to
+ * @throws {ShelfError} 403 when the address must use SSO (passed through
+ *   unchanged), otherwise a wrapped Supabase failure
  */
-async function validateNonSSOUser(email: string) {
-  const user = await db.user.findUnique({
-    where: { email: email.toLowerCase() },
-    select: { sso: true },
-  });
-
-  if (user?.sso) {
-    throw new ShelfError({
-      cause: null,
-      title: "SSO User",
-      message:
-        "This email address is associated with an SSO account. Please use SSO login instead.",
-      additionalData: { email },
-      label: "Auth",
-      shouldBeCaptured: false,
-    });
-  }
-}
-
 export async function sendOTP(email: string) {
   try {
-    await validateNonSSOUser(email);
+    await assertLegacyLoginAllowed(email);
 
     const { error } = await getSupabaseAdmin().auth.signInWithOtp({
       email,
@@ -303,6 +311,9 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
+    // The SSO refusal is written for the user: keep its status and message.
+    rethrowIfClientError(cause);
+
     // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
     // `unknown`, and a bare property access would throw at runtime if it
     // were null/undefined.
@@ -321,8 +332,8 @@ export async function sendOTP(email: string) {
     // "Database error finding user" — Supabase backend hiccup, not actionable.
     const isDatabaseError =
       isAuthApiError(cause) && cause.message.includes("Database error");
-    // SSO-mismatch / similar `validateNonSSOUser` rejections already opt out
-    // via their own `shouldBeCaptured: false` — preserve that decision.
+    // A wrapped ShelfError that already opted out of capture keeps that
+    // decision.
     const inheritedShouldBeCaptured = isLikeShelfError(cause)
       ? cause.shouldBeCaptured
       : undefined;
@@ -351,12 +362,24 @@ export async function sendOTP(email: string) {
   }
 }
 
+/**
+ * Sends a password reset code by email.
+ *
+ * Refuses an address that must use SSO before Supabase sends anything.
+ *
+ * @param email - the address to send the reset code to
+ * @throws {ShelfError} 403 when the address must use SSO (passed through
+ *   unchanged), otherwise a wrapped Supabase failure
+ */
 export async function sendResetPasswordLink(email: string) {
   try {
-    await validateNonSSOUser(email);
+    await assertLegacyLoginAllowed(email);
 
     await getSupabaseAdmin().auth.resetPasswordForEmail(email);
   } catch (cause) {
+    // The SSO refusal is written for the user: keep its status and message.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -638,8 +661,22 @@ export async function verifyAuthSession(authSession: AuthSession) {
   }
 }
 
+/**
+ * Verifies an email sign-in code and returns the session it opens.
+ *
+ * Refuses an address that must use SSO before the code is checked, so a code
+ * sent before the address was refused cannot open a session.
+ *
+ * @param email - the address the code was sent to
+ * @param otp - the code the person typed
+ * @returns the mapped auth session
+ * @throws {ShelfError} 403 when the address must use SSO (passed through
+ *   unchanged), otherwise a wrapped verification failure
+ */
 export async function verifyOtpAndSignin(email: string, otp: string) {
   try {
+    await assertLegacyLoginAllowed(email);
+
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
       email,
       token: otp,
@@ -662,6 +699,9 @@ export async function verifyOtpAndSignin(email: string, otp: string) {
 
     return mapAuthSession(session);
   } catch (cause) {
+    // The SSO refusal is written for the user: keep its status and message.
+    rethrowIfClientError(cause);
+
     let message =
       "Something went wrong. Please try again later or contact support.";
     let shouldBeCaptured = true;

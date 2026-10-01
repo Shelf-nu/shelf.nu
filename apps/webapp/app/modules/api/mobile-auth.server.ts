@@ -15,6 +15,10 @@ import {
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
 import {
+  createSsoRequiredError,
+  getLegacyLoginDecision,
+} from "~/modules/auth/sso-enforcement.server";
+import {
   isSelfServiceOrBaseRole,
   resolveCanSeeAllBookings,
   resolveMostPrivilegedRole,
@@ -103,6 +107,7 @@ export async function requireMobileAuth(request: Request) {
       timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
+      sso: true,
     },
   });
 
@@ -113,6 +118,17 @@ export async function requireMobileAuth(request: Request) {
       label: "Auth",
       status: 404,
     });
+  }
+
+  // The companion signs in with a password straight against Supabase, so this
+  // is the first point Shelf sees that session. Refuse it when the address must
+  // use SSO, as the web sign-in would. SSO users pass without a lookup: the
+  // companion's SSO sessions belong to `User.sso` accounts.
+  if (!user.sso) {
+    const decision = await getLegacyLoginDecision(user.email);
+    if (!decision.allowed) {
+      throw createSsoRequiredError(decision.reason);
+    }
   }
 
   // Record companion-app usage for adoption metrics. requireMobileAuth is the
@@ -126,6 +142,7 @@ export async function requireMobileAuth(request: Request) {
   const {
     deletedAt: _deletedAt,
     lastMobileActiveAt: _lastMobileActiveAt,
+    sso: _sso,
     ...safeUser
   } = user;
   return { user: safeUser, authUser };

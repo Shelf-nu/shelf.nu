@@ -41,6 +41,7 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { getLegacyLoginDecision } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   getSelectedOrganization,
@@ -90,11 +91,12 @@ export const shouldRevalidate = skipRevalidationOnClientViewChange;
  * Gate for every authenticated route beneath this layout, and the source of the
  * data its chrome renders.
  *
- * The gates run in a fixed order and the order is load-bearing: subscription
- * validity, then onboarding, then organization resolution. Onboarding has to
- * clear before org resolution because `getSelectedOrganization` throws for a
- * user with no membership, which is exactly the state a non-onboarded user is
- * in — resolving first turns "finish signing up" into an error page.
+ * The gates run in a fixed order and the order is load-bearing: the SSO
+ * sign-in policy, then subscription validity, then onboarding, then
+ * organization resolution. Onboarding has to clear before org resolution
+ * because `getSelectedOrganization` throws for a user with no membership,
+ * which is exactly the state a non-onboarded user is in: resolving first turns
+ * "finish signing up" into an error page.
  *
  * Because the gate covers routes at every depth, its redirects are absolute. A
  * relative target resolves against the URL the user arrived at, so anyone
@@ -105,7 +107,9 @@ export const shouldRevalidate = skipRevalidationOnClientViewChange;
  * @param args.request - Read for the per-page cookie and the current URL
  * @returns The user, their organizations, subscription state and layout prefs
  * @throws {Response} A redirect to `/onboarding` for a user who has not
- *   finished signing up, or an error response when a gate refuses
+ *   finished signing up, or an error response when a gate refuses. A user
+ *   whose address must now sign in with SSO is signed out and redirected to
+ *   `/login?sso_required=true` (returned, not thrown).
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -150,6 +154,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
       initializePerPageCookieOnLayout(request),
     ]);
+
+    // A session opened through a legacy path (password, OTP) outlives the
+    // decision that now refuses that path, e.g. once the user's domain is
+    // configured for SSO. End it, so the refusal applies to sessions already
+    // open and not only to new sign-ins. SSO users are never refused here: their
+    // session came from SSO.
+    if (!user.sso) {
+      const decision = await getLegacyLoginDecision(user.email);
+      if (!decision.allowed) {
+        context.destroySession();
+        return redirect("/login?sso_required=true");
+      }
+    }
 
     let subscription = null;
 
