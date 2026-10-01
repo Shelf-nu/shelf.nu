@@ -1,15 +1,13 @@
 /**
- * Bulk user invite (CSV import) — role validation
+ * Bulk user invite (CSV import) route
  *
- * Pins that the CSV import cannot grant a role the invite dialog refuses. The
- * `role` column is raw text from an uploaded file and flows into `Invite.roles`
- * verbatim; after acceptance, permissions resolve from `UserOrganization.roles`,
- * so an unvalidated `OWNER` there is a full privilege escalation.
- *
- * Regression coverage for detail.dev finding D032.
+ * Pins how the route hands an uploaded file to `bulkInviteUsers` and answers
+ * with what it decides. Row validation (roles, emails, team members, SSO)
+ * lives in the service's pre-flight and is covered there, including the
+ * OWNER-escalation guard (detail.dev finding D032).
  *
  * @see {@link file://./../../../app/routes/api+/settings.import-users.ts}
- * @see {@link file://./../../../app/modules/invite/roles.ts}
+ * @see {@link file://./../../../app/modules/invite/import-users-preflight.server.ts}
  */
 
 import { OrganizationRoles } from "@prisma/client";
@@ -21,6 +19,7 @@ import { bulkInviteUsers } from "~/modules/invite/service.server";
 import { action } from "~/routes/api+/settings.import-users";
 import type { CSVData } from "~/utils/csv.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
+import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
@@ -29,15 +28,16 @@ import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server
 // why: the route parses an uploaded file; we drive rows in directly instead
 vi.mock("~/utils/csv.server", () => ({ csvDataFromRequest: vi.fn() }));
 
-// why: authorization is not under test here — the role gate is
+// why: authorization is not under test here
 vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 
-// why: subscription seat limits are a separate concern from role validation
+// why: subscription seat limits are a separate concern from the import
 vi.mock("~/utils/subscription.server", () => ({
   assertUserCanInviteUsersToWorkspace: vi.fn(),
 }));
 
-// why: the invite service sends email and writes to the database
+// why: the invite service sends email and writes to the database; its row
+// validation has its own suite
 vi.mock("~/modules/invite/service.server", () => ({
   bulkInviteUsers: vi.fn(),
 }));
@@ -80,7 +80,7 @@ async function runImport(rows: CsvRow[]): Promise<ActionResult> {
   )) as ActionResult;
 }
 
-describe("settings.import-users role validation", () => {
+describe("settings.import-users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -96,41 +96,68 @@ describe("settings.import-users role validation", () => {
     );
   });
 
-  it("rejects a CSV row granting OWNER", async () => {
-    const response = await runImport([
-      [OrganizationRoles.OWNER, "attacker@example.com", ""],
-    ]);
-
-    expect(response.init?.status).toBe(400);
-    // The invite must never be created — this is the escalation itself
-    expect(bulkInviteUsers).not.toHaveBeenCalled();
-  });
-
-  it("names the offending spreadsheet row so the admin can fix it", async () => {
-    const response = await runImport([
-      [OrganizationRoles.ADMIN, "fine@example.com", ""],
-      [OrganizationRoles.OWNER, "attacker@example.com", ""],
-    ]);
-
-    // Data row 2 is spreadsheet row 3 (header + 1-based)
-    expect(JSON.stringify(response.data)).toContain("row 3");
-  });
-
-  it("rejects an unknown role rather than passing it to Prisma", async () => {
-    const response = await runImport([["SUPERUSER", "x@example.com", ""]]);
-
-    expect(response.init?.status).toBe(400);
-    expect(bulkInviteUsers).not.toHaveBeenCalled();
-  });
-
-  it("still accepts the three invitable roles", async () => {
-    const response = await runImport([
+  it("hands every row to the service, which validates them", async () => {
+    await runImport([
       [OrganizationRoles.ADMIN, "a@example.com", ""],
-      [OrganizationRoles.BASE, "b@example.com", ""],
-      [OrganizationRoles.SELF_SERVICE, "c@example.com", ""],
+      [OrganizationRoles.OWNER, "b@example.com", "tm-1"],
     ]);
 
-    expect(response.init?.status).toBeUndefined();
-    expect(bulkInviteUsers).toHaveBeenCalledTimes(1);
+    expect(bulkInviteUsers).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        users: [
+          expect.objectContaining({ role: "ADMIN", email: "a@example.com" }),
+          expect.objectContaining({
+            role: "OWNER",
+            email: "b@example.com",
+            teamMemberId: "tm-1",
+          }),
+        ],
+      })
+    );
+  });
+
+  it("answers a refused file with a 400 carrying the row errors", async () => {
+    const rowErrors = [
+      { row: 3, title: "Invalid role", message: "OWNER can't be granted." },
+    ];
+    vi.mocked(bulkInviteUsers).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        title: "Import file has errors",
+        message: "Found 1 problem(s) in your file. Nothing was imported.",
+        additionalData: { rowErrors, totalErrors: 1 },
+        label: "Invite",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const response = await runImport([
+      [OrganizationRoles.OWNER, "attacker@example.com", ""],
+    ]);
+
+    expect(response.init?.status).toBe(400);
+    expect(response.data).toMatchObject({
+      error: { additionalData: { rowErrors, totalErrors: 1 } },
+    });
+  });
+
+  it("refuses an empty file as a client error", async () => {
+    vi.mocked(csvDataFromRequest).mockResolvedValue([
+      ["role", "email", "teamMemberId"],
+    ]);
+    const request = new Request("http://localhost/api/settings/import-users", {
+      method: "POST",
+      body: new URLSearchParams({ message: "" }),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+
+    const response = (await action(
+      createActionArgs({ context: mockContext, request, params: {} })
+    )) as ActionResult;
+
+    expect(response.init?.status).toBe(400);
+    expect(bulkInviteUsers).not.toHaveBeenCalled();
   });
 });

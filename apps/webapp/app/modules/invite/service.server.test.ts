@@ -20,7 +20,9 @@ import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { caseInsensitiveEmailFilter, normalizeInviteEmail } from "./helpers";
+import { MAX_IMPORT_USERS_ROWS } from "./import-users-preflight.server";
 import {
+  SSO_DOMAIN_CHECK_CONCURRENCY,
   bulkInviteUsers,
   checkUserAndInviteMatch,
   createInvite,
@@ -44,7 +46,7 @@ const dbMock = vi.hoisted(() => ({
   teamMember: {
     update: vi.fn(),
     findMany: vi.fn(),
-    createManyAndReturn: vi.fn(),
+    createMany: vi.fn(),
   },
   $transaction: vi.fn(),
 }));
@@ -314,7 +316,7 @@ describe("createInvite: earlier invites of the same person", () => {
   });
 });
 
-describe("bulkInviteUsers: email case", () => {
+describe("bulkInviteUsers", () => {
   type BulkUsers = Parameters<typeof bulkInviteUsers>[0]["users"];
 
   /** Builds CSV rows the way the import route hands them over */
@@ -330,6 +332,19 @@ describe("bulkInviteUsers: email case", () => {
       })
     );
 
+  /** The team members the bulk insert created, as `{ id, name }` */
+  const createdTeamMembers = () =>
+    (dbMock.teamMember.createMany.mock.calls[0]?.[0]?.data ?? []).map(
+      (member: { id: string; name: string }) => ({
+        id: member.id,
+        name: member.name,
+      })
+    );
+
+  /** Runs the import for `org-1` as `user-1`. */
+  const importRows = (users: BulkUsers) =>
+    bulkInviteUsers({ users, userId: "user-1", organizationId: "org-1" });
+
   beforeEach(() => {
     vi.clearAllMocks();
     ssoMock.checkDomainSSOStatus.mockResolvedValue({
@@ -340,42 +355,216 @@ describe("bulkInviteUsers: email case", () => {
     dbMock.user.findMany.mockResolvedValue([]);
     dbMock.invite.findMany.mockResolvedValue([]);
     dbMock.$transaction.mockImplementation((callback) => callback(dbMock));
-    dbMock.teamMember.createManyAndReturn.mockImplementation(({ data }) =>
-      Promise.resolve(
-        data.map((member: { name: string }, index: number) => ({
-          id: `tm-${index}`,
-          name: member.name,
-        }))
-      )
-    );
+    dbMock.teamMember.createMany.mockResolvedValue({ count: 0 });
     // No invites returned means no emails are scheduled after the test ends.
     dbMock.invite.createManyAndReturn.mockResolvedValue([]);
   });
 
-  it("makes one invite for an address listed twice with different capitals", async () => {
-    await bulkInviteUsers({
-      users: rows("First.Last@School.org", "first.last@school.org"),
-      userId: "user-1",
-      organizationId: "org-1",
+  describe("validates the whole file before writing", () => {
+    it("refuses a file with an address that is not an email, and writes nothing", async () => {
+      const refused = importRows(
+        rows("new.person@school.org", "Evan Williams")
+      );
+
+      await expect(refused).rejects.toMatchObject({
+        status: 400,
+        shouldBeCaptured: false,
+        additionalData: expect.objectContaining({
+          totalErrors: 1,
+          rowErrors: [
+            {
+              row: 3,
+              title: "Invalid email",
+              message: '"Evan Williams" is not a valid email address.',
+            },
+          ],
+        }),
+      });
+      expect(dbMock.$transaction).not.toHaveBeenCalled();
     });
 
+    it("refuses a row granting OWNER, and invites no one from the file", async () => {
+      // The role column flows into `Invite.roles`, and permissions resolve
+      // from the roles an accepted invite grants, so an unvalidated OWNER is a
+      // full privilege escalation (detail.dev D032).
+      const refused = importRows([
+        { email: "fine@example.com", role: "ADMIN" },
+        { email: "attacker@example.com", role: "OWNER" },
+      ] as BulkUsers);
+
+      await expect(refused).rejects.toMatchObject({
+        status: 400,
+        additionalData: expect.objectContaining({
+          rowErrors: [
+            expect.objectContaining({ row: 3, title: "Invalid role" }),
+          ],
+        }),
+      });
+      expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it("refuses a team member id that is not in this workspace", async () => {
+      // The workspace-scoped lookup finds nothing for an id from another
+      // workspace, which is what makes it unknown here.
+      const refused = importRows([
+        { email: "a@school.org", role: "BASE", teamMemberId: "tm-other-org" },
+      ] as BulkUsers);
+
+      await expect(refused).rejects.toMatchObject({
+        status: 400,
+        additionalData: expect.objectContaining({
+          rowErrors: [
+            expect.objectContaining({ title: "Unknown team member" }),
+          ],
+        }),
+      });
+      expect(dbMock.teamMember.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ["tm-other-org"] }, organizationId: "org-1" },
+        select: { id: true, userId: true },
+      });
+      expect(dbMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("refuses an address listed twice with different capitals", async () => {
+      await expect(
+        importRows(rows("First.Last@School.org", "first.last@school.org"))
+      ).rejects.toMatchObject({
+        status: 400,
+        additionalData: expect.objectContaining({
+          rowErrors: [
+            expect.objectContaining({ row: 3, title: "Duplicate email" }),
+          ],
+        }),
+      });
+      expect(dbMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("refuses a file over the row cap before reading anything", async () => {
+      const users = Array.from(
+        { length: MAX_IMPORT_USERS_ROWS + 1 },
+        (_, i) => ({ email: `user${i}@domain${i}.com`, role: "BASE" })
+      ) as BulkUsers;
+
+      await expect(importRows(users)).rejects.toMatchObject({
+        status: 400,
+        additionalData: expect.objectContaining({
+          rowErrors: [
+            expect.objectContaining({ row: 0, title: "File too large" }),
+          ],
+        }),
+      });
+      expect(dbMock.teamMember.findMany).not.toHaveBeenCalled();
+      expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
+    });
+
+    it("runs the per-domain SSO checks a few at a time", async () => {
+      let running = 0;
+      let peak = 0;
+      // why: each check holds a database connection; the stub records how
+      // many are in flight at once.
+      ssoMock.checkDomainSSOStatus.mockImplementation(async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        running -= 1;
+        return { isConfiguredForSSO: false, linkedOrganizations: [] };
+      });
+
+      await importRows(
+        rows(...Array.from({ length: 12 }, (_, i) => `a@domain${i}.com`))
+      );
+
+      expect(ssoMock.checkDomainSSOStatus).toHaveBeenCalledTimes(12);
+      expect(peak).toBeLessThanOrEqual(SSO_DOMAIN_CHECK_CONCURRENCY);
+    });
+
+    it("checks SSO once per domain, not once per row", async () => {
+      await importRows(rows("a@school.org", "b@school.org", "c@other.org"));
+
+      expect(ssoMock.checkDomainSSOStatus).toHaveBeenCalledTimes(2);
+      expect(ssoMock.doesSSOUserExist).not.toHaveBeenCalled();
+    });
+
+    it("refuses Pure SSO addresses with no SSO account, from one lookup", async () => {
+      ssoMock.checkDomainSSOStatus.mockResolvedValue({
+        isConfiguredForSSO: true,
+        linkedOrganizations: [],
+        ssoProviderId: "provider-1",
+      });
+      // Only b@acme.com has signed in through SSO before.
+      dbMock.user.findMany.mockImplementation(
+        (args: { where: { sso?: boolean } }) =>
+          Promise.resolve(args.where.sso ? [{ email: "B@acme.com" }] : [])
+      );
+
+      await expect(
+        importRows(rows("a@acme.com", "b@acme.com"))
+      ).rejects.toMatchObject({
+        additionalData: expect.objectContaining({
+          rowErrors: [expect.objectContaining({ row: 2, title: "SSO" })],
+        }),
+      });
+    });
+  });
+
+  describe("creates a team member per new invitee", () => {
+    it("creates team members only for rows that do not name one", async () => {
+      dbMock.teamMember.findMany.mockResolvedValue([
+        { id: "tm-existing", userId: null },
+      ]);
+
+      await importRows([
+        {
+          email: "linked@school.org",
+          role: "BASE",
+          teamMemberId: "tm-existing",
+        },
+        { email: "new.person@school.org", role: "BASE" },
+      ] as BulkUsers);
+
+      const members = createdTeamMembers();
+      expect(members).toEqual([{ id: expect.any(String), name: "new.person" }]);
+      expect(createdInvites()).toEqual([
+        { inviteeEmail: "linked@school.org", teamMemberId: "tm-existing" },
+        { inviteeEmail: "new.person@school.org", teamMemberId: members[0].id },
+      ]);
+    });
+
+    it("gives two invitees with the same name their own team members", async () => {
+      // Both addresses start with "john", so the name cannot tell them apart.
+      await importRows(rows("john@a.com", "john@b.com"));
+
+      const members = createdTeamMembers();
+      expect(members).toHaveLength(2);
+      expect(members[0].id).not.toBe(members[1].id);
+      expect(createdInvites()).toEqual([
+        { inviteeEmail: "john@a.com", teamMemberId: members[0].id },
+        { inviteeEmail: "john@b.com", teamMemberId: members[1].id },
+      ]);
+    });
+  });
+
+  it("keeps the name as typed for the new team member", async () => {
+    await importRows(rows("First.Last@School.org"));
+
     expect(createdInvites()).toEqual([
-      { inviteeEmail: "first.last@school.org", teamMemberId: "tm-0" },
+      {
+        inviteeEmail: "first.last@school.org",
+        teamMemberId: createdTeamMembers()[0].id,
+      },
     ]);
     // The team member keeps the address as typed; it seeds the first name.
-    expect(dbMock.teamMember.createManyAndReturn).toHaveBeenCalledWith({
-      data: [{ name: "First.Last", organizationId: "org-1" }],
-    });
+    expect(createdTeamMembers()).toEqual([
+      { id: expect.any(String), name: "First.Last" },
+    ]);
   });
 
   it("skips a row for a member whose stored email has other capitals", async () => {
     dbMock.user.findMany.mockResolvedValue([{ email: "Member@School.org" }]);
 
-    const result = await bulkInviteUsers({
-      users: rows("member@school.org", "New.Person@School.org"),
-      userId: "user-1",
-      organizationId: "org-1",
-    });
+    const result = await importRows(
+      rows("member@school.org", "New.Person@School.org")
+    );
 
     expect(dbMock.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -391,7 +580,10 @@ describe("bulkInviteUsers: email case", () => {
       "member@school.org",
     ]);
     expect(createdInvites()).toEqual([
-      { inviteeEmail: "new.person@school.org", teamMemberId: "tm-0" },
+      {
+        inviteeEmail: "new.person@school.org",
+        teamMemberId: createdTeamMembers()[0].id,
+      },
     ]);
   });
 
@@ -402,17 +594,18 @@ describe("bulkInviteUsers: email case", () => {
       { inviteeEmail: "pending@school.org" },
     ]);
 
-    const result = await bulkInviteUsers({
-      users: rows("pending@school.org", "new.person@school.org"),
-      userId: "user-1",
-      organizationId: "org-1",
-    });
+    const result = await importRows(
+      rows("pending@school.org", "new.person@school.org")
+    );
 
     expect(result.skippedUsers.map((user) => user.email)).toEqual([
       "pending@school.org",
     ]);
     expect(createdInvites()).toEqual([
-      { inviteeEmail: "new.person@school.org", teamMemberId: "tm-0" },
+      {
+        inviteeEmail: "new.person@school.org",
+        teamMemberId: createdTeamMembers()[0].id,
+      },
     ]);
   });
 });

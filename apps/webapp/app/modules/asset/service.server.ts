@@ -153,6 +153,12 @@ import {
   uploadImageFromUrl,
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
+import { custodiesForRestore } from "./backup-custody";
+import {
+  placementsForRestore,
+  readLegacyBackupLocation,
+  type BackupLocationDetails,
+} from "./backup-placements";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
@@ -193,6 +199,7 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { Column } from "../asset-index-settings/helpers";
 import {
   createAssetModelsIfNotExists,
+  resolveImportedAssetModel,
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
@@ -1052,8 +1059,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     );
 
   try {
-    const skip = page > 1 ? (page - 1) * perPage : 0;
+    // `take` first, and `skip` from it: a stale cookie can carry a page size
+    // above the cap, and an OFFSET stepped by the raw value walks past the
+    // result set while LIMIT only ever returns `take` rows — the UI then
+    // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
+    const skip = page > 1 ? (page - 1) * take : 0;
     const parsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(
@@ -5009,9 +5020,12 @@ export async function createAssetsFromContentImport({
       }
 
       // ── AssetModel column → resolved model id ──────────────────────
-      const modelKey = asset.assetModel?.trim();
-      const assetModelId =
-        modelKey && assetModels?.[modelKey] ? assetModels[modelKey] : undefined;
+      // The pre-resolve keys its result by the original cell, so the lookup goes
+      // through the shared resolver rather than trimming first.
+      const { name: modelKey, id: assetModelId } = resolveImportedAssetModel({
+        cell: asset.assetModel,
+        models: assetModels,
+      });
       if (modelKey && !assetModelId) {
         // The createAssetModelsIfNotExists pre-resolve should have
         // populated every non-empty key. If we land here, something
@@ -5139,6 +5153,82 @@ export async function createAssetsFromContentImport({
   }
 }
 
+/**
+ * Finds a workspace's locations by name for a backup restore, creating the
+ * ones that are missing. Names match regardless of case, the same way the
+ * database's unique index on location names compares them.
+ *
+ * @param args.names - Location names from the backup file, repeats allowed.
+ * @returns Location ids keyed by lower-cased name.
+ */
+async function findOrCreateLocationsByName({
+  names,
+  details,
+  userId,
+  organizationId,
+}: {
+  names: string[];
+  /** Details to create a missing location with, keyed by lower-cased name. */
+  details: Map<string, BackupLocationDetails>;
+  userId: User["id"];
+  organizationId: Organization["id"];
+}) {
+  /** Lower-cased name -> the first spelling the file uses for it. */
+  const spellings = new Map<string, string>();
+  for (const name of names) {
+    const key = name.toLowerCase();
+    if (!spellings.has(key)) spellings.set(key, name);
+  }
+
+  const locationIds = new Map<string, Location["id"]>();
+  if (spellings.size === 0) return locationIds;
+
+  // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
+  // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
+  // location name act as wildcards.
+  const existing = await db.location.findMany({
+    where: {
+      organizationId,
+      name: { in: [...spellings.values()], mode: "insensitive" },
+    },
+    select: { id: true, name: true },
+  });
+  for (const location of existing) {
+    locationIds.set(location.name.toLowerCase(), location.id);
+  }
+
+  for (const [key, name] of spellings) {
+    if (locationIds.has(key)) continue;
+    const created = await db.location.create({
+      data: { ...details.get(key), name, organizationId, userId },
+      select: { id: true },
+    });
+    locationIds.set(key, created.id);
+  }
+
+  return locationIds;
+}
+
+/**
+ * Restores the assets of a workspace backup into a workspace.
+ *
+ * Relations travel by name, because ids only resolve in the workspace the
+ * backup came from. Locations, categories, tags, asset models, custodians and
+ * custom fields are matched regardless of case and created when missing.
+ *
+ * The restore is not atomic. Locations are resolved before any asset is
+ * created, and each asset is then created with its other relations one row at
+ * a time, so a failure part-way leaves everything already written in place.
+ * Running the file again reuses those relations by name, but creates the
+ * already-restored assets a second time. One transaction does not fit: a
+ * workspace-sized restore runs far past Prisma's interactive-transaction
+ * timeout.
+ *
+ * @param args.data - Rows parsed by `extractCSVDataFromBackupImport`.
+ * @param args.userId - The admin running the restore; owns what it creates.
+ * @param args.organizationId - The workspace restored into.
+ * @throws {ShelfError} Wrapping the first row that fails.
+ */
 export async function createAssetsFromBackupImport({
   data,
   userId,
@@ -5149,332 +5239,358 @@ export async function createAssetsFromBackupImport({
   organizationId: Organization["id"];
 }) {
   try {
-    //TODO use concurrency control or it will overload the server
-    await Promise.all(
-      data.map(async (asset) => {
-        /** Quantity-tracked + assetModel fields — passed through from
-         * the backup payload. Backup export emits these as raw string
-         * values (per-Asset scalar columns); on restore we read them
-         * back so round-trip preserves the qty-tracked semantics. The
-         * content-import path validates these aggressively; for backup
-         * import we trust the source (it came from our own exporter)
-         * but still coerce types defensively. */
-        const backupType =
-          typeof asset.type === "string" &&
-          (asset.type === AssetType.INDIVIDUAL ||
-            asset.type === AssetType.QUANTITY_TRACKED)
-            ? (asset.type as AssetType)
-            : undefined;
-        const backupQuantity =
-          typeof asset.quantity === "string" && asset.quantity.trim() !== ""
-            ? Number(asset.quantity)
-            : typeof asset.quantity === "number"
-            ? asset.quantity
-            : undefined;
-        const backupMinQuantity =
-          typeof asset.minQuantity === "string" &&
-          asset.minQuantity.trim() !== ""
-            ? Number(asset.minQuantity)
-            : typeof asset.minQuantity === "number"
-            ? asset.minQuantity
-            : undefined;
-        const backupUnit =
-          typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
-            ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
-            : undefined;
-        const backupCt =
-          typeof asset.consumptionType === "string" &&
-          (asset.consumptionType === ConsumptionType.ONE_WAY ||
-            asset.consumptionType === ConsumptionType.TWO_WAY)
-            ? (asset.consumptionType as ConsumptionType)
-            : undefined;
+    // Placements travel by location name. Every name is resolved once, here,
+    // before any asset is created, so a location shared by many assets is
+    // looked up in one query rather than once per asset.
+    const placementsPerRow = data.map((asset) =>
+      placementsForRestore({
+        type: asset.type,
+        quantity: asset.quantity,
+        assetLocations: asset.assetLocations,
+        location: asset.location,
+      })
+    );
+    // A backup written before placements existed describes the location
+    // itself; a location created from it keeps that description.
+    const legacyLocationDetails = new Map<string, BackupLocationDetails>();
+    for (const asset of data) {
+      const legacy = readLegacyBackupLocation(asset.location);
+      if (legacy && !legacyLocationDetails.has(legacy.name.toLowerCase())) {
+        legacyLocationDetails.set(legacy.name.toLowerCase(), legacy.details);
+      }
+    }
+    const locationIds = await findOrCreateLocationsByName({
+      names: placementsPerRow.flat().map((placement) => placement.location),
+      details: legacyLocationDetails,
+      userId,
+      organizationId,
+    });
 
-        /** Base data from asset */
-        const d = {
-          data: {
-            title: asset.title,
-            description: asset.description || null,
-            mainImage: asset.mainImage || null,
-            mainImageExpiration: threeDaysFromNow(),
-            userId,
-            organizationId,
-            status: asset.status,
-            createdAt: new Date(asset.createdAt),
-            updatedAt: new Date(asset.updatedAt),
-            qrCodes: {
-              create: [
-                {
-                  id: id(),
-                  version: 0,
-                  errorCorrection: ErrorCorrection["L"],
-                  userId,
-                  organizationId,
-                },
-              ],
-            },
-            valuation: asset.valuation ? +asset.valuation : null,
-            ...(backupType !== undefined ? { type: backupType } : {}),
-            ...(backupQuantity !== undefined
-              ? { quantity: backupQuantity }
-              : {}),
-            ...(backupMinQuantity !== undefined
-              ? { minQuantity: backupMinQuantity }
-              : {}),
-            ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
-            ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
-          },
-        };
+    // One asset at a time. Each row finds or creates its category, tags,
+    // model, custodian and custom fields by name, and those names are unique
+    // per workspace: two rows creating the same new name at once would
+    // collide on the unique index, or leave duplicates where there is none.
+    for (const [rowIndex, asset] of data.entries()) {
+      /** Quantity-tracked + assetModel fields — passed through from
+       * the backup payload. Backup export emits these as raw string
+       * values (per-Asset scalar columns); on restore we read them
+       * back so round-trip preserves the qty-tracked semantics. The
+       * content-import path validates these aggressively; for backup
+       * import we trust the source (it came from our own exporter)
+       * but still coerce types defensively. */
+      const backupType =
+        typeof asset.type === "string" &&
+        (asset.type === AssetType.INDIVIDUAL ||
+          asset.type === AssetType.QUANTITY_TRACKED)
+          ? (asset.type as AssetType)
+          : undefined;
+      const backupQuantity =
+        typeof asset.quantity === "string" && asset.quantity.trim() !== ""
+          ? Number(asset.quantity)
+          : typeof asset.quantity === "number"
+          ? asset.quantity
+          : undefined;
+      const backupMinQuantity =
+        typeof asset.minQuantity === "string" && asset.minQuantity.trim() !== ""
+          ? Number(asset.minQuantity)
+          : typeof asset.minQuantity === "number"
+          ? asset.minQuantity
+          : undefined;
+      const backupUnit =
+        typeof asset.unitOfMeasure === "string" && asset.unitOfMeasure !== ""
+          ? sanitizeUnitOfMeasureLabel(asset.unitOfMeasure)
+          : undefined;
+      const backupCt =
+        typeof asset.consumptionType === "string" &&
+        (asset.consumptionType === ConsumptionType.ONE_WAY ||
+          asset.consumptionType === ConsumptionType.TWO_WAY)
+          ? (asset.consumptionType as ConsumptionType)
+          : undefined;
 
-        /** AssetModel by name — mirrors the category block below.
-         * Skip linkage entirely when the row is QUANTITY_TRACKED:
-         * models are INDIVIDUAL-only by design. Importing a backup that
-         * predates this rule should not block (we just drop the model
-         * connect) — the user can clean up the export upstream or
-         * re-import the model link manually after fixing the type. */
-        if (
-          asset.assetModel &&
-          typeof asset.assetModel === "object" &&
-          (asset.assetModel as any).name &&
-          backupType !== AssetType.QUANTITY_TRACKED
-        ) {
-          const modelPayload = asset.assetModel as { name: string };
-          const existingModel = await db.assetModel.findFirst({
-            where: {
-              organizationId,
-              name: {
-                equals: modelPayload.name.trim(),
-                mode: "insensitive",
+      /** Base data from asset */
+      const d = {
+        data: {
+          title: asset.title,
+          description: asset.description || null,
+          mainImage: asset.mainImage || null,
+          mainImageExpiration: threeDaysFromNow(),
+          userId,
+          organizationId,
+          status: asset.status,
+          createdAt: new Date(asset.createdAt),
+          updatedAt: new Date(asset.updatedAt),
+          qrCodes: {
+            create: [
+              {
+                id: id(),
+                version: 0,
+                errorCorrection: ErrorCorrection["L"],
+                userId,
+                organizationId,
               },
+            ],
+          },
+          valuation: asset.valuation ? +asset.valuation : null,
+          ...(backupType !== undefined ? { type: backupType } : {}),
+          ...(backupQuantity !== undefined ? { quantity: backupQuantity } : {}),
+          ...(backupMinQuantity !== undefined
+            ? { minQuantity: backupMinQuantity }
+            : {}),
+          ...(backupUnit !== undefined ? { unitOfMeasure: backupUnit } : {}),
+          ...(backupCt !== undefined ? { consumptionType: backupCt } : {}),
+        },
+      };
+
+      /** AssetModel by name — mirrors the category block below.
+       * Skip linkage entirely when the row is QUANTITY_TRACKED:
+       * models are INDIVIDUAL-only by design. Importing a backup that
+       * predates this rule should not block (we just drop the model
+       * connect) — the user can clean up the export upstream or
+       * re-import the model link manually after fixing the type. */
+      if (
+        asset.assetModel &&
+        typeof asset.assetModel === "object" &&
+        (asset.assetModel as any).name &&
+        backupType !== AssetType.QUANTITY_TRACKED
+      ) {
+        const modelPayload = asset.assetModel as { name: string };
+        const existingModel = await db.assetModel.findFirst({
+          where: {
+            organizationId,
+            name: {
+              equals: modelPayload.name.trim(),
+              mode: "insensitive",
+            },
+          },
+        });
+        if (existingModel) {
+          Object.assign(d.data, { assetModelId: existingModel.id });
+        } else {
+          const newModel = await db.assetModel.create({
+            data: {
+              name: modelPayload.name.trim(),
+              createdBy: { connect: { id: userId } },
+              organization: { connect: { id: organizationId } },
             },
           });
-          if (existingModel) {
-            Object.assign(d.data, { assetModelId: existingModel.id });
-          } else {
-            const newModel = await db.assetModel.create({
-              data: {
-                name: modelPayload.name.trim(),
-                createdBy: { connect: { id: userId } },
-                organization: { connect: { id: organizationId } },
-              },
-            });
-            Object.assign(d.data, { assetModelId: newModel.id });
-          }
+          Object.assign(d.data, { assetModelId: newModel.id });
         }
+      }
 
-        /** Category */
-        if (asset.category && Object.keys(asset?.category).length > 0) {
-          const category = asset.category as Category;
+      /** Category */
+      if (asset.category && Object.keys(asset?.category).length > 0) {
+        const category = asset.category as Category;
 
-          const existingCat = await db.category.findFirst({
-            where: {
+        // Matched like the unique index on category names, regardless of
+        // case. `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+        const existingCat = await db.category.findFirst({
+          where: {
+            organizationId,
+            name: { in: [category.name], mode: "insensitive" },
+          },
+        });
+
+        /** If it doesn't exist, create a new one */
+        if (!existingCat) {
+          const newCat = await db.category.create({
+            data: {
               organizationId,
               name: category.name,
+              description: category.description || "",
+              color: category.color,
+              userId,
+              createdAt: new Date(category.createdAt),
+              updatedAt: new Date(category.updatedAt),
             },
           });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingCat) {
-            const newCat = await db.category.create({
-              data: {
-                organizationId,
-                name: category.name,
-                description: category.description || "",
-                color: category.color,
-                userId,
-                createdAt: new Date(category.createdAt),
-                updatedAt: new Date(category.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: newCat.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              categoryId: existingCat.id,
-            });
-          }
-        }
-
-        /** Location */
-        if (asset.location && Object.keys(asset?.location).length > 0) {
-          const location = asset.location as Location;
-
-          const existingLoc = await db.location.findFirst({
-            where: {
-              organizationId,
-              name: location.name,
-            },
+          /** Add it to the data for creating the asset */
+          Object.assign(d.data, {
+            categoryId: newCat.id,
           });
-
-          /** If it doesn't exist, create a new one */
-          if (!existingLoc) {
-            const newLoc = await db.location.create({
-              data: {
-                name: location.name,
-                description: location.description || "",
-                address: location.address || "",
-                organizationId,
-                userId,
-                createdAt: new Date(location.createdAt),
-                updatedAt: new Date(location.updatedAt),
-              },
-            });
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: newLoc.id,
-            });
-          } else {
-            /** Add it to the data for creating the asset */
-            Object.assign(d.data, {
-              locationId: existingLoc.id,
-            });
-          }
+        } else {
+          /** Add it to the data for creating the asset */
+          Object.assign(d.data, {
+            categoryId: existingCat.id,
+          });
         }
+      }
 
-        /** Custody */
-        if (asset.custody && Object.keys(asset?.custody).length > 0) {
-          const { custodian } = asset.custody;
+      /** Placements. They are created with the asset, in one write, so the
+       * database checks them together: a pool's placed units may not
+       * exceed its quantity. Names that differ only in case resolve to one
+       * location, so their units are added up. */
+      const unitsByLocationId = new Map<string, number>();
+      for (const { location, quantity } of placementsPerRow[rowIndex]) {
+        const locationId = locationIds.get(location.toLowerCase())!;
+        unitsByLocationId.set(
+          locationId,
+          (unitsByLocationId.get(locationId) ?? 0) + quantity
+        );
+      }
+      if (unitsByLocationId.size > 0) {
+        const placements: Prisma.AssetLocationUncheckedCreateWithoutAssetInput[] =
+          [...unitsByLocationId].map(([locationId, quantity]) => ({
+            locationId,
+            organizationId,
+            quantity,
+          }));
+        Object.assign(d.data, { assetLocations: { create: placements } });
+      }
 
+      /** Custody. Custodians travel by name, matched regardless of case like
+       * the other restored relations; one missing from the workspace is
+       * created as a team member without an account. */
+      const custodies = custodiesForRestore({
+        type: asset.type,
+        custody: asset.custody,
+      });
+      if (custodies.length > 0) {
+        /** Team member id -> units held. Names that differ only in case
+         * resolve to one team member, and the custody unique index allows
+         * one operator row per (asset, team member), so their units add up. */
+        const unitsByTeamMemberId = new Map<string, number>();
+        for (const custody of custodies) {
+          // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+          // Team member names are not unique, so the oldest match wins.
           const existingCustodian = await db.teamMember.findFirst({
             where: {
               deletedAt: null,
               organizationId,
-              name: custodian.name,
+              name: { in: [custody.custodianName], mode: "insensitive" },
+            },
+            orderBy: { createdAt: "asc" },
+            select: { id: true },
+          });
+          const custodian =
+            existingCustodian ??
+            (await db.teamMember.create({
+              data: {
+                name: custody.custodianName,
+                organizationId,
+                createdAt: custody.createdAt,
+                updatedAt: custody.updatedAt,
+              },
+              select: { id: true },
+            }));
+          unitsByTeamMemberId.set(
+            custodian.id,
+            (unitsByTeamMemberId.get(custodian.id) ?? 0) + custody.quantity
+          );
+        }
+        const custodyCreates: Prisma.CustodyUncheckedCreateWithoutAssetInput[] =
+          [...unitsByTeamMemberId].map(([teamMemberId, quantity]) => ({
+            teamMemberId,
+            quantity,
+          }));
+        Object.assign(d.data, { custody: { create: custodyCreates } });
+      }
+
+      /** Tags */
+      if (asset.tags && asset.tags.length > 0) {
+        const tagsNames = asset.tags.map((t) => t.name);
+        // now we loop through the categories and check if they exist
+        const tags: Record<string, string> = {};
+        for (const tag of tagsNames) {
+          // Matched like the unique index on tag names, regardless of case.
+          const existingTag = await db.tag.findFirst({
+            where: {
+              name: { in: [tag], mode: "insensitive" },
+              organizationId,
             },
           });
 
-          if (!existingCustodian) {
-            const newCustodian = await db.teamMember.create({
+          if (!existingTag) {
+            // if the tag doesn't exist, we create a new one
+            const newTag = await db.tag.create({
               data: {
-                name: custodian.name,
-                organizationId,
-                createdAt: new Date(custodian.createdAt),
-                updatedAt: new Date(custodian.updatedAt),
-              },
-            });
-
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: newCustodian.id }],
-              },
-            });
-          } else {
-            Object.assign(d.data, {
-              custody: {
-                create: [{ teamMemberId: existingCustodian.id }],
-              },
-            });
-          }
-        }
-
-        /** Tags */
-        if (asset.tags && asset.tags.length > 0) {
-          const tagsNames = asset.tags.map((t) => t.name);
-          // now we loop through the categories and check if they exist
-          const tags: Record<string, string> = {};
-          for (const tag of tagsNames) {
-            const existingTag = await db.tag.findFirst({
-              where: {
-                name: tag,
-                organizationId,
-              },
-            });
-
-            if (!existingTag) {
-              // if the tag doesn't exist, we create a new one
-              const newTag = await db.tag.create({
-                data: {
-                  name: tag as string,
-                  user: {
-                    connect: {
-                      id: userId,
-                    },
-                  },
-                  organization: {
-                    connect: {
-                      id: organizationId,
-                    },
+                name: tag as string,
+                user: {
+                  connect: {
+                    id: userId,
                   },
                 },
-              });
-              tags[tag] = newTag.id;
-            } else {
-              // if the tag exists, we just update the id
-              tags[tag] = existingTag.id;
-            }
+                organization: {
+                  connect: {
+                    id: organizationId,
+                  },
+                },
+              },
+            });
+            tags[tag] = newTag.id;
+          } else {
+            // if the tag exists, we just update the id
+            tags[tag] = existingTag.id;
           }
-
-          Object.assign(d.data, {
-            tags:
-              asset.tags.length > 0
-                ? {
-                    connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
-                  }
-                : undefined,
-          });
         }
 
-        /** Custom fields */
-        if (asset.customFields && asset.customFields.length > 0) {
-          const customFieldDef = asset.customFields.reduce(
-            (res, { value, customField }) => {
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const { id, createdAt, updatedAt, ...rest } = customField;
-              const options = value?.valueOption?.length
-                ? [value?.valueOption]
-                : undefined;
-              res.push({ ...rest, options, userId, organizationId });
-              return res;
-            },
-            [] as Array<CustomFieldDraftPayload>
-          );
-
-          const cfIds = await upsertCustomField(customFieldDef);
-
-          Object.assign(d.data, {
-            customFields: {
-              create: asset.customFields.map((cf) => ({
-                value: cf.value,
-                // @ts-ignore
-                customFieldId: cfIds[cf.customField.name].id,
-              })),
-            },
-          });
-        }
-
-        /** Create the Asset */
-        const { id: assetId } = await db.asset.create(d);
-
-        // Activity event: ASSET_CREATED at the moment of creation.
-        // The per-note createMany below restores HISTORICAL notes with
-        // their original timestamps — those are not events.
-        await recordEvent({
-          organizationId,
-          actorUserId: userId,
-          action: "ASSET_CREATED",
-          entityType: "ASSET",
-          entityId: assetId,
-          assetId,
-          meta: { source: "backup_import" },
+        Object.assign(d.data, {
+          tags:
+            asset.tags.length > 0
+              ? {
+                  connect: asset.tags.map((tag) => ({ id: tags[tag.name] })),
+                }
+              : undefined,
         });
+      }
 
-        /** Create notes */
-        if (asset?.notes?.length > 0) {
-          await db.note.createMany({
-            data: asset.notes.map((note: Note) => ({
-              content: note.content,
-              type: note.type,
-              assetId,
-              userId,
-              createdAt: new Date(note.createdAt),
-              updatedAt: new Date(note.updatedAt),
+      /** Custom fields */
+      if (asset.customFields && asset.customFields.length > 0) {
+        const customFieldDef = asset.customFields.reduce(
+          (res, { value, customField }) => {
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const { id, createdAt, updatedAt, ...rest } = customField;
+            const options = value?.valueOption?.length
+              ? [value?.valueOption]
+              : undefined;
+            res.push({ ...rest, options, userId, organizationId });
+            return res;
+          },
+          [] as Array<CustomFieldDraftPayload>
+        );
+
+        const { customFields: customFieldsByName } =
+          await upsertCustomField(customFieldDef);
+
+        Object.assign(d.data, {
+          customFields: {
+            create: asset.customFields.map((cf) => ({
+              value: cf.value,
+              customFieldId: customFieldsByName[cf.customField.name].id,
             })),
-          });
-        }
-      })
-    );
+          },
+        });
+      }
+
+      /** Create the Asset */
+      const { id: assetId } = await db.asset.create(d);
+
+      // Activity event: ASSET_CREATED at the moment of creation.
+      // The per-note createMany below restores HISTORICAL notes with
+      // their original timestamps — those are not events.
+      await recordEvent({
+        organizationId,
+        actorUserId: userId,
+        action: "ASSET_CREATED",
+        entityType: "ASSET",
+        entityId: assetId,
+        assetId,
+        meta: { source: "backup_import" },
+      });
+
+      /** Create notes */
+      if (asset?.notes?.length > 0) {
+        await db.note.createMany({
+          data: asset.notes.map((note: Note) => ({
+            content: note.content,
+            type: note.type,
+            assetId,
+            userId,
+            createdAt: new Date(note.createdAt),
+            updatedAt: new Date(note.updatedAt),
+          })),
+        });
+      }
+    }
   } catch (cause) {
     throw new ShelfError({
       cause,

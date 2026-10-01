@@ -608,18 +608,28 @@ export type AllowedCustodianFilterIds = string[] | "all";
  * instead of refusing it would widen the query to every row, which is the
  * opposite of what a refusal should do.
  */
-function applyCustodianAllowList(
+export function applyCustodianAllowList(
   requestedIds: string[],
   allowedTeamMemberIds: AllowedCustodianFilterIds
 ): string[] {
+  /**
+   * A blank value is not a selection. `?teamMember=` arrives as `[""]`, from a
+   * cleared filter or a stale link, and it has to fall through to "no filter":
+   * carried forward it becomes an unmatchable id and answers "nothing found"
+   * where the caller asked for no restriction at all. Dropping it before the
+   * count below also keeps it out of the refusal branch, since asking for nobody
+   * is not asking after someone else's custody.
+   */
+  const requested = requestedIds.filter((id) => id.trim() !== "");
+
   if (allowedTeamMemberIds === "all") {
-    return requestedIds;
+    return requested;
   }
 
   const allowed = new Set(allowedTeamMemberIds);
-  const kept = requestedIds.filter((id) => allowed.has(id));
+  const kept = requested.filter((id) => allowed.has(id));
 
-  return requestedIds.length > 0 && kept.length === 0
+  return requested.length > 0 && kept.length === 0
     ? [CUSTODY_FILTER_REFUSED]
     : kept;
 }
