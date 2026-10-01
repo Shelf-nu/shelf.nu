@@ -90,6 +90,10 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: duplicateAsset deletes the copies it already created through
+      // deleteAsset when a later copy fails; deleteAsset reads the removed
+      // row's reminders to cancel their schedulers.
+      delete: vitest.fn().mockResolvedValue({ reminders: [] }),
       // why: checkOutQuantity returns the refreshed asset at the end of its tx
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
     },
@@ -541,6 +545,7 @@ describe("duplicateAsset", () => {
   const mockAssetLocationCreate = db.assetLocation.create as ReturnType<
     typeof vitest.fn
   >;
+  const mockAssetDelete = db.asset.delete as ReturnType<typeof vitest.fn>;
 
   /** A source asset carrying only the fields `duplicateAsset` reads. */
   function makeSource(overrides: Partial<SourceAsset> = {}): SourceAsset {
@@ -560,6 +565,8 @@ describe("duplicateAsset", () => {
       minQuantity: null,
       consumptionType: null,
       unitOfMeasure: null,
+      availableToBook: true,
+      assetModelId: null,
       ...overrides,
     } as SourceAsset;
   }
@@ -579,6 +586,8 @@ describe("duplicateAsset", () => {
     mockAssetCreate.mockResolvedValue({ id: "asset-new" });
     mockAssetLocationCreate.mockReset();
     mockAssetLocationCreate.mockResolvedValue({});
+    mockAssetDelete.mockReset();
+    mockAssetDelete.mockResolvedValue({ reminders: [] });
     vi.mocked(getActiveCustomFields).mockResolvedValue([]);
   });
 
@@ -680,6 +689,91 @@ describe("duplicateAsset", () => {
     ).rejects.toMatchObject({ status: 400, title: "No units to copy" });
 
     expect(mockAssetCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an individual copy's asset model and booking availability", async () => {
+    // why: createAsset proves the model belongs to the org before linking it.
+    vi.mocked(db.assetModel.findFirst).mockResolvedValueOnce({
+      id: "model-1",
+    } as never);
+
+    await duplicateAsset({
+      asset: makeSource({ assetModelId: "model-1", availableToBook: false }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        availableToBook: false,
+        assetModel: { connect: { id: "model-1" } },
+      }),
+    ]);
+  });
+
+  it("keeps a quantity-tracked copy's booking availability", async () => {
+    await duplicateAsset({
+      asset: makeSource({
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        consumptionType: "TWO_WAY",
+        availableToBook: false,
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({ availableToBook: false }),
+    ]);
+  });
+
+  it("deletes the copies already created when a later copy fails", async () => {
+    mockAssetCreate
+      .mockResolvedValueOnce({ id: "copy-1" })
+      .mockResolvedValueOnce({ id: "copy-2" })
+      .mockRejectedValueOnce(new Error("connection reset"));
+
+    await expect(
+      duplicateAsset({
+        asset: makeSource({ mainImage: "https://example.test/main.png" }),
+        userId: "user-1",
+        amountOfDuplicates: 3,
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(mockAssetDelete.mock.calls.map(([args]) => args.where)).toEqual([
+      { id: "copy-1", organizationId: "org-1" },
+      { id: "copy-2", organizationId: "org-1" },
+    ]);
+    // Images are uploaded only once every copy exists.
+    expect(getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it("reports the original failure when deleting a copy also fails", async () => {
+    mockAssetCreate
+      .mockResolvedValueOnce({ id: "copy-1" })
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "Category not found",
+          label: "Assets",
+          status: 404,
+        })
+      );
+    mockAssetDelete.mockRejectedValueOnce(new Error("delete failed"));
+
+    await expect(
+      duplicateAsset({
+        asset: makeSource(),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ status: 404 });
   });
 
   it('titles a single copy "<title> (copy)"', async () => {

@@ -18,6 +18,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { duplicateAsset, getAsset } from "~/modules/asset/service.server";
+import { canDuplicateAsset } from "~/modules/asset/utils";
 import styles from "~/styles/layout/custom-modal.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { MAX_DUPLICATES_ALLOWED } from "~/utils/constants";
@@ -162,6 +163,10 @@ export default function DuplicateAsset() {
   const navigation = useNavigation();
   const isProcessing = isFormProcessing(navigation.state);
   const actionData = useActionData<typeof action>();
+  /** False for a quantity-tracked asset with no units in stock, which the
+   * service refuses; the dialog says so before the user submits. */
+  const canDuplicate = canDuplicateAsset(asset);
+  const disabled = isProcessing || !canDuplicate;
 
   return (
     <Form ref={zo.ref} method="post">
@@ -208,7 +213,7 @@ export default function DuplicateAsset() {
             defaultValue={1}
             placeholder="How many duplicates assets you want to create for this asset ?"
             className="w-full"
-            disabled={isProcessing}
+            disabled={disabled}
             required
             /* We have to find a way to normalize the error object when it comes from zod */
             error={
@@ -218,6 +223,18 @@ export default function DuplicateAsset() {
               )?.amountOfDuplicates?.message
             }
           />
+
+          {canDuplicate ? null : (
+            <p
+              id="duplicate-no-units"
+              className="w-full rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
+              <span className="block font-medium">No units to copy</span>
+              This asset has no units in stock, and a quantity-tracked asset
+              needs at least 1. Add stock with Adjust quantity, then duplicate
+              it.
+            </p>
+          )}
         </div>
         <div className="mt-6 flex gap-3">
           <Button
@@ -232,7 +249,8 @@ export default function DuplicateAsset() {
             variant="primary"
             width="full"
             type="submit"
-            disabled={isProcessing}
+            disabled={disabled}
+            aria-describedby={canDuplicate ? undefined : "duplicate-no-units"}
           >
             {isProcessing ? <Spinner /> : "Duplicate"}
           </Button>
