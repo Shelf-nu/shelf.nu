@@ -22,12 +22,14 @@
  *   3. A domain not configured for SSO is allowed.
  *   4. On an SSO domain, an address with no account is refused (signup is
  *      already blocked there).
- *   5. A workspace owner who has not been converted is allowed, so every SSO
- *      customer keeps a password owner as the administrative fallback.
+ *   5. An unconverted owner of a workspace linked to that SSO domain (one
+ *      whose SSO settings list the domain) is allowed, so the customer keeps
+ *      a password owner as the administrative fallback. Owning any other
+ *      workspace grants nothing: anyone can create a workspace of their own.
  *   6. Everyone else on an SSO domain is refused.
  *
  * The cheapest checks run first: the owner queries only run for a non-SSO user
- * on an SSO domain.
+ * on an SSO domain that has linked workspaces, and only over those workspaces.
  *
  * The user is looked up here with its own query rather than `findUserByEmail`,
  * because `~/modules/user/service.server` imports `~/modules/auth/service.server`,
@@ -40,10 +42,10 @@
  * bodies: do not add top-level calls to any of them.
  *
  * @see {@link file://./service.server.ts} the legacy sign-in paths that ask this
- * @see {@link file://./sso-conversion.server.ts} account conversion, which uses `userOwnsTeamOrg`
+ * @see {@link file://./sso-conversion.server.ts} account conversion, which uses `userOwnsLinkedSsoWorkspace`
  * @see {@link file://./../../utils/sso.server.ts} checkDomainSSOStatus
  */
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   caseInsensitiveEmailFilter,
@@ -58,7 +60,8 @@ import { checkDomainSSOStatus } from "~/utils/sso.server";
  *
  * - `sso_account`: the account itself has been converted to SSO.
  * - `sso_domain`: the address is on a domain configured for SSO, and the
- *   account is not an unconverted workspace owner (or does not exist).
+ *   account is not an unconverted owner of the domain's SSO workspace (or
+ *   does not exist).
  */
 export type LegacyLoginRefusalReason = "sso_account" | "sso_domain";
 
@@ -68,24 +71,35 @@ export type LegacyLoginDecision =
   | { allowed: false; reason: LegacyLoginRefusalReason };
 
 /**
- * Returns true when the user owns at least one TEAM organization, either as the
- * `Organization.owner` (userId) or through an `OWNER` role on a TEAM
- * membership. Personal workspaces do not count: every user owns one.
+ * Returns true when the user owns one of the given workspaces, either as the
+ * `Organization.owner` (userId) or through an `OWNER` role on its membership.
+ *
+ * Pass the workspaces linked to the user's SSO domain
+ * (`checkDomainSSOStatus(email).linkedOrganizations`). Ownership of any other
+ * workspace must never count: anyone on an SSO domain can create a workspace
+ * of their own, so it cannot be what exempts them from SSO.
  *
  * @param userId - the Shelf `User.id` to check
- * @returns `true` when the user owns a TEAM workspace
+ * @param organizationIds - the workspaces linked to the user's SSO domain
+ * @returns `true` when the user owns one of them; `false` without a query when
+ *   the list is empty
  */
-export async function userOwnsTeamOrg(userId: string): Promise<boolean> {
-  const ownedTeamOrgs = await db.organization.count({
-    where: { userId, type: OrganizationType.TEAM },
+export async function userOwnsLinkedSsoWorkspace(
+  userId: string,
+  organizationIds: string[]
+): Promise<boolean> {
+  if (organizationIds.length === 0) return false;
+
+  const ownedOrgs = await db.organization.count({
+    where: { userId, id: { in: organizationIds } },
   });
-  if (ownedTeamOrgs > 0) return true;
+  if (ownedOrgs > 0) return true;
 
   const ownerMembership = await db.userOrganization.count({
     where: {
       userId,
       roles: { has: OrganizationRoles.OWNER },
-      organization: { type: OrganizationType.TEAM },
+      organizationId: { in: organizationIds },
     },
   });
   return ownerMembership > 0;
@@ -136,12 +150,16 @@ export async function getLegacyLoginDecision(
   // domain, so it is refused before the domain is even looked up.
   if (user?.sso) return { allowed: false, reason: "sso_account" };
 
-  const { isConfiguredForSSO } = await checkDomainSSOStatus(email);
+  const { isConfiguredForSSO, linkedOrganizations } =
+    await checkDomainSSOStatus(email);
   if (!isConfiguredForSSO) return { allowed: true };
 
   if (!user) return { allowed: false, reason: "sso_domain" };
 
-  if (await userOwnsTeamOrg(user.id)) return { allowed: true };
+  const linkedOrgIds = linkedOrganizations.map((org) => org.id);
+  if (await userOwnsLinkedSsoWorkspace(user.id, linkedOrgIds)) {
+    return { allowed: true };
+  }
 
   return { allowed: false, reason: "sso_domain" };
 }

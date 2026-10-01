@@ -168,7 +168,7 @@ describe("admin sso-conversion route", () => {
           firstName: "Sam",
           lastName: "Lee",
           displayName: null,
-          ownsTeamOrg: false,
+          ownsSsoWorkspace: false,
           alreadySso: false,
         },
       ];
@@ -371,7 +371,7 @@ describe("admin sso-conversion route", () => {
 
       it("answers with the engine's status when the revert is refused", async () => {
         const message =
-          "Only a workspace owner, or an account whose domain no longer uses SSO, can be reverted.";
+          "Only an owner of the workspace that uses SSO for this domain, or an account whose domain no longer uses SSO, can be reverted.";
         vi.mocked(revertAccountToStandard).mockRejectedValue(
           new ShelfError({
             cause: null,

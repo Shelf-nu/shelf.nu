@@ -64,16 +64,37 @@ function givenUsers(rows: AccountRow[]) {
   );
 }
 
-/** Sets whether the address's domain is configured for SSO. */
-function givenDomainIsSso(isConfiguredForSSO: boolean) {
+/** The organizations `checkDomainSSOStatus` reports as linked to a domain. */
+type LinkedOrganizations = Awaited<
+  ReturnType<typeof checkDomainSSOStatus>
+>["linkedOrganizations"];
+
+/** The workspace whose SSO settings list the address's domain. */
+const LINKED_ORG_ID = "org-sso";
+
+/**
+ * Sets whether the address's domain is configured for SSO, and which
+ * workspaces are linked to it (by default, one: `LINKED_ORG_ID`).
+ */
+function givenDomainIsSso(
+  isConfiguredForSSO: boolean,
+  linkedOrgIds: string[] = isConfiguredForSSO ? [LINKED_ORG_ID] : []
+) {
   vi.mocked(checkDomainSSOStatus).mockResolvedValue({
     isConfiguredForSSO,
-    linkedOrganizations: [],
+    // The decision reads only the ids of the linked organizations.
+    linkedOrganizations: linkedOrgIds.map((id) => ({
+      id,
+    })) as unknown as LinkedOrganizations,
     ssoProviderId: isConfiguredForSSO ? "provider-1" : null,
   });
 }
 
-/** Sets the two ownership counts behind `userOwnsTeamOrg`. */
+/**
+ * Sets the two ownership counts behind `userOwnsLinkedSsoWorkspace`. The
+ * counts stand for rows that match the query's filters, so a test about an
+ * unlinked workspace sets them to 0: the scoped query would not find it.
+ */
 function givenOwnership({
   ownedOrgs,
   ownerMemberships,
@@ -153,7 +174,7 @@ describe("getLegacyLoginDecision", () => {
     expect(db.organization.count).not.toHaveBeenCalled();
   });
 
-  it("allows the owner of a TEAM workspace on an SSO domain", async () => {
+  it("allows the owner of the workspace linked to the SSO domain", async () => {
     givenUsers([standardUser]);
     givenDomainIsSso(true);
     givenOwnership({ ownedOrgs: 1, ownerMemberships: 0 });
@@ -163,7 +184,7 @@ describe("getLegacyLoginDecision", () => {
     });
   });
 
-  it("allows a user holding the OWNER role on a TEAM workspace", async () => {
+  it("allows a user holding the OWNER role on the linked workspace", async () => {
     givenUsers([standardUser]);
     givenDomainIsSso(true);
     givenOwnership({ ownedOrgs: 0, ownerMemberships: 1 });
@@ -173,18 +194,49 @@ describe("getLegacyLoginDecision", () => {
     });
   });
 
-  it("refuses a standard account that owns no TEAM workspace on an SSO domain", async () => {
+  it("refuses the owner of a workspace that is not linked to the SSO domain", async () => {
     givenUsers([standardUser]);
-    givenDomainIsSso(true);
+    givenDomainIsSso(true, [LINKED_ORG_ID]);
+    // The user owns "org-own", a TEAM workspace they created themselves. The
+    // ownership queries are scoped to the linked workspace, so they find
+    // nothing.
     givenOwnership({ ownedOrgs: 0, ownerMemberships: 0 });
 
     await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
       allowed: false,
       reason: "sso_domain",
     });
+  });
+
+  it("scopes both ownership queries to the workspaces linked to the domain", async () => {
+    givenUsers([standardUser]);
+    givenDomainIsSso(true, ["org-a", "org-b"]);
+
+    await getLegacyLoginDecision(EMAIL);
+
     expect(db.organization.count).toHaveBeenCalledWith({
-      where: expect.objectContaining({ userId: standardUser.id }),
+      where: { userId: standardUser.id, id: { in: ["org-a", "org-b"] } },
     });
+    expect(db.userOrganization.count).toHaveBeenCalledWith({
+      where: {
+        userId: standardUser.id,
+        roles: { has: "OWNER" },
+        organizationId: { in: ["org-a", "org-b"] },
+      },
+    });
+  });
+
+  it("refuses everyone on an SSO domain with no linked workspace, without an owner query", async () => {
+    givenUsers([standardUser]);
+    givenDomainIsSso(true, []);
+    givenOwnership({ ownedOrgs: 1, ownerMemberships: 1 });
+
+    await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+      allowed: false,
+      reason: "sso_domain",
+    });
+    expect(db.organization.count).not.toHaveBeenCalled();
+    expect(db.userOrganization.count).not.toHaveBeenCalled();
   });
 
   it("finds an account stored with capitals for a lowercase address", async () => {

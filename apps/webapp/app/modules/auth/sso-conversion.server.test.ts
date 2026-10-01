@@ -78,6 +78,22 @@ const duplicateSession = {
   expiresAt: 0,
 };
 
+/** The workspace whose SSO settings list the test domain. */
+const LINKED_ORG_ID = "org-sso";
+
+/** The organizations `checkDomainSSOStatus` reports as linked to a domain. */
+type LinkedOrganizations = Awaited<
+  ReturnType<typeof checkDomainSSOStatus>
+>["linkedOrganizations"];
+
+/**
+ * Linked-organization rows for `checkDomainSSOStatus`. The engine reads only
+ * their ids.
+ */
+function linkedOrgs(ids: string[]): LinkedOrganizations {
+  return ids.map((id) => ({ id })) as unknown as LinkedOrganizations;
+}
+
 const existingSsoUser = {
   id: ORIGINAL_ID,
   email: "jane.doe@acme.com",
@@ -123,7 +139,7 @@ beforeEach(() => {
   vi.mocked(db.userOrganization.count).mockResolvedValue(0);
   vi.mocked(checkDomainSSOStatus).mockResolvedValue({
     isConfiguredForSSO: true,
-    linkedOrganizations: [],
+    linkedOrganizations: linkedOrgs([LINKED_ORG_ID]),
     ssoProviderId: PROVIDER_ID,
   });
   vi.mocked(getAuthUserById).mockResolvedValue({
@@ -194,7 +210,7 @@ describe("convertAccountToSso", () => {
     expect(db.user.update).not.toHaveBeenCalled();
   });
 
-  it("converts a workspace owner", async () => {
+  it("converts an owner of the linked workspace", async () => {
     vi.mocked(db.organization.count).mockResolvedValue(1);
 
     const result = await convertAccountToSso({ userId: ORIGINAL_ID });
@@ -206,7 +222,7 @@ describe("convertAccountToSso", () => {
     });
   });
 
-  it("converts a user with an OWNER role on a team membership", async () => {
+  it("converts a user with an OWNER role on the linked workspace", async () => {
     vi.mocked(db.userOrganization.count).mockResolvedValue(1);
 
     const result = await convertAccountToSso({ userId: ORIGINAL_ID });
@@ -319,7 +335,7 @@ describe("reconcileDuplicateSsoLogin", () => {
 });
 
 describe("findEligibleAccountsForSsoConversion", () => {
-  it("matches the domain case-insensitively and flags owners in batch", async () => {
+  it("matches the domain case-insensitively and flags linked-workspace owners in batch", async () => {
     vi.mocked(db.user.findMany).mockResolvedValue([
       {
         id: "u1",
@@ -363,14 +379,58 @@ describe("findEligibleAccountsForSsoConversion", () => {
         },
       })
     );
+    expect(checkDomainSSOStatus).toHaveBeenCalledWith("@acme.com");
+    // Both ownership queries are scoped to the domain's linked workspaces, so
+    // owning any other workspace never marks a candidate.
     expect(db.organization.findMany).toHaveBeenCalledTimes(1);
+    expect(db.organization.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: { in: ["u1", "u2", "u3"] },
+        id: { in: [LINKED_ORG_ID] },
+      },
+      select: { userId: true },
+    });
     expect(db.userOrganization.findMany).toHaveBeenCalledTimes(1);
-    expect(result.map((r) => [r.id, r.ownsTeamOrg, r.alreadySso])).toEqual([
-      ["u1", true, false],
-      ["u2", false, true],
-      ["u3", true, false],
-    ]);
+    expect(db.userOrganization.findMany).toHaveBeenCalledWith({
+      where: {
+        userId: { in: ["u1", "u2", "u3"] },
+        roles: { has: "OWNER" },
+        organizationId: { in: [LINKED_ORG_ID] },
+      },
+      select: { userId: true },
+    });
+    expect(result.map((r) => [r.id, r.ownsSsoWorkspace, r.alreadySso])).toEqual(
+      [
+        ["u1", true, false],
+        ["u2", false, true],
+        ["u3", true, false],
+      ]
+    );
     expect(result[0].displayName).toBe("Annie");
+  });
+
+  it("marks no one as an owner when no workspace is linked to the domain", async () => {
+    vi.mocked(db.user.findMany).mockResolvedValue([
+      {
+        id: "u1",
+        email: "a@acme.com",
+        firstName: null,
+        lastName: null,
+        displayName: null,
+        sso: false,
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.user.findMany>>);
+    vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+      isConfiguredForSSO: true,
+      linkedOrganizations: [],
+      ssoProviderId: PROVIDER_ID,
+    });
+
+    const result = await findEligibleAccountsForSsoConversion("acme.com");
+
+    expect(result.map((r) => r.ownsSsoWorkspace)).toEqual([false]);
+    expect(db.organization.findMany).not.toHaveBeenCalled();
+    expect(db.userOrganization.findMany).not.toHaveBeenCalled();
   });
 
   it("skips the ownership queries when nothing matches", async () => {
@@ -483,6 +543,22 @@ describe("convertAllEligibleOnDomain", () => {
     expect(db.$transaction).toHaveBeenCalledTimes(3);
   });
 
+  it("converts the owner of a workspace that is not linked to the domain", async () => {
+    // "u-owner" owns a workspace of their own, not the one linked to the
+    // domain, so the scoped ownership queries find nothing.
+    vi.mocked(db.organization.findMany).mockResolvedValue([]);
+
+    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
+
+    expect(result).toEqual({ converted: 4, pendingReconcile: 0, failed: [] });
+    expect(seededUserIds()).toEqual([
+      "u-std-1",
+      "u-owner",
+      "u-std-2",
+      "u-std-3",
+    ]);
+  });
+
   it("keeps going after one account fails and reports it", async () => {
     vi.mocked(getAuthUserById).mockImplementation(((id: string) =>
       Promise.resolve(
@@ -576,14 +652,44 @@ describe("revertAccountToStandard", () => {
       revertAccountToStandard({ userId: ORIGINAL_ID })
     ).rejects.toMatchObject({
       status: 400,
-      message: expect.stringMatching(/only a workspace owner/i),
+      message: expect.stringMatching(/only an owner of the workspace/i),
     });
     expect(db.$transaction).not.toHaveBeenCalled();
     expect(db.$executeRaw).not.toHaveBeenCalled();
     expect(db.user.update).not.toHaveBeenCalled();
   });
 
-  it("reverts a workspace owner on an SSO domain", async () => {
+  it("refuses the owner of a workspace that is not linked to the SSO domain", async () => {
+    // The user owns a workspace of their own; the ownership counts are scoped
+    // to the linked workspace and find nothing.
+    vi.mocked(db.organization.count).mockResolvedValue(0);
+    vi.mocked(db.userOrganization.count).mockResolvedValue(0);
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(db.organization.count).toHaveBeenCalledWith({
+      where: { userId: ORIGINAL_ID, id: { in: [LINKED_ORG_ID] } },
+    });
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("refuses everyone when the SSO domain has no linked workspace", async () => {
+    vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+      isConfiguredForSSO: true,
+      linkedOrganizations: [],
+      ssoProviderId: PROVIDER_ID,
+    });
+    vi.mocked(db.organization.count).mockResolvedValue(1);
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(db.organization.count).not.toHaveBeenCalled();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("reverts an owner of the linked workspace on an SSO domain", async () => {
     vi.mocked(db.organization.count).mockResolvedValue(1);
 
     const result = await revertAccountToStandard({

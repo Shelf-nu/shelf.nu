@@ -19,9 +19,12 @@
  * duplicate SSO auth user. `reconcileDuplicateSsoLogin` merges it back onto the
  * original account from the SSO callback.
  *
- * Workspace owners may be converted one at a time, but `convertAllEligibleOnDomain`
- * skips them: an unconverted owner keeps password login on an SSO domain, which
- * is every customer's administrative fallback when their IdP is unavailable.
+ * Owners of a workspace linked to the domain (one whose SSO settings list it)
+ * may be converted one at a time, but `convertAllEligibleOnDomain` skips them:
+ * an unconverted owner of the customer's SSO workspace keeps password login,
+ * which is the customer's administrative fallback when their IdP is
+ * unavailable. Owning any other workspace earns no such treatment, because
+ * anyone on the domain can create one.
  * `revertAccountToStandard` turns a converted account back into an email
  * account for that same recovery case.
  *
@@ -36,11 +39,11 @@
  * @see {@link file://./../../utils/sso.server.ts} resolveUserAndOrgForSsoCallback
  * @see {@link file://./../../routes/_layout+/admin-dashboard+/sso-conversion.tsx}
  */
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationRoles } from "@prisma/client";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
-import { userOwnsTeamOrg } from "~/modules/auth/sso-enforcement.server";
+import { userOwnsLinkedSsoWorkspace } from "~/modules/auth/sso-enforcement.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -77,7 +80,8 @@ export type SsoConversionCandidate = {
   firstName: string | null;
   lastName: string | null;
   displayName: string | null;
-  ownsTeamOrg: boolean;
+  /** Owns a workspace linked to the domain's SSO (Convert all skips them). */
+  ownsSsoWorkspace: boolean;
   alreadySso: boolean;
 };
 
@@ -190,10 +194,10 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  * the account as SSO-only and signs out its current sessions.
  *
  * Guards: skips users already SSO (idempotent); requires the domain to have a
- * configured SSO provider; requires the auth account to exist. Workspace owners
- * are converted like anyone else; a converted owner loses the password login
- * an unconverted owner keeps on an SSO domain, and support can undo it with
- * `revertAccountToStandard`.
+ * configured SSO provider; requires the auth account to exist. Owners of the
+ * domain's SSO workspace are converted like anyone else; a converted owner
+ * loses the password login an unconverted one keeps, and support can undo it
+ * with `revertAccountToStandard`.
  *
  * The seeded `provider_id` is the lowercased email. Stored email case is not
  * normalized, and an IdP that sends a different case is handled by
@@ -438,8 +442,9 @@ export async function reconcileDuplicateSsoLogin({
 /**
  * Lists candidate accounts for the admin conversion UI: every non-deleted Shelf
  * user whose email domain matches `domain` (case-insensitive), annotated with
- * whether they already use SSO and whether they own a team org (which Convert
- * all skips).
+ * whether they already use SSO and whether they own a workspace linked to the
+ * domain's SSO (which Convert all skips). Ownership of any other workspace is
+ * not reported: it does not exempt anyone from SSO.
  *
  * @param domain - the email domain to match (e.g. "acme.com")
  * @returns the matching accounts with eligibility annotations, ordered by email
@@ -466,26 +471,32 @@ export async function findEligibleAccountsForSsoConversion(
 
   const userIds = users.map((u) => u.id);
 
-  // Same two ownership shapes as `userOwnsTeamOrg`, batched for the whole list.
-  const [ownedTeamOrgs, ownerMemberships] = await Promise.all([
-    db.organization.findMany({
-      where: { userId: { in: userIds }, type: OrganizationType.TEAM },
-      select: { userId: true },
-    }),
-    db.userOrganization.findMany({
-      where: {
-        userId: { in: userIds },
-        roles: { has: OrganizationRoles.OWNER },
-        organization: { type: OrganizationType.TEAM },
-      },
-      select: { userId: true },
-    }),
-  ]);
+  // `checkDomainSSOStatus` reads the domain from an address.
+  const { linkedOrganizations } = await checkDomainSSOStatus(`@${normalized}`);
+  const linkedOrgIds = linkedOrganizations.map((org) => org.id);
 
-  const ownerIds = new Set<string>([
-    ...ownedTeamOrgs.map((o) => o.userId),
-    ...ownerMemberships.map((m) => m.userId),
-  ]);
+  // Same two ownership shapes as `userOwnsLinkedSsoWorkspace`, batched for the
+  // whole list and scoped to the domain's linked workspaces.
+  const ownerIds = new Set<string>();
+  if (linkedOrgIds.length > 0) {
+    const [ownedOrgs, ownerMemberships] = await Promise.all([
+      db.organization.findMany({
+        where: { userId: { in: userIds }, id: { in: linkedOrgIds } },
+        select: { userId: true },
+      }),
+      db.userOrganization.findMany({
+        where: {
+          userId: { in: userIds },
+          roles: { has: OrganizationRoles.OWNER },
+          organizationId: { in: linkedOrgIds },
+        },
+        select: { userId: true },
+      }),
+    ]);
+    for (const { userId } of [...ownedOrgs, ...ownerMemberships]) {
+      ownerIds.add(userId);
+    }
+  }
 
   return users.map((u) => ({
     id: u.id,
@@ -494,16 +505,17 @@ export async function findEligibleAccountsForSsoConversion(
     lastName: u.lastName,
     displayName: u.displayName,
     alreadySso: u.sso,
-    ownsTeamOrg: ownerIds.has(u.id),
+    ownsSsoWorkspace: ownerIds.has(u.id),
   }));
 }
 
 /**
  * Converts every eligible account on a domain, one after another, each in its
- * own transaction. Eligible means not already SSO and not a workspace owner,
- * recomputed here from the database rather than taken from the client, so the
- * admin page cannot widen the set. Owners are left on password login and can
- * be converted individually with `convertAccountToSso`.
+ * own transaction. Eligible means not already SSO and not an owner of a
+ * workspace linked to the domain, recomputed here from the database rather
+ * than taken from the client, so the admin page cannot widen the set. Those
+ * owners are left on password login and can be converted individually with
+ * `convertAccountToSso`. Owners of any other workspace are converted.
  *
  * One account failing does not stop the rest: its error is collected and the
  * run continues.
@@ -529,7 +541,9 @@ export async function convertAllEligibleOnDomain({
   await requireSsoProviderIdForEmail(`@${normalized}`);
 
   const candidates = await findEligibleAccountsForSsoConversion(normalized);
-  const eligible = candidates.filter((c) => !c.alreadySso && !c.ownsTeamOrg);
+  const eligible = candidates.filter(
+    (c) => !c.alreadySso && !c.ownsSsoWorkspace
+  );
 
   const result: SsoConvertAllResult = {
     converted: 0,
@@ -609,9 +623,10 @@ function isStandardEmailTakenError(cause: unknown): boolean {
  * through Forgot password.
  *
  * Only allowed when the reverted account could then use password login, per
- * the same rules as `getLegacyLoginDecision`: the account owns a team
- * workspace, or its domain is no longer configured for SSO. Anyone else on an
- * SSO domain would be reverted into an account that cannot sign in at all.
+ * the same rules as `getLegacyLoginDecision`: the account owns a workspace
+ * linked to its SSO domain, or its domain is no longer configured for SSO.
+ * Anyone else on an SSO domain (including the owner of some other workspace)
+ * would be reverted into an account that cannot sign in at all.
  *
  * In one transaction it removes the account's SSO identities, adds an `email`
  * identity, clears `is_sso_user` and points the app metadata at the email
@@ -662,15 +677,20 @@ export async function revertAccountToStandard({
 
     // The domain check runs first: the owner queries are only needed when the
     // domain still uses SSO.
-    const { isConfiguredForSSO } = await checkDomainSSOStatus(user.email);
+    const { isConfiguredForSSO, linkedOrganizations } =
+      await checkDomainSSOStatus(user.email);
     const canUsePasswordLogin =
-      !isConfiguredForSSO || (await userOwnsTeamOrg(user.id));
+      !isConfiguredForSSO ||
+      (await userOwnsLinkedSsoWorkspace(
+        user.id,
+        linkedOrganizations.map((org) => org.id)
+      ));
 
     if (!canUsePasswordLogin) {
       throw new ShelfError({
         cause: null,
         message:
-          "Only a workspace owner, or an account whose domain no longer uses SSO, can be reverted. Anyone else on an SSO domain still could not sign in with a password.",
+          "Only an owner of the workspace that uses SSO for this domain, or an account whose domain no longer uses SSO, can be reverted. Anyone else on an SSO domain still could not sign in with a password.",
         additionalData: { userId, email: user.email },
         label,
         status: 400,

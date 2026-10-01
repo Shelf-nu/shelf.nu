@@ -4,15 +4,17 @@
  * Lets Shelf staff convert a customer's existing standard (email/password)
  * accounts into SSO-only accounts that keep their original UUID and all data.
  * Staff enter an email domain to list every matching Shelf account, annotated
- * with whether it is already SSO or belongs to a workspace owner, then either
- * convert accounts one at a time or convert every eligible account at once.
- * "Convert all" skips workspace owners, who may keep password login; an owner
- * can still be converted individually.
+ * with whether it is already SSO or belongs to an owner of the workspace that
+ * uses SSO for the domain, then either convert accounts one at a time or
+ * convert every eligible account at once. "Convert all" skips those owners,
+ * who may keep password login; each can still be converted individually.
+ * Owning any other workspace earns no exemption.
  *
  * Already-SSO accounts can be reverted to standard login as a recovery tool,
  * for example when a customer's identity provider is unavailable. A revert is
- * only allowed when the account could then sign in with a password: a workspace
- * owner, or any account whose domain no longer uses SSO.
+ * only allowed when the account could then sign in with a password: an owner of
+ * the workspace that uses SSO for the domain, or any account whose domain no
+ * longer uses SSO.
  *
  * The page also lists the workspaces that claim the domain and flags the ones
  * with SSO group mappings: at a converted user's first SSO login, membership in
@@ -355,7 +357,7 @@ export default function SsoConversionPage() {
   // Mirrors the server's own selection in convertAllEligibleOnDomain, which is
   // what actually decides; this count only labels the button.
   const eligibleCount = candidates.filter(
-    (c) => !c.alreadySso && !c.ownsTeamOrg
+    (c) => !c.alreadySso && !c.ownsSsoWorkspace
   ).length;
 
   return (
@@ -364,10 +366,12 @@ export default function SsoConversionPage() {
         <h1 className="text-xl font-semibold">Convert accounts to SSO</h1>
         <p className="text-sm text-gray-600">
           Enter an email domain to list its Shelf accounts. Converted accounts
-          sign in only via SSO and keep all of their data. Workspace owners can
-          keep password login: Convert all skips them, but each one can still be
-          converted on its own. SSO accounts can be reverted to standard login
-          when that would let them sign in with a password.
+          sign in only via SSO and keep all of their data. Owners of the
+          workspace that uses SSO for the domain can keep password login:
+          Convert all skips them, but each one can still be converted on its
+          own. Owning any other workspace does not exempt an account. SSO
+          accounts can be reverted to standard login when that would let them
+          sign in with a password.
         </p>
       </div>
 
@@ -544,8 +548,9 @@ function ConvertAllControl({
                 {eligibleCount === 1 ? "This account" : "These accounts"} will
                 lose password login and be signed out of every session. From
                 then on they can only sign in through the domain's SSO provider,
-                and they keep their data and user id. Workspace owners are
-                skipped and keep their password login.
+                and they keep their data and user id. Owners of the workspace
+                that uses SSO for this domain are skipped and keep their
+                password login.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -620,7 +625,8 @@ function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
 /**
  * One candidate account row: name, status and a single action behind a
  * confirmation dialog. A standard account offers Convert (with owner-specific
- * wording for workspace owners); an SSO account offers Revert to standard.
+ * wording for owners of the workspace that uses SSO for the domain); an SSO
+ * account offers Revert to standard.
  *
  * Each row owns its fetcher, so an in-flight operation only disables its own
  * button, and the row shows its own result or error (a page-level
@@ -644,10 +650,10 @@ function CandidateRow({
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const status = candidate.alreadySso
-    ? candidate.ownsTeamOrg
+    ? candidate.ownsSsoWorkspace
       ? "Already SSO (workspace owner)"
       : "Already SSO"
-    : candidate.ownsTeamOrg
+    : candidate.ownsSsoWorkspace
     ? "Workspace owner, can keep password login"
     : "Eligible";
 
@@ -707,8 +713,8 @@ function CandidateRow({
                   Convert {candidate.email} to SSO?
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  {candidate.ownsTeamOrg
-                    ? "This account owns a workspace and could keep password login. After conversion it can only sign in via SSO, and it is signed out of every session. If the identity provider becomes unavailable, Shelf support can revert it to standard login. The account keeps its data and user id."
+                  {candidate.ownsSsoWorkspace
+                    ? "This account owns the workspace that uses SSO for this domain and could keep password login. After conversion it can only sign in via SSO, and it is signed out of every session. If the identity provider becomes unavailable, Shelf support can revert it to standard login. The account keeps its data and user id."
                     : "This removes the account's password and signs it out of every session. From then on it can only sign in through the domain's SSO provider. The account keeps its data and user id."}
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -777,7 +783,7 @@ function RevertAction({
   confirmOpen: boolean;
   setConfirmOpen: (open: boolean) => void;
 }) {
-  const blocked = isConfiguredForSSO && !candidate.ownsTeamOrg;
+  const blocked = isConfiguredForSSO && !candidate.ownsSsoWorkspace;
   const reasonId = `revert-reason-${candidate.id}`;
 
   return (
@@ -824,8 +830,9 @@ function RevertAction({
       </AlertDialog>
       {blocked ? (
         <span id={reasonId} className="max-w-xs text-xs text-gray-600">
-          Only workspace owners can be reverted while {domain} uses SSO. Anyone
-          else could not sign in with a password.
+          Only owners of the workspace that uses SSO for {domain} can be
+          reverted while it uses SSO. Anyone else could not sign in with a
+          password.
         </span>
       ) : null}
     </div>

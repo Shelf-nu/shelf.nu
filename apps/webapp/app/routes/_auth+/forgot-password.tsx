@@ -113,8 +113,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * Eligibility to receive a code is decided by `getLegacyLoginDecision`
          * (`auth/sso-enforcement.server`), which `sendResetPasswordLink` asks:
          * a converted account is refused, and so is every account on an SSO
-         * domain except an unconverted workspace owner. A refused address is
-         * sent nothing and the send returns as a success. That decision costs
+         * domain except an unconverted owner of a workspace linked to that
+         * domain. A refused address is sent nothing and the send returns as a
+         * success. That decision costs
          * a different number of queries depending on the answer, so it runs
          * inside the un-awaited send below, never before the response.
          *
