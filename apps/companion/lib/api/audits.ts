@@ -1,4 +1,5 @@
 import { apiFetch, apiUpload } from "./client";
+import { auditImageUploadPath } from "../audit-photo-capture";
 import type {
   AuditsResponse,
   AuditDetailResponse,
@@ -202,6 +203,8 @@ export const auditsApi = {
    * @param imageUri Local file URI from expo-image-picker
    * @param mimeType Image MIME type (defaults to image/jpeg)
    * @param content Optional note text to accompany the image
+   * @param capturedAt When the camera took the photo (ISO). Only for a photo
+   *   just taken; the server then stamps it. Omit for a library photo.
    */
   uploadImage: (
     orgId: string,
@@ -209,7 +212,8 @@ export const auditsApi = {
     auditAssetId: string,
     imageUri: string,
     mimeType: string = "image/jpeg",
-    content?: string
+    content?: string,
+    capturedAt?: string | null
   ) => {
     const formData = new FormData();
     // React Native FormData accepts objects with uri/type/name for file uploads
@@ -223,14 +227,8 @@ export const auditsApi = {
       formData.append("content", content);
     }
 
-    const params = new URLSearchParams({
-      orgId,
-      auditSessionId,
-      auditAssetId,
-    });
-
     return apiUpload<UploadAuditImageResponse>(
-      `/api/mobile/audits/image?${params}`,
+      auditImageUploadPath({ orgId, auditSessionId, auditAssetId, capturedAt }),
       formData
     );
   },

@@ -29,6 +29,11 @@ import {
  *
  * Query params:
  *   - orgId (required), auditSessionId (required), auditAssetId (required)
+ *   - capturedAt (optional): ISO time the phone took the photo, sent only by
+ *     the camera path. A value within ten minutes of the server's clock gets
+ *     the stored photo a capture stamp (see `photo-stamp.server.ts`). It
+ *     travels in the query, not the body, because the stamp is applied while
+ *     the file streams and a body field after the file would arrive too late.
  *
  * Body: multipart/form-data with `image` (required) and optional `content`
  * (note text). `content` is read from the SAME bounded parse that streams
@@ -75,6 +80,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const url = new URL(request.url);
     const auditSessionId = url.searchParams.get("auditSessionId");
     const auditAssetId = url.searchParams.get("auditAssetId");
+    const capturedAt = url.searchParams.get("capturedAt");
 
     if (!auditSessionId || !auditAssetId) {
       return data(
@@ -122,6 +128,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       uploadedById: user.id,
       auditAssetId,
+      capturedAt,
       returnParsedFormData: true,
     });
 

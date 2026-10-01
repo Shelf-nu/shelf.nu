@@ -116,10 +116,12 @@ function createImageRequest(opts: {
   auditSessionId?: string;
   auditAssetId?: string;
   content?: string;
+  capturedAt?: string;
 }) {
   const params = new URLSearchParams({ orgId: "org-1" });
   if (opts.auditSessionId) params.set("auditSessionId", opts.auditSessionId);
   if (opts.auditAssetId) params.set("auditAssetId", opts.auditAssetId);
+  if (opts.capturedAt) params.set("capturedAt", opts.capturedAt);
   // content travels in the multipart body (not the query string)
   const form = new FormData();
   if (opts.content !== undefined) form.set("content", opts.content);
@@ -189,6 +191,37 @@ describe("POST /api/mobile/audits/image", () => {
         imageIds: ["img-1"],
         content: null,
       })
+    );
+  });
+
+  it("forwards the camera's capturedAt from the query to the upload", async () => {
+    await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+          capturedAt: "2026-10-01T21:01:30.000Z",
+        }),
+      })
+    );
+
+    expect(uploadAuditImage).toHaveBeenCalledWith(
+      expect.objectContaining({ capturedAt: "2026-10-01T21:01:30.000Z" })
+    );
+  });
+
+  it("passes no capture time when the phone sent none (library photo, older app)", async () => {
+    await action(
+      createActionArgs({
+        request: createImageRequest({
+          auditSessionId: "session-1",
+          auditAssetId: "audit-asset-1",
+        }),
+      })
+    );
+
+    expect(uploadAuditImage).toHaveBeenCalledWith(
+      expect.objectContaining({ capturedAt: null })
     );
   });
 

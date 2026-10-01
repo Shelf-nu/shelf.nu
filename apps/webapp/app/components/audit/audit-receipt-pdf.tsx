@@ -147,6 +147,46 @@ export const AuditReceiptPDF = ({
 };
 
 /**
+ * Audit photos on the receipt, two to a row, each at the full width of its
+ * cell and its natural aspect ratio.
+ *
+ * Always the full stored image: the thumbnail is a small square crop, which
+ * would print as a blur and cut off the capture stamp burned into a photo's
+ * bottom-right corner. Each photo is kept whole on one page (see the print
+ * styles in {@link AuditPDFContent}).
+ *
+ * @param props.images - The photos to print
+ * @param props.alt - Alt text for a photo without a description
+ */
+function AuditPdfPhotos({
+  images,
+  alt,
+}: {
+  images: AuditPdfDbResult["generalImages"];
+  alt: string;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {images.map((img) => (
+        <div
+          key={img.id}
+          className="audit-pdf-photo break-inside-avoid border border-gray-300 p-1"
+        >
+          <img
+            src={img.imageUrl}
+            alt={img.description || alt}
+            className="h-auto w-full"
+          />
+          {img.description && (
+            <p className="mt-1 text-xs text-gray-600">{img.description}</p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * PDF content component that renders the actual audit receipt layout.
  *
  * @param componentRef - Ref to the printable content container
@@ -292,6 +332,15 @@ export const AuditPDFContent = ({
           .audit-assets-table td:first-child {
             border-left: 1px solid #d1d5db !important;
           }
+          .audit-assets-table tr,
+          .audit-pdf-photo {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          .audit-pdf-keep-with-next {
+            break-after: avoid;
+            page-break-after: avoid;
+          }
         }`}
       </style>
 
@@ -433,7 +482,9 @@ export const AuditPDFContent = ({
           {/* About the audit as a whole — completion note and its photos. */}
           <When truthy={generalNotes.length > 0 || generalImages.length > 0}>
             <div className="mb-4">
-              <h3 className="mb-2 text-sm font-medium">About this audit</h3>
+              <h3 className="audit-pdf-keep-with-next mb-2 text-sm font-medium">
+                About this audit
+              </h3>
 
               {generalNotes.map((note) => (
                 <div key={note.id} className="mb-2 border border-gray-300 p-2">
@@ -455,22 +506,7 @@ export const AuditPDFContent = ({
               ))}
 
               <When truthy={generalImages.length > 0}>
-                <div className="grid grid-cols-4 gap-2">
-                  {generalImages.map((img) => (
-                    <div key={img.id} className="border border-gray-300 p-1">
-                      <img
-                        src={img.thumbnailUrl || img.imageUrl}
-                        alt={img.description || "Audit image"}
-                        className="h-24 w-full object-cover"
-                      />
-                      {img.description && (
-                        <p className="mt-1 text-xs text-gray-600">
-                          {img.description}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <AuditPdfPhotos images={generalImages} alt="Audit image" />
               </When>
             </div>
           </When>
@@ -478,7 +514,7 @@ export const AuditPDFContent = ({
           {/* One block per asset somebody recorded something about. */}
           {findingEntries.map(([assetId, { assetName, images, notes }]) => (
             <div key={assetId} className="mb-3">
-              <h4 className="mb-1 text-xs font-medium text-gray-700">
+              <h4 className="audit-pdf-keep-with-next mb-1 text-xs font-medium text-gray-700">
                 {assetName}
               </h4>
 
@@ -502,22 +538,7 @@ export const AuditPDFContent = ({
               ))}
 
               <When truthy={images.length > 0}>
-                <div className="grid grid-cols-4 gap-2">
-                  {images.map((img) => (
-                    <div key={img.id} className="border border-gray-300 p-1">
-                      <img
-                        src={img.thumbnailUrl || img.imageUrl}
-                        alt={img.description || `Photo of ${assetName}`}
-                        className="h-24 w-full object-cover"
-                      />
-                      {img.description && (
-                        <p className="mt-1 text-xs text-gray-600">
-                          {img.description}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                <AuditPdfPhotos images={images} alt={`Photo of ${assetName}`} />
               </When>
             </div>
           ))}
