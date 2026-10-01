@@ -24,8 +24,14 @@ import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
-import type { TeamMember, Location as LocationType } from "@/lib/api";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import type {
+  AssetQuantityFields,
+  TeamMember,
+  Location as LocationType,
+} from "@/lib/api";
+import type {
+  AssetType,
   BookingAsset,
   BookingDetailResponse,
   QrResolveFailureReason,
@@ -47,6 +53,20 @@ import {
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
+import {
+  buildQuantityFacts,
+  bulkAssetRequest,
+  chosenQuantity,
+  describeCustodyConfirm,
+  planCustodySubmit,
+  summarizeCustodySubmit,
+  unitsFor,
+  type CustodyAudience,
+  type CustodyScanMode,
+  type CustodySubmitPlan,
+  type ScanQuantityFacts,
+} from "@/lib/custody-scan-quantities";
+import { formatQuantity } from "@/lib/quantity-format";
 import { markBookingDirty, markBookingsListDirty } from "@/lib/booking-refresh";
 import {
   countBookingBatch,
@@ -158,7 +178,25 @@ type ScannedItem = {
   assetCount?: number;
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
+  /** Assets only: the asset's type. Absent on servers that predate it. */
+  assetType?: AssetType;
+  /**
+   * Quantity-tracked assets in the custody modes: the units this row can move
+   * and who holds them. The row submits a number of units, never the asset.
+   */
+  quantityFacts?: ScanQuantityFacts;
+  /** Quantity rows: the units the operator set. Absent means the default. */
+  chosenQuantity?: number;
+  /** Why the last submit did not move this row, as the server said it. */
+  submitError?: string;
 };
+
+/** The custody mode for an action, or null for the other scanner actions. */
+function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
+  return action === "assign_custody" || action === "release_custody"
+    ? action
+    : null;
+}
 
 // ── Scanner Content ─────────────────────────────────────
 
@@ -278,6 +316,8 @@ function ScannerContent() {
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  // The scan-list row whose quantity sheet is open (by qrId), or null.
+  const [quantityEditQrId, setQuantityEditQrId] = useState<string | null>(null);
 
   // Booking check-in items (separate from batch scan)
   const [bookingCheckinItems, setBookingCheckinItems] = useState<ScannedItem[]>(
@@ -716,26 +756,28 @@ function ScannerContent() {
         const qrLookupId = qrId ?? samId;
         let codeId: string;
         let codeOrgId: string | null;
-        let asset: {
-          id: string;
-          title: string;
-          status: string;
-          mainImage: string | null;
-          // The kit the ASSET belongs to (distinct from the `kitId` local
-          // below, which is the kit a kit-linked QR points at directly).
-          kitId: string | null;
-          availableToBook: boolean;
-          /**
-           * Model this asset belongs to, or null. Fulfil mode matches it
-           * against the booking's outstanding reservations so progress counts
-           * only units that actually fulfil one. Optional: an older server
-           * omits it, and the client then treats the match as unknown rather
-           * than claiming false progress.
-           */
-          assetModelId?: string | null;
-          category: { name: string } | null;
-          location: { name: string } | null;
-        } | null;
+        let asset:
+          | ({
+              id: string;
+              title: string;
+              status: string;
+              mainImage: string | null;
+              // The kit the ASSET belongs to (distinct from the `kitId` local
+              // below, which is the kit a kit-linked QR points at directly).
+              kitId: string | null;
+              availableToBook: boolean;
+              /**
+               * Model this asset belongs to, or null. Fulfil mode matches it
+               * against the booking's outstanding reservations so progress counts
+               * only units that actually fulfil one. Optional: an older server
+               * omits it, and the client then treats the match as unknown rather
+               * than claiming false progress.
+               */
+              assetModelId?: string | null;
+              category: { name: string } | null;
+              location: { name: string } | null;
+            } & AssetQuantityFields)
+          | null;
         // The kit a kit-linked code resolves to (full object for batch ops).
         let kit: ScannedKit | null = null;
         // A QR can be asset-less but still linked to a kit. We track kitId
@@ -1629,6 +1671,28 @@ function ScannerContent() {
           return;
         }
 
+        // In the custody modes a quantity-tracked row moves a number of units,
+        // so it carries what it can move. Assign reads the free count from the
+        // asset detail (the asset screen's own cap); release reads the holders
+        // the resolve already sent.
+        let quantityFacts: ScanQuantityFacts | undefined;
+        const custodyMode = custodyModeOf(action);
+        if (custodyMode && asset.type === "QUANTITY_TRACKED") {
+          let detail = null;
+          if (custodyMode === "assign_custody" && currentOrg) {
+            const { data: detailData } = await api.asset(
+              asset.id,
+              currentOrg.id
+            );
+            if (isStaleScan()) {
+              finalizeScan();
+              return;
+            }
+            detail = detailData?.asset ?? null;
+          }
+          quantityFacts = buildQuantityFacts({ scanned: asset, detail });
+        }
+
         const newItem: ScannedItem = {
           type: "asset",
           qrId: codeId,
@@ -1638,6 +1702,8 @@ function ScannerContent() {
           mainImage: asset.mainImage,
           category: asset.category?.name || null,
           kitId: asset.kitId ?? null,
+          assetType: asset.type,
+          quantityFacts,
         };
 
         setScannedItems((prev) => [newItem, ...prev]);
@@ -1731,19 +1797,24 @@ function ScannerContent() {
 
     if (action === "assign_custody") {
       if (isSelfService) {
-        // Self-service: no picker — resolve own team-member record and assign.
+        // Self-service: no picker. Resolve own team-member record and assign.
         void assignCustodyToSelf();
       } else {
         setShowCustodyPicker(true);
       }
     } else if (action === "release_custody") {
-      // Blockers guarantee every item in the list is IN_CUSTODY here.
-      Alert.alert("Release Custody", `Release custody of ${batchLabel()}?`, [
+      // Blockers guarantee every whole asset and kit here is in custody, and
+      // every quantity row has exactly one holder with units to give back.
+      const plan = planCustodySubmit("release_custody", scannedItems);
+      const audience: CustodyAudience = { isSelfService };
+      const confirm = describeCustodyConfirm("release_custody", plan, audience);
+      Alert.alert(confirm.title, confirm.message, [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Release",
+          text: confirm.confirmLabel,
           style: "destructive",
-          onPress: () => performBulkRelease(),
+          onPress: () =>
+            void runCustodySubmit("release_custody", plan, audience),
         },
       ]);
     } else if (action === "update_location") {
@@ -1754,7 +1825,7 @@ function ScannerContent() {
   /**
    * Self-service custody assignment: the mobile team-members endpoint returns
    * only the caller's own record for SELF_SERVICE roles, so resolve it and go
-   * straight to the confirm dialog — no picker.
+   * straight to the confirm dialog, with no picker.
    */
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
@@ -1768,7 +1839,7 @@ function ScannerContent() {
     performBulkAssign(member);
   };
 
-  const performBulkAssign = async (member: TeamMember) => {
+  const performBulkAssign = (member: TeamMember) => {
     setShowCustodyPicker(false);
     if (!currentOrg) return;
 
@@ -1778,104 +1849,105 @@ function ScannerContent() {
           .join(" ") || member.name
       : member.name;
 
-    const confirmLabel = batchLabel();
-    Alert.alert(
-      isSelfService ? "Take Custody" : "Assign Custody",
-      isSelfService
-        ? `Take custody of ${confirmLabel}?`
-        : `Assign ${confirmLabel} to ${displayName}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: isSelfService ? "Take" : "Assign",
-          onPress: async () => {
-            setIsSubmitting(true);
-            // Fan out per entity type — assets and kits have separate bulk
-            // endpoints wrapping their respective services (web parity).
-            const { assetIds, kitIds } = splitScannedIds();
-            const [assetResult, kitResult] = await Promise.all([
-              assetIds.length > 0
-                ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-                : Promise.resolve({ data: null, error: null }),
-              kitIds.length > 0
-                ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
-                : Promise.resolve({ error: null }),
-            ]);
-            setIsSubmitting(false);
-
-            const error = assetResult.error || kitResult.error;
-            if (error) {
-              Alert.alert("Error", error);
-            } else {
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success
-              );
-              playScanSound();
-              // Honest partial success: mixed batches skip QUANTITY_TRACKED
-              // assets server-side (their custody is per-unit), so say both
-              // numbers instead of implying everything was assigned. Absent
-              // field (older server) or all-INDIVIDUAL batches read 0 and the
-              // alert body is unchanged. All-QT batches error out server-side
-              // and never reach this branch.
-              const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-              const skippedNote =
-                skipped > 0
-                  ? `\n\n${skipped} quantity-tracked asset${
-                      skipped === 1 ? "" : "s"
-                    } skipped. Assign quantities from the asset's detail screen.`
-                  : "";
-              Alert.alert(
-                "Done",
-                isSelfService
-                  ? `You have custody of ${confirmLabel}.${skippedNote}`
-                  : `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
-              );
-              setScannedItems([]);
-              lastScanRef.current = "";
-            }
-          },
-        },
-      ]
-    );
+    const plan = planCustodySubmit("assign_custody", scannedItems);
+    const audience: CustodyAudience = {
+      custodianName: displayName,
+      isSelfService,
+    };
+    const confirm = describeCustodyConfirm("assign_custody", plan, audience);
+    Alert.alert(confirm.title, confirm.message, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: confirm.confirmLabel,
+        onPress: () =>
+          void runCustodySubmit("assign_custody", plan, audience, member.id),
+      },
+    ]);
   };
 
-  const performBulkRelease = async () => {
+  /**
+   * Sends a custody submit and reports it.
+   *
+   * One asset request carries the whole assets and the quantity rows (their
+   * units in `quantities`); the server checks every unit count before it
+   * writes anything, so it moves all of them or none. Kits go in their own
+   * request (web parity). Rows the server accepted leave the list; rows it
+   * refused stay, showing its reason, so the operator can fix them and submit
+   * again.
+   *
+   * @param mode - Assign or release.
+   * @param plan - The split built when the operator confirmed.
+   * @param audience - Who receives the custody, for the wording.
+   * @param custodianId - Assign only: the chosen team member.
+   */
+  const runCustodySubmit = async (
+    mode: CustodyScanMode,
+    plan: CustodySubmitPlan,
+    audience: CustodyAudience,
+    custodianId?: string
+  ) => {
     if (!currentOrg) return;
-    const releasedLabel = batchLabel();
+    if (mode === "assign_custody" && !custodianId) return;
+    const orgId = currentOrg.id;
+    const { assetIds, quantities } = bulkAssetRequest(plan);
+    const kitIds = plan.kits.map((row) => row.targetId);
+
     setIsSubmitting(true);
-    const { assetIds, kitIds } = splitScannedIds();
     const [assetResult, kitResult] = await Promise.all([
-      assetIds.length > 0
-        ? api.bulkReleaseCustody(currentOrg.id, assetIds)
-        : Promise.resolve({ data: null, error: null }),
-      kitIds.length > 0
-        ? api.bulkReleaseKitCustody(currentOrg.id, kitIds)
-        : Promise.resolve({ error: null }),
+      assetIds.length === 0
+        ? Promise.resolve({ data: null, error: null })
+        : mode === "assign_custody"
+        ? api.bulkAssignCustody(orgId, assetIds, custodianId!, quantities)
+        : api.bulkReleaseCustody(orgId, assetIds, quantities),
+      kitIds.length === 0
+        ? Promise.resolve({ error: null })
+        : mode === "assign_custody"
+        ? api.bulkAssignKitCustody(orgId, kitIds, custodianId!)
+        : api.bulkReleaseKitCustody(orgId, kitIds),
     ]);
     setIsSubmitting(false);
 
-    const error = assetResult.error || kitResult.error;
-    if (error) {
-      Alert.alert("Error", error);
-    } else {
+    const summary = summarizeCustodySubmit(
+      mode,
+      plan,
+      {
+        assetError: assetResult.error,
+        kitError: kitResult.error,
+        skippedQuantityTracked: assetResult.data?.skippedQuantityTracked ?? 0,
+      },
+      audience
+    );
+
+    if (summary.succeededQrIds.length > 0) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      // Honest partial success — mirrors performBulkAssign: the server skips
-      // QUANTITY_TRACKED assets in mixed batches and reports the count.
-      const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-      const skippedNote =
-        skipped > 0
-          ? `\n\n${skipped} quantity-tracked asset${
-              skipped === 1 ? "" : "s"
-            } skipped. Release quantities from the asset's detail screen.`
-          : "";
-      Alert.alert(
-        "Done",
-        `Released custody of ${releasedLabel}.${skippedNote}`
-      );
-      setScannedItems([]);
-      lastScanRef.current = "";
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
+    Alert.alert(summary.title, summary.message);
+
+    const succeeded = new Set(summary.succeededQrIds);
+    setScannedItems((prev) =>
+      prev
+        .filter((item) => !succeeded.has(item.qrId))
+        .map((item) =>
+          summary.rowErrors[item.qrId]
+            ? { ...item, submitError: summary.rowErrors[item.qrId] }
+            : item
+        )
+    );
+    lastScanRef.current = "";
+  };
+
+  /** Stores the operator's quantity for a row and clears its old error. */
+  const setRowQuantity = (qrId: string, quantity: number) => {
+    setScannedItems((prev) =>
+      prev.map((item) =>
+        item.qrId === qrId
+          ? { ...item, chosenQuantity: quantity, submitError: undefined }
+          : item
+      )
+    );
   };
 
   const performBulkUpdateLocation = async (location: LocationType) => {
@@ -2542,6 +2614,36 @@ function ScannerContent() {
 
   const showBatchDrawer =
     !isBookingMode && isBatchAction(action) && scannedItems.length > 0;
+
+  // Rows as the batch drawer shows them: a quantity row in a custody mode
+  // carries its units and cap, and any row the last submit refused carries
+  // the server's reason.
+  const custodyMode = custodyModeOf(action);
+  const batchDrawerItems = scannedItems.map((item) => {
+    const facts = item.quantityFacts;
+    const cap = custodyMode && facts ? unitsFor(custodyMode, facts) : 0;
+    return {
+      ...item,
+      quantity:
+        custodyMode && facts && cap > 0
+          ? {
+              value: chosenQuantity(custodyMode, facts, item.chosenQuantity),
+              max: cap,
+              unitOfMeasure: facts.unitOfMeasure,
+            }
+          : undefined,
+      error: item.submitError,
+    };
+  });
+
+  // The row whose quantity sheet is open, with its cap and current value.
+  const quantityEditItem = quantityEditQrId
+    ? batchDrawerItems.find((item) => item.qrId === quantityEditQrId) ?? null
+    : null;
+  const quantityEditHolder =
+    custodyMode === "release_custody"
+      ? quantityEditItem?.quantityFacts?.holders[0] ?? null
+      : null;
   const showBookingDrawer = isBookingMode && bookingCheckinItems.length > 0;
 
   // Instruction text
@@ -2891,7 +2993,7 @@ function ScannerContent() {
           {/* ── Batch Drawer ──────────────────────────── */}
           {showBatchDrawer && (
             <BatchDrawer
-              items={scannedItems}
+              items={batchDrawerItems}
               keyField="qrId"
               title={`${scannedItems.length} item${
                 scannedItems.length > 1 ? "s" : ""
@@ -2909,6 +3011,7 @@ function ScannerContent() {
               blockers={blockers}
               onResolveBlocker={resolveBlocker}
               onResolveAllBlockers={resolveAllBlockers}
+              onEditQuantity={setQuantityEditQrId}
             />
           )}
 
@@ -2995,6 +3098,41 @@ function ScannerContent() {
           />
         </>
       )}
+
+      {/* Units for one quantity row. Setting a number only edits the list;
+          nothing is sent until the drawer's submit. */}
+      <QuantityInputSheet
+        visible={quantityEditItem?.quantity != null}
+        title={
+          custodyMode === "release_custody"
+            ? "Units to release"
+            : "Units to assign"
+        }
+        subtitle={
+          quantityEditItem?.quantity
+            ? quantityEditHolder
+              ? `"${quantityEditItem.title}": ${
+                  quantityEditHolder.name
+                } holds ${formatQuantity(
+                  quantityEditItem.quantity.max,
+                  quantityEditItem.quantity.unitOfMeasure
+                )}`
+              : `"${quantityEditItem.title}": ${formatQuantity(
+                  quantityEditItem.quantity.max,
+                  quantityEditItem.quantity.unitOfMeasure
+                )} free`
+            : undefined
+        }
+        max={quantityEditItem?.quantity?.max ?? 1}
+        defaultValue={quantityEditItem?.quantity?.value}
+        unitOfMeasure={quantityEditItem?.quantity?.unitOfMeasure}
+        confirmLabel="Set"
+        onSubmit={(quantity) => {
+          if (quantityEditQrId) setRowQuantity(quantityEditQrId, quantity);
+          setQuantityEditQrId(null);
+        }}
+        onClose={() => setQuantityEditQrId(null)}
+      />
     </View>
   );
 }

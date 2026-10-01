@@ -6,9 +6,18 @@ import {
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
-import { mobileBulkIdsSchema } from "~/modules/api/mobile-bulk-ids.server";
+import {
+  mobileBulkIdsSchema,
+  mobileQuantitiesSchema,
+} from "~/modules/api/mobile-bulk-ids.server";
 import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  assertAssignableQuantities,
+  assignQuantityToCustodian,
+  QUANTITY_CUSTODIAN_SELECT,
+  splitQuantityAssetIds,
+} from "~/modules/custody/quantity-custody.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
@@ -24,7 +33,18 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Uses the same `bulkCheckOutAssets` service as the webapp to ensure
  * consistent behavior (status updates, notes, validation).
  *
- * Body: { assetIds: string[], custodianId: string }
+ * Body: { assetIds: string[], custodianId: string, quantities?: Record<assetId, units> }
+ *
+ * `quantities` comes from the companion's Scan tab, which gives each
+ * quantity-tracked row a unit count. An asset named there is assigned unit by
+ * unit through the shared quantity-custody functions, exactly as the web
+ * scanner's route does, after every named asset has been checked. All other
+ * ids take the bulk path. Without `quantities` the route behaves as it always
+ * has: quantity-tracked ids are skipped in a mixed list, and a list of only
+ * quantity-tracked ids is refused.
+ *
+ * @see {@link file://./../assets.bulk-assign-custody.ts} the web twin
+ * @see {@link file://./../../../modules/custody/quantity-custody.server.ts}
  */
 export async function action({ request }: ActionFunctionArgs) {
   let userId: string | undefined;
@@ -53,6 +73,7 @@ export async function action({ request }: ActionFunctionArgs) {
       .object({
         assetIds: mobileBulkIdsSchema("assetIds"),
         custodianId: z.string().min(1),
+        quantities: mobileQuantitiesSchema,
       })
       .safeParse(await request.json().catch(() => null));
 
@@ -67,7 +88,11 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    const { assetIds, custodianId } = parsed.data;
+    const { assetIds, custodianId, quantities } = parsed.data;
+    const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
+      assetIds,
+      quantities
+    );
 
     // Get user context (role + barcode access) for asset index settings
     const { role, canUseBarcodes, canSeeAllCustody } =
@@ -81,10 +106,11 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     // Validate custodian belongs to the organization
+    // The name fields are what the per-unit audit notes render.
     const teamMember = await getTeamMember({
       id: custodianId,
       organizationId,
-      select: { id: true, name: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -101,10 +127,32 @@ export async function action({ request }: ActionFunctionArgs) {
      * Without it, a SELF_SERVICE user could assign custody to any
      * team member (hex-security r3202162994).
      */
+    // Every per-unit assignment is checked before any is written.
+    await assertAssignableQuantities({
+      quantityAssetIds,
+      quantities,
+      organizationId,
+    });
+
+    for (const assetId of quantityAssetIds) {
+      await assignQuantityToCustodian({
+        assetId,
+        custodian: teamMember,
+        quantity: quantities[assetId],
+        userId: user.id,
+        organizationId,
+        role,
+      });
+    }
+
+    if (!bulkAssetIds.length) {
+      return data({ success: true, skippedQuantityTracked: 0 });
+    }
+
     const { skippedQuantityTracked } = await bulkCheckOutAssets({
       userId: user.id,
       role,
-      assetIds,
+      assetIds: bulkAssetIds,
       custodianId,
       custodianName: teamMember.name,
       organizationId,
@@ -121,12 +169,10 @@ export async function action({ request }: ActionFunctionArgs) {
       allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
     });
 
-    // Additive: the service silently skips QUANTITY_TRACKED assets on mixed
-    // selections (they need a per-asset quantity — use
-    // /api/mobile/custody/assign-quantity). Forward the count so the app can
-    // report it honestly, mirroring the web's assets.bulk-assign-custody.ts.
-    // An ALL-quantity-tracked selection throws in the service instead and
-    // surfaces through the error envelope.
+    // The service skips QUANTITY_TRACKED ids that came without a quantity in a
+    // mixed list, and refuses a list of only such ids. Forward the skipped
+    // count so the app can say so, as the web's assets.bulk-assign-custody.ts
+    // does.
     return data({ success: true, skippedQuantityTracked });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

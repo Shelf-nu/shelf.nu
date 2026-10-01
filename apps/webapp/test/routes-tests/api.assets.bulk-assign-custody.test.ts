@@ -7,6 +7,7 @@ import {
   bulkCheckOutAssets,
   checkOutQuantity,
 } from "~/modules/asset/service.server";
+import { QUANTITY_CUSTODIAN_SELECT } from "~/modules/custody/quantity-custody.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -93,6 +94,22 @@ vi.mock("~/modules/team-member/service.server", () => ({
   // to not hit the database. "all" keeps the route's select-all behaviour
   // unchanged for these role-forwarding assertions.
   scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
+}));
+
+// why: the per-unit path writes an audit note and runs the low-stock check
+// after each assignment. Their content is pinned in the shared module's own
+// suite; here they only need to not reach a database.
+vi.mock("~/modules/note/service.server", () => ({ createNote: vi.fn() }));
+vi.mock("~/modules/user/service.server", () => ({
+  getUserByID: vi.fn().mockResolvedValue({
+    id: "user-123",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    displayName: null,
+  }),
+}));
+vi.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vi.fn(),
 }));
 
 // why: preventing actual notification sending during route tests
@@ -203,7 +220,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     });
   });
 
@@ -251,7 +268,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     });
   });
 

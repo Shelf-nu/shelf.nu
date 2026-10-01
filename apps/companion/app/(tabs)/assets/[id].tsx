@@ -43,6 +43,7 @@ import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { custodyAssignCap } from "@/lib/custody-scan-quantities";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
@@ -447,13 +448,10 @@ export default function AssetDetailScreen() {
     onOpenBooking: (bookingId) =>
       pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`),
   });
-  // Cap for the assign-quantity step. Prefer the server's custodyAvailable
-  // (web-parity cap that also excludes kit earmarks); fall back for older
-  // servers to the broader `available`, then the plain total — the server
-  // re-validates the real cap on submit either way.
-  const assignMax = isQtyTracked
-    ? breakdown?.custodyAvailable ?? breakdown?.available ?? asset.quantity ?? 0
-    : 0;
+  // Cap for the assign-quantity step, shared with the Scan tab's assign mode
+  // so both offer the same number. The server re-validates the real cap on
+  // submit either way.
+  const assignMax = isQtyTracked ? custodyAssignCap(asset) : 0;
   // Units releasable from the pending release target (operator rows only;
   // kit-held units are excluded). 0 while no row is pending.
   const releaseMax = releaseQtyEntry
