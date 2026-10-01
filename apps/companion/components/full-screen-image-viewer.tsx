@@ -10,7 +10,13 @@
  * render it within that modal's tree: iOS presents a modal only from the one
  * already on screen, so a sibling modal never appears.
  */
-import { Modal, Pressable, StyleSheet, TouchableOpacity } from "react-native";
+import {
+  Modal,
+  Pressable,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -44,40 +50,46 @@ export function FullScreenImageViewer({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityViewIsModal
-        accessibilityRole="image"
-        accessibilityLabel={accessibilityLabel}
-        accessibilityHint="Tap to close"
-      >
-        {uri ? (
-          <Image
-            source={{ uri }}
-            style={styles.image}
-            contentFit="contain"
-            cachePolicy="memory-disk"
-          />
-        ) : null}
-      </Pressable>
-      <TouchableOpacity
-        style={[
-          styles.closeButton,
-          { top: insets.top + 12, right: insets.right + 16 },
-        ]}
-        onPress={onClose}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel="Close image viewer"
-      >
-        <Ionicons name="close" size={28} color="#fff" />
-      </TouchableOpacity>
+      {/* The modal scope wraps both children: VoiceOver ignores the siblings
+          of a view marked modal, which would hide the close button. */}
+      <View style={styles.root} accessibilityViewIsModal>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="image"
+          accessibilityLabel={accessibilityLabel}
+          accessibilityHint="Tap to close"
+        >
+          {uri ? (
+            <Image
+              source={{ uri }}
+              style={styles.image}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+            />
+          ) : null}
+        </Pressable>
+        <TouchableOpacity
+          style={[
+            styles.closeButton,
+            { top: insets.top + 12, right: insets.right + 16 },
+          ]}
+          onPress={onClose}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Close image viewer"
+        >
+          <Ionicons name="close" size={28} color="#fff" />
+        </TouchableOpacity>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   backdrop: {
     flex: 1,
     backgroundColor: "#000",

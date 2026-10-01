@@ -6,7 +6,7 @@
  */
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 
 const photo = {
@@ -33,6 +33,10 @@ function renderThumbnail(images?: (typeof photo)[]) {
 const preview = () => screen.queryByRole("dialog");
 
 describe("image preview", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("opens the full image, not the thumbnail, when the thumbnail is clicked", async () => {
     const user = userEvent.setup();
     await user.click(renderThumbnail());
@@ -110,5 +114,45 @@ describe("image preview", () => {
 
     await user.click(screen.getByRole("button", { name: "Previous" }));
     expect(screen.getByText("1 of 2 image(s)")).toBeTruthy();
+  });
+
+  it("takes taps even when a modal sheet has disabled them on the page", async () => {
+    const user = userEvent.setup();
+    await user.click(renderThumbnail());
+
+    const backdrop = document.querySelector<HTMLElement>(
+      "[data-image-preview-backdrop]"
+    );
+    expect(backdrop?.className).toContain("pointer-events-auto");
+  });
+
+  it("keeps Tab inside the preview and skips controls hidden at this width", async () => {
+    // why: Happy DOM lays nothing out, so every element has no boxes. Give
+    // boxes to everything except elements hidden by the `hidden` class, which
+    // is what a browser does below `lg` for the footer Close button.
+    vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+      function (this: HTMLElement) {
+        const hidden = this.closest(".hidden") !== null;
+        return (hidden ? [] : [{}]) as unknown as DOMRectList;
+      }
+    );
+    const user = userEvent.setup();
+    const second = {
+      id: "image-2",
+      imageUrl: "https://storage.test/audits/second.webp",
+      thumbnailUrl: "https://storage.test/audits/second-thumbnail.webp",
+      alt: "Second photo",
+    };
+    await user.click(renderThumbnail([photo, second]));
+
+    const close = screen.getByRole("button", { name: "Close preview" });
+    const next = screen.getByRole("button", { name: "Next" });
+
+    next.focus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(next);
   });
 });

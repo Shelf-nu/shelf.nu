@@ -12,7 +12,8 @@
  * page behind does not scroll. From `lg` up the same markup lays out as a
  * centred panel with a title bar and a footer over the dimmed page.
  *
- * Escape closes it. With `onPrevious` / `onNext`, the arrow keys page through.
+ * Escape closes it, Tab stays inside it, and with `onPrevious` / `onNext` the
+ * arrow keys page through.
  *
  * @see {@link file://./image-with-preview.tsx}
  * @see {@link file://../assets/asset-image/component.tsx}
@@ -67,6 +68,38 @@ export function ImagePreviewDialog({
   return disablePortal ? overlay : <DialogPortal>{overlay}</DialogPortal>;
 }
 
+/** Controls that can take keyboard focus. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Keeps Tab and Shift+Tab inside the preview, wrapping from the last visible
+ * control to the first and back. Controls hidden at the current width (the
+ * footer Close button below `lg`) are skipped: they render no boxes.
+ *
+ * @param event - The Tab keydown
+ * @param dialog - The preview's dialog element
+ */
+function keepFocusInside(event: KeyboardEvent, dialog: HTMLElement | null) {
+  if (!dialog) return;
+  const controls = Array.from(
+    dialog.querySelectorAll<HTMLElement>(FOCUSABLE)
+  ).filter((control) => control.getClientRects().length > 0);
+  const first = controls[0];
+  const last = controls[controls.length - 1];
+  if (!first || !last) return;
+
+  const active = document.activeElement;
+  const outside = !dialog.contains(active);
+  if (event.shiftKey && (active === first || outside)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || outside)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /**
  * The open preview. Mounted only while open, so the scroll lock, the key
  * bindings and the focus move are taken on open and released on close.
@@ -82,6 +115,7 @@ function PreviewOverlay({
   actions,
 }: Omit<ImagePreviewDialogProps, "open" | "disablePortal">) {
   const closeButtonRef = useAutoFocus<HTMLButtonElement>();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   // Read through a ref so the listener below is bound once per opening.
   const handlersRef = useRef({ onClose, onPrevious, onNext });
@@ -94,7 +128,9 @@ function PreviewOverlay({
 
     function handleKeyDown(event: KeyboardEvent) {
       const handlers = handlersRef.current;
-      if (event.key === DIALOG_CLOSE_SHORTCUT) {
+      if (event.key === "Tab") {
+        keepFocusInside(event, dialogRef.current);
+      } else if (event.key === DIALOG_CLOSE_SHORTCUT) {
         event.preventDefault();
         event.stopPropagation();
         handlers.onClose();
@@ -128,14 +164,21 @@ function PreviewOverlay({
   // The backdrop and the stage around the image close on a tap. They are a
   // pointer shortcut only, so they stay presentational: keyboard users close
   // with Escape or the close button, which takes focus on open.
+  //
+  // `pointer-events-auto` is load-bearing: a modal Radix Sheet sets
+  // `pointer-events: none` on <body>, and this overlay portals there, so
+  // without it a preview opened from a sheet ignores every tap.
+  // `data-image-preview-backdrop` marks it as a dialog for the sheets that
+  // check before closing (see `contextual-sidebar.tsx`).
   return (
     <div
       role="presentation"
-      className="fixed inset-0 z-[100] flex items-center justify-center overscroll-contain bg-gray-950 lg:bg-black/50 lg:p-8 lg:backdrop-blur-sm"
+      className="pointer-events-auto fixed inset-0 z-[100] flex items-center justify-center overscroll-contain bg-gray-950 lg:bg-black/50 lg:p-8 lg:backdrop-blur-sm"
       onClick={closeOnOwnClick}
       data-image-preview-backdrop
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={alt}
