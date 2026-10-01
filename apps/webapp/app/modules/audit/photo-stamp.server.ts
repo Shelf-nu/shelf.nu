@@ -102,21 +102,27 @@ function singleLine(value: string): string {
 }
 
 /**
- * Characters the stamp font is known to draw: Latin (with Extended-A/B and
- * Latin Extended Additional), combining accents, Greek, Cyrillic, general
- * punctuation and currency signs. DejaVu Sans Mono has no glyphs for CJK,
- * Arabic, Hebrew, Indic scripts or emoji, and a missing glyph is burned into
- * the photo for good as an empty box.
+ * Characters the stamp font is sure to draw, kept deliberately narrow: Basic
+ * Latin, Latin-1, Latin Extended-A, basic Greek and Cyrillic, and the
+ * Windows-1252 punctuation and euro sign DejaVu Sans Mono inherits from
+ * Bitstream Vera. The font covers only parts of other blocks (10 of the 31
+ * currency signs, for example) and has no CJK, Arabic, Hebrew, Indic or emoji
+ * glyphs, and a missing glyph is burned into the photo for good as an empty
+ * box. Widen this list only from the installed font's character map.
  */
 const STAMP_FONT_COVERAGE: ReadonlyArray<readonly [number, number]> = [
   [0x0020, 0x007e], // Basic Latin
-  [0x00a0, 0x024f], // Latin-1 Supplement, Latin Extended-A and -B
-  [0x0300, 0x036f], // Combining diacritical marks
-  [0x0370, 0x03ff], // Greek
-  [0x0400, 0x04ff], // Cyrillic
-  [0x1e00, 0x1eff], // Latin Extended Additional
-  [0x2000, 0x206f], // General punctuation
-  [0x20a0, 0x20bf], // Currency symbols
+  [0x00a0, 0x017f], // Latin-1 Supplement and Latin Extended-A
+  [0x0384, 0x03ce], // Greek (monotonic)
+  [0x0400, 0x045f], // Cyrillic (basic)
+  [0x2013, 0x2014], // en and em dash
+  [0x2018, 0x201a], // single quotes
+  [0x201c, 0x201e], // double quotes
+  [0x2020, 0x2022], // daggers, bullet
+  [0x2026, 0x2026], // ellipsis (also ends a cut subject)
+  [0x2030, 0x2030], // per mille
+  [0x2039, 0x203a], // single guillemets
+  [0x20ac, 0x20ac], // euro sign
 ];
 
 /**
@@ -147,13 +153,16 @@ function isCovered(char: string): boolean {
 /**
  * A subject the stamp font can draw, or null when it cannot.
  *
- * Emoji are decoration and are dropped. Any other character outside
- * {@link STAMP_FONT_COVERAGE} makes the whole subject unprintable: the stamp
- * then leaves the line off rather than print a name with boxes in it.
+ * Emoji are decoration and are dropped (the same Unicode class holds © ® ™).
+ * Any other character outside {@link STAMP_FONT_COVERAGE} makes the whole
+ * subject unprintable: the stamp then leaves the line off rather than print a
+ * name with boxes in it.
  */
 function printableSubject(value: string): string | null {
+  // Composed form first, so an accent typed as a separate mark counts as the
+  // accented letter the font has.
   const text = singleLine(
-    Array.from(value)
+    Array.from(value.normalize("NFC"))
       .map((char) => (isPictograph(char) ? " " : char))
       .join("")
   );

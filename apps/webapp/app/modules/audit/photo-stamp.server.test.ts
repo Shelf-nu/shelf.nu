@@ -152,13 +152,15 @@ describe("buildStampLines", () => {
     ).toBe("Sofia kit");
   });
 
-  it("keeps names in Latin, Greek, Cyrillic and Vietnamese", () => {
-    for (const title of [
-      "Kamera Größe",
-      "Κάμερα",
-      "Камера Сони",
-      "Máy ảnh số",
-    ]) {
+  it("keeps names in Latin, Greek and Cyrillic, accents typed either way", () => {
+    expect(
+      buildStampLines({
+        ...base,
+        assetTitle: "Kamera Gro\u0308sse",
+        prefs: prefs({}),
+      })[1]
+    ).toBe("Kamera Grösse");
+    for (const title of ["Kamera Größe", "Κάμερα", "Камера Сони", "Łódź €12"]) {
       expect(
         buildStampLines({ ...base, assetTitle: title, prefs: prefs({}) })[1]
       ).toBe(title);
@@ -172,6 +174,10 @@ describe("buildStampLines", () => {
         assetTitle: "三脚架 Tripod",
         prefs: prefs({}),
       })
+    ).toEqual(["1 Oct 2026, 14:02 PDT"]);
+    // A sign in a block the font covers only partly.
+    expect(
+      buildStampLines({ ...base, assetTitle: "Wallet ₿", prefs: prefs({}) })
     ).toEqual(["1 Oct 2026, 14:02 PDT"]);
     expect(
       buildStampLines({
