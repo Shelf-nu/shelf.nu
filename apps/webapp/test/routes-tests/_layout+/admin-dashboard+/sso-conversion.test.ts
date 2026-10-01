@@ -303,7 +303,6 @@ describe("admin sso-conversion route", () => {
       it("converts the domain, records the admin as the actor and returns the summary", async () => {
         const summary = {
           converted: 3,
-          pendingReconcile: 1,
           failed: [
             { userId: "user-9", email: "kim@acme.com", message: "Boom." },
           ],

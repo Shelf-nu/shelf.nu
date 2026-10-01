@@ -12,6 +12,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
+import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
@@ -30,7 +31,10 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import {
+  isSsoAccountLinkedError,
+  resolveUserAndOrgForSsoCallback,
+} from "~/utils/sso.server";
 
 /**
  * Schema for handling OAuth callback data with improved groups handling
@@ -170,6 +174,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
+    // The account was moved onto SSO and the person must sign in once more:
+    // an outcome to report, not a failure.
+    if (isSsoAccountLinkedError(cause)) {
+      return data(
+        payload({ ssoAccountLinked: true as const, message: cause.message })
+      );
+    }
     const reason = makeShelfError(cause);
     return data(error(reason), { status: reason.status });
   }
@@ -233,9 +244,16 @@ export default function LoginCallback() {
     [data?.error]
   );
 
+  const linkedNotice =
+    data && "ssoAccountLinked" in data && data.ssoAccountLinked
+      ? data.message
+      : null;
+
   return (
     <div className="flex justify-center text-center">
-      {data?.error ? (
+      {linkedNotice ? (
+        <SsoAccountLinkedNotice variant="web" />
+      ) : data?.error ? (
         <div>
           {/* If there are validation errors, we map over those and show them */}
           {validationErrors ? (

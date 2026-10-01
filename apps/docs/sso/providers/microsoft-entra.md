@@ -156,7 +156,7 @@ Once confirmed you should end up with a setup similar to this:
 > [!NOTE]
 > You can only complete this step, once you have received confirmation from your contact person at Shelf that the setup has been completed.
 >
-> Keep in mind that the OWNER of the workspace in shelf, cannot be an SSO user. The workspace needs to be created by a normal user. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
+> Keep in mind that the workspace in Shelf needs to be created by a normal (non-SSO) user, who becomes its OWNER and maps the groups. We recommend that this owner keeps standard login as an administrative fallback; converting the owner to SSO later is optional and done on request. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
 
 Once you have the groups ready, you need to add their **IDs** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
@@ -168,3 +168,7 @@ Each field also accepts **more than one Object ID, separated by commas** — any
 > Enter each Object ID exactly as it appears in Microsoft Entra. Matching ignores letter case and surrounding spaces, but copying the exact value is the safest way to avoid a mismatch.
 
 ![Shelf workspace SSO group mapping](../../img/google-workspace-step-9.png)
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. The default Entra NameID works for this, so you do not need to change it: on the first SSO sign-in after conversion, the user is asked to sign in once more, and then lands in their existing account. After that they sign in once, as usual. Map your groups (Step 11) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login. See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.

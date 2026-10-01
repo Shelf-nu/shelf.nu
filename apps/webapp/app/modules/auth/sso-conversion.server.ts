@@ -9,15 +9,14 @@
  * Supabase Auth never links an SSO login to a non-SSO account on its own. The
  * only way it matches an SSO assertion to an existing user is through a row in
  * `auth.identities` keyed on `UNIQUE(provider_id, provider)`, where
- * `provider = 'sso:<providerId>'` and `provider_id` is the SAML subject. For
- * Shelf's documented IdPs the subject is the user's email (see
- * apps/docs/sso/providers/*). Conversion therefore pre-seeds that identity row
- * on the existing auth user, so the first SSO login lands on the original UUID.
+ * `provider = 'sso:<providerId>'` and `provider_id` is the SAML subject.
+ * Conversion pre-seeds that row with the user's email as the subject, so an IdP
+ * whose NameID is the email lands the first SSO login on the original UUID.
  *
- * When the subject does not match the pre-seeded value (a different NameID
- * format, or a login that happened before conversion), Supabase creates a
- * duplicate SSO auth user. `reconcileDuplicateSsoLogin` merges it back onto the
- * original account from the SSO callback.
+ * Any other subject (an opaque persistent NameID, as Entra sends, or a login
+ * that happened before conversion) makes Supabase create a duplicate SSO auth
+ * user. `reconcileDuplicateSsoLogin` merges it back onto the original account
+ * from the SSO callback, and the user's next SSO sign-in lands on the original.
  *
  * Owners of a workspace linked to the domain (one whose SSO settings list it)
  * may be converted one at a time, but `convertAllEligibleOnDomain` skips them:
@@ -59,18 +58,11 @@ const label = "SSO" as const;
  */
 type SsoConversionTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
-/**
- * Result of a single account conversion attempt.
- *
- * `converted_pending_reconcile` means the account is converted, but another
- * auth user (left by an SSO sign-in attempted before conversion) already holds
- * the SSO identity. The user's first SSO sign-in merges that duplicate and asks
- * them to sign in once more; after that they sign in normally.
- */
+/** Result of a single account conversion attempt. */
 export type SsoConversionResult = {
   userId: string;
   email: string;
-  status: "converted" | "converted_pending_reconcile" | "skipped_already_sso";
+  status: "converted" | "skipped_already_sso";
 };
 
 /** A candidate row for the admin conversion UI. */
@@ -92,13 +84,9 @@ export type SsoConvertAllFailure = {
   message: string;
 };
 
-/**
- * Summary of a Convert all run. `converted` counts every account converted,
- * including the `pendingReconcile` ones that need one extra SSO sign-in.
- */
+/** Summary of a Convert all run: how many accounts converted, and which failed. */
 export type SsoConvertAllResult = {
   converted: number;
-  pendingReconcile: number;
   failed: SsoConvertAllFailure[];
 };
 
@@ -199,14 +187,14 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  * loses the password login an unconverted one keeps, and support can undo it
  * with `revertAccountToStandard`.
  *
- * The seeded `provider_id` is the lowercased email. Stored email case is not
- * normalized, and an IdP that sends a different case is handled by
+ * The seeded `provider_id` is the lowercased email. An IdP whose subject is
+ * anything else (a different case, an opaque NameID), or an SSO auth user left
+ * by a sign-in attempted before conversion, is handled by
  * `reconcileDuplicateSsoLogin` at callback time.
  *
  * @param args.userId - the Shelf `User.id` (same as the auth UUID) to convert
  * @param args.actorUserId - the admin performing the conversion, for the log
- * @returns the conversion result: `converted`, `converted_pending_reconcile`
- *   (an earlier SSO auth user holds the identity) or `skipped_already_sso`
+ * @returns the conversion result: `converted` or `skipped_already_sso`
  * @throws {ShelfError} on any guard failure
  */
 export async function convertAccountToSso({
@@ -255,9 +243,10 @@ export async function convertAccountToSso({
       });
     }
 
-    const pendingReconcile = await db.$transaction(async (tx) => {
-      // ON CONFLICT keeps a re-run idempotent.
-      const seeded = await tx.$executeRaw`
+    await db.$transaction(async (tx) => {
+      // ON CONFLICT keeps a re-run idempotent, and leaves an identity already
+      // held by an earlier SSO auth user to the callback's reconcile.
+      await tx.$executeRaw`
         INSERT INTO auth.identities
           (user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
         VALUES (
@@ -274,29 +263,12 @@ export async function convertAccountToSso({
         ON CONFLICT (provider_id, provider) DO NOTHING
       `;
 
-      // Nothing seeded means the identity already exists. On this user it is
-      // harmless. On another auth user it is a duplicate from an earlier SSO
-      // attempt: conversion still goes ahead, because the callback's reconcile
-      // path only merges accounts with `User.sso` set, but the admin is told
-      // the user needs one extra sign-in.
-      let heldByAnotherUser = false;
-      if (seeded === 0) {
-        const holders = await tx.$queryRaw<{ userId: string }[]>`
-          SELECT user_id::text AS "userId"
-          FROM auth.identities
-          WHERE provider_id = ${subject} AND provider = ${provider}
-        `;
-        heldByAnotherUser = holders.some((h) => h.userId !== user.id);
-      }
-
       await sealAuthUserAsSso(tx, user.id, ssoProviderId);
 
       await tx.user.update({
         where: { id: user.id },
         data: { sso: true, onboarded: true },
       });
-
-      return heldByAnotherUser;
     });
 
     Logger.info(
@@ -304,18 +276,10 @@ export async function convertAccountToSso({
         user.email
       }) to SSO provider ${ssoProviderId}, performed by ${
         actorUserId ?? "unknown"
-      }${
-        pendingReconcile
-          ? "; an earlier SSO auth user holds the identity and is merged at the next SSO sign-in"
-          : ""
       }`
     );
 
-    return {
-      userId: user.id,
-      email: user.email,
-      status: pendingReconcile ? "converted_pending_reconcile" : "converted",
-    };
+    return { userId: user.id, email: user.email, status: "converted" };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -342,8 +306,9 @@ export async function convertAccountToSso({
  * transaction rolls back unless exactly one identity moved and exactly one
  * auth user was deleted.
  *
- * The caller must then ask the user to sign in again: the active session
- * belongs to the deleted duplicate.
+ * The active session belongs to the deleted duplicate, so the caller must not
+ * issue it. It asks the user to sign in again instead (see
+ * `resolveUserAndOrgForSsoCallback`); that sign-in matches the moved identity.
  *
  * @param args.authSession - the session issued for the duplicate auth user
  * @param args.existingUser - the original Shelf user matched by email (sso === true)
@@ -523,8 +488,8 @@ export async function findEligibleAccountsForSsoConversion(
  * @param args.domain - the email domain to convert (case and surrounding
  *   whitespace are ignored)
  * @param args.actorUserId - the admin performing the conversion, for the log
- * @returns how many accounts converted, how many of those await a reconcile at
- *   their next SSO sign-in, and the accounts that failed with their messages
+ * @returns how many accounts converted, and the accounts that failed with their
+ *   messages
  * @throws {ShelfError} 400 when the domain has no configured SSO provider,
  *   raised once before any account is touched
  */
@@ -547,7 +512,6 @@ export async function convertAllEligibleOnDomain({
 
   const result: SsoConvertAllResult = {
     converted: 0,
-    pendingReconcile: 0,
     failed: [],
   };
 
@@ -559,9 +523,6 @@ export async function convertAllEligibleOnDomain({
       });
       if (status === "converted") {
         result.converted += 1;
-      } else if (status === "converted_pending_reconcile") {
-        result.converted += 1;
-        result.pendingReconcile += 1;
       }
     } catch (cause) {
       result.failed.push({
@@ -576,9 +537,9 @@ export async function convertAllEligibleOnDomain({
   Logger.info(
     `SSO conversion: convert all on ${normalized} by ${
       actorUserId ?? "unknown"
-    }: ${eligible.length} eligible, ${result.converted} converted (${
-      result.pendingReconcile
-    } pending reconcile), ${result.failed.length} failed`
+    }: ${eligible.length} eligible, ${result.converted} converted, ${
+      result.failed.length
+    } failed`
   );
 
   return result;

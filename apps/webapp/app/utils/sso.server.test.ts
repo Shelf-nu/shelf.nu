@@ -46,6 +46,7 @@ const mockConversion = await import("~/modules/auth/sso-conversion.server");
 
 import {
   checkDomainSSOStatus,
+  isSsoAccountLinkedError,
   resolveUserAndOrgForSsoCallback,
 } from "~/utils/sso.server";
 
@@ -245,7 +246,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
   });
 
   describe("duplicate SSO auth user for an approved account", () => {
-    it("reconciles the duplicate, then asks the user to sign in again", async () => {
+    it("reconciles the duplicate, then reports the account as linked and asks for one more sign-in", async () => {
       const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: true };
       seedUsers(approvedUser);
       // @ts-expect-error - vitest mock type
@@ -261,10 +262,14 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       );
 
       expect(error).toBeInstanceOf(ShelfError);
+      // The callback routes render this one as a success notice.
+      expect(isSsoAccountLinkedError(error)).toBe(true);
       expect(error).toMatchObject({
-        status: 400,
-        title: "Your account is now SSO-enabled",
-        message: expect.stringMatching(/sign in again/),
+        status: 409,
+        title: "Your account is now on single sign-on",
+        message:
+          "Your account is now on single sign-on. Sign in again to continue.",
+        additionalData: { ssoAccountLinked: true },
         shouldBeCaptured: false,
       });
       expect(mockConversion.reconcileDuplicateSsoLogin).toHaveBeenCalledWith({
@@ -298,7 +303,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       mockConversion.reconcileDuplicateSsoLogin.mockResolvedValue(undefined);
 
       await expect(resolveUserAndOrgForSsoCallback(baseInput)).rejects.toThrow(
-        /sign in again/
+        /Sign in again/
       );
 
       expect(mockConversion.reconcileDuplicateSsoLogin).toHaveBeenCalledWith({

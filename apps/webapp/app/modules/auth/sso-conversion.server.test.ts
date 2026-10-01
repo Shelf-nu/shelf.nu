@@ -445,45 +445,28 @@ describe("findEligibleAccountsForSsoConversion", () => {
 });
 
 describe("convertAccountToSso when the SSO identity already exists", () => {
-  /** Makes the identity INSERT report 0 rows (ON CONFLICT DO NOTHING). */
-  function insertSkipsOnConflict() {
+  it("still converts the account and never looks up who holds the identity", async () => {
+    // ON CONFLICT DO NOTHING: an identity already held (by this user on a
+    // re-run, or by an SSO auth user from a sign-in before conversion) seeds
+    // nothing. The callback's reconcile merges any duplicate at sign-in.
     vi.mocked(db.$executeRaw).mockImplementation(((
       strings: TemplateStringsArray
     ) =>
       Promise.resolve(
         strings.join("").includes("INSERT INTO auth.identities") ? 0 : 1
       )) as unknown as typeof db.$executeRaw);
-  }
-
-  it("still converts, but reports a pending reconcile when another auth user holds the identity", async () => {
-    insertSkipsOnConflict();
-    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: DUPLICATE_ID }]);
 
     const result = await convertAccountToSso({ userId: ORIGINAL_ID });
 
-    expect(result.status).toBe("converted_pending_reconcile");
-    // The account is still sealed and flagged, so the callback's reconcile
-    // path can merge the duplicate at the next SSO sign-in.
+    expect(result.status).toBe("converted");
+    expect(rawCallMatching("INSERT INTO auth.identities").sql).toContain(
+      "ON CONFLICT (provider_id, provider) DO NOTHING"
+    );
     rawCallMatching("UPDATE auth.users");
     expect(db.user.update).toHaveBeenCalledWith({
       where: { id: ORIGINAL_ID },
       data: { sso: true, onboarded: true },
     });
-  });
-
-  it("reports a plain conversion when the identity is already on this user", async () => {
-    insertSkipsOnConflict();
-    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: ORIGINAL_ID }]);
-
-    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
-
-    expect(result.status).toBe("converted");
-  });
-
-  it("does not look up the identity holder when the insert succeeds", async () => {
-    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
-
-    expect(result.status).toBe("converted");
     expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });
@@ -530,7 +513,7 @@ describe("convertAllEligibleOnDomain", () => {
       actorUserId: "admin-id",
     });
 
-    expect(result).toEqual({ converted: 3, pendingReconcile: 0, failed: [] });
+    expect(result).toEqual({ converted: 3, failed: [] });
     expect(seededUserIds()).toEqual(["u-std-1", "u-std-2", "u-std-3"]);
     expect(db.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -550,7 +533,7 @@ describe("convertAllEligibleOnDomain", () => {
 
     const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
 
-    expect(result).toEqual({ converted: 4, pendingReconcile: 0, failed: [] });
+    expect(result).toEqual({ converted: 4, failed: [] });
     expect(seededUserIds()).toEqual([
       "u-std-1",
       "u-owner",
@@ -576,25 +559,6 @@ describe("convertAllEligibleOnDomain", () => {
       },
     ]);
     expect(seededUserIds()).toEqual(["u-std-1", "u-std-3"]);
-  });
-
-  it("counts a pending reconcile as converted and tallies it", async () => {
-    // Only u-std-3's identity is already held, by an earlier SSO auth user.
-    vi.mocked(db.$executeRaw).mockImplementation(((
-      strings: TemplateStringsArray,
-      ...values: unknown[]
-    ) =>
-      Promise.resolve(
-        strings.join("").includes("INSERT INTO auth.identities") &&
-          values[0] === "u-std-3"
-          ? 0
-          : 1
-      )) as unknown as typeof db.$executeRaw);
-    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: DUPLICATE_ID }]);
-
-    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
-
-    expect(result).toEqual({ converted: 3, pendingReconcile: 1, failed: [] });
   });
 
   it("throws once, before touching any account, when the domain has no SSO provider", async () => {

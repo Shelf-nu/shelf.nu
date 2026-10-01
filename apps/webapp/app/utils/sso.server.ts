@@ -55,6 +55,28 @@ async function findSsoCallbackUserByEmail(email: string) {
 }
 
 /**
+ * Marks the error raised after a duplicate SSO login was merged onto the
+ * original account. The merge succeeded and the next SSO sign-in lands on the
+ * original, so the callback routes render this as a success notice, not as a
+ * failure. Read it with {@link isSsoAccountLinkedError}.
+ */
+const SSO_ACCOUNT_LINKED_KEY = "ssoAccountLinked";
+
+/**
+ * Whether `cause` is the "account linked, sign in again" outcome of
+ * {@link resolveUserAndOrgForSsoCallback}.
+ *
+ * @param cause - anything caught from the resolver
+ * @returns true when the merge succeeded and the user must sign in once more
+ */
+export function isSsoAccountLinkedError(cause: unknown): cause is ShelfError {
+  return (
+    isLikeShelfError(cause) &&
+    cause.additionalData?.[SSO_ACCOUNT_LINKED_KEY] === true
+  );
+}
+
+/**
  * This resolves the correct org we should redirect the user to
  * Also it handles:
  * - Creating a new user if the user doesn't exist
@@ -74,9 +96,10 @@ async function findSsoCallbackUserByEmail(email: string) {
  *    the Shelf user to the SSO auth UUID.
  * 4. Auth account exists, the ids differ and the user is approved for SSO
  *    (`user.sso`): Supabase created a duplicate SSO auth user. Reconcile it onto
- *    the original account via `reconcileDuplicateSsoLogin`, then reject with a
- *    400 asking the user to sign in again, because the current session belongs
- *    to the deleted duplicate. The caller must not issue that session.
+ *    the original account via `reconcileDuplicateSsoLogin`, then throw the
+ *    account-linked notice (`isSsoAccountLinkedError`) asking the user to sign
+ *    in again. The current session belongs to the deleted duplicate, so the
+ *    caller must not issue it.
  * 5. Auth account is an email/password account and the user is not approved:
  *    reject and point the user to support.
  * 6. Anything else: update from SSO.
@@ -99,6 +122,10 @@ async function findSsoCallbackUserByEmail(email: string) {
  * - [x] User with SSO gets invited to a workspace - should be able to accept invite
  * - [x] Existing SSO user's domain gets configured for SCIM - on next login should get org access based on groups
  * - [x] SCIM user loses all group access - should keep personal workspace but lose org access
+ *
+ * @returns the user and the org to land on
+ * @throws {ShelfError} the account-linked notice (see `isSsoAccountLinkedError`)
+ *   after a duplicate merge; other ShelfErrors on refusal or failure
  */
 export async function resolveUserAndOrgForSsoCallback({
   authSession,
@@ -200,14 +227,18 @@ export async function resolveUserAndOrgForSsoCallback({
         });
 
         // The current session belongs to the duplicate that was just deleted,
-        // and a session for the original cannot be minted server-side. The
-        // next SSO login matches the moved identity and lands on the original.
+        // so it must not be issued. Supabase matches the moved identity on the
+        // next SSO sign-in, which lands on the original account. There is no
+        // safe admin API to mint a session for an SSO user (a magic link looks
+        // up only non-SSO users and would create a new account), so the user
+        // signs in once more.
         throw new ShelfError({
           cause: null,
-          status: 400,
-          title: "Your account is now SSO-enabled",
+          status: 409,
+          title: "Your account is now on single sign-on",
           message:
-            "We've moved your account to single sign-on. Please sign in again with your organization's SSO to continue.",
+            "Your account is now on single sign-on. Sign in again to continue.",
+          additionalData: { [SSO_ACCOUNT_LINKED_KEY]: true },
           label: "Auth",
           shouldBeCaptured: false,
         });
@@ -253,6 +284,11 @@ export async function resolveUserAndOrgForSsoCallback({
       throw createError;
     }
   } catch (cause: any) {
+    // The routes recognise this one by its additionalData, which the wrapper
+    // below would replace.
+    if (isSsoAccountLinkedError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       title: cause.title || "Authentication failed",

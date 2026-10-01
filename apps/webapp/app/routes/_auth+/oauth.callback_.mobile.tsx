@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
 import { supabaseClient } from "~/integrations/supabase/client";
+import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -39,7 +40,10 @@ import {
   payload,
   readFormData,
 } from "~/utils/http.server";
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import {
+  isSsoAccountLinkedError,
+  resolveUserAndOrgForSsoCallback,
+} from "~/utils/sso.server";
 
 /** Custom-scheme deeplink the companion app registers and listens for. */
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
@@ -176,6 +180,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
+    // The account was moved onto SSO and the person must sign in once more:
+    // an outcome to report, not a failure.
+    if (isSsoAccountLinkedError(cause)) {
+      return data(
+        payload({ ssoAccountLinked: true as const, message: cause.message }),
+        { headers: { "Set-Cookie": clearChallengeCookie } }
+      );
+    }
     const reason = makeShelfError(cause);
     // why: the client renders `result.error` and never re-throws, so without an
     // explicit log a genuine 5xx (refresh-token exchange, user/org provisioning,
@@ -236,12 +248,18 @@ export default function MobileLoginCallback() {
     }
   }, [result]);
 
+  const linkedNotice =
+    result && "ssoAccountLinked" in result && result.ssoAccountLinked
+      ? result.message
+      : null;
   const errorMessage =
     result && "error" in result ? result.error?.message : undefined;
 
   return (
     <div className="flex justify-center text-center">
-      {errorMessage ? (
+      {linkedNotice ? (
+        <SsoAccountLinkedNotice variant="mobile" />
+      ) : errorMessage ? (
         <div>
           <div className="text-sm text-error-500">{errorMessage}</div>
           <Button to="/" className="mt-4">

@@ -129,3 +129,7 @@ It often helps to ask them to log out of their Google account and log back in.
 Ask them to enter the domain of their in the Login in with SSO page.
 
 If sign in is not working correctly, reach out to your support contact at Shelf.
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. On the first SSO sign-in after conversion, the user may be asked to sign in once more before landing in their existing account; with the Name ID set to the primary email (Step 5), it usually lands directly. After that they sign in once, as usual. Map your groups (Step 9) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login. See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.

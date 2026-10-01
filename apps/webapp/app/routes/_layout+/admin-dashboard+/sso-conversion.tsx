@@ -280,13 +280,6 @@ function describeConversionResult(result: SsoConversionResult): {
         message: `${result.email} can now sign in via SSO.`,
         rowText: "Converted to SSO.",
       };
-    case "converted_pending_reconcile":
-      return {
-        title: "Account converted to SSO",
-        message: `${result.email} tried SSO before conversion. Their first SSO sign-in merges that attempt and asks them to sign in once more.`,
-        rowText:
-          "Converted. Their first SSO sign-in asks them to sign in once more.",
-      };
     case "skipped_already_sso":
       return {
         title: "Account already SSO",
@@ -586,8 +579,8 @@ function ConvertAllControl({
 }
 
 /**
- * The outcome of a "Convert all" run: how many converted, how many of those
- * need one extra sign-in, and every account that failed with its reason.
+ * The outcome of a "Convert all" run: how many converted, and every account
+ * that failed with its reason.
  *
  * @param props.summary - the result of {@link convertAllEligibleOnDomain}
  */
@@ -597,13 +590,6 @@ function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
       <p className="font-semibold text-gray-900">
         Converted {pluralizeAccounts(summary.converted)}.
       </p>
-      {summary.pendingReconcile > 0 ? (
-        <p>
-          {pluralizeAccounts(summary.pendingReconcile)} tried SSO before
-          conversion. Their first SSO sign-in merges that attempt and asks them
-          to sign in once more.
-        </p>
-      ) : null}
       {summary.failed.length > 0 ? (
         <div className="text-error-500">
           <p className="font-semibold">
