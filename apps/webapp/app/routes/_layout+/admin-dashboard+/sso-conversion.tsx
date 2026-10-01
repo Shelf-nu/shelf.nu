@@ -39,7 +39,10 @@ import {
 } from "~/components/shared/modal";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { useDisabled } from "~/hooks/use-disabled";
-import type { SsoConversionCandidate } from "~/modules/auth/sso-conversion.server";
+import type {
+  SsoConversionCandidate,
+  SsoConversionResult,
+} from "~/modules/auth/sso-conversion.server";
 import {
   convertAccountToSso,
   findEligibleAccountsForSsoConversion,
@@ -158,15 +161,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       actorUserId: userId,
     });
 
+    const copy = describeConversionResult(result);
     sendNotification({
-      title:
-        result.status === "converted"
-          ? "Account converted to SSO"
-          : "Account already SSO",
-      message:
-        result.status === "converted"
-          ? `${result.email} can now sign in via SSO.`
-          : `${result.email} was already an SSO account.`,
+      title: copy.title,
+      message: copy.message,
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
@@ -175,6 +173,41 @@ export async function action({ context, request }: ActionFunctionArgs) {
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
+  }
+}
+
+/**
+ * User-facing copy for one conversion result, shared by the toast the action
+ * sends and the line under the converted row.
+ *
+ * @param result - the outcome of {@link convertAccountToSso}
+ * @returns the toast title and message, and the short text for the row
+ */
+function describeConversionResult(result: SsoConversionResult): {
+  title: string;
+  message: string;
+  rowText: string;
+} {
+  switch (result.status) {
+    case "converted":
+      return {
+        title: "Account converted to SSO",
+        message: `${result.email} can now sign in via SSO.`,
+        rowText: "Converted to SSO.",
+      };
+    case "converted_pending_reconcile":
+      return {
+        title: "Account converted to SSO",
+        message: `${result.email} tried SSO before conversion. Their first SSO sign-in merges that attempt and asks them to sign in once more.`,
+        rowText:
+          "Converted. Their first SSO sign-in asks them to sign in once more.",
+      };
+    case "skipped_already_sso":
+      return {
+        title: "Account already SSO",
+        message: `${result.email} was already an SSO account.`,
+        rowText: "Was already an SSO account.",
+      };
   }
 }
 
@@ -336,9 +369,7 @@ function CandidateRow({ candidate }: { candidate: SsoConversionCandidate }) {
             </span>
           ) : result ? (
             <span className="text-xs text-success-600" role="status">
-              {result.status === "converted"
-                ? "Converted to SSO."
-                : "Was already an SSO account."}
+              {describeConversionResult(result).rowText}
             </span>
           ) : null}
         </div>

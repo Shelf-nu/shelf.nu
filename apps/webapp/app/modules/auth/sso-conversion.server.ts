@@ -49,11 +49,18 @@ const label = "SSO" as const;
  */
 type SsoConversionTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
-/** Result of a single account conversion attempt. */
+/**
+ * Result of a single account conversion attempt.
+ *
+ * `converted_pending_reconcile` means the account is converted, but another
+ * auth user (left by an SSO sign-in attempted before conversion) already holds
+ * the SSO identity. The user's first SSO sign-in merges that duplicate and asks
+ * them to sign in once more; after that they sign in normally.
+ */
 export type SsoConversionResult = {
   userId: string;
   email: string;
-  status: "converted" | "skipped_already_sso";
+  status: "converted" | "converted_pending_reconcile" | "skipped_already_sso";
 };
 
 /** A candidate row for the admin conversion UI. */
@@ -179,7 +186,8 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  *
  * @param args.userId - the Shelf `User.id` (same as the auth UUID) to convert
  * @param args.actorUserId - the admin performing the conversion, for the log
- * @returns the conversion result (`converted` or `skipped_already_sso`)
+ * @returns the conversion result: `converted`, `converted_pending_reconcile`
+ *   (an earlier SSO auth user holds the identity) or `skipped_already_sso`
  * @throws {ShelfError} on any guard failure
  */
 export async function convertAccountToSso({
@@ -240,9 +248,9 @@ export async function convertAccountToSso({
       });
     }
 
-    await db.$transaction(async (tx) => {
+    const pendingReconcile = await db.$transaction(async (tx) => {
       // ON CONFLICT keeps a re-run idempotent.
-      await tx.$executeRaw`
+      const seeded = await tx.$executeRaw`
         INSERT INTO auth.identities
           (user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
         VALUES (
@@ -259,12 +267,29 @@ export async function convertAccountToSso({
         ON CONFLICT (provider_id, provider) DO NOTHING
       `;
 
+      // Nothing seeded means the identity already exists. On this user it is
+      // harmless. On another auth user it is a duplicate from an earlier SSO
+      // attempt: conversion still goes ahead, because the callback's reconcile
+      // path only merges accounts with `User.sso` set, but the admin is told
+      // the user needs one extra sign-in.
+      let heldByAnotherUser = false;
+      if (seeded === 0) {
+        const holders = await tx.$queryRaw<{ userId: string }[]>`
+          SELECT user_id::text AS "userId"
+          FROM auth.identities
+          WHERE provider_id = ${subject} AND provider = ${provider}
+        `;
+        heldByAnotherUser = holders.some((h) => h.userId !== user.id);
+      }
+
       await sealAuthUserAsSso(tx, user.id, ssoProviderId);
 
       await tx.user.update({
         where: { id: user.id },
         data: { sso: true, onboarded: true },
       });
+
+      return heldByAnotherUser;
     });
 
     Logger.info(
@@ -272,10 +297,18 @@ export async function convertAccountToSso({
         user.email
       }) to SSO provider ${ssoProviderId}, performed by ${
         actorUserId ?? "unknown"
+      }${
+        pendingReconcile
+          ? "; an earlier SSO auth user holds the identity and is merged at the next SSO sign-in"
+          : ""
       }`
     );
 
-    return { userId: user.id, email: user.email, status: "converted" };
+    return {
+      userId: user.id,
+      email: user.email,
+      status: pendingReconcile ? "converted_pending_reconcile" : "converted",
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

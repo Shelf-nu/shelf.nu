@@ -11,6 +11,7 @@ vi.mock("~/database/db.server", () => ({
     user: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
+      findMany: vi.fn(),
     },
     organization: {
       findMany: vi.fn(),
@@ -94,6 +95,31 @@ function wrappedAuthError(status: number, message = "auth error") {
   });
 }
 
+/** A Shelf user row as the callback's lookups return it. */
+type SeededUser = { id: string; email: string } & Record<string, unknown>;
+
+/**
+ * Seeds the Shelf users the callback can find, answering the two lookups the
+ * way the database does: `findUnique` by exact id, `findMany` by email without
+ * regard to letter case.
+ *
+ * @param users - every Shelf user that exists for this test
+ */
+function seedUsers(...users: SeededUser[]) {
+  vi.mocked(mockDb.db.user.findUnique).mockImplementation(((args: {
+    where: { id?: string };
+  }) =>
+    Promise.resolve(
+      users.find((u) => u.id === args.where.id) ?? null
+    )) as unknown as typeof mockDb.db.user.findUnique);
+  vi.mocked(mockDb.db.user.findMany).mockImplementation(((args: {
+    where: { email: { in: string[] } };
+  }) =>
+    Promise.resolve(
+      users.filter((u) => args.where.email.in.includes(u.email.toLowerCase()))
+    )) as unknown as typeof mockDb.db.user.findMany);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -101,8 +127,7 @@ beforeEach(() => {
 describe("resolveUserAndOrgForSsoCallback", () => {
   describe("existing user flows", () => {
     it("rejects an un-approved email-auth account without reconciling it", async () => {
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue({
+      seedUsers({
         ...shelfUser,
         id: ORIGINAL_UUID,
         sso: false,
@@ -125,8 +150,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
 
     it("updates a user whose id is the authenticated auth UUID without looking up the auth user", async () => {
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(shelfUser);
+      seedUsers(shelfUser);
       // A converted account keeps its original auth user, whose provider can
       // still read "email". The same-UUID login must not reach that check.
       // @ts-expect-error - vitest mock type
@@ -166,8 +190,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         id: "cuid-placeholder-from-scim",
         sso: true,
       };
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(scimPlaceholderUser);
+      seedUsers(scimPlaceholderUser);
       // Supabase returns a genuine 404 — the SCIM-provisioned user has no
       // auth account yet, so the ID rewrite should run.
       // @ts-expect-error - vitest mock type
@@ -199,8 +222,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
 
     it("skips the ID rewrite when the user already has the Supabase UUID", async () => {
       // user.id already === authSession.userId
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(shelfUser);
+      seedUsers(shelfUser);
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockRejectedValue(wrappedAuthError(404));
       // @ts-expect-error - vitest mock type
@@ -225,8 +247,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
   describe("duplicate SSO auth user for an approved account", () => {
     it("reconciles the duplicate, then asks the user to sign in again", async () => {
       const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: true };
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(approvedUser);
+      seedUsers(approvedUser);
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockResolvedValue({
         id: ORIGINAL_UUID,
@@ -259,10 +280,80 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
   });
 
+  describe("matching the Shelf account", () => {
+    it("finds an approved account whose stored email differs in case", async () => {
+      const approvedUser = {
+        ...shelfUser,
+        id: ORIGINAL_UUID,
+        email: "Jane@Example.com",
+        sso: true,
+      };
+      seedUsers(approvedUser);
+      // @ts-expect-error - vitest mock type
+      mockAuth.getAuthUserById.mockResolvedValue({
+        id: ORIGINAL_UUID,
+        app_metadata: { provider: "sso:provider" },
+      });
+      // @ts-expect-error - vitest mock type
+      mockConversion.reconcileDuplicateSsoLogin.mockResolvedValue(undefined);
+
+      await expect(resolveUserAndOrgForSsoCallback(baseInput)).rejects.toThrow(
+        /sign in again/
+      );
+
+      expect(mockConversion.reconcileDuplicateSsoLogin).toHaveBeenCalledWith({
+        authSession: baseAuthSession,
+        existingUser: {
+          id: ORIGINAL_UUID,
+          email: "Jane@Example.com",
+          sso: true,
+        },
+      });
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("matches the account by its auth id even when the IdP sends a different email", async () => {
+      const renamedUser = { ...shelfUser, email: "jane.old@example.com" };
+      seedUsers(renamedUser);
+      // @ts-expect-error - vitest mock type
+      mockUser.updateUserFromSSO.mockResolvedValue({
+        user: { id: renamedUser.id },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback(baseInput);
+
+      expect(mockUser.updateUserFromSSO).toHaveBeenCalledWith(
+        baseAuthSession,
+        renamedUser,
+        expect.any(Object)
+      );
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("refuses to pick between accounts whose emails differ only in case", async () => {
+      seedUsers(
+        { ...shelfUser, id: "account-a", email: "Jane@example.com", sso: true },
+        { ...shelfUser, id: "account-b", email: "jane@Example.com", sso: true }
+      );
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({ status: 409 });
+      expect(mockAuth.getAuthUserById).not.toHaveBeenCalled();
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
+      expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+  });
+
   describe("new user flow", () => {
     it("creates a new user when no existing Shelf user is found", async () => {
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(null);
+      seedUsers();
       const created = { user: { id: "new-user" }, org: { id: "org-1" } };
       // @ts-expect-error - vitest mock type
       mockUser.createUserFromSSO.mockResolvedValue(created);
@@ -286,8 +377,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
 
     it("cleans up the Supabase auth account when new-user creation fails", async () => {
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(null);
+      seedUsers();
       // @ts-expect-error - vitest mock type
       mockUser.createUserFromSSO.mockRejectedValue(
         new Error("db write failed")
@@ -310,8 +400,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
         ...shelfUser,
         id: "cuid-placeholder-from-scim",
       };
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue(scimPlaceholderUser);
+      seedUsers(scimPlaceholderUser);
       // Rate-limited (429) — must NOT trigger the ID rewrite.
       // @ts-expect-error - vitest mock type
       mockAuth.getAuthUserById.mockRejectedValue(
@@ -327,8 +416,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
     });
 
     it("rethrows generic (non-AuthApiError) failures from getAuthUserById", async () => {
-      // @ts-expect-error - vitest mock type
-      mockDb.db.user.findUnique.mockResolvedValue({
+      seedUsers({
         ...shelfUser,
         id: ORIGINAL_UUID,
       });

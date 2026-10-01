@@ -17,6 +17,7 @@ vi.mock("~/database/db.server", () => {
   const db = {
     $transaction: vi.fn(),
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
     user: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
@@ -375,5 +376,49 @@ describe("findEligibleAccountsForSsoConversion", () => {
     ).resolves.toEqual([]);
     expect(db.organization.findMany).not.toHaveBeenCalled();
     expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("convertAccountToSso when the SSO identity already exists", () => {
+  /** Makes the identity INSERT report 0 rows (ON CONFLICT DO NOTHING). */
+  function insertSkipsOnConflict() {
+    vi.mocked(db.$executeRaw).mockImplementation(((
+      strings: TemplateStringsArray
+    ) =>
+      Promise.resolve(
+        strings.join("").includes("INSERT INTO auth.identities") ? 0 : 1
+      )) as unknown as typeof db.$executeRaw);
+  }
+
+  it("still converts, but reports a pending reconcile when another auth user holds the identity", async () => {
+    insertSkipsOnConflict();
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: DUPLICATE_ID }]);
+
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted_pending_reconcile");
+    // The account is still sealed and flagged, so the callback's reconcile
+    // path can merge the duplicate at the next SSO sign-in.
+    rawCallMatching("UPDATE auth.users");
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: ORIGINAL_ID },
+      data: { sso: true, onboarded: true },
+    });
+  });
+
+  it("reports a plain conversion when the identity is already on this user", async () => {
+    insertSkipsOnConflict();
+    vi.mocked(db.$queryRaw).mockResolvedValue([{ userId: ORIGINAL_ID }]);
+
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+  });
+
+  it("does not look up the identity holder when the insert succeeds", async () => {
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });

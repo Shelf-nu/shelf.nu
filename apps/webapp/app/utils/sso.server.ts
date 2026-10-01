@@ -7,6 +7,7 @@ import {
   getAuthUserById,
 } from "~/modules/auth/service.server";
 import { reconcileDuplicateSsoLogin } from "~/modules/auth/sso-conversion.server";
+import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { USER_WITH_SSO_DETAILS_SELECT } from "~/modules/user/fields";
 import {
   createUserFromSSO,
@@ -18,16 +19,55 @@ import { isLikeShelfError, ShelfError } from "./error";
 import { emailMatchesDomains, isValidDomain, parseDomains } from "./misc";
 
 /**
+ * Finds the Shelf account an SSO login belongs to by email, whatever case the
+ * address was stored in. Stored emails are not normalized, while the IdP and
+ * Supabase may send a different case, so an exact match would miss the account
+ * and send the login down the new-user path.
+ *
+ * The match feeds the SCIM re-key and the duplicate reconcile, both of which
+ * rewrite accounts, so it must name exactly one user: two accounts whose
+ * emails differ only in case are refused rather than guessed between.
+ *
+ * @param email - the email Supabase returned for the SSO login
+ * @returns the matching user, or null when no account has the address
+ * @throws {ShelfError} 409 when more than one account matches
+ */
+async function findSsoCallbackUserByEmail(email: string) {
+  const matches = await db.user.findMany({
+    where: { email: caseInsensitiveEmailFilter(email) },
+    select: USER_WITH_SSO_DETAILS_SELECT,
+    take: 2,
+  });
+
+  if (matches.length > 1) {
+    throw new ShelfError({
+      cause: null,
+      status: 409,
+      title: "Account needs attention",
+      message:
+        "More than one Shelf account uses this email address. Please contact our support team so we can sign you in to the right one.",
+      additionalData: { email, userIds: matches.map((m) => m.id) },
+      label: "Auth",
+    });
+  }
+
+  return matches[0] ?? null;
+}
+
+/**
  * This resolves the correct org we should redirect the user to
  * Also it handles:
  * - Creating a new user if the user doesn't exist
  * - Throwing an error if the user is already connected to an email account
  * - Linking the user to the correct org if SCIM is configured
  *
- * Order of checks for an existing Shelf user (matched by email):
- * 1. The authenticated auth user IS the Shelf user (`authSession.userId === user.id`):
- *    a normal login, including an account converted to SSO whose pre-seeded
- *    identity matched. Update from SSO without looking up the auth user.
+ * Order of checks:
+ * 1. A Shelf user whose id is the authenticated auth UUID: a normal login,
+ *    including an account converted to SSO whose pre-seeded identity matched.
+ *    Update from SSO without looking up the auth user.
+ *
+ * Otherwise the Shelf user is matched by email without regard to letter case
+ * (see `findSsoCallbackUserByEmail`); no match means a new user. For a match:
  * 2. Look up the Shelf user's auth account. Only a genuine 404 counts as
  *    "no auth account"; any other failure is rethrown.
  * 3. No auth account and the ids differ: a SCIM-provisioned placeholder. Re-key
@@ -84,29 +124,30 @@ export async function resolveUserAndOrgForSsoCallback({
   formatPrefs?: DetectedFormatPrefs;
 }) {
   try {
-    // First check if user exists
-    const user = await db.user.findUnique({
-      where: {
-        email: authSession.email,
-      },
+    // The authenticated auth user's own Shelf account: a normal login. This
+    // also covers a converted account, where Supabase matched the pre-seeded
+    // SSO identity and signed in the original UUID, whose auth `provider` can
+    // still read "email", so the provider checks below must not run for it.
+    // Matching by id first keeps the login working when the IdP's email for
+    // the user differs from the one stored in Shelf.
+    const ownAccount = await db.user.findUnique({
+      where: { id: authSession.userId },
       select: USER_WITH_SSO_DETAILS_SELECT,
     });
 
-    if (user) {
-      // The authenticated auth user is this Shelf user. This also covers a
-      // converted account: Supabase matched the pre-seeded SSO identity and
-      // signed in the original UUID, whose auth `provider` can still read
-      // "email", so the provider checks below must not run for it.
-      if (authSession.userId === user.id) {
-        const response = await updateUserFromSSO(authSession, user, {
-          firstName,
-          lastName,
-          groups,
-          contactInfo,
-        });
-        return { user: response.user, org: response.org };
-      }
+    if (ownAccount) {
+      const response = await updateUserFromSSO(authSession, ownAccount, {
+        firstName,
+        lastName,
+        groups,
+        contactInfo,
+      });
+      return { user: response.user, org: response.org };
+    }
 
+    const user = await findSsoCallbackUserByEmail(authSession.email);
+
+    if (user) {
       // getAuthUserById throws on 404 (e.g. SCIM-provisioned users have no
       // Supabase auth account yet). Only swallow a genuine 404. Rethrow
       // transient Supabase/admin errors so they aren't misread as a missing
