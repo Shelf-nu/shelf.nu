@@ -25,7 +25,7 @@ import {
   getLegacyLoginDecision,
 } from "~/modules/auth/sso-enforcement.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
 import {
   payload,
@@ -111,10 +111,11 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * registered, and which are federated, one request at a time.
          *
          * Eligibility to receive a code is decided by `getLegacyLoginDecision`
-         * (`auth/sso-enforcement.server`), which `sendResetPasswordLink` asserts:
+         * (`auth/sso-enforcement.server`), which `sendResetPasswordLink` asks:
          * a converted account is refused, and so is every account on an SSO
-         * domain except an unconverted workspace owner. That decision costs a
-         * different number of queries depending on the answer, so it runs
+         * domain except an unconverted workspace owner. A refused address is
+         * sent nothing and the send returns as a success. That decision costs
+         * a different number of queries depending on the answer, so it runs
          * inside the un-awaited send below, never before the response.
          *
          * A "use SSO instead" hint belongs in the page as static copy shown to
@@ -146,12 +147,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
            *
            * The rejection is swallowed because a delivery failure is only
            * reachable for an address that exists, so surfacing it re-opens the
-           * leak by another route. An SSO refusal (403) is an expected outcome,
-           * not a failure, so it is not logged.
+           * leak by another route.
            */
           void sendResetPasswordLink(email).catch((cause: unknown) => {
-            if (isLikeShelfError(cause) && cause.status === 403) return;
-
             Logger.error(
               new ShelfError({
                 cause,

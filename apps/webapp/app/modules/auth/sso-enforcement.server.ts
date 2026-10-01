@@ -6,6 +6,16 @@
  * legacy entry point asks, so the web forms, the companion app and existing web
  * sessions all refuse the same accounts.
  *
+ * The decision is per-account, so its answer describes the account behind an
+ * address. Only act on it visibly after the caller has authenticated as that
+ * account (the password or code was accepted, or a session exists), or where
+ * the caller already holds a secret tied to the address (an invite token).
+ * Before authentication a response may depend only on the address's DOMAIN,
+ * which the SSO login page already reveals: refuse silently (send nothing,
+ * answer as a success) and use `isSsoDomainEmail` for any hint. A refusal shown
+ * to an anonymous caller tells them whether an address is a converted account
+ * or an SSO domain's password owner.
+ *
  * The rules, in order:
  *   1. With SSO disabled for the deployment, everything is allowed.
  *   2. An account converted to SSO (`User.sso`) is refused on any domain.
@@ -29,7 +39,7 @@
  * none of these modules calls into another at import time, only inside function
  * bodies: do not add top-level calls to any of them.
  *
- * @see {@link file://./service.server.ts} the legacy sign-in paths that assert this
+ * @see {@link file://./service.server.ts} the legacy sign-in paths that ask this
  * @see {@link file://./sso-conversion.server.ts} account conversion, which uses `userOwnsTeamOrg`
  * @see {@link file://./../../utils/sso.server.ts} checkDomainSSOStatus
  */
@@ -141,8 +151,10 @@ export const SSO_REQUIRED_MESSAGE =
   "This email address signs in with single sign-on. Please use Login with SSO.";
 
 /**
- * Builds the error every legacy entry point throws for a refused address, so
- * the web forms, the invite page and the companion app all say the same thing.
+ * Builds the error a refused address is shown once it has authenticated (or
+ * holds an invite token), so the web forms, the invite page and the companion
+ * app all say the same thing. Never throw it before authentication: see the
+ * file header.
  *
  * @param reason - why the decision refused the address
  * @returns a 403 `ShelfError`, not captured: a refusal is expected, not a fault
@@ -162,16 +174,18 @@ export function createSsoRequiredError(
 }
 
 /**
- * Throws when an email address must sign in with SSO instead of a legacy path.
- * Call it before handing the address to Supabase for password login, OTP or a
- * password reset.
+ * Whether an address is on a domain configured for SSO, for the domain-level
+ * "use Login with SSO" hint shown before authentication. The answer is the same
+ * for every address on the domain, so it is safe to show to anyone.
  *
- * @param email - the address the person is signing in with
- * @throws {ShelfError} 403, not captured, when the address must use SSO
+ * @param email - the address the person typed
+ * @returns `true` when SSO is enabled for the deployment and the domain is
+ *   configured for it
+ * @throws {ShelfError} If the domain lookup fails
  */
-export async function assertLegacyLoginAllowed(email: string): Promise<void> {
-  const decision = await getLegacyLoginDecision(email);
-  if (decision.allowed) return;
+export async function isSsoDomainEmail(email: string): Promise<boolean> {
+  if (DISABLE_SSO) return false;
 
-  throw createSsoRequiredError(decision.reason);
+  const { isConfiguredForSSO } = await checkDomainSSOStatus(email);
+  return isConfiguredForSSO;
 }

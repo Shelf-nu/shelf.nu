@@ -10,16 +10,115 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { SERVER_URL } from "~/utils/env";
 
 import type { ErrorLabel } from "~/utils/error";
-import {
-  isLikeShelfError,
-  rethrowIfClientError,
-  ShelfError,
-} from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { mapAuthSession } from "./mappers.server";
-import { assertLegacyLoginAllowed } from "./sso-enforcement.server";
+import {
+  createSsoRequiredError,
+  getLegacyLoginDecision,
+} from "./sso-enforcement.server";
+import type {
+  LegacyLoginDecision,
+  LegacyLoginRefusalReason,
+} from "./sso-enforcement.server";
 
 const label: ErrorLabel = "Auth";
+
+/** The message a wrong email/password pair shows, whatever the account. */
+export const INVALID_CREDENTIALS_MESSAGE = "Incorrect email or password";
+
+/**
+ * The message a wrong or expired email sign-in code shows. It is the wording
+ * Supabase Auth uses for `otp_expired`, fixed here so a refused account gets
+ * exactly the same answer as a wrong code.
+ */
+export const INVALID_OTP_MESSAGE = "Token has expired or is invalid";
+
+/**
+ * Builds the error a wrong or expired email sign-in code produces. A refused
+ * address that verified a code gets this same error, so the response says
+ * nothing about the account behind the address.
+ *
+ * @param cause - the Supabase error, or null for a refused address
+ * @param email - the address the code was sent to
+ * @returns a `ShelfError` that is not captured: a bad code is expected
+ */
+function createInvalidOtpError(cause: unknown, email: string): ShelfError {
+  return new ShelfError({
+    cause,
+    message: INVALID_OTP_MESSAGE,
+    label,
+    shouldBeCaptured: false,
+    additionalData: { email },
+  });
+}
+
+/**
+ * Ends the one session behind `accessToken` (scope `local`), leaving the
+ * account's other sessions alone.
+ *
+ * Best-effort: the caller refuses the sign-in whether or not this succeeds,
+ * and the tokens are never handed to the client, so a failure is logged rather
+ * than thrown.
+ *
+ * @param accessToken - the access token of the session to end
+ */
+async function revokeSession(accessToken: string): Promise<void> {
+  try {
+    const { error } = await getSupabaseAdmin().auth.admin.signOut(
+      accessToken,
+      "local"
+    );
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Failed to revoke a session opened by a refused legacy sign-in. The tokens were not returned to the client.",
+        label,
+      })
+    );
+  }
+}
+
+/**
+ * Asks the legacy sign-in decision for an address that has just authenticated,
+ * and ends the session it opened when the address must use SSO.
+ *
+ * Runs only after Supabase has accepted the credentials, so the answer reaches
+ * nobody who could not sign in as that account anyway. If the decision itself
+ * fails, the session is ended too: an unanswered check never lets one through.
+ *
+ * @param authSession - the session Supabase just opened; the decision is asked
+ *   about its authenticated address
+ * @returns null when the sign-in may proceed, otherwise why it is refused
+ * @throws {ShelfError} If the decision fails (the session is already revoked)
+ */
+async function refuseAuthenticatedLegacySession(
+  authSession: AuthSession
+): Promise<LegacyLoginRefusalReason | null> {
+  const { email, accessToken } = authSession;
+  let decision: LegacyLoginDecision;
+  try {
+    decision = await getLegacyLoginDecision(email);
+  } catch (cause) {
+    await revokeSession(accessToken);
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong. Please try again later or contact support.",
+      label,
+    });
+  }
+
+  if (decision.allowed) return null;
+
+  await revokeSession(accessToken);
+  return decision.reason;
+}
 
 export async function createEmailAuthAccount(email: string, password: string) {
   try {
@@ -176,20 +275,24 @@ export async function resendVerificationEmail(email: string) {
 /**
  * Signs in with email and password.
  *
- * Refuses an address that must use SSO before Supabase is asked, so a refused
- * account never gets a session. This covers web login, the accept-invite
- * sign-in and the onboarding re-login.
+ * Supabase checks the password first, and every failure keeps the same
+ * response it has for any account. Only after the credentials are accepted is
+ * the SSO decision asked: a refused address has the session just opened
+ * revoked and gets the SSO-required error. Asking before authentication would
+ * tell anyone who types an address whether it is a converted account or an SSO
+ * domain's password owner. This covers web login, the accept-invite sign-in and
+ * the onboarding re-login.
  *
  * @param email - the address to sign in with
  * @param password - the plaintext password
  * @returns the mapped auth session, or null when the email is not confirmed
- * @throws {ShelfError} 403 when the address must use SSO (passed through
- *   unchanged), otherwise a wrapped Supabase failure
+ * @throws {ShelfError} 403 when the credentials are right but the address must
+ *   use SSO; {@link INVALID_CREDENTIALS_MESSAGE} for a wrong pair; otherwise a
+ *   wrapped Supabase failure
  */
 export async function signInWithEmail(email: string, password: string) {
+  let authSession: AuthSession;
   try {
-    await assertLegacyLoginAllowed(email);
-
     const { data, error } = await getSupabaseAdmin().auth.signInWithPassword({
       email,
       password,
@@ -205,11 +308,8 @@ export async function signInWithEmail(email: string, password: string) {
 
     const { session } = data;
 
-    return mapAuthSession(session);
+    authSession = mapAuthSession(session);
   } catch (cause) {
-    // The SSO refusal is written for the user: keep its status and message.
-    rethrowIfClientError(cause);
-
     const isInvalidCredentials =
       isAuthApiError(cause) && cause.message === "Invalid login credentials";
     // Supabase 504s and intermittent fetch failures surface as
@@ -221,7 +321,7 @@ export async function signInWithEmail(email: string, password: string) {
     const isRateLimitError = isAuthApiError(cause) && cause.status === 429;
 
     const message = isInvalidCredentials
-      ? "Incorrect email or password"
+      ? INVALID_CREDENTIALS_MESSAGE
       : "Something went wrong. Please try again later or contact support.";
 
     throw new ShelfError({
@@ -236,6 +336,13 @@ export async function signInWithEmail(email: string, password: string) {
       ),
     });
   }
+
+  const refusal = await refuseAuthenticatedLegacySession(authSession);
+  if (refusal) {
+    throw createSsoRequiredError(refusal);
+  }
+
+  return authSession;
 }
 
 export async function signInWithSSO(
@@ -290,15 +397,17 @@ export async function signInWithSSO(
 /**
  * Sends a one-time sign-in code by email.
  *
- * Refuses an address that must use SSO before Supabase sends anything.
+ * An address that must use SSO is sent nothing, and the function returns
+ * exactly as a successful send does: the caller cannot be authenticated yet, so
+ * its response must not depend on the account behind the address.
  *
  * @param email - the address to send the code to
- * @throws {ShelfError} 403 when the address must use SSO (passed through
- *   unchanged), otherwise a wrapped Supabase failure
+ * @throws {ShelfError} a wrapped Supabase failure
  */
 export async function sendOTP(email: string) {
   try {
-    await assertLegacyLoginAllowed(email);
+    const decision = await getLegacyLoginDecision(email);
+    if (!decision.allowed) return;
 
     const { error } = await getSupabaseAdmin().auth.signInWithOtp({
       email,
@@ -311,9 +420,6 @@ export async function sendOTP(email: string) {
       throw error;
     }
   } catch (cause) {
-    // The SSO refusal is written for the user: keep its status and message.
-    rethrowIfClientError(cause);
-
     // Read `code` via narrowing instead of `@ts-expect-error` — `cause` is
     // `unknown`, and a bare property access would throw at runtime if it
     // were null/undefined.
@@ -365,21 +471,20 @@ export async function sendOTP(email: string) {
 /**
  * Sends a password reset code by email.
  *
- * Refuses an address that must use SSO before Supabase sends anything.
+ * An address that must use SSO is sent nothing, and the function returns
+ * exactly as a successful send does, so every caller answers the same way for
+ * every address.
  *
  * @param email - the address to send the reset code to
- * @throws {ShelfError} 403 when the address must use SSO (passed through
- *   unchanged), otherwise a wrapped Supabase failure
+ * @throws {ShelfError} a wrapped Supabase failure
  */
 export async function sendResetPasswordLink(email: string) {
   try {
-    await assertLegacyLoginAllowed(email);
+    const decision = await getLegacyLoginDecision(email);
+    if (!decision.allowed) return;
 
     await getSupabaseAdmin().auth.resetPasswordForEmail(email);
   } catch (cause) {
-    // The SSO refusal is written for the user: keep its status and message.
-    rethrowIfClientError(cause);
-
     throw new ShelfError({
       cause,
       message:
@@ -664,19 +769,20 @@ export async function verifyAuthSession(authSession: AuthSession) {
 /**
  * Verifies an email sign-in code and returns the session it opens.
  *
- * Refuses an address that must use SSO before the code is checked, so a code
- * sent before the address was refused cannot open a session.
+ * The SSO decision is asked only after Supabase accepts the code. A refused
+ * address (a code sent before it was refused, since `sendOTP` sends refused
+ * addresses nothing) has the new session revoked and gets the same error as a
+ * wrong code, so the response never describes the account.
  *
  * @param email - the address the code was sent to
  * @param otp - the code the person typed
  * @returns the mapped auth session
- * @throws {ShelfError} 403 when the address must use SSO (passed through
- *   unchanged), otherwise a wrapped verification failure
+ * @throws {ShelfError} {@link INVALID_OTP_MESSAGE} for a wrong or expired code
+ *   and for a refused address; otherwise a wrapped verification failure
  */
 export async function verifyOtpAndSignin(email: string, otp: string) {
+  let authSession: AuthSession;
   try {
-    await assertLegacyLoginAllowed(email);
-
     const { data, error } = await getSupabaseAdmin().auth.verifyOtp({
       email,
       token: otp,
@@ -697,10 +803,11 @@ export async function verifyOtpAndSignin(email: string, otp: string) {
       });
     }
 
-    return mapAuthSession(session);
+    authSession = mapAuthSession(session);
   } catch (cause) {
-    // The SSO refusal is written for the user: keep its status and message.
-    rethrowIfClientError(cause);
+    if (isAuthApiError(cause) && cause.code === "otp_expired") {
+      throw createInvalidOtpError(cause, email);
+    }
 
     let message =
       "Something went wrong. Please try again later or contact support.";
@@ -719,4 +826,11 @@ export async function verifyOtpAndSignin(email: string, otp: string) {
       additionalData: { email },
     });
   }
+
+  const refusal = await refuseAuthenticatedLegacySession(authSession);
+  if (refusal) {
+    throw createInvalidOtpError(null, email);
+  }
+
+  return authSession;
 }

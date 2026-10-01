@@ -1,8 +1,9 @@
 // @vitest-environment node
 /**
- * Tests for the legacy sign-in decision (`getLegacyLoginDecision`) and its
- * throwing wrapper (`assertLegacyLoginAllowed`): which addresses may use
- * password login, email OTP and password reset, and which must use SSO.
+ * Tests for the legacy sign-in decision (`getLegacyLoginDecision`), the error a
+ * refusal is shown with (`createSsoRequiredError`), and the domain-level hint
+ * (`isSsoDomainEmail`): which addresses may use password login, email OTP and
+ * password reset, and which must use SSO.
  *
  * @see {@link file://./sso-enforcement.server.ts}
  */
@@ -42,8 +43,9 @@ import type * as EnvModule from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 import {
-  assertLegacyLoginAllowed,
+  createSsoRequiredError,
   getLegacyLoginDecision,
+  isSsoDomainEmail,
 } from "./sso-enforcement.server";
 
 const EMAIL = "jane@acme.com";
@@ -212,21 +214,9 @@ describe("getLegacyLoginDecision", () => {
   });
 });
 
-describe("assertLegacyLoginAllowed", () => {
-  it("resolves when the address may use a legacy sign-in", async () => {
-    givenUsers([standardUser]);
-    givenDomainIsSso(false);
-
-    await expect(assertLegacyLoginAllowed(EMAIL)).resolves.toBeUndefined();
-  });
-
-  it("throws an uncaptured 403 telling the person to use SSO", async () => {
-    givenUsers([standardUser]);
-    givenDomainIsSso(true);
-
-    const error = await assertLegacyLoginAllowed(EMAIL).catch(
-      (cause: unknown) => cause
-    );
+describe("createSsoRequiredError", () => {
+  it("is an uncaptured 403 telling the person to use SSO", () => {
+    const error = createSsoRequiredError("sso_domain");
 
     expect(error).toBeInstanceOf(ShelfError);
     expect(error).toMatchObject({
@@ -237,5 +227,35 @@ describe("assertLegacyLoginAllowed", () => {
       shouldBeCaptured: false,
       additionalData: { reason: "sso_domain" },
     });
+  });
+});
+
+describe("isSsoDomainEmail", () => {
+  it("is true for an address on a domain configured for SSO", async () => {
+    givenDomainIsSso(true);
+
+    await expect(isSsoDomainEmail(EMAIL)).resolves.toBe(true);
+  });
+
+  it("is false for an address on any other domain", async () => {
+    givenDomainIsSso(false);
+
+    await expect(isSsoDomainEmail(EMAIL)).resolves.toBe(false);
+  });
+
+  it("is false without a lookup when SSO is disabled", async () => {
+    env.disableSso = true;
+    givenDomainIsSso(true);
+
+    await expect(isSsoDomainEmail(EMAIL)).resolves.toBe(false);
+    expect(checkDomainSSOStatus).not.toHaveBeenCalled();
+  });
+
+  it("never reads the account behind the address", async () => {
+    givenDomainIsSso(true);
+
+    await isSsoDomainEmail(EMAIL);
+
+    expect(db.user.findMany).not.toHaveBeenCalled();
   });
 });

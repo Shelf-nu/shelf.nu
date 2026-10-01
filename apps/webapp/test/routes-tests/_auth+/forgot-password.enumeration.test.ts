@@ -7,9 +7,9 @@
  * A reset code is still sent only to a real, non-SSO account; the response
  * simply does not say which case occurred.
  *
- * The SSO domain decision (`getLegacyLoginDecision`) is asserted inside
- * `sendResetPasswordLink`, which the route does not await, so its refusal must
- * leave the response unchanged too. The confirm step asks the same decision
+ * The SSO domain decision (`getLegacyLoginDecision`) is asked inside
+ * `sendResetPasswordLink`, which the route does not await, and a refusal there
+ * sends nothing and resolves as a send does, so the response is unchanged too. The confirm step asks the same decision
  * once the code has verified, so a code sent before an address was refused
  * cannot set a password.
  *
@@ -61,7 +61,6 @@ vi.mock("~/database/db.server", () => ({
 
 import { updateAccountPassword } from "~/modules/auth/service.server";
 import { action } from "~/routes/_auth+/forgot-password";
-import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
 /** POSTs a password-reset request for `email`. */
@@ -208,17 +207,8 @@ describe("forgot-password enumeration", () => {
     const loggerSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
 
     mockUserFindFirst.mockResolvedValueOnce({ id: "legacy-1", sso: false });
-    mockSendResetPasswordLink.mockRejectedValueOnce(
-      new ShelfError({
-        cause: null,
-        status: 403,
-        title: "Single sign-on required",
-        message:
-          "This email address signs in with single sign-on. Please use Login with SSO.",
-        label: "Auth",
-        shouldBeCaptured: false,
-      })
-    );
+    // A refusal sends nothing and resolves exactly as a send does.
+    mockSendResetPasswordLink.mockResolvedValueOnce(undefined);
     const refused = observable(await requestReset("member@sso-corp.com"));
 
     mockUserFindFirst.mockResolvedValueOnce(null);
