@@ -232,7 +232,7 @@ async function captureStampTransform(
       })
     );
 
-  let lines: [string, string];
+  let lines: string[];
   try {
     lines = await resolveCaptureStampLines(args);
   } catch (cause) {

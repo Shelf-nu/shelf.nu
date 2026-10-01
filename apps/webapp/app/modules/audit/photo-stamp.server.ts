@@ -5,7 +5,8 @@
  * was taken with a camera moments before it was uploaded. Line 1 is the moment
  * the server received the photo, in the uploader's own date and time
  * preferences and zone. Line 2 names what the photo is of: the asset's title,
- * or `Audit: <name>` for a photo of the audit as a whole.
+ * or `Audit: <name>` for a photo of the audit as a whole. A name in a script
+ * the stamp font cannot draw is left off, giving a one-line stamp.
  *
  * Which uploads are stamped is decided by one rule, {@link isFreshCapture}:
  * a client sends `capturedAt` only for a photo it has just taken, and the
@@ -101,6 +102,65 @@ function singleLine(value: string): string {
 }
 
 /**
+ * Characters the stamp font is known to draw: Latin (with Extended-A/B and
+ * Latin Extended Additional), combining accents, Greek, Cyrillic, general
+ * punctuation and currency signs. DejaVu Sans Mono has no glyphs for CJK,
+ * Arabic, Hebrew, Indic scripts or emoji, and a missing glyph is burned into
+ * the photo for good as an empty box.
+ */
+const STAMP_FONT_COVERAGE: ReadonlyArray<readonly [number, number]> = [
+  [0x0020, 0x007e], // Basic Latin
+  [0x00a0, 0x024f], // Latin-1 Supplement, Latin Extended-A and -B
+  [0x0300, 0x036f], // Combining diacritical marks
+  [0x0370, 0x03ff], // Greek
+  [0x0400, 0x04ff], // Cyrillic
+  [0x1e00, 0x1eff], // Latin Extended Additional
+  [0x2000, 0x206f], // General punctuation
+  [0x20a0, 0x20bf], // Currency symbols
+];
+
+/**
+ * Emoji and the parts emoji are built from: skin-tone modifiers, flag
+ * letters, the joiner, variation selectors, the keycap mark and tag
+ * characters.
+ */
+function isPictograph(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (
+    /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}]/u.test(
+      char
+    ) ||
+    code === 0x200d ||
+    code === 0xfe0e ||
+    code === 0xfe0f ||
+    code === 0x20e3 ||
+    (code >= 0xe0020 && code <= 0xe007f)
+  );
+}
+
+/** Whether the stamp font draws this character. */
+function isCovered(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return STAMP_FONT_COVERAGE.some(([from, to]) => code >= from && code <= to);
+}
+
+/**
+ * A subject the stamp font can draw, or null when it cannot.
+ *
+ * Emoji are decoration and are dropped. Any other character outside
+ * {@link STAMP_FONT_COVERAGE} makes the whole subject unprintable: the stamp
+ * then leaves the line off rather than print a name with boxes in it.
+ */
+function printableSubject(value: string): string | null {
+  const text = singleLine(
+    Array.from(value)
+      .map((char) => (isPictograph(char) ? " " : char))
+      .join("")
+  );
+  return text && Array.from(text).every(isCovered) ? text : null;
+}
+
+/**
  * The short name of `timeZone` at the given moment, such as `PDT` or `GMT+2`.
  * An invalid zone reads as `UTC`, which is the zone `formatDate` falls back to.
  */
@@ -119,15 +179,16 @@ function zoneAbbreviation(at: Date, timeZone: string): string {
 }
 
 /**
- * Builds the two lines of a capture stamp.
+ * Builds the lines of a capture stamp.
  *
  * @param args.receivedAt - When the server received the photo
  * @param args.prefs - The uploader's resolved date and time preferences
  * @param args.assetTitle - Title of the asset the photo belongs to, or null
  *   for a photo of the audit as a whole
  * @param args.auditName - Name of the audit session
- * @returns Line 1 (moment and zone) and line 2 (asset, or `Audit: <name>`),
- *   the second cut to {@link STAMP_SUBJECT_MAX_CHARS} characters
+ * @returns Line 1 (moment and zone) and, when the stamp font can draw it,
+ *   line 2 (asset, or `Audit: <name>`) cut to {@link STAMP_SUBJECT_MAX_CHARS}
+ *   characters. A name in a script the font lacks gives a one-line stamp.
  */
 export function buildStampLines({
   receivedAt,
@@ -139,16 +200,18 @@ export function buildStampLines({
   prefs: ResolvedFormatPrefs;
   assetTitle: string | null;
   auditName: string;
-}): [string, string] {
+}): string[] {
   const moment = formatDate(receivedAt, prefs, { includeTime: true });
   const zone = zoneAbbreviation(receivedAt, prefs.timeZone);
-  const title = assetTitle ? singleLine(assetTitle) : "";
-  const subject = title || `Audit: ${singleLine(auditName)}`;
+  const line1 = zone ? `${moment} ${zone}` : moment;
 
-  return [
-    zone ? `${moment} ${zone}` : moment,
-    truncateChars(subject, STAMP_SUBJECT_MAX_CHARS),
-  ];
+  const subject = assetTitle
+    ? printableSubject(assetTitle)
+    : printableSubject(`Audit: ${auditName}`);
+
+  return subject
+    ? [line1, truncateChars(subject, STAMP_SUBJECT_MAX_CHARS)]
+    : [line1];
 }
 
 /** Escapes text for use inside SVG markup. */
@@ -282,7 +345,7 @@ export async function stampCaptureTime(
  * @param args.auditAssetId - The audit asset the photo belongs to, if any
  * @param args.organizationId - The organization of the audit
  * @param args.uploadedById - The uploader, whose date preferences apply
- * @returns The two stamp lines
+ * @returns The stamp lines (see {@link buildStampLines})
  * @throws {Error} When the audit session does not exist in the organization
  */
 export async function resolveCaptureStampLines({
@@ -297,7 +360,7 @@ export async function resolveCaptureStampLines({
   auditAssetId?: AuditAsset["id"];
   organizationId: Organization["id"];
   uploadedById: User["id"];
-}): Promise<[string, string]> {
+}): Promise<string[]> {
   const [audit, auditAsset, prefs] = await Promise.all([
     db.auditSession.findFirst({
       where: { id: auditSessionId, organizationId },

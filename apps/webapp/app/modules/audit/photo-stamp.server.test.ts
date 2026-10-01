@@ -117,7 +117,7 @@ describe("buildStampLines", () => {
     expect(auditLine).toBe("Audit: Quarterly count of the eas…");
   });
 
-  it("keeps a subject on one line and never splits an emoji", () => {
+  it("keeps a subject on one line, without control characters", () => {
     expect(
       buildStampLines({
         ...base,
@@ -133,13 +133,54 @@ describe("buildStampLines", () => {
         prefs: prefs({}),
       })[1]
     ).toBe("Tripod");
+  });
 
-    const [, line2] = buildStampLines({
-      ...base,
-      assetTitle: `${"a".repeat(32)}📷📷📷`,
-      prefs: prefs({}),
-    });
-    expect(line2).toBe(`${"a".repeat(32)}📷…`);
+  it("drops emoji from a subject, which the stamp font cannot draw", () => {
+    expect(
+      buildStampLines({
+        ...base,
+        assetTitle: "📷 Camera 👍🏽",
+        prefs: prefs({}),
+      })[1]
+    ).toBe("Camera");
+    expect(
+      buildStampLines({
+        ...base,
+        assetTitle: "🇧🇬 Sofia kit",
+        prefs: prefs({}),
+      })[1]
+    ).toBe("Sofia kit");
+  });
+
+  it("keeps names in Latin, Greek, Cyrillic and Vietnamese", () => {
+    for (const title of [
+      "Kamera Größe",
+      "Κάμερα",
+      "Камера Сони",
+      "Máy ảnh số",
+    ]) {
+      expect(
+        buildStampLines({ ...base, assetTitle: title, prefs: prefs({}) })[1]
+      ).toBe(title);
+    }
+  });
+
+  it("leaves off a name the stamp font cannot draw instead of printing boxes", () => {
+    expect(
+      buildStampLines({
+        ...base,
+        assetTitle: "三脚架 Tripod",
+        prefs: prefs({}),
+      })
+    ).toEqual(["1 Oct 2026, 14:02 PDT"]);
+    expect(
+      buildStampLines({
+        ...base,
+        assetTitle: null,
+        auditName: "جرد المستودع",
+        prefs: prefs({}),
+      })
+    ).toEqual(["1 Oct 2026, 14:02 PDT"]);
   });
 });
 
@@ -178,6 +219,17 @@ describe("buildStampSvg", () => {
     expect(portrait).toContain('font-size="30" fill="white">');
     expect(portrait).toContain('<rect width="451" height="93"');
     expect(portrait).toContain('width="475" height="117"');
+  });
+
+  it("draws a one-line band when there is no second line", () => {
+    const svg = buildStampSvg({
+      lines: ["1 Oct 2026, 14:02 PDT"],
+      imageWidth: 1200,
+      imageHeight: 900,
+    });
+    expect(svg.match(/<text /g)).toHaveLength(1);
+    // 15 + 30 + 15 = 60 px tall; 21 chars x 30 px x 0.62 + 60 = 451 px wide.
+    expect(svg).toContain('<rect width="451" height="60"');
   });
 
   it("never draws line 1 smaller than 24 px on a narrow image", () => {
