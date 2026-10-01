@@ -5,8 +5,9 @@ import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   assertAssignableQuantities,
-  assignQuantityToCustodian,
+  assignQuantities,
   QUANTITY_CUSTODIAN_SELECT,
+  quantityRefusalsError,
   splitQuantityAssetIds,
 } from "~/modules/custody/quantity-custody.server";
 import {
@@ -114,24 +115,19 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    // Every per-unit assignment is checked before any is written.
+    // Every per-unit assignment is checked before anything is written.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       organizationId,
     });
 
-    for (const assetId of quantityAssetIds) {
-      await assignQuantityToCustodian({
-        assetId,
-        custodian: custodianRecord,
-        quantity: quantities[assetId],
-        userId,
-        organizationId,
-        role,
-      });
-    }
-
+    /**
+     * The whole-asset call runs before the per-unit writes: it validates and
+     * writes in one transaction, so if it refuses, nothing has been written.
+     * The per-unit writes after it were checked above; a refusal there can
+     * only come from a concurrent change, and is reported by asset.
+     */
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId,
@@ -156,6 +152,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }),
         })
       : { skippedQuantityTracked: 0 };
+
+    const refusals = await assignQuantities({
+      quantityAssetIds,
+      quantities,
+      custodian: custodianRecord,
+      userId,
+      organizationId,
+      role,
+    });
+    if (refusals.length) throw quantityRefusalsError("assigned", refusals);
 
     const skippedNote =
       skippedQuantityTracked > 0

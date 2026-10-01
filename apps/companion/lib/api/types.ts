@@ -727,6 +727,12 @@ export type BulkActionResponse = {
    * older servers). Always 0 for all-INDIVIDUAL batches.
    */
   skippedQuantityTracked?: number;
+  /**
+   * Bulk custody with `quantities` only: assets whose unit write the server
+   * refused after its checks passed (a concurrent change). Nothing was written
+   * for them; the rest of the request was. Absent when every write landed.
+   */
+  refusedQuantities?: { assetId: string; title: string; message: string }[];
 };
 
 export type BookingStatus =

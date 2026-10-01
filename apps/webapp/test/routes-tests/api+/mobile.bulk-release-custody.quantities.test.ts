@@ -18,8 +18,10 @@ import {
   bulkCheckInAssets,
   releaseQuantity,
 } from "~/modules/asset/service.server";
+import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/bulk-release-custody";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
@@ -66,9 +68,18 @@ vitest.mock("~/modules/asset/service.server", () => ({
 }));
 
 // why: the holder lookup reads operator custody rows straight off the table
-const dbMocks = vitest.hoisted(() => ({ custodyFindMany: vitest.fn() }));
+const dbMocks = vitest.hoisted(() => ({
+  custodyFindMany: vitest.fn(),
+  assetFindFirst: vitest.fn(({ where }: { where: { id: string } }) =>
+    Promise.resolve({ title: `Asset ${where.id}` })
+  ),
+}));
 vitest.mock("~/database/db.server", () => ({
-  db: { custody: { findMany: dbMocks.custodyFindMany } },
+  db: {
+    custody: { findMany: dbMocks.custodyFindMany },
+    // A refused release names its asset.
+    asset: { findFirst: dbMocks.assetFindFirst },
+  },
 }));
 
 // why: index settings are forwarded to the bulk call, not under test
@@ -94,12 +105,23 @@ vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
 }));
 
 /** An operator custody row as the shared holder lookup selects it. */
-function holder(assetId: string, teamMemberId: string, quantity = 10) {
+function holder(
+  assetId: string,
+  teamMemberId: string,
+  quantity = 10,
+  userId: string | null = null
+) {
   return {
     assetId,
     quantity,
     asset: { title: `Asset ${assetId}` },
-    custodian: { id: teamMemberId, name: `Member ${teamMemberId}`, user: null },
+    custodian: {
+      id: teamMemberId,
+      name: `Member ${teamMemberId}`,
+      user: userId
+        ? { id: userId, firstName: null, lastName: null, displayName: null }
+        : null,
+    },
   };
 }
 
@@ -219,6 +241,57 @@ describe("POST /api/mobile/bulk-release-custody with quantities", () => {
     expect(status).toBe(400);
     expect(releaseQuantity).not.toHaveBeenCalled();
     expect(bulkCheckInAssets).not.toHaveBeenCalled();
+  });
+
+  it("refuses before any write when a self-service user names someone else's units", async () => {
+    vitest.mocked(getMobileUserContext).mockResolvedValueOnce({
+      role: "SELF_SERVICE",
+      canUseBarcodes: false,
+      canSeeAllCustody: false,
+    } as never);
+    dbMocks.custodyFindMany.mockResolvedValue([
+      holder("qty-1", "tm-self", 5, "user-1"),
+      holder("qty-2", "tm-other", 5, "user-other"),
+    ]);
+
+    const { status } = await submit({
+      assetIds: ["asset-1", "qty-1", "qty-2"],
+      quantities: { "qty-1": 1, "qty-2": 1 },
+    });
+
+    expect(status).toBe(403);
+    expect(bulkCheckInAssets).not.toHaveBeenCalled();
+    expect(releaseQuantity).not.toHaveBeenCalled();
+  });
+
+  it("reports by asset a release refused after the check, and keeps the rest", async () => {
+    dbMocks.custodyFindMany.mockResolvedValue([
+      holder("qty-1", "tm-1"),
+      holder("qty-2", "tm-2"),
+    ]);
+    vitest.mocked(releaseQuantity).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Assets",
+        status: 400,
+        message: "Cannot release 3 units. Only 1 unit in custody.",
+      })
+    );
+
+    const { status, body } = await submit({
+      assetIds: ["qty-1", "qty-2"],
+      quantities: { "qty-1": 3, "qty-2": 1 },
+    });
+
+    expect(status).toBe(200);
+    expect(body.refusedQuantities).toEqual([
+      {
+        assetId: "qty-1",
+        title: "Asset qty-1",
+        message: "Cannot release 3 units. Only 1 unit in custody.",
+      },
+    ]);
+    expect(releaseQuantity).toHaveBeenCalledTimes(2);
   });
 
   it("handles a body without quantities exactly as before", async () => {

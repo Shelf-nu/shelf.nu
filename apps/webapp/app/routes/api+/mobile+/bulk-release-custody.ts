@@ -13,7 +13,7 @@ import {
 import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
-  releaseQuantityFromCustodian,
+  releaseQuantities,
   resolveQuantityReleases,
   splitQuantityAssetIds,
 } from "~/modules/custody/quantity-custody.server";
@@ -29,6 +29,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * Releases custody of multiple assets (bulk check-in).
  * Body: { assetIds: string[], quantities?: Record<assetId, units> }
+ * Response: { success: true, skippedQuantityTracked, refusedQuantities? }
  *
  * `quantities` comes from the companion's Scan tab, which gives each
  * quantity-tracked row a unit count. An asset named there is released unit by
@@ -106,6 +107,8 @@ export async function action({ request }: ActionFunctionArgs) {
       quantityAssetIds,
       quantities,
       organizationId,
+      role,
+      userId: user.id,
     });
 
     /**
@@ -113,10 +116,9 @@ export async function action({ request }: ActionFunctionArgs) {
      * Without it, a SELF_SERVICE user could release custody on any
      * team member's asset (hex-security r3202161632).
      *
-     * The whole-asset path runs first and the per-unit releases after it,
-     * as on the web route: the per-unit releases are already checked above,
-     * while `bulkCheckInAssets` validates its own set as it runs, so the call
-     * that can still refuse goes first.
+     * The whole-asset call runs before the per-unit releases, as on the web
+     * route: it validates and writes in one transaction, so if it refuses,
+     * nothing has been written.
      */
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckInAssets({
@@ -138,24 +140,26 @@ export async function action({ request }: ActionFunctionArgs) {
         })
       : { skippedQuantityTracked: 0 };
 
-    for (const { assetId, custodian } of resolvedReleases) {
-      // `releaseQuantity` applies the SELF_SERVICE rule to these: a
-      // self-service caller may only release units they hold themselves.
-      await releaseQuantityFromCustodian({
-        assetId,
-        custodian,
-        quantity: quantities[assetId],
-        userId: user.id,
-        organizationId,
-        role,
-      });
-    }
+    // Checked above, so a refusal here can only come from a concurrent change
+    // to that asset; it is reported by asset (see the assign route).
+    // `releaseQuantity` also applies the SELF_SERVICE rule on each write.
+    const refusedQuantities = await releaseQuantities({
+      releases: resolvedReleases,
+      quantities,
+      userId: user.id,
+      organizationId,
+      role,
+    });
 
     // The service skips QUANTITY_TRACKED ids that came without a quantity in a
     // mixed list, and refuses a list of only such ids. Forward the skipped
     // count so the app can say so, as the web's assets.bulk-release-custody.ts
     // does.
-    return data({ success: true, skippedQuantityTracked });
+    return data({
+      success: true,
+      skippedQuantityTracked,
+      ...(refusedQuantities.length ? { refusedQuantities } : {}),
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(

@@ -20,6 +20,7 @@ import {
 } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/bulk-assign-custody";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
@@ -111,7 +112,11 @@ vitest.mock("~/modules/consumption-log/low-stock.server", () => ({
 function freeUnits(free: Record<string, number>) {
   dbMocks.assetFindFirst.mockImplementation(
     ({ where }: { where: { id: string } }) =>
-      Promise.resolve({ title: `Asset ${where.id}`, quantity: 100 })
+      Promise.resolve({
+        title: `Asset ${where.id}`,
+        quantity: 100,
+        type: where.id.startsWith("qty-") ? "QUANTITY_TRACKED" : "INDIVIDUAL",
+      })
   );
   vitest
     .mocked(computeCustodyAvailability)
@@ -196,6 +201,64 @@ describe("POST /api/mobile/bulk-assign-custody with quantities", () => {
     expect(checkOutQuantity).not.toHaveBeenCalled();
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
     expect(createNote).not.toHaveBeenCalled();
+  });
+
+  it("runs the whole-asset call before any per-unit write", async () => {
+    await submit({
+      assetIds: ["asset-1", "qty-1"],
+      quantities: { "qty-1": 3 },
+    });
+
+    // The bulk call validates and writes in one transaction, so if it refuses,
+    // no units have been handed over yet.
+    expect(
+      vitest.mocked(bulkCheckOutAssets).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(checkOutQuantity).mock.invocationCallOrder[0]);
+  });
+
+  it("refuses a unit count for an asset that is not tracked by quantity", async () => {
+    const { status, body } = await submit({
+      assetIds: ["qty-1", "asset-1"],
+      quantities: { "qty-1": 2, "asset-1": 1 },
+    });
+
+    expect(status).toBe(400);
+    expect(body.error.message).toBe(
+      'Nothing was assigned. "Asset asset-1" (not tracked by quantity).'
+    );
+    expect(checkOutQuantity).not.toHaveBeenCalled();
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("reports by asset a unit write refused after the check, and keeps the rest", async () => {
+    vitest.mocked(checkOutQuantity).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        label: "Assets",
+        status: 400,
+        message: "Cannot check out 2 units. Only 1 units are available.",
+      })
+    );
+
+    const { status, body } = await submit({
+      assetIds: ["asset-1", "qty-1", "qty-2"],
+      quantities: { "qty-1": 2, "qty-2": 1 },
+    });
+
+    expect(status).toBe(200);
+    expect(body).toEqual({
+      success: true,
+      skippedQuantityTracked: 0,
+      refusedQuantities: [
+        {
+          assetId: "qty-1",
+          title: "Asset qty-1",
+          message: "Cannot check out 2 units. Only 1 units are available.",
+        },
+      ],
+    });
+    // The other unit row still went.
+    expect(checkOutQuantity).toHaveBeenCalledTimes(2);
   });
 
   it("assigns once for an asset scanned under two codes", async () => {

@@ -189,9 +189,7 @@ test("release facts list operator holders with the units they can hand back", ()
     },
     detail: null,
   });
-  assert.deepEqual(built.holders, [
-    { teamMemberId: "tm-1", name: "Member tm-1", units: 8 },
-  ]);
+  assert.deepEqual(built.holders, [{ teamMemberId: "tm-1", units: 8 }]);
   assert.equal(built.hasKitHeldUnits, true);
   assert.equal(built.consumable, true);
   assert.equal(unitsFor("release_custody", built), 8);
@@ -205,9 +203,7 @@ test("a holder without releasableQuantity counts all of their units", () => {
     },
     detail: null,
   });
-  assert.deepEqual(built.holders, [
-    { teamMemberId: "tm-1", name: "Ana", units: 4 },
-  ]);
+  assert.deepEqual(built.holders, [{ teamMemberId: "tm-1", units: 4 }]);
   assert.equal(built.hasKitHeldUnits, false);
 });
 
@@ -223,7 +219,7 @@ test("assign starts at one unit and is capped by the free units", () => {
 
 test("release starts at every held unit and is capped by them", () => {
   const held = facts({
-    holders: [{ teamMemberId: "tm-1", name: "Ana", units: 30 }],
+    holders: [{ teamMemberId: "tm-1", units: 30 }],
   });
   assert.equal(unitsFor("release_custody", held), 30);
   assert.equal(defaultQuantity("release_custody", held), 30);
@@ -298,7 +294,7 @@ test("release sends every held unit by default", () => {
     qtyRow(
       "qr-1",
       "Cable",
-      facts({ holders: [{ teamMemberId: "tm-7", name: "Ana", units: 12 }] })
+      facts({ holders: [{ teamMemberId: "tm-7", units: 12 }] })
     ),
   ]);
   assert.deepEqual(bulkAssetRequest(plan).quantities, { "asset-qr-1": 12 });
@@ -354,7 +350,7 @@ test("mixed units are counted as units", () => {
       "Cable",
       facts({
         unitOfMeasure: "m",
-        holders: [{ teamMemberId: "tm-1", name: "Ana", units: 10 }],
+        holders: [{ teamMemberId: "tm-1", units: 10 }],
       }),
       10
     ),
@@ -363,7 +359,7 @@ test("mixed units are counted as units", () => {
       "Plugs",
       facts({
         unitOfMeasure: "pcs",
-        holders: [{ teamMemberId: "tm-1", name: "Ana", units: 4 }],
+        holders: [{ teamMemberId: "tm-1", units: 4 }],
       }),
       4
     ),
@@ -413,6 +409,35 @@ test("a refused asset request keeps every asset row, whole or by units, with the
   );
   assert.deepEqual(summary.succeededQrIds, []);
   assert.deepEqual(summary.rowErrors, { "qr-1": reason, "qr-2": reason });
+});
+
+test("a quantity row the server refused after its checks stays with the reason, and the rest are done", () => {
+  const plan = planCustodySubmit("assign_custody", [
+    individualRow("qr-1", "Tripod"),
+    qtyRow("qr-2", "Cable", facts(), 2),
+    qtyRow("qr-3", "Wire", facts(), 1),
+  ]);
+  const reason = "Cannot check out 2 units. Only 1 units are available.";
+  const summary = summarizeCustodySubmit(
+    "assign_custody",
+    plan,
+    {
+      assetError: null,
+      kitError: null,
+      refusedQuantities: [{ assetId: "asset-qr-2", message: reason }],
+    },
+    { custodianName: "Jane", isSelfService: false }
+  );
+
+  assert.equal(summary.title, "Partly done");
+  assert.equal(
+    summary.message,
+    'Assigned 1 asset and 1 pcs of "Wire" to Jane.\n\n' +
+      "Still in your list:\n" +
+      `• 2 pcs of "Cable": ${reason}`
+  );
+  assert.deepEqual(summary.succeededQrIds.sort(), ["qr-1", "qr-3"]);
+  assert.deepEqual(summary.rowErrors, { "qr-2": reason });
 });
 
 test("kits and assets are reported apart, since they are two requests", () => {
@@ -479,7 +504,7 @@ test("the release confirm names the units and warns when they are used up", () =
       "Cable ties",
       facts({
         consumable: true,
-        holders: [{ teamMemberId: "tm-1", name: "Ana", units: 30 }],
+        holders: [{ teamMemberId: "tm-1", units: 30 }],
       })
     ),
   ]);

@@ -122,7 +122,7 @@ function quantityFacts(
 ): ScanQuantityFacts {
   return {
     assignable: 10,
-    holders: [{ teamMemberId: "tm-1", name: "Ana", units: 4 }],
+    holders: [{ teamMemberId: "tm-1", units: 4 }],
     hasKitHeldUnits: false,
     unitOfMeasure: "pcs",
     consumable: false,
@@ -196,8 +196,8 @@ const RELEASE_CASES: Record<string, BlockableItem> = {
   "qty-several-holders": quantityRow({
     quantityFacts: quantityFacts({
       holders: [
-        { teamMemberId: "tm-1", name: "Ana", units: 2 },
-        { teamMemberId: "tm-2", name: "Bo", units: 3 },
+        { teamMemberId: "tm-1", units: 2 },
+        { teamMemberId: "tm-2", units: 3 },
       ],
     }),
   }),

@@ -12,7 +12,15 @@
  *   scanners. {@link splitQuantityAssetIds} separates the assets named there
  *   from whole assets, {@link assertAssignableQuantities} /
  *   {@link resolveQuantityReleases} check every named asset before anything is
- *   written, and the same two per-asset functions then move the units.
+ *   written, the whole-asset bulk call runs next, and
+ *   {@link assignQuantities} / {@link releaseQuantities} then move the units,
+ *   reporting any asset whose write was refused.
+ *
+ * Why that order: the bulk services validate and write in one transaction, so
+ * once the checks here pass, the only refusal left is a concurrent change to
+ * one asset between the check and its write. That refusal lands after other
+ * writes have committed, so it is reported per asset rather than as a failure
+ * of the whole submission, which a client would retry.
  *
  * So a unit hand-over writes the same records whichever screen started it: the
  * service's consumption log and activity event, one audit note on the asset,
@@ -24,7 +32,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
@@ -34,7 +42,7 @@ import {
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
 import { getUserByID } from "~/modules/user/service.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import {
   appendUserTextToNote,
@@ -109,8 +117,9 @@ export function splitQuantityAssetIds(
  * @param args.quantityAssetIds - Assets moved by units (see {@link splitQuantityAssetIds}).
  * @param args.quantities - Units per asset id.
  * @param args.organizationId - The caller's workspace.
- * @throws {ShelfError} 400 "Nothing was assigned. ..." naming each asset with
- *   the units asked for and the units free.
+ * @throws {ShelfError} 400 "Nothing was assigned. ..." naming each asset that
+ *   asked for more units than are free, is not tracked by quantity, or is not
+ *   in the workspace.
  */
 export async function assertAssignableQuantities({
   quantityAssetIds,
@@ -126,11 +135,17 @@ export async function assertAssignableQuantities({
   for (const assetId of quantityAssetIds) {
     const asset = await db.asset.findFirst({
       where: { id: assetId, organizationId },
-      select: { title: true, quantity: true },
+      select: { title: true, quantity: true, type: true },
     });
 
-    // `checkOutQuantity` refuses an unknown asset by name.
-    if (!asset) continue;
+    if (!asset) {
+      unavailable.push("an asset that is not in this workspace");
+      continue;
+    }
+    if (asset.type !== AssetType.QUANTITY_TRACKED) {
+      unavailable.push(`"${asset.title}" (not tracked by quantity)`);
+      continue;
+    }
 
     const { available } = await computeCustodyAvailability(db, {
       assetId,
@@ -148,7 +163,7 @@ export async function assertAssignableQuantities({
   if (unavailable.length) {
     throw new ShelfError({
       cause: null,
-      title: "Not enough units available",
+      title: "These units cannot be assigned",
       message: `Nothing was assigned. ${unavailable.join("; ")}.`,
       additionalData: { unavailable },
       label: "Assets",
@@ -187,18 +202,27 @@ export type ResolvedQuantityRelease = {
  * @param args.quantityAssetIds - Assets moved by units (see {@link splitQuantityAssetIds}).
  * @param args.quantities - Units per asset id.
  * @param args.organizationId - The caller's workspace.
+ * @param args.role - The acting user's role.
+ * @param args.userId - The acting user.
  * @returns One resolved release per asset, in the given order.
  * @throws {ShelfError} 400 when an asset has no operator-held units, more than
- *   one holder, or fewer units held than asked for.
+ *   one holder, or fewer units held than asked for; 403 when a self-service
+ *   user asks to release units someone else holds.
  */
 export async function resolveQuantityReleases({
   quantityAssetIds,
   quantities,
   organizationId,
+  role,
+  userId,
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
   organizationId: string;
+  /** The acting user's role: self-service may only release their own units. */
+  role: OrganizationRoles;
+  /** The acting user. */
+  userId: string;
 }): Promise<ResolvedQuantityRelease[]> {
   if (!quantityAssetIds.length) return [];
 
@@ -234,6 +258,23 @@ export async function resolveQuantityReleases({
     }
 
     const [holder] = holders;
+    // `releaseQuantity` applies the same rule on the write; checking it here
+    // makes the refusal arrive before anything is written.
+    if (
+      role === OrganizationRoles.SELF_SERVICE &&
+      holder.custodian.user?.id !== userId
+    ) {
+      throw new ShelfError({
+        cause: null,
+        title: "Action not allowed",
+        status: 403,
+        label: "Assets",
+        shouldBeCaptured: false,
+        message: `Nothing was released. "${holder.asset.title}" is held by someone else, and self-service users can only release their own custody.`,
+        additionalData: { assetId, userId },
+      });
+    }
+
     if (quantities[assetId] > holder.quantity) {
       throw new ShelfError({
         cause: null,
@@ -377,6 +418,161 @@ export async function releaseQuantityFromCustodian({
   await runLowStockCheck({ assetId, userId, organizationId });
 
   return { consumed: consumedUnits, returned: returnedUnits };
+}
+
+/** A per-unit write that was refused after the checks passed. */
+export type QuantityRefusal = {
+  assetId: string;
+  /** The asset's title, so a message can say which asset it was. */
+  title: string;
+  /** The service's reason. */
+  message: string;
+};
+
+/**
+ * Assigns the units of every checked asset to one custodian, in order.
+ *
+ * Call it after {@link assertAssignableQuantities} and the whole-asset bulk
+ * call. Each asset is its own transaction, so a refusal here (a concurrent
+ * change to that asset since the check) does not stop the rest: the asset is
+ * reported and the loop moves on.
+ *
+ * @returns The refused assets, with the reason; empty when every write landed.
+ */
+export async function assignQuantities({
+  quantityAssetIds,
+  quantities,
+  custodian,
+  userId,
+  organizationId,
+  role,
+}: {
+  quantityAssetIds: string[];
+  quantities: Record<string, number>;
+  custodian: QuantityCustodian;
+  userId: string;
+  organizationId: string;
+  role: OrganizationRoles;
+}): Promise<QuantityRefusal[]> {
+  const refusals: QuantityRefusal[] = [];
+  for (const assetId of quantityAssetIds) {
+    try {
+      await assignQuantityToCustodian({
+        assetId,
+        custodian,
+        quantity: quantities[assetId],
+        userId,
+        organizationId,
+        role,
+      });
+    } catch (cause) {
+      refusals.push(await refusalFor(assetId, organizationId, cause));
+    }
+  }
+  return refusals;
+}
+
+/**
+ * Releases the units of every resolved asset from its holder, in order.
+ *
+ * Call it after {@link resolveQuantityReleases} and the whole-asset bulk call.
+ * Like {@link assignQuantities}, a refused asset is reported and the loop
+ * moves on.
+ *
+ * @returns The refused assets, with the reason; empty when every write landed.
+ */
+export async function releaseQuantities({
+  releases,
+  quantities,
+  userId,
+  organizationId,
+  role,
+}: {
+  releases: ResolvedQuantityRelease[];
+  quantities: Record<string, number>;
+  userId: string;
+  organizationId: string;
+  role: OrganizationRoles;
+}): Promise<QuantityRefusal[]> {
+  const refusals: QuantityRefusal[] = [];
+  for (const { assetId, custodian } of releases) {
+    try {
+      await releaseQuantityFromCustodian({
+        assetId,
+        custodian,
+        quantity: quantities[assetId],
+        userId,
+        organizationId,
+        role,
+      });
+    } catch (cause) {
+      refusals.push(await refusalFor(assetId, organizationId, cause));
+    }
+  }
+  return refusals;
+}
+
+/**
+ * One error for a web submission some of whose per-unit writes were refused.
+ * The rest of the submission was written, so the message says so: a blind
+ * retry would move those units a second time.
+ *
+ * @param verb - "assigned" or "released".
+ * @param refusals - From {@link assignQuantities} / {@link releaseQuantities}.
+ */
+export function quantityRefusalsError(
+  verb: "assigned" | "released",
+  refusals: QuantityRefusal[]
+): ShelfError {
+  return new ShelfError({
+    cause: null,
+    title: `Some units were not ${verb}`,
+    message: `Everything else was ${verb}. Not ${verb}: ${refusals
+      .map((refusal) => `"${refusal.title}": ${refusal.message}`)
+      .join(" ")}`,
+    additionalData: { refusals },
+    label: "Assets",
+    status: 409,
+    shouldBeCaptured: false,
+  });
+}
+
+/** Describes a refused per-unit write for the operator. */
+async function refusalFor(
+  assetId: string,
+  organizationId: string,
+  cause: unknown
+): Promise<QuantityRefusal> {
+  if (!isLikeShelfError(cause)) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Unexpected failure in a per-unit custody write",
+        label: "Assets",
+        additionalData: { assetId },
+      })
+    );
+  }
+
+  // Best-effort: the title only makes the message clearer.
+  let title = "An asset";
+  try {
+    const asset = await db.asset.findFirst({
+      where: { id: assetId, organizationId },
+      select: { title: true },
+    });
+    if (asset) title = asset.title;
+  } catch {
+    // keep the generic title
+  }
+
+  return {
+    assetId,
+    title,
+    message: isLikeShelfError(cause)
+      ? cause.message
+      : "Something went wrong. Please try again.",
+  };
 }
 
 /** The custodian as a note renders them: a user link, or their bold name. */

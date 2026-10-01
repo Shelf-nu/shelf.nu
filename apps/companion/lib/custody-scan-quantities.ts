@@ -42,10 +42,13 @@ import type {
 /** The two scan modes that move custody. */
 export type CustodyScanMode = "assign_custody" | "release_custody";
 
-/** One person holding operator-assigned units of an asset. */
+/**
+ * One person holding operator-assigned units of an asset. Only the id is
+ * kept: the scan payload is not filtered by the caller's custody visibility,
+ * so holder names are never carried into the scan list.
+ */
 type QuantityHolder = {
   teamMemberId: string;
-  name: string;
   /** Units this holder can hand back through a release. */
   units: number;
 };
@@ -114,7 +117,6 @@ export function buildQuantityFacts({
   const holders: QuantityHolder[] = custodyList
     .map((entry) => ({
       teamMemberId: entry.custodian.id,
-      name: entry.custodian.name,
       units: operatorUnits(entry),
     }))
     .filter((holder) => holder.units > 0);
@@ -327,6 +329,12 @@ type CustodySubmitOutcome = {
    * means the server predates the map and moved none of the units.
    */
   skippedQuantityTracked?: number;
+  /**
+   * Quantity rows whose write the server refused after its checks passed (a
+   * concurrent change to that asset). Nothing was written for them; the rest
+   * of the request was.
+   */
+  refusedQuantities?: { assetId: string; message: string }[];
 };
 
 /** Shown on quantity rows a server without `quantities` support skipped. */
@@ -407,8 +415,10 @@ export function describeCustodyConfirm(
  *
  * Whole items and units are counted separately. The asset request carries the
  * whole assets and the quantity rows, and the server writes none of it when it
- * refuses, so those rows succeed or fail together. Kits go in their own
- * request, so a submit can still be partly done when one of the two refuses.
+ * refuses, so those rows fail together. Once its checks pass, the server can
+ * still refuse one quantity row because of a concurrent change; it reports
+ * that row by asset and writes the rest. Kits go in their own request. So a
+ * submit can be partly done.
  * Rows that failed are listed with their error and stay in the scan list so
  * the operator can fix them and submit again.
  *
@@ -468,8 +478,18 @@ export function summarizeCustodySubmit(
           UNITS_NOT_SUPPORTED_ERROR
         );
       } else {
-        succeededQrIds.push(...plan.quantityRows.map((row) => row.qrId));
-        done.quantityRows = plan.quantityRows;
+        const refused = new Map(
+          (outcome.refusedQuantities ?? []).map((r) => [r.assetId, r.message])
+        );
+        for (const row of plan.quantityRows) {
+          const reason = refused.get(row.assetId);
+          if (reason) {
+            fail([row.qrId], describeItems({ quantityRows: [row] }), reason);
+          } else {
+            succeededQrIds.push(row.qrId);
+            done.quantityRows.push(row);
+          }
+        }
       }
     }
   }

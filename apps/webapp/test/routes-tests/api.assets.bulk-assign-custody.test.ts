@@ -9,6 +9,7 @@ import {
 } from "~/modules/asset/service.server";
 import { QUANTITY_CUSTODIAN_SELECT } from "~/modules/custody/quantity-custody.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
+import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
@@ -178,6 +179,7 @@ beforeEach(() => {
   dbMocks.assetFindFirst.mockResolvedValue({
     title: "USB-C Cables",
     quantity: 100,
+    type: "QUANTITY_TRACKED",
   });
 });
 
@@ -496,6 +498,37 @@ describe("api/assets/bulk-assign-custody", () => {
       expect(response.status).toBe(400);
       expect(mockCheckOutQuantity).not.toHaveBeenCalled();
       expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+    });
+
+    it("runs the whole-asset call before any per-unit write", async () => {
+      await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 2 }) })
+      );
+
+      // The bulk call validates and writes in one transaction, so if it
+      // refuses, no units have been handed over yet.
+      expect(
+        vi.mocked(bulkCheckOutAssets).mock.invocationCallOrder[0]
+      ).toBeLessThan(mockCheckOutQuantity.mock.invocationCallOrder[0]);
+    });
+
+    it("says what landed when a per-unit write is refused after the check", async () => {
+      mockCheckOutQuantity.mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          label: "Assets",
+          status: 400,
+          message: "Only 1 units are available.",
+        })
+      );
+
+      const response = (await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 2 }) })
+      )) as unknown as Response;
+
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error.message).toMatch(/^Everything else was assigned\. /);
     });
   });
 });

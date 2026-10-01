@@ -1914,6 +1914,7 @@ function ScannerContent() {
         assetError: assetResult.error,
         kitError: kitResult.error,
         skippedQuantityTracked: assetResult.data?.skippedQuantityTracked ?? 0,
+        refusedQuantities: assetResult.data?.refusedQuantities,
       },
       audience
     );
@@ -2640,10 +2641,6 @@ function ScannerContent() {
   const quantityEditItem = quantityEditQrId
     ? batchDrawerItems.find((item) => item.qrId === quantityEditQrId) ?? null
     : null;
-  const quantityEditHolder =
-    custodyMode === "release_custody"
-      ? quantityEditItem?.quantityFacts?.holders[0] ?? null
-      : null;
   const showBookingDrawer = isBookingMode && bookingCheckinItems.length > 0;
 
   // Instruction text
@@ -3108,19 +3105,14 @@ function ScannerContent() {
             ? "Units to release"
             : "Units to assign"
         }
+        // The holder is not named: the scan payload is not filtered by the
+        // caller's custody visibility, so names stay off this screen.
         subtitle={
           quantityEditItem?.quantity
-            ? quantityEditHolder
-              ? `"${quantityEditItem.title}": ${
-                  quantityEditHolder.name
-                } holds ${formatQuantity(
-                  quantityEditItem.quantity.max,
-                  quantityEditItem.quantity.unitOfMeasure
-                )}`
-              : `"${quantityEditItem.title}": ${formatQuantity(
-                  quantityEditItem.quantity.max,
-                  quantityEditItem.quantity.unitOfMeasure
-                )} free`
+            ? `"${quantityEditItem.title}": ${formatQuantity(
+                quantityEditItem.quantity.max,
+                quantityEditItem.quantity.unitOfMeasure
+              )} ${custodyMode === "release_custody" ? "held" : "free"}`
             : undefined
         }
         max={quantityEditItem?.quantity?.max ?? 1}

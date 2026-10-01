@@ -17,9 +17,13 @@ import {
 } from "~/modules/asset/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { createNote } from "~/modules/note/service.server";
+import { ShelfError } from "~/utils/error";
 import {
   assertAssignableQuantities,
+  assignQuantities,
   assignQuantityToCustodian,
+  quantityRefusalsError,
+  releaseQuantities,
   releaseQuantityFromCustodian,
   resolveQuantityReleases,
   splitQuantityAssetIds,
@@ -110,11 +114,19 @@ describe("splitQuantityAssetIds", () => {
 });
 
 describe("assertAssignableQuantities", () => {
-  function freeUnits(free: Record<string, number>) {
+  function freeUnits(free: Record<string, number>, individual: string[] = []) {
     dbMocks.assetFindFirst.mockImplementation(
       ({ where }: { where: { id: string } }) =>
         Promise.resolve(
-          where.id in free ? { title: `Asset ${where.id}`, quantity: 50 } : null
+          where.id in free || individual.includes(where.id)
+            ? {
+                title: `Asset ${where.id}`,
+                quantity: 50,
+                type: individual.includes(where.id)
+                  ? "INDIVIDUAL"
+                  : "QUANTITY_TRACKED",
+              }
+            : null
         )
     );
     vi.mocked(computeCustodyAvailability).mockImplementation(
@@ -154,16 +166,19 @@ describe("assertAssignableQuantities", () => {
     });
   });
 
-  it("leaves an asset outside the workspace to checkOutQuantity", async () => {
-    freeUnits({});
+  it("refuses an asset that is not in the workspace or not tracked by quantity", async () => {
+    freeUnits({ q1: 5 }, ["camera"]);
     await expect(
       assertAssignableQuantities({
-        quantityAssetIds: ["elsewhere"],
-        quantities: { elsewhere: 1 },
+        quantityAssetIds: ["elsewhere", "camera", "q1"],
+        quantities: { elsewhere: 1, camera: 1, q1: 2 },
         organizationId: "org-1",
       })
-    ).resolves.toBeUndefined();
-    expect(computeCustodyAvailability).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({
+      status: 400,
+      message:
+        'Nothing was assigned. an asset that is not in this workspace; "Asset camera" (not tracked by quantity).',
+    });
   });
 });
 
@@ -183,6 +198,8 @@ describe("resolveQuantityReleases", () => {
         quantityAssetIds: [],
         quantities: {},
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
       })
     ).resolves.toEqual([]);
     expect(dbMocks.custodyFindMany).not.toHaveBeenCalled();
@@ -195,6 +212,8 @@ describe("resolveQuantityReleases", () => {
       quantityAssetIds: ["q1"],
       quantities: { q1: 8 },
       organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userId: "user-1",
     });
 
     expect(resolved).toEqual([
@@ -234,8 +253,141 @@ describe("resolveQuantityReleases", () => {
         quantityAssetIds: ["q1"],
         quantities: { q1: 3 },
         organizationId: "org-1",
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({ status: 400, message });
+  });
+});
+
+describe("resolveQuantityReleases for a self-service user", () => {
+  function heldBy(userId: string | null) {
+    return {
+      assetId: "q1",
+      quantity: 5,
+      asset: { title: "Cable" },
+      custodian: {
+        id: "tm-1",
+        name: "Holder",
+        user: userId
+          ? { id: userId, firstName: null, lastName: null, displayName: null }
+          : null,
+      },
+    };
+  }
+
+  it("releases units the caller holds", async () => {
+    dbMocks.custodyFindMany.mockResolvedValue([heldBy("user-self")]);
+    await expect(
+      resolveQuantityReleases({
+        quantityAssetIds: ["q1"],
+        quantities: { q1: 2 },
+        organizationId: "org-1",
+        role: OrganizationRoles.SELF_SERVICE,
+        userId: "user-self",
+      })
+    ).resolves.toHaveLength(1);
+  });
+
+  it.each([
+    ["a colleague", "user-other"],
+    ["a team member without an account", null],
+  ])("refuses before any write when %s holds them", async (_label, holder) => {
+    dbMocks.custodyFindMany.mockResolvedValue([heldBy(holder)]);
+    await expect(
+      resolveQuantityReleases({
+        quantityAssetIds: ["q1"],
+        quantities: { q1: 2 },
+        organizationId: "org-1",
+        role: OrganizationRoles.SELF_SERVICE,
+        userId: "user-self",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
+
+describe("assignQuantities and releaseQuantities", () => {
+  beforeEach(() => {
+    dbMocks.assetFindFirst.mockImplementation(
+      ({ where }: { where: { id: string } }) =>
+        Promise.resolve({ title: `Asset ${where.id}` })
+    );
+  });
+
+  it("keeps going past a refused asset and reports it by name", async () => {
+    vi.mocked(checkOutQuantity)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          label: "Assets",
+          message: "Cannot check out 3 units. Only 1 units are available.",
+        })
+      )
+      .mockResolvedValueOnce({} as never);
+
+    const refusals = await assignQuantities({
+      quantityAssetIds: ["q1", "q2", "q3"],
+      quantities: { q1: 1, q2: 3, q3: 2 },
+      custodian,
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expect(checkOutQuantity).toHaveBeenCalledTimes(3);
+    expect(refusals).toEqual([
+      {
+        assetId: "q2",
+        title: "Asset q2",
+        message: "Cannot check out 3 units. Only 1 units are available.",
+      },
+    ]);
+    // Notes only for the assignments that landed.
+    expect(createNote).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports nothing when every release lands", async () => {
+    const refusals = await releaseQuantities({
+      releases: [
+        { assetId: "q1", custodian },
+        { assetId: "q2", custodian },
+      ],
+      quantities: { q1: 1, q2: 2 },
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+    expect(refusals).toEqual([]);
+    expect(releaseQuantity).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides an unexpected failure behind a plain reason", async () => {
+    vi.mocked(releaseQuantity).mockRejectedValueOnce(new TypeError("boom"));
+    const refusals = await releaseQuantities({
+      releases: [{ assetId: "q1", custodian }],
+      quantities: { q1: 1 },
+      userId: "user-1",
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    });
+    expect(refusals).toEqual([
+      {
+        assetId: "q1",
+        title: "Asset q1",
+        message: "Something went wrong. Please try again.",
+      },
+    ]);
+  });
+
+  it("words a web refusal so a retry does not repeat what landed", () => {
+    const refusal = quantityRefusalsError("assigned", [
+      { assetId: "q2", title: "Cable", message: "Only 1 units are available." },
+    ]);
+    expect(refusal.status).toBe(409);
+    expect(refusal.message).toBe(
+      'Everything else was assigned. Not assigned: "Cable": Only 1 units are available.'
+    );
   });
 });
 
