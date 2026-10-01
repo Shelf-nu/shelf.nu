@@ -8,7 +8,9 @@
  * uses SSO for the domain, then either convert accounts one at a time or
  * convert every eligible account at once. "Convert all" skips those owners,
  * who may keep password login; each can still be converted individually.
- * Owning any other workspace earns no exemption.
+ * Owning any other workspace earns no exemption. Accounts whose user tried SSO
+ * before conversion are flagged: their first SSO sign-in after conversion asks
+ * them to sign in once more.
  *
  * Already-SSO accounts can be reverted to standard login as a recovery tool,
  * for example when a customer's identity provider is unavailable. A revert is
@@ -275,11 +277,18 @@ function describeConversionResult(result: SsoConversionResult): {
 } {
   switch (result.status) {
     case "converted":
-      return {
-        title: "Account converted to SSO",
-        message: `${result.email} can now sign in via SSO.`,
-        rowText: "Converted to SSO.",
-      };
+      return result.needsExtraSignIn
+        ? {
+            title: "Account converted to SSO",
+            message: `${result.email} can now sign in via SSO. They tried SSO before conversion, so their first SSO sign-in will ask them to sign in once more.`,
+            rowText:
+              "Converted to SSO. Their first SSO sign-in will ask them to sign in once more.",
+          }
+        : {
+            title: "Account converted to SSO",
+            message: `${result.email} can now sign in via SSO.`,
+            rowText: "Converted to SSO.",
+          };
     case "skipped_already_sso":
       return {
         title: "Account already SSO",
@@ -302,6 +311,10 @@ function describeConvertAllResult(result: SsoConvertAllResult): {
 } {
   const converted = pluralizeAccounts(result.converted);
   const failed = result.failed.length;
+  const outcome =
+    failed > 0
+      ? "See the summary on the page for the accounts that failed."
+      : "Every eligible account on the domain now signs in via SSO.";
 
   return {
     title:
@@ -309,10 +322,22 @@ function describeConvertAllResult(result: SsoConvertAllResult): {
         ? `Converted ${converted}, ${failed} failed`
         : `Converted ${converted} to SSO`,
     message:
-      failed > 0
-        ? "See the summary on the page for the accounts that failed."
-        : "Every eligible account on the domain now signs in via SSO.",
+      result.needsExtraSignIn > 0
+        ? `${outcome} ${describeExtraSignIns(result.needsExtraSignIn)}`
+        : outcome,
   };
+}
+
+/**
+ * The sentence telling the admin how many converted users will be asked to sign
+ * in once more, shared by the Convert all toast and summary.
+ *
+ * @param count - converted accounts whose user tried SSO before conversion
+ */
+function describeExtraSignIns(count: number) {
+  return count === 1
+    ? "1 account tried SSO before conversion: its first SSO sign-in will ask the user to sign in once more."
+    : `${count} accounts tried SSO before conversion: their first SSO sign-in will ask the users to sign in once more.`;
 }
 
 /**
@@ -579,8 +604,9 @@ function ConvertAllControl({
 }
 
 /**
- * The outcome of a "Convert all" run: how many converted, and every account
- * that failed with its reason.
+ * The outcome of a "Convert all" run: how many converted, how many of those
+ * will be asked to sign in once more, and every account that failed with its
+ * reason.
  *
  * @param props.summary - the result of {@link convertAllEligibleOnDomain}
  */
@@ -590,6 +616,11 @@ function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
       <p className="font-semibold text-gray-900">
         Converted {pluralizeAccounts(summary.converted)}.
       </p>
+      {summary.needsExtraSignIn > 0 ? (
+        <p className="text-warning-700">
+          {describeExtraSignIns(summary.needsExtraSignIn)}
+        </p>
+      ) : null}
       {summary.failed.length > 0 ? (
         <div className="text-error-500">
           <p className="font-semibold">
@@ -610,7 +641,9 @@ function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
 
 /**
  * One candidate account row: name, status and a single action behind a
- * confirmation dialog. A standard account offers Convert (with owner-specific
+ * confirmation dialog. A standard account whose user tried SSO before
+ * conversion carries a note that their first SSO sign-in will ask them to sign
+ * in once more. A standard account offers Convert (with owner-specific
  * wording for owners of the workspace that uses SSO for the domain); an SSO
  * account offers Revert to standard.
  *
@@ -660,6 +693,12 @@ function CandidateRow({
       <Td>
         <div className="flex flex-col gap-1">
           <span>{status}</span>
+          {!candidate.alreadySso && candidate.hasEarlierSsoLogin ? (
+            <span className="max-w-xs text-xs text-warning-700">
+              Tried SSO before conversion: their first SSO sign-in will ask them
+              to sign in once more.
+            </span>
+          ) : null}
           {fetcherError ? (
             <span className="text-xs text-error-500" role="alert">
               {fetcherError.message}

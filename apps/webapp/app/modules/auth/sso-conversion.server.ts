@@ -10,13 +10,17 @@
  * only way it matches an SSO assertion to an existing user is through a row in
  * `auth.identities` keyed on `UNIQUE(provider_id, provider)`, where
  * `provider = 'sso:<providerId>'` and `provider_id` is the SAML subject.
- * Conversion pre-seeds that row with the user's email as the subject, so an IdP
- * whose NameID is the email lands the first SSO login on the original UUID.
+ * Conversion pre-seeds that row with the user's email as the subject. Supabase
+ * links the first SSO login to that email-keyed identity (same SSO provider,
+ * same email) whatever NameID the IdP sends, so it lands on the original UUID.
  *
- * Any other subject (an opaque persistent NameID, as Entra sends, or a login
- * that happened before conversion) makes Supabase create a duplicate SSO auth
- * user. `reconcileDuplicateSsoLogin` merges it back onto the original account
+ * The exception is a user who tried SSO before conversion: that attempt was
+ * refused but left a duplicate SSO auth user (same email, no Shelf `User`)
+ * holding the IdP identity, and the first SSO login after conversion lands on
+ * it. `reconcileDuplicateSsoLogin` merges it back onto the original account
  * from the SSO callback, and the user's next SSO sign-in lands on the original.
+ * The admin page flags these accounts (`hasEarlierSsoLogin`,
+ * `needsExtraSignIn`) so staff can tell the user to expect that extra sign-in.
  *
  * Owners of a workspace linked to the domain (one whose SSO settings list it)
  * may be converted one at a time, but `convertAllEligibleOnDomain` skips them:
@@ -63,6 +67,12 @@ export type SsoConversionResult = {
   userId: string;
   email: string;
   status: "converted" | "skipped_already_sso";
+  /**
+   * True when a converted user tried SSO before conversion, so their first SSO
+   * sign-in merges that attempt and asks them to sign in once more. Always
+   * false for `skipped_already_sso`.
+   */
+  needsExtraSignIn: boolean;
 };
 
 /** A candidate row for the admin conversion UI. */
@@ -75,6 +85,11 @@ export type SsoConversionCandidate = {
   /** Owns a workspace linked to the domain's SSO (Convert all skips them). */
   ownsSsoWorkspace: boolean;
   alreadySso: boolean;
+  /**
+   * Another SSO auth user holds this email: the user tried SSO before their
+   * account was converted. Only meaningful while `alreadySso` is false.
+   */
+  hasEarlierSsoLogin: boolean;
 };
 
 /** One account that `convertAllEligibleOnDomain` could not convert. */
@@ -87,6 +102,8 @@ export type SsoConvertAllFailure = {
 /** Summary of a Convert all run: how many accounts converted, and which failed. */
 export type SsoConvertAllResult = {
   converted: number;
+  /** Converted accounts whose first SSO sign-in will ask them to sign in again. */
+  needsExtraSignIn: number;
   failed: SsoConvertAllFailure[];
 };
 
@@ -154,6 +171,37 @@ async function sealAuthUserAsSso(
 }
 
 /**
+ * Finds which of the given accounts tried SSO before being converted: another
+ * auth user exists with the same email (case-insensitive) and
+ * `is_sso_user = true`. That is the duplicate a refused pre-conversion SSO
+ * sign-in leaves behind, which the first SSO sign-in after conversion lands on.
+ *
+ * One query for the whole list; none when the list is empty. An account's own
+ * auth row never counts, even once it is SSO itself.
+ *
+ * @param accounts - the Shelf users (`id` is also the auth user id) to check
+ * @returns the lowercased emails that have such an earlier SSO auth user
+ */
+async function findEmailsWithEarlierSsoLogin(
+  accounts: { id: string; email: string }[]
+): Promise<Set<string>> {
+  if (accounts.length === 0) return new Set();
+
+  const emails = accounts.map((a) => a.email.toLowerCase());
+  const ids = accounts.map((a) => a.id);
+
+  const rows = await db.$queryRaw<{ email: string }[]>`
+    SELECT DISTINCT lower(email) AS email
+    FROM auth.users
+    WHERE is_sso_user = true
+      AND lower(email) = ANY(${emails}::text[])
+      AND id::text <> ALL(${ids}::text[])
+  `;
+
+  return new Set(rows.map((row) => row.email));
+}
+
+/**
  * Resolves the SSO provider id configured for an email's domain, or throws.
  *
  * @param email - the email whose domain provider should be resolved
@@ -187,14 +235,15 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  * loses the password login an unconverted one keeps, and support can undo it
  * with `revertAccountToStandard`.
  *
- * The seeded `provider_id` is the lowercased email. An IdP whose subject is
- * anything else (a different case, an opaque NameID), or an SSO auth user left
- * by a sign-in attempted before conversion, is handled by
- * `reconcileDuplicateSsoLogin` at callback time.
+ * The seeded `provider_id` is the lowercased email. An SSO auth user left by a
+ * sign-in attempted before conversion is merged by `reconcileDuplicateSsoLogin`
+ * at callback time, which costs the user one extra sign-in; `needsExtraSignIn`
+ * reports it.
  *
  * @param args.userId - the Shelf `User.id` (same as the auth UUID) to convert
  * @param args.actorUserId - the admin performing the conversion, for the log
- * @returns the conversion result: `converted` or `skipped_already_sso`
+ * @returns the conversion result: `converted` or `skipped_already_sso`, and
+ *   whether the user's first SSO sign-in will ask them to sign in again
  * @throws {ShelfError} on any guard failure
  */
 export async function convertAccountToSso({
@@ -226,6 +275,7 @@ export async function convertAccountToSso({
         userId: user.id,
         email: user.email,
         status: "skipped_already_sso",
+        needsExtraSignIn: false,
       };
     }
 
@@ -242,6 +292,10 @@ export async function convertAccountToSso({
         label,
       });
     }
+
+    const needsExtraSignIn = (await findEmailsWithEarlierSsoLogin([user])).has(
+      subject
+    );
 
     await db.$transaction(async (tx) => {
       // ON CONFLICT keeps a re-run idempotent, and leaves an identity already
@@ -279,7 +333,12 @@ export async function convertAccountToSso({
       }`
     );
 
-    return { userId: user.id, email: user.email, status: "converted" };
+    return {
+      userId: user.id,
+      email: user.email,
+      status: "converted",
+      needsExtraSignIn,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -407,9 +466,10 @@ export async function reconcileDuplicateSsoLogin({
 /**
  * Lists candidate accounts for the admin conversion UI: every non-deleted Shelf
  * user whose email domain matches `domain` (case-insensitive), annotated with
- * whether they already use SSO and whether they own a workspace linked to the
- * domain's SSO (which Convert all skips). Ownership of any other workspace is
- * not reported: it does not exempt anyone from SSO.
+ * whether they already use SSO, whether they own a workspace linked to the
+ * domain's SSO (which Convert all skips), and whether they tried SSO before
+ * conversion. Ownership of any other workspace is not reported: it does not
+ * exempt anyone from SSO.
  *
  * @param domain - the email domain to match (e.g. "acme.com")
  * @returns the matching accounts with eligibility annotations, ordered by email
@@ -439,6 +499,8 @@ export async function findEligibleAccountsForSsoConversion(
   // `checkDomainSSOStatus` reads the domain from an address.
   const { linkedOrganizations } = await checkDomainSSOStatus(`@${normalized}`);
   const linkedOrgIds = linkedOrganizations.map((org) => org.id);
+
+  const earlierSsoEmails = await findEmailsWithEarlierSsoLogin(users);
 
   // Same two ownership shapes as `userOwnsLinkedSsoWorkspace`, batched for the
   // whole list and scoped to the domain's linked workspaces.
@@ -471,6 +533,7 @@ export async function findEligibleAccountsForSsoConversion(
     displayName: u.displayName,
     alreadySso: u.sso,
     ownsSsoWorkspace: ownerIds.has(u.id),
+    hasEarlierSsoLogin: earlierSsoEmails.has(u.email.toLowerCase()),
   }));
 }
 
@@ -488,8 +551,9 @@ export async function findEligibleAccountsForSsoConversion(
  * @param args.domain - the email domain to convert (case and surrounding
  *   whitespace are ignored)
  * @param args.actorUserId - the admin performing the conversion, for the log
- * @returns how many accounts converted, and the accounts that failed with their
- *   messages
+ * @returns how many accounts converted, how many of those will be asked to sign
+ *   in again at their first SSO sign-in, and the accounts that failed with
+ *   their messages
  * @throws {ShelfError} 400 when the domain has no configured SSO provider,
  *   raised once before any account is touched
  */
@@ -512,17 +576,19 @@ export async function convertAllEligibleOnDomain({
 
   const result: SsoConvertAllResult = {
     converted: 0,
+    needsExtraSignIn: 0,
     failed: [],
   };
 
   for (const candidate of eligible) {
     try {
-      const { status } = await convertAccountToSso({
+      const { status, needsExtraSignIn } = await convertAccountToSso({
         userId: candidate.id,
         actorUserId,
       });
       if (status === "converted") {
         result.converted += 1;
+        if (needsExtraSignIn) result.needsExtraSignIn += 1;
       }
     } catch (cause) {
       result.failed.push({

@@ -114,6 +114,29 @@ function rawCalls(): RawCall[] {
   });
 }
 
+/** Every `$queryRaw` call so far, as normalized SQL text plus bound values. */
+function rawQueries(): RawCall[] {
+  return vi.mocked(db.$queryRaw).mock.calls.map((call) => {
+    const [strings, ...values] = call as unknown as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    return { sql: strings.join("?").replace(/\s+/g, " ").trim(), values };
+  });
+}
+
+/**
+ * Makes the earlier-SSO-login lookup report `emails` (lowercased) as having
+ * another SSO auth user.
+ */
+function earlierSsoLoginFor(emails: string[]) {
+  vi.mocked(db.$queryRaw).mockResolvedValue(
+    emails.map((email) => ({ email })) as unknown as Awaited<
+      ReturnType<typeof db.$queryRaw>
+    >
+  );
+}
+
 /** The single raw call whose SQL contains `fragment`; fails if not exactly one. */
 function rawCallMatching(fragment: string): RawCall {
   const matches = rawCalls().filter((c) => c.sql.includes(fragment));
@@ -129,6 +152,8 @@ beforeEach(() => {
   // clearAllMocks leaves mockResolvedValueOnce queues in place; reset them.
   vi.mocked(db.$executeRaw).mockReset();
   vi.mocked(db.$executeRaw).mockResolvedValue(1);
+  vi.mocked(db.$queryRaw).mockReset();
+  earlierSsoLoginFor([]);
   vi.mocked(db.user.findUnique).mockResolvedValue(
     baseUser as unknown as Awaited<ReturnType<typeof db.user.findUnique>>
   );
@@ -159,6 +184,7 @@ describe("convertAccountToSso", () => {
       userId: ORIGINAL_ID,
       email: baseUser.email,
       status: "converted",
+      needsExtraSignIn: false,
     });
     const seal = rawCallMatching("UPDATE auth.users");
     expect(seal.sql).toContain("is_sso_user = true");
@@ -190,6 +216,29 @@ describe("convertAccountToSso", () => {
     ]);
   });
 
+  it("looks up an earlier SSO login for this user only, by lowercased email", async () => {
+    await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    const queries = rawQueries();
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toContain("FROM auth.users");
+    expect(queries[0].sql).toContain("is_sso_user = true");
+    expect(queries[0].sql).toContain("lower(email) = ANY(");
+    expect(queries[0].sql).toContain("id::text <> ALL(");
+    expect(queries[0].values).toEqual([["jane.doe@acme.com"], [ORIGINAL_ID]]);
+  });
+
+  it("reports the extra sign-in when the user tried SSO before conversion", async () => {
+    earlierSsoLoginFor(["jane.doe@acme.com"]);
+
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result).toMatchObject({
+      status: "converted",
+      needsExtraSignIn: true,
+    });
+  });
+
   it("signs out the user's existing sessions", async () => {
     await convertAccountToSso({ userId: ORIGINAL_ID });
 
@@ -206,7 +255,9 @@ describe("convertAccountToSso", () => {
     const result = await convertAccountToSso({ userId: ORIGINAL_ID });
 
     expect(result.status).toBe("skipped_already_sso");
+    expect(result.needsExtraSignIn).toBe(false);
     expect(db.$executeRaw).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     expect(db.user.update).not.toHaveBeenCalled();
   });
 
@@ -409,6 +460,46 @@ describe("findEligibleAccountsForSsoConversion", () => {
     expect(result[0].displayName).toBe("Annie");
   });
 
+  it("flags candidates whose email another SSO auth user holds, in one query", async () => {
+    vi.mocked(db.user.findMany).mockResolvedValue([
+      {
+        id: "u1",
+        email: "A@acme.com",
+        firstName: null,
+        lastName: null,
+        displayName: null,
+        sso: false,
+      },
+      {
+        id: "u2",
+        email: "b@acme.com",
+        firstName: null,
+        lastName: null,
+        displayName: null,
+        sso: false,
+      },
+    ] as unknown as Awaited<ReturnType<typeof db.user.findMany>>);
+    vi.mocked(db.organization.findMany).mockResolvedValue([]);
+    vi.mocked(db.userOrganization.findMany).mockResolvedValue([]);
+    earlierSsoLoginFor(["a@acme.com"]);
+
+    const result = await findEligibleAccountsForSsoConversion("acme.com");
+
+    const queries = rawQueries();
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toContain("is_sso_user = true");
+    // The candidates' own auth rows are excluded by id.
+    expect(queries[0].sql).toContain("id::text <> ALL(");
+    expect(queries[0].values).toEqual([
+      ["a@acme.com", "b@acme.com"],
+      ["u1", "u2"],
+    ]);
+    expect(result.map((r) => [r.id, r.hasEarlierSsoLogin])).toEqual([
+      ["u1", true],
+      ["u2", false],
+    ]);
+  });
+
   it("marks no one as an owner when no workspace is linked to the domain", async () => {
     vi.mocked(db.user.findMany).mockResolvedValue([
       {
@@ -441,11 +532,12 @@ describe("findEligibleAccountsForSsoConversion", () => {
     ).resolves.toEqual([]);
     expect(db.organization.findMany).not.toHaveBeenCalled();
     expect(db.userOrganization.findMany).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });
 
 describe("convertAccountToSso when the SSO identity already exists", () => {
-  it("still converts the account and never looks up who holds the identity", async () => {
+  it("still converts the account", async () => {
     // ON CONFLICT DO NOTHING: an identity already held (by this user on a
     // re-run, or by an SSO auth user from a sign-in before conversion) seeds
     // nothing. The callback's reconcile merges any duplicate at sign-in.
@@ -467,7 +559,6 @@ describe("convertAccountToSso when the SSO identity already exists", () => {
       where: { id: ORIGINAL_ID },
       data: { sso: true, onboarded: true },
     });
-    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 });
 
@@ -513,7 +604,7 @@ describe("convertAllEligibleOnDomain", () => {
       actorUserId: "admin-id",
     });
 
-    expect(result).toEqual({ converted: 3, failed: [] });
+    expect(result).toEqual({ converted: 3, needsExtraSignIn: 0, failed: [] });
     expect(seededUserIds()).toEqual(["u-std-1", "u-std-2", "u-std-3"]);
     expect(db.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -533,13 +624,21 @@ describe("convertAllEligibleOnDomain", () => {
 
     const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
 
-    expect(result).toEqual({ converted: 4, failed: [] });
+    expect(result).toEqual({ converted: 4, needsExtraSignIn: 0, failed: [] });
     expect(seededUserIds()).toEqual([
       "u-std-1",
       "u-owner",
       "u-std-2",
       "u-std-3",
     ]);
+  });
+
+  it("counts the converted accounts whose users tried SSO before conversion", async () => {
+    earlierSsoLoginFor(["one@acme.com", "three@acme.com"]);
+
+    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
+
+    expect(result).toEqual({ converted: 3, needsExtraSignIn: 2, failed: [] });
   });
 
   it("keeps going after one account fails and reports it", async () => {

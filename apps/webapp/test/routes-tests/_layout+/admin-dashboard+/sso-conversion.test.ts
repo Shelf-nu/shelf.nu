@@ -57,6 +57,7 @@ import {
   findEligibleAccountsForSsoConversion,
   revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 
@@ -170,6 +171,7 @@ describe("admin sso-conversion route", () => {
           displayName: null,
           ownsSsoWorkspace: false,
           alreadySso: false,
+          hasEarlierSsoLogin: false,
         },
       ];
       vi.mocked(checkDomainSSOStatus).mockResolvedValue({
@@ -225,6 +227,7 @@ describe("admin sso-conversion route", () => {
         userId: "user-1",
         email: "sam@acme.com",
         status: "converted",
+        needsExtraSignIn: false,
       });
 
       const result = await action(
@@ -238,6 +241,30 @@ describe("admin sso-conversion route", () => {
       expect(result).toEqual(
         expect.objectContaining({
           result: expect.objectContaining({ status: "converted" }),
+        })
+      );
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "sam@acme.com can now sign in via SSO.",
+        })
+      );
+    });
+
+    it("tells the admin about the extra sign-in when the user tried SSO before conversion", async () => {
+      vi.mocked(convertAccountToSso).mockResolvedValue({
+        userId: "user-1",
+        email: "sam@acme.com",
+        status: "converted",
+        needsExtraSignIn: true,
+      });
+
+      await action(
+        actionArgs({ intent: "convert-one", targetUserId: "user-1" })
+      );
+
+      expect(sendNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringMatching(/sign in once more/),
         })
       );
     });
@@ -303,6 +330,7 @@ describe("admin sso-conversion route", () => {
       it("converts the domain, records the admin as the actor and returns the summary", async () => {
         const summary = {
           converted: 3,
+          needsExtraSignIn: 0,
           failed: [
             { userId: "user-9", email: "kim@acme.com", message: "Boom." },
           ],
@@ -320,6 +348,24 @@ describe("admin sso-conversion route", () => {
         expect(convertAccountToSso).not.toHaveBeenCalled();
         expect(result).toEqual(
           expect.objectContaining({ intent: "convert-all", result: summary })
+        );
+      });
+
+      it("mentions the extra sign-ins in the toast when some users tried SSO first", async () => {
+        vi.mocked(convertAllEligibleOnDomain).mockResolvedValue({
+          converted: 3,
+          needsExtraSignIn: 2,
+          failed: [],
+        });
+
+        await action(actionArgs({ intent: "convert-all", domain: "acme.com" }));
+
+        expect(sendNotification).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining(
+              "2 accounts tried SSO before conversion"
+            ),
+          })
         );
       });
 
