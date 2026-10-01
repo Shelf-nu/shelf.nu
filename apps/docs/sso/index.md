@@ -72,7 +72,7 @@ If users on your domain already have standard (email/password) Shelf accounts, f
 - **Workspace owners are not converted.** At least one non-SSO owner must remain per workspace as an administrative fallback. Re-assign ownership first if an owner needs SSO.
 - Converting an account signs the user out of every existing session and removes their password. From then on they sign in only via SSO.
 - **Group mappings decide the role.** If the workspace's SSO settings map identity provider groups to roles (the Administrator, Self service and Base group fields), every SSO login sets the user's role from their groups. A converted user whose groups do not map to any role loses access to that workspace at their first SSO login. If no group mappings are configured, existing workspace memberships and roles are kept as they are. Set up the groups (or leave the mappings empty) before converting.
-- If a converted user signs in via SSO before the conversion completes, Shelf reconciles their account automatically on that login and asks them to sign in once more.
+- If a user tries to sign in via SSO before their account is converted, the sign-in is refused and they are asked to contact support. Once the account is converted, their next SSO sign-in reconciles it automatically and asks them to sign in once more; after that they sign in normally. Convert accounts before announcing SSO to your team so nobody hits the refusal.
 
 For SSO to match converted accounts seamlessly, your identity provider's **NameID value must be the user's email address** (see the provider setup guides). If it is not, the account is reconciled on the first SSO login and the user is asked to sign in once more.
 

@@ -37,7 +37,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { WarningBox } from "~/components/shared/warning-box";
 import { Table, Td, Th, Tr } from "~/components/table";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { SsoConversionCandidate } from "~/modules/auth/sso-conversion.server";
@@ -241,7 +240,13 @@ export default function SsoConversionPage() {
           )}
 
           {mappedWorkspaces.length > 0 ? (
-            <WarningBox>
+            // why: a plain box rather than WarningBox, which can be dismissed.
+            // This is the page's only signal that conversion can cost a user
+            // their workspace access, so it stays visible on every search.
+            <div
+              role="status"
+              className="rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
               <div>
                 <p className="font-semibold">
                   Check group mappings before converting
@@ -257,7 +262,7 @@ export default function SsoConversionPage() {
                   to no role loses access there.
                 </p>
               </div>
-            </WarningBox>
+            </div>
           ) : linkedWorkspaces.length > 0 ? (
             <p className="text-sm text-gray-600">
               None of these workspaces map IdP groups to roles, so converted
