@@ -1124,6 +1124,12 @@ model SsoDetails {
   selfServiceGroupId String? // The group id for SELF_SERVICE users
   adminGroupId       String? // The group id for ADMIN users
 
+  // Whether legacy sign-in (password, email code, password reset) is refused
+  // for unconverted accounts on this setup's domain. Owners of a linked
+  // workspace keep legacy sign-in either way. Shelf staff turn it off only
+  // while setting up and testing SSO with a few users.
+  requireSsoLogin Boolean @default(true)
+
   // Datetime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

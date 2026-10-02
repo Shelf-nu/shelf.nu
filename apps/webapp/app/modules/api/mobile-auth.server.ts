@@ -14,6 +14,11 @@ import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import {
+  createSsoRequiredError,
+  getLegacyLoginDecisionForUser,
+} from "~/modules/auth/sso-enforcement.server";
 import {
   isSelfServiceOrBaseRole,
   resolveCanSeeAllBookings,
@@ -82,9 +87,12 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Get the database user record — exclude soft-deleted users
+  // Get the database user record by the verified auth id, which is the Shelf
+  // user id. The stored email can differ in letter case from the one Supabase
+  // returns, so it does not identify the account. Soft-deleted users are
+  // excluded below.
   const user = await db.user.findUnique({
-    where: { email: authUser.email },
+    where: { id: authUser.id },
     select: {
       id: true,
       email: true,
@@ -103,6 +111,7 @@ export async function requireMobileAuth(request: Request) {
       timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
+      sso: true,
     },
   });
 
@@ -113,6 +122,23 @@ export async function requireMobileAuth(request: Request) {
       label: "Auth",
       status: 404,
     });
+  }
+
+  // The companion signs in with a password straight against Supabase, so this
+  // is the first point Shelf sees that session. Refuse it when the address must
+  // use SSO, as the web sign-in would. SSO users pass without a lookup: the
+  // companion's SSO sessions belong to `User.sso` accounts. A refused account
+  // has every session revoked first, so its refresh token cannot mint another
+  // access token for the companion or the web.
+  if (!user.sso) {
+    const decision = await getLegacyLoginDecisionForUser({
+      userId: user.id,
+      email: user.email,
+    });
+    if (!decision.allowed) {
+      await revokeAllSessions(token);
+      throw createSsoRequiredError(decision.reason);
+    }
   }
 
   // Record companion-app usage for adoption metrics. requireMobileAuth is the
@@ -126,6 +152,7 @@ export async function requireMobileAuth(request: Request) {
   const {
     deletedAt: _deletedAt,
     lastMobileActiveAt: _lastMobileActiveAt,
+    sso: _sso,
     ...safeUser
   } = user;
   return { user: safeUser, authUser };

@@ -263,6 +263,23 @@ describe("SSO group-claim revocation", () => {
     });
   });
 
+  it("never changes the workspace owner's role, even when their groups map to one", async () => {
+    dbMocks.queryRaw.mockResolvedValue([{ id: "uo-1" }]);
+    dbMocks.teamMemberFindFirst.mockResolvedValue({ id: TEAM_MEMBER_ID });
+
+    const result = await login(["g-staff"], ["OWNER"]);
+
+    // Ownership moves only through transfer-ownership; a group claim that maps
+    // the owner to BASE must leave the OWNER role in place.
+    expect(dbMocks.userOrganizationUpdate).not.toHaveBeenCalled();
+    expect(dbMocks.userOrganizationDeleteMany).not.toHaveBeenCalled();
+    expect(result.transitions[0]).toMatchObject({
+      previousRoles: ["OWNER"],
+      newRole: "OWNER",
+    });
+    expect(result.org?.id).toBe(ORG_ID);
+  });
+
   describe("granting a workspace the user has no membership in", () => {
     beforeEach(() => {
       dbMocks.scimFindUnique.mockResolvedValue(null);
