@@ -10,7 +10,12 @@
  * @see {@link file://./helpers.server.ts}
  */
 
-import type { AssetType, BookingStatus, Currency } from "@prisma/client";
+import type {
+  AssetType,
+  BookingStatus,
+  Currency,
+  CustomFieldType,
+} from "@prisma/client";
 import type { ResolvableAssetModelImage } from "../asset/image-resolution";
 
 // -----------------------------------------------------------------------------
@@ -79,20 +84,89 @@ export interface ResolvedTimeframe {
 // Filter Types
 // -----------------------------------------------------------------------------
 
-/** Filter types supported by reports */
+/**
+ * Filter types supported by reports. Each one the registry declares for a
+ * report is rendered by the filter bar and honoured by the report's loader,
+ * CSV and PDF through `resolveReportFilters`.
+ *
+ * - `custom_field`: "field is value" on the workspace's TEXT, OPTION and
+ *   BOOLEAN custom fields.
+ * - `asset_model`: assets of the chosen models.
+ */
 export type FilterType =
   | "status"
   | "location"
   | "category"
   | "team_member"
   | "asset"
-  | "booking";
+  | "booking"
+  | "custom_field"
+  | "asset_model";
 
 /** A single filter value */
 export interface ReportFilter {
   type: FilterType;
   value: string;
   label: string;
+}
+
+/**
+ * One filter currently applied to a report, labelled for the chip row and
+ * removable by deleting exactly `param=value` from the query string.
+ */
+export interface ActiveReportFilter {
+  type: FilterType;
+  /** Query key holding this filter (`category`, `cf`, ...). */
+  param: string;
+  /** Exact query value to delete to remove this one filter. */
+  value: string;
+  /** What the chip says, e.g. "Category: Cameras". */
+  label: string;
+}
+
+/** A custom field the filter bar offers, with the values it can take. */
+export interface ReportCustomFieldOption {
+  id: string;
+  name: string;
+  type: CustomFieldType;
+  /** Values to pick from; OPTION lists its options, BOOLEAN yes/no. */
+  values: string[];
+  /** True when a TEXT field holds more distinct values than were loaded. */
+  hasMoreValues: boolean;
+}
+
+/** One selectable status for the status dropdown. */
+export interface ReportStatusOption {
+  value: string;
+  label: string;
+}
+
+/**
+ * Pick-list payload for the filter bar. Lists stay empty for filter types
+ * the report does not declare. The paged lists (`categories`, `locations`,
+ * `teamMembers`, `assetModels`) and their totals are spread onto the report
+ * loader's top level, where the shared `DynamicDropdown` reads them.
+ */
+export interface ReportFilterOptions {
+  categories: { id: string; name: string; color: string }[];
+  totalCategories: number;
+  locations: { id: string; name: string }[];
+  totalLocations: number;
+  teamMembers: {
+    id: string;
+    name: string;
+    user: {
+      firstName: string | null;
+      lastName: string | null;
+      displayName: string | null;
+      email: string;
+    } | null;
+  }[];
+  totalTeamMembers: number;
+  assetModels: { id: string; name: string }[];
+  totalAssetModels: number;
+  customFields: ReportCustomFieldOption[];
+  statuses: ReportStatusOption[];
 }
 
 /** Active filters for a report */
@@ -486,6 +560,8 @@ export interface DistributionBreakdown {
   byLocation: AssetDistributionRow[];
   /** Breakdown by status */
   byStatus: AssetDistributionRow[];
+  /** Breakdown by asset model; assets without a model form one bucket. */
+  byAssetModel: AssetDistributionRow[];
 }
 
 /** KPI IDs for the Asset Distribution report */
