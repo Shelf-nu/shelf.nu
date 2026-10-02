@@ -198,21 +198,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ]);
 
     /**
-     * We get the first QR code(for now we can only have 1)
-     * And using the ID of tha qr code, we find the latest scan.
+     * The latest scan of this kit, whichever code was scanned (QR or barcode).
      *
      * `getLastScanForViewer` applies the `scan:read` gate SERVER-SIDE and
      * returns null without it. The parsed scan carries the scanner's name and
      * email, GPS coordinates and user-agent; the component renders
      * `<ScanDetails>` behind the same check, but a client-side check only
-     * hides the data — BASE and SELF_SERVICE hold `scan: []` and were still
-     * receiving all of it in the page payload.
-     *
-     * The asset route was moved onto this helper in `109d02857`; the kit route
-     * was not, and kept calling `parseScanData` directly.
+     * hides the data: BASE and SELF_SERVICE hold `scan: []`, and a payload
+     * built for them would carry all of it.
      */
     const lastScan = await getLastScanForViewer({
-      qrId: kit.qrCodes[0]?.id,
+      target: { kitId: kit.id },
       userId,
       organizationId,
       // The caller's FULL role list, mirroring the asset route. Not the single

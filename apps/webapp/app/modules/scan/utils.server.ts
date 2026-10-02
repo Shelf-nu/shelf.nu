@@ -1,4 +1,5 @@
 import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
+import { ScanCodeType } from "@prisma/client";
 import type { IResult } from "ua-parser-js";
 import parser from "ua-parser-js";
 import { ShelfError } from "~/utils/error";
@@ -89,13 +90,22 @@ function isValidUser(
 /**
  * A scan row with the relations `parseScanData` needs: the scanning user
  * (with their org memberships, to decide whether to name them) and the QR
- * (for its organization). Named so tests can build fixtures against the real
- * shape instead of casting — a schema change then fails typecheck.
+ * (whose organization stands in on a row that carries none). Named so tests
+ * can build fixtures against the real shape instead of casting: a schema
+ * change then fails typecheck.
  */
 export type ScanWithRelations = Scan & {
   user: (User & { userOrganizations: UserOrganization[] | null }) | null;
 } & { qr: Qr | null };
 
+/**
+ * Shapes a scan row for the "Last scan" card.
+ *
+ * @param args.scan - The scan with its relations, or null when never scanned
+ * @param args.userId - The viewer
+ * @returns The card payload, or null when there is no scan
+ * @throws {ShelfError} If the row cannot be parsed
+ */
 export function parseScanData({
   scan,
   userId,
@@ -110,10 +120,13 @@ export function parseScanData({
      * 2. User - Scanned by: You || Unknown
      */
     if (scan) {
-      let scannedBy = scan.userId === userId ? "You" : "Unknown";
-      const user = scan?.user;
-      scannedBy =
-        user && isValidUser(user?.userOrganizations, scan?.qr?.organizationId)
+      const user = scan.user;
+      // The scanner is named only when they belong to the workspace the code
+      // resolved in. Every row written since scans record their workspace
+      // carries it; the QR's workspace is the fallback for any that do not.
+      const scanOrganizationId = scan.organizationId ?? scan.qr?.organizationId;
+      const scannedBy =
+        user && isValidUser(user.userOrganizations, scanOrganizationId)
           ? `${resolveUserDisplayName(user)}(${user.email})`
           : "Unknown";
       const coordinates =
@@ -130,6 +143,10 @@ export function parseScanData({
         dateTime: scan.createdAt,
         ua,
         manuallyGenerated: scan.manuallyGenerated,
+        codeType: scan.codeType,
+        // The scanned value, shown for a barcode or SAM ID so the card says
+        // which label was scanned. A QR id means nothing to a reader.
+        code: scan.codeType === ScanCodeType.QR ? null : scan.code,
       };
     }
 

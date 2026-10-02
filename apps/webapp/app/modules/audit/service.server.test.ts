@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
+import { recordAuditScanNonFatal } from "~/modules/scan/service.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { createSignedUrl } from "~/utils/storage.server";
@@ -62,6 +63,12 @@ vi.mock("~/utils/markdoc-wrappers", () => ({
 vi.mock("~/modules/activity-event/service.server", () => ({
   recordEvent: vi.fn().mockResolvedValue(undefined),
   recordEvents: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: the asset's scan record writes to the database; what it records is
+// covered in modules/scan/record-scan.test.ts. Here we assert the audit asks.
+vi.mock("~/modules/scan/service.server", () => ({
+  recordAuditScanNonFatal: vi.fn().mockResolvedValue(null),
 }));
 
 // why: cancellation triggers email + scheduler side effects we don't exercise in service unit tests
@@ -2451,6 +2458,45 @@ describe("audit service", () => {
       await recordAuditScan(scanInput);
 
       expect(mockDb.auditSession.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("records the audit scan on the asset's scan record once it commits", async () => {
+      mockPendingSession({ first: 1 });
+      mockDb.asset.findUnique.mockResolvedValue({
+        id: "asset-1",
+        title: "Camera",
+        organizationId: "org-1",
+        sequentialId: "SAM-0001",
+      });
+
+      await recordAuditScan({ ...scanInput, userAgent: "Mozilla/5.0" });
+
+      expect(recordAuditScanNonFatal).toHaveBeenCalledWith({
+        code: "qr-1",
+        asset: expect.objectContaining({
+          id: "asset-1",
+          sequentialId: "SAM-0001",
+        }),
+        organizationId: "org-1",
+        userId: "user-1",
+        userAgent: "Mozilla/5.0",
+      });
+    });
+
+    it("does not record a repeat of an asset this audit already scanned", async () => {
+      mockPendingSession({ first: 1 });
+      mockDb.auditScan.findFirst.mockResolvedValue({
+        id: "scan-0",
+        auditAssetId: "audit-asset-1",
+      });
+      // why: the repeat returns before the transaction, so the claims queued
+      // above are never consumed; drain them so they cannot answer a later
+      // test's updateMany.
+      mockDb.auditSession.updateMany.mockReset();
+
+      await recordAuditScan(scanInput);
+
+      expect(recordAuditScanNonFatal).not.toHaveBeenCalled();
     });
   });
 

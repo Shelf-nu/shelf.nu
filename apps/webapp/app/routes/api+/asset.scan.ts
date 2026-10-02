@@ -1,7 +1,8 @@
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getAsset } from "~/modules/asset/service.server";
-import { createScan } from "~/modules/scan/service.server";
+import { recordScan } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
@@ -44,17 +45,22 @@ export async function action({ context, request }: ActionFunctionArgs) {
       organizationId,
       include: { qrCodes: true },
     });
-    /** WE get the first qrCode as the app only supports 1 code per asset for now */
+    /** An asset carries one QR code; the GPS update is recorded against it. */
     const qr = asset?.qrCodes[0];
 
-    await createScan({
-      userAgent: request.headers.get("user-agent") as string,
-      userId: userId,
+    await recordScan({
+      codeType: ScanCodeType.QR,
+      code: qr.id,
+      source: ScanSource.GPS_UPDATE,
+      userAgent: request.headers.get("user-agent"),
+      userId,
       qrId: qr.id,
-      deleted: false,
-      latitude: latitude,
-      longitude: longitude,
+      assetId: asset.id,
+      organizationId,
+      latitude,
+      longitude,
       manuallyGenerated,
+      writeNote: true,
     });
 
     return data(payload({ success: true }));

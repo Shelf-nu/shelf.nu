@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -7,6 +8,8 @@ import type { AssetWithResolvableImage } from "~/modules/asset/image-resolution"
 import { serializeAssetImage } from "~/modules/asset/image-resolution";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { getQr } from "~/modules/qr/service.server";
+import type { RecordScanArgs } from "~/modules/scan/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import {
   getScannerPickerMeta,
   ScannerPickerContextSchema,
@@ -53,6 +56,7 @@ export type KitFromQr = KitFromScanner;
  * from the loaded asset or kit, the same way the QR branch does.
  */
 type ScannedBarcodeMatch = {
+  id: string;
   asset: (AssetWithResolvableImage & { id: string }) | null;
   kit: KitFromScanner | null;
 };
@@ -126,6 +130,22 @@ async function serializeScannedAsset<
   };
 }
 
+/**
+ * GET /api/get-scanned-item/:qrId
+ *
+ * Resolves a scanned QR id or SAM ID (with a SAM-shaped barcode fallback) to
+ * its asset or kit in the caller's workspace. Every web scanner drawer calls
+ * it once per scanned code, and the web scanner's SAM "View asset" calls it
+ * with `?source=scanner`.
+ *
+ * Each resolve records the scan: `WEB_SCANNER` with a note on the asset when
+ * `source=scanner` (the scanner opens the asset), `WEB_DRAWER` without one
+ * otherwise (any other `source` value counts as a drawer). A resolve carrying
+ * `auditSessionId` records nothing, because the audit's own writer
+ * (`recordAuditScan`) records that scan.
+ *
+ * @see {@link file://./get-scanned-barcode.$value.ts} the camera-barcode twin
+ */
 export async function loader({ request, params, context }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -150,6 +170,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude,
       auditSessionId,
       pickerContext,
+      source,
     } = parseData(
       searchParams,
       z.object({
@@ -176,6 +197,8 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             }
           }),
         auditSessionId: z.string().optional(),
+        /** `scanner` from the web scanner's SAM "View asset"; see above. */
+        source: z.string().optional(),
         /**
          * JSON-encoded `{ type: "location" | "kit" | "booking", id }`.
          * When present, the loader attaches a normalised picker MAX
@@ -206,6 +229,33 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       kitExtraInclude: Prisma.KitInclude | undefined;
       auditSessionId?: string;
       pickerContext?: ReturnType<typeof ScannerPickerContextSchema.parse>;
+      source?: string;
+    };
+
+    // Allowlisted: only the exact value opens the asset and notes it; any
+    // other value counts as a drawer.
+    const isScannerView = source === "scanner";
+
+    /**
+     * Records this resolve as a scan, unless an audit is scanning (its writer
+     * records instead). Non-fatal: a failed record never fails the resolve.
+     */
+    const recordResolvedScan = async (
+      resolved: Pick<
+        RecordScanArgs,
+        "codeType" | "qrId" | "barcodeId" | "assetId" | "kitId"
+      >
+    ) => {
+      if (auditSessionId) return;
+      await recordScanNonFatal({
+        ...resolved,
+        code: qrId,
+        source: isScannerView ? ScanSource.WEB_SCANNER : ScanSource.WEB_DRAWER,
+        userAgent: request.headers.get("user-agent"),
+        userId,
+        organizationId,
+        writeNote: isScannerView,
+      });
     };
 
     // SECURITY (CWE-94 / overfetch): assetExtraInclude/kitExtraInclude are
@@ -233,6 +283,10 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
       });
 
       if (asset) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.SAM_ID,
+          assetId: asset.id,
+        });
         return data(
           payload({
             qr: {
@@ -271,6 +325,15 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
             },
           })
         : null;
+
+      if (barcode?.asset || barcode?.kit) {
+        await recordResolvedScan({
+          codeType: ScanCodeType.BARCODE,
+          barcodeId: barcode.id,
+          assetId: barcode.asset?.id ?? null,
+          kitId: barcode.asset ? null : barcode.kit?.id ?? null,
+        });
+      }
 
       if (barcode?.asset) {
         return data(
@@ -339,6 +402,13 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
         label: "QR",
       });
     }
+
+    await recordResolvedScan({
+      codeType: ScanCodeType.QR,
+      qrId: qr.id,
+      assetId: qr.assetId,
+      kitId: qr.kitId,
+    });
 
     return data(
       payload({
