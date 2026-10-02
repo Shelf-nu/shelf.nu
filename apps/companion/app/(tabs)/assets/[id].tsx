@@ -802,7 +802,7 @@ export default function AssetDetailScreen() {
                 </Text>
               </View>
             )}
-            {asset.valuation != null && asset.valuation > 0 && (
+            {asset.valuation != null && (
               <InfoRow
                 icon="cash-outline"
                 label="Value"

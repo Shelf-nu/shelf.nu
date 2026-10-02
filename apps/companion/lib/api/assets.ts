@@ -244,5 +244,8 @@ export const assetsApi = {
     apiFetch<{ note: AssetNote }>(`/api/mobile/asset/add-note?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify({ assetId, content }),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
 };

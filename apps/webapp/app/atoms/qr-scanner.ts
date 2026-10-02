@@ -770,6 +770,40 @@ export type ExpectedModelRequest = {
 };
 
 /**
+ * One concrete `BookingAsset` already on a booking before a scan session
+ * starts. Both the Check Out drawer and the Scan to Assign screen render
+ * these in an "already included" section, so the shape is shared even
+ * though each screen seeds its own atom from it.
+ */
+export type AlreadyIncludedRow = {
+  id: string;
+  title: string;
+  mainImage: string | null;
+  thumbnailImage: string | null;
+  assetModelId: string | null;
+  /**
+   * Whether this asset's standalone row still carries no reservation stamp,
+   * so scanning it could answer a reserved unit. The server decides it; the
+   * drawer only reads it to tell a countable scan from a plain duplicate.
+   */
+  claimable: boolean;
+  kitId: string | null;
+  /**
+   * `BookingAsset.quantity` on this booking: `1` for INDIVIDUAL
+   * assets, `N` for QUANTITY_TRACKED. Lets the "Already included"
+   * collapser render `"Pens × 20"` for qty-tracked rows instead
+   * of hiding the unit count entirely.
+   */
+  bookedQuantity: number;
+  /**
+   * Asset type so the renderer knows whether to show the quantity
+   * suffix (`QUANTITY_TRACKED`) or suppress it (`INDIVIDUAL`, which
+   * is implicitly `× 1`).
+   */
+  type: "INDIVIDUAL" | "QUANTITY_TRACKED";
+};
+
+/**
  * Fulfil-and-checkout session metadata. Null when no session is
  * active. `bookingFrom` is kept as ISO string because the atom layer
  * shouldn't own `Date` instances (they serialize poorly across
@@ -802,27 +836,7 @@ export type FulfilSessionInfo = {
    * picture (mirrors the audit expected-list UX). Never mutated
    * client-side — the server owns these rows.
    */
-  alreadyIncluded: Array<{
-    id: string;
-    title: string;
-    mainImage: string | null;
-    thumbnailImage: string | null;
-    assetModelId: string | null;
-    kitId: string | null;
-    /**
-     * `BookingAsset.quantity` on this booking — `1` for INDIVIDUAL
-     * assets, `N` for QUANTITY_TRACKED. Lets the "Already included"
-     * collapser render `"Pens × 20"` for qty-tracked rows instead
-     * of hiding the unit count entirely.
-     */
-    bookedQuantity: number;
-    /**
-     * Asset type so the renderer knows whether to show the quantity
-     * suffix (`QUANTITY_TRACKED`) or suppress it (`INDIVIDUAL`, which
-     * is implicitly `× 1`).
-     */
-    type: "INDIVIDUAL" | "QUANTITY_TRACKED";
-  }>;
+  alreadyIncluded: AlreadyIncludedRow[];
 } | null;
 
 /** Current fulfil-and-checkout session metadata. */
@@ -867,3 +881,16 @@ export const endFulfilSessionAtom = atom(null, (_get, set) => {
   set(expectedModelRequestsAtom, []);
   set(scannedItemsAtom, {});
 });
+
+/**
+ * Assets already on the booking before the current Scan to Assign session.
+ *
+ * A separate atom rather than a read through `fulfilSessionAtom`: the Check
+ * Out drawer owns that atom's lifecycle, and pointing Scan to Assign's
+ * "already included" list at it would make one screen's teardown clear the
+ * other screen's data. `expectedModelRequestsAtom` is shared because both
+ * screens already agree on its lifecycle; this is the one piece that had no
+ * shared home yet. Seeded and cleared by
+ * `useBookingAssignSessionInitialization`.
+ */
+export const assignAlreadyIncludedAtom = atom<AlreadyIncludedRow[]>([]);
