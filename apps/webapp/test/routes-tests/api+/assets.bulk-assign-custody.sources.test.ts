@@ -56,16 +56,42 @@ vi.mock("~/modules/asset/availability-primitives.server", () => ({
 }));
 
 // why: the pool's placements and custody come from the database; each test
-// states them plainly.
+// states them plainly. The note wording helpers stay real.
 const sourcesMock = vi.hoisted(() => vi.fn());
-vi.mock("~/modules/asset/custody-source.server", () => ({
+vi.mock("~/modules/asset/custody-source.server", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("~/modules/asset/custody-source.server")
+  >()),
   loadCustodySources: sourcesMock,
 }));
 
-// why: exercising the route's forwarding and refusal, not the writes
+// why: exercising the route's forwarding and refusal, not the writes;
+// `checkOutQuantity` reports the source it recorded, as the service does
 vi.mock("~/modules/asset/service.server", () => ({
   bulkCheckOutAssets: vi.fn().mockResolvedValue({ skippedQuantityTracked: 0 }),
-  checkOutQuantity: vi.fn().mockResolvedValue({}),
+  checkOutQuantity: vi.fn().mockResolvedValue({
+    source: {
+      locationId: "loc-camera",
+      locationName: "Camera Room",
+      explicit: true,
+      multiSource: true,
+    },
+  }),
+}));
+
+// why: each per-unit write is followed by an audit note and a low-stock
+// check; neither is under test here
+vi.mock("~/modules/note/service.server", () => ({ createNote: vi.fn() }));
+vi.mock("~/modules/user/service.server", () => ({
+  getUserByID: vi.fn().mockResolvedValue({
+    id: "user-1",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    displayName: null,
+  }),
+}));
+vi.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vi.fn(),
 }));
 
 // why: authorization is asserted at the service layer; here it only needs to resolve
@@ -73,7 +99,9 @@ vi.mock("~/utils/roles.server", () => ({ requirePermission: vi.fn() }));
 
 // why: the custodian lookup and select-all narrowing read the database
 vi.mock("~/modules/team-member/service.server", () => ({
-  getTeamMember: vi.fn().mockResolvedValue({ id: "tm-1" }),
+  getTeamMember: vi
+    .fn()
+    .mockResolvedValue({ id: "tm-1", name: "Ahmed", user: null }),
   scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
 }));
 
@@ -136,7 +164,11 @@ beforeEach(() => {
     canUseBarcodes: false,
     canSeeAllCustody: true,
   } as Awaited<ReturnType<typeof requirePermission>>);
-  dbMocks.assetFindFirst.mockResolvedValue({ title: "Spanner", quantity: 4 });
+  dbMocks.assetFindFirst.mockResolvedValue({
+    title: "Spanner",
+    quantity: 4,
+    type: "QUANTITY_TRACKED",
+  });
   dbMocks.locationFindFirst.mockResolvedValue({ name: "Studio" });
   sourcesMock.mockResolvedValue(twoLocationPool);
 });
