@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  canDuplicateAsset,
   getPrimaryKit,
   getPrimaryLocation,
   isDirectBookingBlockedByKit,
@@ -112,4 +113,27 @@ describe("isDirectBookingBlockedByKit", () => {
     expect(isDirectBookingBlockedByKit(null)).toBe(false);
     expect(isDirectBookingBlockedByKit(undefined)).toBe(false);
   });
+});
+
+describe("canDuplicateAsset", () => {
+  it("allows an individual asset whatever its quantity", () => {
+    expect(canDuplicateAsset({ type: "INDIVIDUAL", quantity: null })).toBe(
+      true
+    );
+  });
+
+  it("allows a quantity-tracked asset with units in stock", () => {
+    expect(canDuplicateAsset({ type: "QUANTITY_TRACKED", quantity: 1 })).toBe(
+      true
+    );
+  });
+
+  it.each([0, null])(
+    "refuses a quantity-tracked asset with %s units in stock",
+    (quantity) => {
+      expect(canDuplicateAsset({ type: "QUANTITY_TRACKED", quantity })).toBe(
+        false
+      );
+    }
+  );
 });

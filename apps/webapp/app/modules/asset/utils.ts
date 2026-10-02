@@ -30,6 +30,25 @@ export function isQuantityTracked(
 }
 
 /**
+ * Returns true if the asset can be duplicated as it stands.
+ *
+ * A copy of a quantity-tracked asset starts with the source's stock, and a
+ * quantity-tracked asset needs at least 1 unit, so a pool with no units in
+ * stock cannot be copied until it is restocked. Individual assets can always
+ * be duplicated. The duplicate dialog and `duplicateAsset` both read this, so
+ * the button and the service refuse the same assets.
+ *
+ * @param asset - The source asset's `type` and `quantity` (workspace stock)
+ * @returns false only for a quantity-tracked asset with no units in stock
+ */
+export function canDuplicateAsset(asset: {
+  type?: AssetType | string | null;
+  quantity?: number | null;
+}): boolean {
+  return !isQuantityTracked(asset) || (asset.quantity ?? 0) > 0;
+}
+
+/**
  * Returns the asset's primary kit (or null) from the `AssetKit` pivot.
  *
  * `TKit` is inferred from the asset's projected shape: pass any value
