@@ -128,6 +128,11 @@ vitest.mock("~/database/db.server", () => ({
     qr: {
       update: vitest.fn().mockResolvedValue({}),
     },
+    // why: createAsset retypes the orphaned barcodes it reuses inside its
+    // create transaction, so the delegate has to exist for the tx body to run.
+    barcode: {
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
     // why: checkOutQuantity finds/creates/increments the operator-allocated
     // custody row; releaseQuantity finds it then deletes or decrements by
     // primary key. Both use `findFirst` (not `findUnique`) because the
@@ -2437,6 +2442,68 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("createAsset reused barcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("gives a reused orphaned barcode the type the import asked for", async () => {
+    expect.assertions(3);
+
+    await createAsset({
+      title: "NGR Locomotive",
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        // An orphan left behind by a deleted asset, stored as Code128, now
+        // claimed by a `barcode_ExternalQR` cell.
+        { type: "ExternalQR", value: "65LR002055MC", existingId: "bc-orphan" },
+        { type: "Code39", value: "ABC123", existingId: "bc-orphan-2" },
+        // A brand-new value: created with its type, no retype needed.
+        { type: "ExternalQR", value: "new-value" },
+      ],
+    } as any);
+
+    expect(db.barcode.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["bc-orphan"] }, organizationId: "org-A" },
+      data: { type: "ExternalQR" },
+    });
+    expect(db.barcode.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["bc-orphan-2"] }, organizationId: "org-A" },
+      data: { type: "Code39" },
+    });
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          barcodes: {
+            connect: [{ id: "bc-orphan" }, { id: "bc-orphan-2" }],
+            create: [
+              {
+                type: "ExternalQR",
+                value: "new-value",
+                organizationId: "org-A",
+              },
+            ],
+          },
+        }),
+      })
+    );
+  });
+
+  it("does not touch existing barcodes when none are reused", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [{ type: "Code128", value: "ABC123" }],
+    } as any);
+
+    expect(db.barcode.updateMany).not.toHaveBeenCalled();
   });
 });
 
