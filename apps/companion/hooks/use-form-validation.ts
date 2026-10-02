@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { usePreventRemove } from "@react-navigation/native";
+import { valuationFromInput } from "@/lib/asset-valuation";
 import type { AssetDetail, Category, Location, Tag } from "@/lib/api";
 import type { CustomFieldState } from "./use-edit-asset-form";
 
@@ -50,7 +51,7 @@ export function useFormValidation({
       origTagIds.some((id, i) => id !== newTagIds[i])
     )
       return true;
-    const numVal = valuation.trim() ? parseFloat(valuation.trim()) : null;
+    const numVal = valuationFromInput(valuation);
     if (numVal !== (originalAsset.valuation ?? null)) return true;
     if (customFields.some((cf) => cf.value !== cf.originalValue)) return true;
     return false;
