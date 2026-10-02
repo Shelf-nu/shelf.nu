@@ -228,6 +228,10 @@ vitest.mock("~/database/db.server", () => ({
         lastName: "User",
         displayName: null,
       }),
+      // why: booking emails name the acting user (resolveBookingEmailActor).
+      // Null by default so no email carries an actor line; the "booking emails
+      // name who acted" block sets the acting user it asserts on.
+      findUnique: vitest.fn().mockResolvedValue(null),
       // why: updateBasicBooking now resolves the acting user's format prefs via
       // resolveUserFormatPrefsById (db.user.findFirst). Returning null makes the
       // resolver fall back to hints/defaults — no test asserts the formatted
@@ -16941,5 +16945,365 @@ describe("model reservation guard — write paths", () => {
 
       expect(db.booking.update).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * Every booking email a person triggers names them and the moment, on the
+ * line under the heading (HTML) and right after the event sentence (plain
+ * text). One test per send site. The acting user has a display name set, so
+ * it must be the name shown, never the legal first and last name.
+ */
+describe("booking emails name who acted", () => {
+  /** When the action runs; the Berlin recipient sees it as 16:15. */
+  const ACTED_AT = new Date("2026-09-30T14:15:00Z");
+
+  const ACTING_USER = {
+    email: "test@example.com",
+    firstName: "Johanna",
+    lastName: "Legal",
+    displayName: "Jo Display",
+  };
+
+  /** The fields the email template and its footers read. */
+  const EMAIL_FIELDS = {
+    custodianUser: {
+      id: "user-2",
+      email: "custodian@example.com",
+      firstName: "Casey",
+      lastName: "Custodian",
+      displayName: null,
+    },
+    custodianTeamMember: null,
+    creator: null,
+    notificationRecipients: [],
+    modelRequests: [],
+    organization: {
+      name: "Test Org",
+      customEmailFooter: null,
+      owner: { email: "owner@example.com" },
+    },
+    _count: { bookingAssets: 1 },
+  };
+
+  /** One recipient who reads dates as DD/MM/YYYY, 24h, in Berlin. */
+  function mockBerlinRecipient() {
+    vitest.mocked(getBookingNotificationRecipients).mockResolvedValueOnce([
+      {
+        email: "custodian@example.com",
+        firstName: "Casey",
+        lastName: "Custodian",
+        userId: "user-2",
+        dateFormat: "DD_MM_YYYY",
+        timeFormat: "H24",
+        weekStart: "MONDAY",
+        timeZone: "Europe/Berlin",
+        reason: "custodian",
+      },
+    ]);
+  }
+
+  /** Asserts every sent email carries the actor line, in HTML and text. */
+  function expectActorLine(label: string, emailCount = 1) {
+    const payloads = vitest.mocked(sendEmail).mock.calls.map(([p]) => p);
+    expect(payloads).toHaveLength(emailCount);
+    for (const payload of payloads) {
+      expect(payload.text).toContain(
+        `\n${label}: Jo Display on 30/09/2026, 16:15\n`
+      );
+      expect(payload.html).toContain(`${label}:</span>`);
+      expect(payload.html).toContain("Jo Display on 30/09/2026, 16:15");
+      expect(payload.html).not.toContain("Johanna");
+      expect(payload.text).not.toContain("Johanna");
+    }
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    vitest.useFakeTimers({ toFake: ["Date"] });
+    vitest.setSystemTime(ACTED_AT);
+    //@ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValue(ACTING_USER);
+    // why: `clearAllMocks` keeps implementations, and earlier describes leave
+    // bookings in this read. Extend's clash check reads it, so an unrelated
+    // leftover booking would refuse the extension before any email is sent.
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vitest.useRealTimers();
+    //@ts-expect-error missing vitest type
+    db.user.findUnique.mockResolvedValue(null);
+  });
+
+  it("reserveBooking: Reserved by", async () => {
+    const draft = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.DRAFT,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            status: "AVAILABLE",
+            availableToBook: true,
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(draft);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...draft,
+      status: BookingStatus.RESERVED,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.count.mockResolvedValueOnce(1);
+    mockBerlinRecipient();
+
+    await reserveBooking({
+      id: "booking-1",
+      name: "Test Booking",
+      organizationId: "org-1",
+      custodianUserId: "user-2",
+      custodianTeamMemberId: "team-2",
+      from: futureFromDate,
+      to: futureToDate,
+      hints: mockClientHints,
+      isSelfServiceOrBase: false,
+      tags: [],
+      userId: "user-1",
+    });
+
+    expectActorLine("Reserved by");
+  });
+
+  it("checkinBooking: Completed by", async () => {
+    const ongoing = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-2",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...ongoing,
+      status: BookingStatus.COMPLETE,
+    });
+    mockBerlinRecipient();
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      userId: "user-1",
+    });
+
+    expectActorLine("Completed by");
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.html).not.toContain("Checked in by");
+  });
+
+  it("cancelBooking: Cancelled by, above the cancellation reason", async () => {
+    const reserved = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", assetKits: [] },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-3",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...reserved,
+      status: BookingStatus.CANCELLED,
+    });
+    mockBerlinRecipient();
+
+    await cancelBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      userId: "user-1",
+      cancellationReason: "Venue closed",
+    });
+
+    expectActorLine("Cancelled by");
+    const [payload] = vitest.mocked(sendEmail).mock.calls[0];
+    expect(payload.text).toContain(
+      'Your booking has been cancelled: "Test Booking".\n' +
+        "Cancelled by: Jo Display on 30/09/2026, 16:15\n" +
+        "\n" +
+        "Reason: Venue closed"
+    );
+  });
+
+  it("revertBookingToDraft: Reverted by", async () => {
+    const reserved = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.RESERVED,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(reserved);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...reserved,
+      status: BookingStatus.DRAFT,
+    });
+    mockBerlinRecipient();
+
+    await revertBookingToDraft({
+      id: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      hints: mockClientHints,
+    });
+
+    expectActorLine("Reverted by");
+  });
+
+  it("extendBooking: Extended by", async () => {
+    const ongoing = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: { id: "asset-1", status: AssetStatus.CHECKED_OUT },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-actor-5",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    const newEndDate = new Date(futureToDate.getTime() + 24 * 60 * 60 * 1000);
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(ongoing);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ ...ongoing, to: newEndDate });
+    mockBerlinRecipient();
+
+    await extendBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      newEndDate,
+      hints: mockClientHints,
+      userId: "user-1",
+      role: OrganizationRoles.ADMIN,
+    });
+
+    expectActorLine("Extended by");
+  });
+
+  it("deleteBooking: Deleted by", async () => {
+    const reserved = {
+      ...mockBookingData,
+      ...EMAIL_FIELDS,
+      status: BookingStatus.RESERVED,
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue(reserved);
+    //@ts-expect-error missing vitest type
+    db.booking.delete.mockResolvedValue(reserved);
+    mockBerlinRecipient();
+
+    await deleteBooking(
+      { id: "booking-1", organizationId: "org-1" },
+      mockClientHints,
+      "user-1"
+    );
+
+    expectActorLine("Deleted by");
+  });
+
+  /** Two reserved bookings, as the bulk actions read them. */
+  function bulkBookings() {
+    return ["bk-actor-1", "bk-actor-2"].map((id, i) => ({
+      ...EMAIL_FIELDS,
+      id,
+      name: `Booking ${i + 1}`,
+      organizationId: "org-1",
+      status: BookingStatus.RESERVED,
+      custodianUserId: "user-2",
+      activeSchedulerReference: null,
+      bookingAssets: [],
+      from: futureFromDate,
+      to: futureToDate,
+    }));
+  }
+
+  it("bulkCancelBookings: Cancelled by, on every booking's email", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue(bulkBookings());
+    mockBerlinRecipient();
+    mockBerlinRecipient();
+
+    await bulkCancelBookings({
+      bookingIds: ["bk-actor-1", "bk-actor-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    expectActorLine("Cancelled by", 2);
+  });
+
+  it("bulkDeleteBookings: Deleted by, on every booking's email", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue(bulkBookings());
+    mockBerlinRecipient();
+    mockBerlinRecipient();
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-actor-1", "bk-actor-2"],
+      organizationId: "org-1",
+      userId: "user-1",
+      role: OrganizationRoles.OWNER,
+      hints: mockClientHints,
+    });
+
+    expectActorLine("Deleted by", 2);
   });
 });
