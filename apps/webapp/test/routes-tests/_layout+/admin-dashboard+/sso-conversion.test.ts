@@ -495,6 +495,7 @@ describe("admin sso-conversion route", () => {
         expect(setRequireSsoLogin).toHaveBeenCalledWith({
           organizationId: "linked",
           requireSsoLogin: false,
+          actorUserId: ADMIN_ID,
         });
         expect(result).toEqual(
           expect.objectContaining({
@@ -518,6 +519,7 @@ describe("admin sso-conversion route", () => {
         expect(setRequireSsoLogin).toHaveBeenCalledWith({
           organizationId: "linked",
           requireSsoLogin: true,
+          actorUserId: ADMIN_ID,
         });
       });
 

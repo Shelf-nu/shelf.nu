@@ -168,7 +168,18 @@ export function isSsoLoginRelaxed(
  */
 async function decideLegacyLogin(
   email: string,
-  user: { id: string; sso: boolean } | null
+  user: { id: string; sso: boolean } | null,
+  {
+    honourRelaxation = true,
+  }: {
+    /**
+     * Whether the "Require SSO login" switch may allow the account. Off for
+     * the email-change guard: the switch relaxes logins during an SSO pilot,
+     * and moving the address off the domain would escape enforcement for good
+     * once the switch is back on.
+     */
+    honourRelaxation?: boolean;
+  } = {}
 ): Promise<LegacyLoginDecision> {
   // A converted account has no password or email identity left, whatever its
   // domain, so it is refused before the domain is even looked up.
@@ -180,7 +191,9 @@ async function decideLegacyLogin(
 
   if (!user) return { allowed: false, reason: "sso_domain" };
 
-  if (isSsoLoginRelaxed(linkedOrganizations)) return { allowed: true };
+  if (honourRelaxation && isSsoLoginRelaxed(linkedOrganizations)) {
+    return { allowed: true };
+  }
 
   const linkedOrgIds = linkedOrganizations.map((org) => org.id);
   if (await userOwnsLinkedSsoWorkspace(user.id, linkedOrgIds)) {
@@ -272,7 +285,9 @@ export async function assertEmailChangeAllowed({
   });
   if (user?.sso) return;
 
-  const decision = await decideLegacyLogin(email, user);
+  const decision = await decideLegacyLogin(email, user, {
+    honourRelaxation: false,
+  });
   if (decision.allowed) return;
 
   throw new ShelfError({

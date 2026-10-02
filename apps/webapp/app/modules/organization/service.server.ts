@@ -18,6 +18,7 @@ import {
   ShelfError,
 } from "~/utils/error";
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
+import { Logger } from "~/utils/logger";
 import { emailMatchesDomains } from "~/utils/misc";
 import {
   createStripeCustomer,
@@ -764,6 +765,8 @@ export async function toggleAuditEnabled({
  * @param args.organizationId - the workspace whose SSO setup is changed
  * @param args.requireSsoLogin - `true` to refuse legacy sign-in, `false` to
  *   allow it while SSO is being set up and tested
+ * @param args.actorUserId - the staff member making the change, logged so a
+ *   relaxed domain can be traced to who relaxed it
  * @returns the updated `SsoDetails` row
  * @throws {ShelfError} 400 when the workspace has no SSO details; 500 when the
  *   lookup or the update fails
@@ -771,9 +774,11 @@ export async function toggleAuditEnabled({
 export async function setRequireSsoLogin({
   organizationId,
   requireSsoLogin,
+  actorUserId,
 }: {
   organizationId: string;
   requireSsoLogin: boolean;
+  actorUserId: string;
 }) {
   try {
     const organization = await db.organization.findUnique({
@@ -794,10 +799,16 @@ export async function setRequireSsoLogin({
       });
     }
 
-    return await db.ssoDetails.update({
+    const updated = await db.ssoDetails.update({
       where: { id: organization.ssoDetailsId },
       data: { requireSsoLogin },
     });
+
+    Logger.info(
+      `SSO: Require SSO login set to ${requireSsoLogin} on SSO details ${organization.ssoDetailsId} (workspace ${organizationId}) by ${actorUserId}`
+    );
+
+    return updated;
   } catch (cause) {
     rethrowIfClientError(cause);
 

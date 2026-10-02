@@ -306,7 +306,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        await setRequireSsoLogin({ organizationId, requireSsoLogin });
+        await setRequireSsoLogin({
+          organizationId,
+          requireSsoLogin,
+          actorUserId: userId,
+        });
 
         sendNotification({
           title: requireSsoLogin

@@ -487,13 +487,15 @@ describe("assertEmailChangeAllowed", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("allows a standard non-owner while every linked workspace has Require SSO login off", async () => {
+  it("still refuses a standard non-owner while Require SSO login is switched off", async () => {
+    // The switch only relaxes logins during an SSO pilot. Moving the address
+    // off the domain would escape enforcement once the switch is back on.
     givenUserById({ id: "user-1", sso: false });
     givenLinkedWorkspaces([{ id: LINKED_ORG_ID, requireSsoLogin: false }]);
 
     await expect(
       assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
-    ).resolves.toBeUndefined();
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it("allows a standard account on a domain without SSO", async () => {

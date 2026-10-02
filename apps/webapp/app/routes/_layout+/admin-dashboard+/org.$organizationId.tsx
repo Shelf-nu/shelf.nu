@@ -197,7 +197,11 @@ export const action = async ({
               .default("false"),
           })
         );
-        await setRequireSsoLogin({ organizationId, requireSsoLogin });
+        await setRequireSsoLogin({
+          organizationId,
+          requireSsoLogin,
+          actorUserId: userId,
+        });
 
         return payload({
           message: `Require SSO login ${requireSsoLogin ? "on" : "off"}`,
