@@ -1459,6 +1459,15 @@ export async function createAsset({
         });
       }
 
+      /**
+       * Orphaned barcodes being reused, grouped by the type the caller asked
+       * for. A reused row keeps whatever type it was created with, so it is
+       * retyped inside the create transaction before being connected:
+       * otherwise a `barcode_ExternalQR` import cell that matches a leftover
+       * Code128 row attaches as Code128.
+       */
+      const reusedBarcodeIdsByType = new Map<BarcodeType, string[]>();
+
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
       if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
@@ -1466,9 +1475,17 @@ export async function createAsset({
         );
 
         if (barcodesToAdd.length > 0) {
-          const barcodesToConnect = barcodesToAdd
-            .filter((b) => b.existingId)
-            .map((b) => ({ id: b.existingId! }));
+          const reusedBarcodes = barcodesToAdd.filter((b) => b.existingId);
+          reusedBarcodes.forEach(({ type, existingId }) => {
+            reusedBarcodeIdsByType.set(type, [
+              ...(reusedBarcodeIdsByType.get(type) ?? []),
+              existingId!,
+            ]);
+          });
+
+          const barcodesToConnect = reusedBarcodes.map((b) => ({
+            id: b.existingId!,
+          }));
 
           const barcodesToCreate = barcodesToAdd
             .filter((b) => !b.existingId)
@@ -1523,6 +1540,16 @@ export async function createAsset({
             { categoryId: categoryId!, organizationId },
             tx
           );
+        }
+
+        // The value already matches (that is how the orphan was found), so
+        // only the type needs to follow the import. Org-scoped: the ids come
+        // from an org-scoped lookup, and this keeps the write that way too.
+        for (const [type, ids] of reusedBarcodeIdsByType) {
+          await tx.barcode.updateMany({
+            where: { id: { in: ids }, organizationId },
+            data: { type },
+          });
         }
 
         const created = await tx.asset.create({
