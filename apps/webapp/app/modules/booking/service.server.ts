@@ -857,6 +857,8 @@ async function reconcileAssetStatusForBookingExit({
  *
  *  - `status: CHECKED_OUT` leaves a kit held in a custodian's hands alone, so
  *    it cannot be stranded AVAILABLE with its `KitCustody` row still attached;
+ *    a kit that carries a `KitCustody` row is skipped whatever its status, for
+ *    the same reason;
  *  - a kit any OTHER live booking still has out is dropped outright. That one
  *    the status filter cannot catch, because such a kit is legitimately
  *    CHECKED_OUT — and releasing it would let it be booked again while it is
@@ -971,6 +973,7 @@ async function releaseCheckedOutKits(
       id: { in: releasableKitIds },
       organizationId,
       status: KitStatus.CHECKED_OUT,
+      custody: { is: null },
     },
     data: { status: KitStatus.AVAILABLE },
   });
@@ -5194,7 +5197,7 @@ export async function checkinBooking({
               quantity: true,
               // Kit provenance: which kit this slice came from, which survives
               // the member being detached from the kit mid-booking. Required by
-              // `getKitIdsByBookingSlices`, so dropping either is a type error.
+              // `getKitIdsToAcquire`, so dropping either is a type error.
               assetKitId: true,
               sourceKitId: true,
               asset: {
@@ -5256,24 +5259,19 @@ export async function checkinBooking({
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
     /**
-     * Kits to release, from BOTH directions.
-     *
-     * Live membership alone misses a kit whose member was detached while the
-     * booking ran; the booking's own slices alone miss a kit reached through a
-     * standalone row, which carries no provenance. A kit released redundantly
-     * is a no-op write; a kit missed stays stuck with no way out of the UI.
-     */
-    const sliceKitAssetIds = await getKitIdsByBookingSlices({
-      slices: bookingFound.bookingAssets,
-      organizationId,
-    });
-    /**
      * Kits this booking took out, resolved exactly as the check-out that
      * stamped them did — release has to be the inverse of acquire, or it
      * either strands a kit or hands back one it never held. In particular a
      * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
      * its units come out of the free pool, and every kit holding that asset
      * kept its own slice throughout.
+     *
+     * Every one of them goes to `releaseCheckedOutKits`. This check-in closes
+     * every slice of the booking, so nothing on it still holds a kit, and
+     * whether another live booking does is read from that booking's own
+     * slices. Do not gate on member asset statuses: a `QUANTITY_TRACKED`
+     * member shared with another kit reads CHECKED_OUT while that other kit
+     * is out, which says nothing about this kit.
      */
     const kitIds = await getKitIdsToAcquire({
       slices: bookingFound.bookingAssets,
@@ -5395,31 +5393,7 @@ export async function checkinBooking({
       })
       .map((asset) => asset.id);
 
-    // Pre-compute which kits to check in
     const assetsToCheckinSet = new Set(assetsToCheckin);
-    const kitsToCheckin = hasKits
-      ? kitIds.filter((kitId) => {
-          // Same union as the resolution above. Filtering on membership alone
-          // yields [] for a kit reached only through provenance, and `.every()`
-          // on [] is vacuously true — which would release it unconditionally.
-          //
-          // Membership is matched across EVERY `AssetKit` row: a
-          // `QUANTITY_TRACKED` asset can belong to several kits, and the rows
-          // come back unordered, so a first-row read tests an arbitrary one.
-          const kitAssetsInBooking = bookingFoundAssets.filter(
-            (asset) =>
-              sliceKitAssetIds.get(kitId)?.has(asset.id) ||
-              (asset.assetKits ?? []).some(
-                (membership) => membership?.kitId === kitId
-              )
-          );
-          return kitAssetsInBooking.every(
-            (asset) =>
-              assetsToCheckinSet.has(asset.id) ||
-              asset.status === AssetStatus.AVAILABLE
-          );
-        })
-      : [];
 
     /**
      * Build the lookups of explicit dispositions. Qty-tracked slices
@@ -5824,7 +5798,7 @@ export async function checkinBooking({
         /* If there are any kits associated with the booking, then update their status */
         if (hasKits) {
           await releaseCheckedOutKits(tx, {
-            kitIds: kitsToCheckin,
+            kitIds,
             organizationId,
             excludeBookingIds: [id],
           });
