@@ -28,6 +28,7 @@
  * @see apps/webapp/app/routes/api+/mobile+/config.ts
  */
 import { getAppVersion } from "../app-update";
+import { parseLatestCompanionVersion } from "../update-banner";
 import {
   CLOUD_SERVER,
   getActiveServer,
@@ -261,6 +262,34 @@ export async function refreshActiveServerConfig(): Promise<void> {
   // a credentials refresh (no teardown, no sign-out of unrelated state), and an
   // unchanged config is a no-op.
   await setActiveServer(server);
+}
+
+/**
+ * Asks the active server which app version is newest in the stores.
+ *
+ * Feeds the "new version available" banner. Unlike
+ * `refreshActiveServerConfig` it covers Shelf Cloud too, and it only reads: it
+ * never changes the active server. It skips `parseServerConfigResponse` on
+ * purpose, because the banner needs one field and a response that parser
+ * rejects can still carry it.
+ *
+ * @returns The advertised version, or `null` on any failure: offline, an
+ *   error status, a body that is not JSON, or a server that predates the field.
+ */
+export async function fetchLatestCompanionVersion(): Promise<string | null> {
+  try {
+    return await fetchWithTimeout(
+      `${getActiveServer().baseUrl}/api/mobile/config`,
+      { method: "GET", headers: { accept: "application/json" } },
+      CONFIG_TIMEOUT_MS,
+      async (response) => {
+        if (!response.ok) return null;
+        return parseLatestCompanionVersion(await response.json());
+      }
+    );
+  } catch {
+    return null;
+  }
 }
 
 /**

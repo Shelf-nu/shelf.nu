@@ -22,6 +22,7 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { config } from "~/config/shelf.config";
 import {
   INSTANCE_NAME,
+  LATEST_COMPANION_VERSION,
   MIN_COMPANION_VERSION,
   SUPABASE_ANON_PUBLIC,
   SUPABASE_URL,
@@ -55,6 +56,9 @@ export function loader(_args: LoaderFunctionArgs) {
     // guards the other direction (server too old for the app); the two are
     // independent because neither side can update the other.
     minCompanionVersion: MIN_COMPANION_VERSION || null,
+    // Newest app version in the stores, or null for "no banner". An older app
+    // shows a dismissible "new version available" banner; it blocks nothing.
+    latestCompanionVersion: LATEST_COMPANION_VERSION || null,
     ssoEnabled: !config.disableSSO,
     // Password login is an organisation-level concern (SSO orgs disable it per
     // organisation), not an instance-level one, so this is always true today.
