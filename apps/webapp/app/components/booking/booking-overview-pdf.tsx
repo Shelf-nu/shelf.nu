@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Fragment, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
@@ -7,13 +7,15 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
+import { AssetCodePrintImage } from "../assets/asset-code-print-image";
 import { AssetCodePrintText } from "../assets/asset-code-print-text";
-import { AssetImage } from "../assets/asset-image/component";
+import { AssetPrintImage } from "../assets/asset-print-image";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
@@ -21,6 +23,24 @@ import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type PdfApiResponse = { pdfMeta: PdfDbResult };
+
+/**
+ * Widths of the asset table's columns, in percent, in column order. They sum
+ * to 100 and the table is `table-fixed`, so the table is exactly the printable
+ * width and no cell's content can push it off the page; long text wraps inside
+ * its column instead. The Code column's share is shared with the server, which
+ * refuses a barcode picture wider than that cell.
+ */
+const ASSET_TABLE_COLUMNS = [
+  { name: "number", percent: 5 },
+  { name: "image", percent: 10 },
+  { name: "name", percent: 16 },
+  { name: "quantity", percent: 6 },
+  { name: "kit", percent: 10 },
+  { name: "category", percent: 13 },
+  { name: "location", percent: 13 },
+  { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
+] as const;
 
 export const BookingOverviewPDF = ({
   booking,
@@ -188,16 +208,16 @@ export const BookingPDFPreview = ({
     booking,
     organization,
     assets,
-    assetIdToQrCodeMap,
+    assetIdToCodeImageMap,
     assetIdToDisplayCodeMap,
     totalValue,
     modelRequests,
   } = pdfMeta;
 
   // Workspaces that want people scanning the label on the item, not the sheet,
-  // turn the QR image off. The text code prints either way, so the row is still
-  // matchable by eye.
-  const showQrCodesOnPdfs = organization.showQrCodesOnPdfs ?? true;
+  // turn the code pictures off. The text code prints either way, so the row is
+  // still matchable by eye.
+  const showCodeImages = organization.showQrCodesOnPdfs ?? true;
 
   // Phase 3d (Book-by-Model): defensively re-filter here so a caller
   // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
@@ -222,19 +242,28 @@ export const BookingPDFPreview = ({
   const isPeriodDifferentFromOriginal =
     isFromDifferentFromOriginal || isToDifferentFromOriginal;
 
+  /** An empty Description row is noise on paper, so it prints only with text. */
+  const hasDescription = !!booking.description?.trim();
+
   return (
     <div className="border bg-gray-200 py-4">
       <style>
         {`@media print {
           @page {
-            margin: 10mm;  /* Adjust margin size as needed */
+            margin: 10mm;
             size: A4;
           }
+          /* The printable width IS the sheet: A4 minus the page margins. A
+             fixed width wider than that makes Chrome shrink the whole page. */
           .pdf-wrapper {
-            margin: 0;
-            padding: 0;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: auto !important;
           }
+          /* The cells draw every line. The table's own border would run
+             down into the space a whole row leaves at the foot of a page. */
           .booking-assets-table {
+            border: 0 !important;
             border-collapse: separate !important;
             border-spacing: 0 !important;
           }
@@ -250,10 +279,22 @@ export const BookingPDFPreview = ({
           .booking-assets-table td:first-child {
             border-left: 1px solid #d1d5db !important;
           }
+          /* A row never splits across a page break, and each asset's group
+             (its row plus its description row) moves to the next page whole.
+             The header repeats on every page. */
+          .booking-assets-table tr,
+          .booking-assets-table tbody {
+            break-inside: avoid;
+          }
+          .booking-assets-table thead {
+            display: table-header-group;
+          }
         }`}
       </style>
       <div
-        className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+        // On screen the sheet is an A4 page with its 10mm margins as padding,
+        // so the preview's table is the same 190mm wide as the printed one.
+        className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
         ref={componentRef}
       >
         <div className="mb-5 flex justify-between">
@@ -312,14 +353,16 @@ export const BookingPDFPreview = ({
             </div>
           </When>
 
-          <div className="flex border-b border-gray-300 p-2">
-            <span className="min-w-[150px] text-sm font-medium">
-              Description
-            </span>
-            <span className="grow whitespace-pre-wrap text-gray-600">
-              {booking?.description}
-            </span>
-          </div>
+          <When truthy={hasDescription}>
+            <div className="flex border-b border-gray-300 p-2">
+              <span className="min-w-[150px] text-sm font-medium">
+                Description
+              </span>
+              <span className="grow whitespace-pre-wrap text-gray-600">
+                {booking.description}
+              </span>
+            </div>
+          </When>
 
           <div className="flex p-2">
             <span className="min-w-[150px] text-sm font-medium">
@@ -343,84 +386,79 @@ export const BookingPDFPreview = ({
           </When>
         </section>
 
-        <table className="booking-assets-table w-full border border-gray-300">
+        <table className="booking-assets-table w-full table-fixed border border-gray-300">
+          <colgroup>
+            {ASSET_TABLE_COLUMNS.map((column) => (
+              <col key={column.name} style={{ width: `${column.percent}%` }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
-              <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                 #
               </th>
-              <th className="w-20 min-w-[76px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                 Image
               </th>
-              <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Name
               </th>
-              <th className="w-12 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                 Qty
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Kit
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Category
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              {/* Sized so the CODE gets ~120px, the same room the audit
-                  receipt gives it at 140px. The two numbers differ because this
-                  cell also carries the tick box and its gap on the code's line,
-                  which take 32px the audit cell does not spend. At ~120px a SAM
-                  ID or a ten-character QR id takes one line and a 25-character
-                  legacy QR id takes two; below ~166px the legacy id takes
-                  three. Longer barcode values wrap further on `break-all`. */}
-              <th className="min-w-[174px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              {/* Wide enough for the tick box and code line, and for an
+                  11-character Code 128 picture at 0.25mm per bar. The code
+                  text wraps on `break-all`. */}
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
           </thead>
-          <tbody>
-            {assets.map((asset, index) => (
-              // Per-slice rows: a QT asset booked standalone + via multiple
-              // kits appears once per slice, so key on the unique
-              // `bookingAssetId` (asset.id would collide across slices).
-              <Fragment key={asset.bookingAssetId}>
-                <tr
-                  key={asset.bookingAssetId}
-                  className={tw(
-                    "align-top",
-                    !asset.description && "border-b border-gray-300"
-                  )}
-                >
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    {index + 1}
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <AssetImage
-                      asset={{
-                        id: asset.id,
-                        mainImage: asset.mainImage,
-                        thumbnailImage: asset.thumbnailImage,
-                        mainImageExpiration: asset.mainImageExpiration,
-                        assetModel: asset.assetModel ?? null,
-                      }}
-                      alt={`Image of ${asset.title}`}
-                      className="!size-14 object-cover"
-                    />
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    {asset?.title}
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-center text-sm text-gray-600">
-                    {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
-                    {asset.quantity ?? 1}
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    {/* why: out of this rule — the checklist prints the kit's
+          {assets.map((asset, index) => (
+            // One row group per asset, so its row and its description row
+            // print on the same page. Per-slice rows: a QT asset booked
+            // standalone + via multiple kits appears once per slice, so key on
+            // the unique `bookingAssetId` (asset.id would collide across
+            // slices).
+            <tbody key={asset.bookingAssetId}>
+              <tr
+                className={tw(
+                  "align-top",
+                  !asset.description && "border-b border-gray-300"
+                )}
+              >
+                <td className="border-r border-gray-300 px-1 py-2.5 text-sm text-gray-600">
+                  {index + 1}
+                </td>
+                <td className="border-r border-gray-300 px-1.5 py-2.5 text-sm text-gray-600">
+                  <AssetPrintImage
+                    asset={asset}
+                    alt={`Image of ${asset.title}`}
+                    className="size-14"
+                  />
+                </td>
+                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                  {asset?.title}
+                </td>
+                <td className="break-words border-r border-gray-300 px-1 py-2.5 text-center text-sm text-gray-600">
+                  {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
+                  {asset.quantity ?? 1}
+                </td>
+                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                  {/* why: out of this rule: the checklist prints the kit's
                         name only. Kits carry no `sequentialId`, so a SAM_ID
                         workspace has no kit code to print here. */}
-                    {asset?.kit?.name}
-                    {/* Print-medium equivalent of the overview's
+                  {asset?.kit?.name}
+                  {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
                         paper, so the explanation is printed inline. Without
                         it a detached row is indistinguishable from a live kit
@@ -428,68 +466,61 @@ export const BookingPDFPreview = ({
                         actual contents with nothing explaining the gap.
                         Status-neutral wording: CANCELLED bookings keep these
                         rows too and may never have gone out. */}
-                    <When truthy={!!asset.isRemovedFromKit}>
-                      <span className="mt-1 block text-xs text-gray-500">
-                        Removed from kit — kept as a record of what was booked
-                      </span>
+                  <When truthy={!!asset.isRemovedFromKit}>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      Removed from kit, kept as a record of what was booked
+                    </span>
+                  </When>
+                </td>
+                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                  {asset?.category?.name}
+                </td>
+                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                  {asset?.location?.name}
+                </td>
+                <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <div className="flex flex-col items-start gap-1">
+                    {/* The picture is optional; the tick box and the code are
+                          not. Keeping the picture on its own line means the cell
+                          reads the same with it and without it, and gives the
+                          code the whole cell to wrap in. */}
+                    <When truthy={showCodeImages}>
+                      <AssetCodePrintImage
+                        src={assetIdToCodeImageMap[asset.id]}
+                        displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        alt={`Code of ${asset.title}`}
+                        squareClassName="size-14"
+                      />
                     </When>
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    {asset?.category?.name}
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    {asset?.location?.name}
-                  </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <div className="flex flex-col items-start gap-1">
-                      {/* The QR is optional; the tick box and the code are not.
-                          Keeping the image on its own line means the cell reads
-                          the same with it and without it, and gives the code the
-                          whole cell to wrap in — a 25-character legacy QR id
-                          needs two lines here. */}
-                      <When
-                        truthy={
-                          showQrCodesOnPdfs && !!assetIdToQrCodeMap[asset.id]
-                        }
-                      >
-                        <img
-                          src={assetIdToQrCodeMap[asset.id]}
-                          alt="QR Code"
-                          className="size-14 object-cover"
-                        />
-                      </When>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          aria-label={`Mark ${asset.title} as picked`}
-                          className="block size-5 border"
-                        />
-                        {/* Printed even when the QR image failed to generate:
-                            the code is the part a picker matches against the
-                            physical label. */}
-                        <AssetCodePrintText
-                          displayCode={assetIdToDisplayCodeMap[asset.id]}
-                        />
-                      </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        aria-label={`Mark ${asset.title} as picked`}
+                        className="block size-5 border"
+                      />
+                      {/* Printed even when there is no picture: the code is
+                            the part a picker matches against the physical
+                            label. */}
+                      <AssetCodePrintText
+                        displayCode={assetIdToDisplayCodeMap[asset.id]}
+                      />
+                    </div>
+                  </div>
+                </td>
+              </tr>
+
+              <When truthy={!!asset.description}>
+                <tr className="border-b border-gray-300 align-top">
+                  <td colSpan={8} className="m-2 p-2">
+                    <div className="flex items-start gap-4 bg-gray-100 p-4">
+                      <div className="w-20 text-xs">Asset Description</div>
+                      <div className="flex-1 text-sm">{asset.description}</div>
                     </div>
                   </td>
                 </tr>
-
-                <When truthy={!!asset.description}>
-                  <tr className="border-b border-gray-300 align-top">
-                    <td colSpan={8} className="m-2 p-2">
-                      <div className="flex items-start gap-4 bg-gray-100 p-4">
-                        <div className="w-20 text-xs">Asset Description</div>
-                        <div className="flex-1 text-sm">
-                          {asset.description}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                </When>
-              </Fragment>
-            ))}
-          </tbody>
+              </When>
+            </tbody>
+          ))}
         </table>
 
         {/*

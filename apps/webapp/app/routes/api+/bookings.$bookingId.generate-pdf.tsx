@@ -1,6 +1,23 @@
+/**
+ * Booking Checklist API
+ *
+ * Serves `/api/bookings/:bookingId/generate-pdf`: everything the printable
+ * booking checklist renders, loaded when its preview opens. Dates are
+ * formatted in the acting user's format, lapsed asset photos are re-signed so
+ * every photo prints, and one `pdf_preview_opened` event is sent per preview.
+ *
+ * @see {@link file://./../../modules/booking/pdf-helpers.ts}
+ * @see {@link file://./../../components/booking/booking-overview-pdf.tsx}
+ */
+
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getClientHint } from "~/utils/client-hints";
@@ -61,6 +78,15 @@ export const loader = async ({
       { orderBy, orderDirection, search: paramsValues.search }
     );
 
+    // Asset photos are signed URLs that stop loading once they lapse, and a
+    // photo that does not load prints as the placeholder. Re-signed here, in
+    // the loader of the sheet that prints photos, rather than in the shared
+    // data helper: the check-in receipt reuses that helper and prints none.
+    pdfMeta.assets = await refreshExpiredAssetImages(pdfMeta.assets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+
     // Resolve the acting user's format preferences so booking PDF dates render
     // per their settings rather than the request locale.
     const prefs = await resolveUserFormatPrefsById(
@@ -86,6 +112,16 @@ export const loader = async ({
     if (originalTo) {
       pdfMeta.originalTo = dateTimeFormat.format(new Date(originalTo));
     }
+
+    captureServerEvent({
+      distinctId: userId,
+      event: "pdf_preview_opened",
+      properties: {
+        sheet: "booking_checklist",
+        organizationId,
+        rowCount: pdfMeta.assets.length,
+      },
+    });
 
     return data(payload({ pdfMeta }));
   } catch (cause) {
