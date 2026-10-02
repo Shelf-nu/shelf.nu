@@ -1,6 +1,7 @@
 /**
- * Admin SSO conversion route: admin gating, the loader's view of a domain, and
- * the action's hand-off to the conversion engine for each intent.
+ * Admin SSO conversion route: admin gating, the loader's view of a domain, the
+ * action's hand-off to the conversion engine for each intent, and the
+ * per-workspace "Require SSO login" switch.
  *
  * @see {@link file://./../../../../app/routes/_layout+/admin-dashboard+/sso-conversion.tsx}
  */
@@ -19,6 +20,11 @@ vi.mock("~/modules/auth/sso-conversion.server", () => ({
   convertAllEligibleOnDomain: vi.fn(),
   findEligibleAccountsForSsoConversion: vi.fn(),
   revertAccountToStandard: vi.fn(),
+}));
+// why: the switch is written through Prisma; the route test checks which
+// workspace it is written for, and when it is refused.
+vi.mock("~/modules/organization/service.server", () => ({
+  setRequireSsoLogin: vi.fn(),
 }));
 // why: checkDomainSSOStatus reads auth.sso_domains with raw SQL.
 vi.mock("~/utils/sso.server", () => ({
@@ -57,6 +63,7 @@ import {
   findEligibleAccountsForSsoConversion,
   revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
+import { setRequireSsoLogin } from "~/modules/organization/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
@@ -113,7 +120,8 @@ function linkedOrg(
   id: string,
   groups: Partial<
     Record<"adminGroupId" | "selfServiceGroupId" | "baseUserGroupId", string>
-  > = {}
+  > = {},
+  requireSsoLogin = true
 ) {
   return {
     id,
@@ -124,6 +132,7 @@ function linkedOrg(
       adminGroupId: groups.adminGroupId ?? null,
       selfServiceGroupId: groups.selfServiceGroupId ?? null,
       baseUserGroupId: groups.baseUserGroupId ?? null,
+      requireSsoLogin,
     },
   };
 }
@@ -161,7 +170,7 @@ describe("admin sso-conversion route", () => {
       expect(findEligibleAccountsForSsoConversion).not.toHaveBeenCalled();
     });
 
-    it("returns the candidates and each linked workspace's group-mapping state", async () => {
+    it("returns the candidates and each linked workspace's group-mapping and switch state", async () => {
       const candidates = [
         {
           id: "user-1",
@@ -178,7 +187,7 @@ describe("admin sso-conversion route", () => {
         isConfiguredForSSO: true,
         linkedOrganizations: [
           linkedOrg("mapped", { selfServiceGroupId: "grp-1" }),
-          linkedOrg("unmapped"),
+          linkedOrg("unmapped", {}, false),
         ],
         ssoProviderId: "provider-1",
       } as never);
@@ -198,11 +207,17 @@ describe("admin sso-conversion route", () => {
           isConfiguredForSSO: true,
           candidates,
           linkedWorkspaces: [
-            { id: "mapped", name: "Workspace mapped", hasGroupMappings: true },
+            {
+              id: "mapped",
+              name: "Workspace mapped",
+              hasGroupMappings: true,
+              requireSsoLogin: true,
+            },
             {
               id: "unmapped",
               name: "Workspace unmapped",
               hasGroupMappings: false,
+              requireSsoLogin: false,
             },
           ],
         })
@@ -438,6 +453,100 @@ describe("admin sso-conversion route", () => {
 
         expect(asResponse(response).status).toBe(400);
         expect(body.error?.message).toBe(message);
+      });
+    });
+
+    describe("set-require-sso", () => {
+      beforeEach(() => {
+        vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+          isConfiguredForSSO: true,
+          linkedOrganizations: [linkedOrg("linked")],
+          ssoProviderId: "provider-1",
+        } as never);
+      });
+
+      it("refuses a non-admin with 403 and writes nothing", async () => {
+        vi.mocked(requireAdmin).mockRejectedValue(forbidden());
+
+        const response = await action(
+          actionArgs({
+            intent: "set-require-sso",
+            domain: "acme.com",
+            organizationId: "linked",
+            requireSsoLogin: "false",
+          })
+        );
+
+        expect(asResponse(response).status).toBe(403);
+        expect(setRequireSsoLogin).not.toHaveBeenCalled();
+      });
+
+      it("writes the switch for a workspace linked to the domain", async () => {
+        const result = await action(
+          actionArgs({
+            intent: "set-require-sso",
+            domain: " @ACME.com ",
+            organizationId: "linked",
+            requireSsoLogin: "false",
+          })
+        );
+
+        expect(checkDomainSSOStatus).toHaveBeenCalledWith("x@acme.com");
+        expect(setRequireSsoLogin).toHaveBeenCalledWith({
+          organizationId: "linked",
+          requireSsoLogin: false,
+        });
+        expect(result).toEqual(
+          expect.objectContaining({
+            intent: "set-require-sso",
+            organizationId: "linked",
+            requireSsoLogin: false,
+          })
+        );
+      });
+
+      it("turns the switch back on", async () => {
+        await action(
+          actionArgs({
+            intent: "set-require-sso",
+            domain: "acme.com",
+            organizationId: "linked",
+            requireSsoLogin: "true",
+          })
+        );
+
+        expect(setRequireSsoLogin).toHaveBeenCalledWith({
+          organizationId: "linked",
+          requireSsoLogin: true,
+        });
+      });
+
+      it("refuses a workspace that is not linked to the domain with 400", async () => {
+        const response = await action(
+          actionArgs({
+            intent: "set-require-sso",
+            domain: "acme.com",
+            organizationId: "someone-elses",
+            requireSsoLogin: "false",
+          })
+        );
+
+        expect(asResponse(response).status).toBe(400);
+        expect(setRequireSsoLogin).not.toHaveBeenCalled();
+      });
+
+      it("refuses a value other than true or false with 400", async () => {
+        const response = await action(
+          actionArgs({
+            intent: "set-require-sso",
+            domain: "acme.com",
+            organizationId: "linked",
+            requireSsoLogin: "on",
+          })
+        );
+
+        expect(asResponse(response).status).toBe(400);
+        expect(setRequireSsoLogin).not.toHaveBeenCalled();
       });
     });
   });

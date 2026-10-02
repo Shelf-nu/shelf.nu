@@ -21,13 +21,18 @@
  * The page also lists the workspaces that claim the domain and flags the ones
  * with SSO group mappings: at a converted user's first SSO login, membership in
  * those workspaces is re-derived from the user's IdP groups, so a user whose
- * groups map to no role loses access there.
+ * groups map to no role loses access there. Each linked workspace carries its
+ * "Require SSO login" switch: while every linked workspace has it off,
+ * unconverted accounts on the domain can still sign in with a password, which
+ * lets a customer pilot SSO with a few users before everyone is converted.
  *
  * The action dispatches on an `intent` field (`convert-one`, `convert-all`,
- * `revert`) to {@link convertAccountToSso}, {@link convertAllEligibleOnDomain}
- * and {@link revertAccountToStandard}, which enforce every eligibility rule;
- * the candidate list comes from {@link findEligibleAccountsForSsoConversion}.
- * The page is gated to ADMIN users in both the loader and the action.
+ * `revert`, `set-require-sso`) to {@link convertAccountToSso},
+ * {@link convertAllEligibleOnDomain}, {@link revertAccountToStandard} and
+ * {@link setRequireSsoLogin}; the conversion engine enforces every eligibility
+ * rule. The candidate list comes from
+ * {@link findEligibleAccountsForSsoConversion}. The page is gated to ADMIN
+ * users in both the loader and the action.
  *
  * @see {@link file://./../../../modules/auth/sso-conversion.server.ts}
  * @see {@link file://./../../../utils/sso.server.ts} checkDomainSSOStatus
@@ -39,6 +44,7 @@ import { data, useFetcher, useLoaderData } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import Input from "~/components/forms/input";
+import { Switch } from "~/components/forms/switch";
 import { Button } from "~/components/shared/button";
 import {
   AlertDialog,
@@ -64,9 +70,10 @@ import {
   findEligibleAccountsForSsoConversion,
   revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
+import { setRequireSsoLogin } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
@@ -87,7 +94,23 @@ type LinkedWorkspace = {
    * is re-derived from the user's IdP groups at every SSO login.
    */
   hasGroupMappings: boolean;
+  /**
+   * The workspace's "Require SSO login" switch. Legacy sign-in on the domain is
+   * allowed only while every linked workspace has it off.
+   */
+  requireSsoLogin: boolean;
 };
+
+/**
+ * Normalizes a typed domain: accepts "acme.com" as well as "@acme.com", in any
+ * case, with surrounding spaces.
+ *
+ * @param raw - the domain as typed or submitted
+ * @returns the bare lowercase domain, or "" when nothing was given
+ */
+function normalizeDomain(raw: string) {
+  return raw.trim().replace(/^@/, "").toLowerCase();
+}
 
 /**
  * Loads the SSO conversion view for an optional `?domain=` query.
@@ -107,11 +130,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     await requireAdmin(userId);
 
     const url = new URL(request.url);
-    // Accept "acme.com" as well as "@acme.com", in any case.
-    const domain = (url.searchParams.get("domain") ?? "")
-      .trim()
-      .replace(/^@/, "")
-      .toLowerCase();
+    const domain = normalizeDomain(url.searchParams.get("domain") ?? "");
 
     if (!domain) {
       return payload({
@@ -137,6 +156,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             org.ssoDetails?.selfServiceGroupId ||
             org.ssoDetails?.baseUserGroupId
         ),
+        // A linked workspace always has SSO details; the fallback mirrors the
+        // column default.
+        requireSsoLogin: org.ssoDetails?.requireSsoLogin ?? true,
       })
     );
 
@@ -169,6 +191,12 @@ const SsoConversionActionSchema = z.discriminatedUnion("intent", [
     intent: z.literal("revert"),
     targetUserId: z.string().min(1),
   }),
+  z.object({
+    intent: z.literal("set-require-sso"),
+    domain: z.string().transform(normalizeDomain).pipe(z.string().min(1)),
+    organizationId: z.string().min(1),
+    requireSsoLogin: z.enum(["true", "false"]).transform((v) => v === "true"),
+  }),
 ]);
 
 /**
@@ -180,7 +208,11 @@ const SsoConversionActionSchema = z.discriminatedUnion("intent", [
  *   {@link convertAllEligibleOnDomain}, which recomputes eligibility itself and
  *   skips owners and SSO accounts;
  * - `revert`: reverts `targetUserId` to standard login via
- *   {@link revertAccountToStandard}.
+ *   {@link revertAccountToStandard};
+ * - `set-require-sso`: sets the "Require SSO login" switch of `organizationId`
+ *   via {@link setRequireSsoLogin}, after checking that the workspace is
+ *   linked to `domain` (400 otherwise), so the page only ever writes to the
+ *   workspaces it lists.
  *
  * The admin check runs before the form is read, for every intent. The engine
  * functions enforce the eligibility rules; their refusals come back with the
@@ -255,6 +287,43 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         return payload({ intent: "revert" as const, result });
+      }
+
+      case "set-require-sso": {
+        const { domain, organizationId, requireSsoLogin } = submission;
+        const { linkedOrganizations } = await checkDomainSSOStatus(
+          `x@${domain}`
+        );
+        if (!linkedOrganizations.some((org) => org.id === organizationId)) {
+          throw new ShelfError({
+            cause: null,
+            title: "Workspace not linked",
+            message: `This workspace is not linked to ${domain}.`,
+            additionalData: { domain, organizationId },
+            label: "SSO",
+            status: 400,
+            shouldBeCaptured: false,
+          });
+        }
+
+        await setRequireSsoLogin({ organizationId, requireSsoLogin });
+
+        sendNotification({
+          title: requireSsoLogin
+            ? "Require SSO login is on"
+            : "Require SSO login is off",
+          message: requireSsoLogin
+            ? `Unconverted accounts on ${domain} must sign in with SSO, except owners of the linked workspace.`
+            : `Unconverted accounts on ${domain} can sign in with a password while every linked workspace has it off.`,
+          icon: { name: "success", variant: "success" },
+          senderId: userId,
+        });
+
+        return payload({
+          intent: "set-require-sso" as const,
+          organizationId,
+          requireSsoLogin,
+        });
       }
     }
   } catch (cause) {
@@ -385,6 +454,11 @@ export default function SsoConversionPage() {
   const { domain, isConfiguredForSSO, candidates, linkedWorkspaces } =
     useLoaderData<typeof loader>();
   const mappedWorkspaces = linkedWorkspaces.filter((w) => w.hasGroupMappings);
+  // Mirrors rule 5 of sso-enforcement.server: legacy sign-in is relaxed only
+  // while every linked workspace has the switch off.
+  const ssoLoginRelaxed =
+    linkedWorkspaces.length > 0 &&
+    linkedWorkspaces.every((w) => !w.requireSsoLogin);
   // Mirrors the server's own selection in convertAllEligibleOnDomain, which is
   // what actually decides; this count only labels the button.
   const eligibleCount = candidates.filter(
@@ -433,14 +507,13 @@ export default function SsoConversionPage() {
             Workspaces linked to {domain}
           </h2>
           {linkedWorkspaces.length > 0 ? (
-            <ul className="list-inside list-disc text-sm text-gray-700">
+            <ul className="flex flex-col gap-2 text-sm text-gray-700">
               {linkedWorkspaces.map((workspace) => (
-                <li key={workspace.id}>
-                  {workspace.name}
-                  {workspace.hasGroupMappings
-                    ? " (group mappings set)"
-                    : " (no group mappings)"}
-                </li>
+                <LinkedWorkspaceRow
+                  key={workspace.id}
+                  workspace={workspace}
+                  domain={domain}
+                />
               ))}
             </ul>
           ) : (
@@ -449,6 +522,17 @@ export default function SsoConversionPage() {
               are.
             </p>
           )}
+
+          {ssoLoginRelaxed ? (
+            <p
+              role="status"
+              className="rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
+            >
+              Require SSO login is off for every workspace linked to {domain}:
+              unconverted users can still sign in with a password. Turn it back
+              on after Convert all.
+            </p>
+          ) : null}
 
           {mappedWorkspaces.length > 0 ? (
             // why: a plain box rather than WarningBox, which can be dismissed.
@@ -518,6 +602,83 @@ export default function SsoConversionPage() {
         <p className="text-sm text-gray-600">No accounts found for {domain}.</p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One workspace linked to the searched domain: its name, whether it maps IdP
+ * groups to roles, and its "Require SSO login" switch.
+ *
+ * The switch owns its fetcher and shows the submitted value while the request
+ * is in flight; the loader revalidation that follows brings the stored value.
+ * A refusal (for example a workspace no longer linked to the domain) is shown
+ * under the switch.
+ *
+ * @param props.workspace - the linked workspace as the loader returns it
+ * @param props.domain - the searched domain, which the action checks the
+ *   workspace against
+ */
+function LinkedWorkspaceRow({
+  workspace,
+  domain,
+}: {
+  workspace: LinkedWorkspace;
+  domain: string;
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const submitting = useDisabled(fetcher);
+  const pending = fetcher.formData?.get("requireSsoLogin");
+  const checked =
+    typeof pending === "string"
+      ? pending === "true"
+      : workspace.requireSsoLogin;
+  const fetcherError = fetcher.data?.error ?? null;
+  const switchId = `require-sso-${workspace.id}`;
+  const descriptionId = `require-sso-description-${workspace.id}`;
+
+  return (
+    <li className="flex flex-col gap-1 rounded border border-gray-200 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <span>
+          <span className="font-medium text-gray-900">{workspace.name}</span>
+          {workspace.hasGroupMappings
+            ? " (group mappings set)"
+            : " (no group mappings)"}
+        </span>
+        <span className="flex items-center gap-2">
+          <label htmlFor={switchId} className="text-sm text-gray-700">
+            Require SSO login
+          </label>
+          <Switch
+            id={switchId}
+            checked={checked}
+            disabled={submitting}
+            aria-describedby={descriptionId}
+            onCheckedChange={(next) =>
+              fetcher.submit(
+                {
+                  intent: "set-require-sso",
+                  domain,
+                  organizationId: workspace.id,
+                  requireSsoLogin: String(next),
+                },
+                { method: "post" }
+              )
+            }
+          />
+        </span>
+      </div>
+      <span id={descriptionId} className="text-xs text-gray-600">
+        {checked
+          ? "On: unconverted users on this domain must sign in with SSO, except owners of this workspace."
+          : "Off: unconverted users can still sign in with a password while every linked workspace has it off. Turn it on after Convert all."}
+      </span>
+      {fetcherError ? (
+        <span className="text-xs text-error-500" role="alert">
+          {fetcherError.message}
+        </span>
+      ) : null}
+    </li>
   );
 }
 

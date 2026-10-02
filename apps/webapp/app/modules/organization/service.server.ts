@@ -751,6 +751,66 @@ export async function toggleAuditEnabled({
   }
 }
 
+/**
+ * Sets the "Require SSO login" switch (`SsoDetails.requireSsoLogin`) on a
+ * workspace's SSO setup. While every workspace linked to an SSO domain has it
+ * off, unconverted accounts on the domain keep password, email code and
+ * password reset sign-in (see `~/modules/auth/sso-enforcement.server`).
+ * Staff-only: callers must already have checked the admin role.
+ *
+ * The switch lives on the `SsoDetails` row, which several workspaces can
+ * share, so it changes for every workspace on that row.
+ *
+ * @param args.organizationId - the workspace whose SSO setup is changed
+ * @param args.requireSsoLogin - `true` to refuse legacy sign-in, `false` to
+ *   allow it while SSO is being set up and tested
+ * @returns the updated `SsoDetails` row
+ * @throws {ShelfError} 400 when the workspace has no SSO details; 500 when the
+ *   lookup or the update fails
+ */
+export async function setRequireSsoLogin({
+  organizationId,
+  requireSsoLogin,
+}: {
+  organizationId: string;
+  requireSsoLogin: boolean;
+}) {
+  try {
+    const organization = await db.organization.findUnique({
+      where: { id: organizationId },
+      select: { ssoDetailsId: true },
+    });
+
+    if (!organization?.ssoDetailsId) {
+      throw new ShelfError({
+        cause: null,
+        title: "No SSO details",
+        message:
+          "This workspace has no SSO details yet. Save the SSO details first.",
+        additionalData: { organizationId, requireSsoLogin },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    return await db.ssoDetails.update({
+      where: { id: organization.ssoDetailsId },
+      data: { requireSsoLogin },
+    });
+  } catch (cause) {
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while changing the Require SSO login setting. Please try again or contact support.",
+      additionalData: { organizationId, requireSsoLogin },
+      label,
+    });
+  }
+}
+
 /** Permissions functions */
 
 /**

@@ -94,11 +94,31 @@ function givenDomainIsSso(
 ) {
   vi.mocked(checkDomainSSOStatus).mockResolvedValue({
     isConfiguredForSSO,
-    // The decision reads only the ids of the linked organizations.
+    // Without `ssoDetails` a linked organization counts as requiring SSO
+    // login, which is the default every setup starts with.
     linkedOrganizations: linkedOrgIds.map((id) => ({
       id,
     })) as unknown as LinkedOrganizations,
     ssoProviderId: isConfiguredForSSO ? "provider-1" : null,
+  });
+}
+
+/**
+ * Sets an SSO domain whose linked workspaces carry the given "Require SSO
+ * login" switch states, one workspace per entry.
+ */
+function givenLinkedWorkspaces(
+  workspaces: { id: string; requireSsoLogin: boolean }[]
+) {
+  vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+    isConfiguredForSSO: true,
+    // The decision reads only the ids and the switch of the linked
+    // organizations.
+    linkedOrganizations: workspaces.map(({ id, requireSsoLogin }) => ({
+      id,
+      ssoDetails: { requireSsoLogin },
+    })) as unknown as LinkedOrganizations,
+    ssoProviderId: "provider-1",
   });
 }
 
@@ -252,6 +272,74 @@ describe("getLegacyLoginDecision", () => {
     expect(db.userOrganization.count).not.toHaveBeenCalled();
   });
 
+  describe("with the Require SSO login switch", () => {
+    it("allows an unconverted non-owner when every linked workspace has it off", async () => {
+      givenUsers([standardUser]);
+      givenLinkedWorkspaces([
+        { id: "org-a", requireSsoLogin: false },
+        { id: "org-b", requireSsoLogin: false },
+      ]);
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: true,
+      });
+      expect(db.organization.count).not.toHaveBeenCalled();
+      expect(db.userOrganization.count).not.toHaveBeenCalled();
+    });
+
+    it("refuses an unconverted non-owner when one linked workspace still has it on", async () => {
+      givenUsers([standardUser]);
+      givenLinkedWorkspaces([
+        { id: "org-a", requireSsoLogin: false },
+        { id: "org-b", requireSsoLogin: true },
+      ]);
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: false,
+        reason: "sso_domain",
+      });
+    });
+
+    it("still refuses a converted account when the switch is off", async () => {
+      givenUsers([{ ...standardUser, sso: true }]);
+      givenLinkedWorkspaces([{ id: "org-a", requireSsoLogin: false }]);
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: false,
+        reason: "sso_account",
+      });
+    });
+
+    it("still refuses an address with no account when the switch is off", async () => {
+      givenLinkedWorkspaces([{ id: "org-a", requireSsoLogin: false }]);
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: false,
+        reason: "sso_domain",
+      });
+    });
+
+    it("keeps the block on an SSO domain with no linked workspace", async () => {
+      givenUsers([standardUser]);
+      givenLinkedWorkspaces([]);
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: false,
+        reason: "sso_domain",
+      });
+    });
+
+    it("still allows the owner when the switch is on", async () => {
+      givenUsers([standardUser]);
+      givenLinkedWorkspaces([{ id: "org-a", requireSsoLogin: true }]);
+      givenOwnership({ ownedOrgs: 1, ownerMemberships: 0 });
+
+      await expect(getLegacyLoginDecision(EMAIL)).resolves.toEqual({
+        allowed: true,
+      });
+    });
+  });
+
   it("finds an account stored with capitals for a lowercase address", async () => {
     givenUsers([{ id: "user-caps", email: "Jane@Acme.com", sso: true }]);
 
@@ -393,6 +481,15 @@ describe("assertEmailChangeAllowed", () => {
     givenUserById({ id: "user-1", sso: false });
     givenDomainIsSso(true);
     givenOwnership({ ownedOrgs: 0, ownerMemberships: 1 });
+
+    await expect(
+      assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a standard non-owner while every linked workspace has Require SSO login off", async () => {
+    givenUserById({ id: "user-1", sso: false });
+    givenLinkedWorkspaces([{ id: LINKED_ORG_ID, requireSsoLogin: false }]);
 
     await expect(
       assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })

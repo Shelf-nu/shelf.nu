@@ -22,14 +22,21 @@
  *   3. A domain not configured for SSO is allowed.
  *   4. On an SSO domain, an address with no account is refused (signup is
  *      already blocked there).
- *   5. An unconverted owner of a workspace linked to that SSO domain (one
- *      whose SSO settings list the domain) is allowed, so the customer keeps
- *      a password owner as the administrative fallback. Owning any other
- *      workspace grants nothing: anyone can create a workspace of their own.
- *   6. Everyone else on an SSO domain is refused.
+ *   5. An unconverted account is allowed when the domain has linked workspaces
+ *      (ones whose SSO settings list the domain) and every one of them has
+ *      "Require SSO login" (`SsoDetails.requireSsoLogin`) switched off. Shelf
+ *      staff switch it off while a customer sets up and tests SSO with a few
+ *      users. One linked workspace that requires SSO is enough to keep the
+ *      block, and a domain with no linked workspace has nothing to switch off.
+ *   6. An unconverted owner of a workspace linked to that SSO domain is
+ *      allowed, so the customer keeps a password owner as the administrative
+ *      fallback. Owning any other workspace grants nothing: anyone can create
+ *      a workspace of their own.
+ *   7. Everyone else on an SSO domain is refused.
  *
  * The cheapest checks run first: the owner queries only run for a non-SSO user
- * on an SSO domain that has linked workspaces, and only over those workspaces.
+ * on an SSO domain whose linked workspaces require SSO, and only over those
+ * workspaces.
  *
  * The user is looked up here with its own query rather than `findUserByEmail`,
  * because `~/modules/user/service.server` imports `~/modules/auth/service.server`,
@@ -59,9 +66,9 @@ import { checkDomainSSOStatus } from "~/utils/sso.server";
  * Why a legacy sign-in was refused.
  *
  * - `sso_account`: the account itself has been converted to SSO.
- * - `sso_domain`: the address is on a domain configured for SSO, and the
- *   account is not an unconverted owner of the domain's SSO workspace (or
- *   does not exist).
+ * - `sso_domain`: the address is on a domain configured for SSO, and either
+ *   has no account, or a linked workspace requires SSO login and the account
+ *   is not an unconverted owner of the domain's SSO workspace.
  */
 export type LegacyLoginRefusalReason = "sso_account" | "sso_domain";
 
@@ -134,7 +141,7 @@ async function findAccountForEmail(
  * Applies the rules in the file header to one account (or none) and the
  * address whose domain is checked.
  *
- * @param email - the address whose domain decides rules 3 to 6
+ * @param email - the address whose domain decides rules 3 to 7
  * @param user - the account behind the address, or null when there is none
  * @returns the decision
  */
@@ -151,6 +158,15 @@ async function decideLegacyLogin(
   if (!isConfiguredForSSO) return { allowed: true };
 
   if (!user) return { allowed: false, reason: "sso_domain" };
+
+  // A missing `ssoDetails` counts as requiring SSO: only an explicit `false`
+  // relaxes the block.
+  const ssoLoginRelaxed =
+    linkedOrganizations.length > 0 &&
+    linkedOrganizations.every(
+      (org) => org.ssoDetails?.requireSsoLogin === false
+    );
+  if (ssoLoginRelaxed) return { allowed: true };
 
   const linkedOrgIds = linkedOrganizations.map((org) => org.id);
   if (await userOwnsLinkedSsoWorkspace(user.id, linkedOrgIds)) {
