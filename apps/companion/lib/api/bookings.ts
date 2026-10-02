@@ -183,6 +183,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+        // why: not retried. Each call creates a booking, so a request that
+        // timed out after the server had already written it would leave two.
+        retry: false,
       }
     ),
 
@@ -285,6 +288,9 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify({ bookingId }),
+        // why: not retried. Each call creates a booking, so a request that
+        // timed out after the server had already written it would leave two.
+        retry: false,
       }
     ),
 
