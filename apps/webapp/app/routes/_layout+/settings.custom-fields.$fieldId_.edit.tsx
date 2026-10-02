@@ -19,6 +19,7 @@ import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
 import {
   getCustomField,
   updateCustomField,
+  getCustomFieldGroups,
 } from "~/modules/custom-field/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { FIELD_TYPE_NAME } from "~/utils/custom-fields";
@@ -55,13 +56,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const customField = await getCustomField({
-      organizationId,
-      id,
-      userOrganizations,
-      request,
-      include: { categories: { select: { id: true } } },
-    });
+    const [customField, groupsResult] = await Promise.all([
+      getCustomField({
+        organizationId,
+        id,
+        userOrganizations,
+        request,
+        include: { categories: { select: { id: true } } },
+      }),
+      getCustomFieldGroups({ organizationId }),
+    ]);
 
     const { categories, totalCategories } = await getCategoriesForCreateAndEdit(
       {
@@ -81,6 +85,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       categories,
       totalCategories,
+      groups: groupsResult,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -108,8 +113,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       CustomFieldSubmissionSchema
     );
 
-    const { name, helpText, active, required, options, categories } =
-      parsedData;
+    const {
+      name,
+      helpText,
+      active,
+      required,
+      options,
+      categories,
+      groupId,
+      position,
+    } = parsedData;
 
     const field = await getCustomField({ organizationId, id });
 
@@ -151,6 +164,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       options,
       categories,
       organizationId,
+      groupId,
+      position,
     });
 
     sendNotification({
@@ -189,6 +204,8 @@ export default function CustomFieldEditPage() {
           active={customField.active}
           options={customField.options}
           categories={customField.categories.map((c) => c.id)}
+          groupId={customField.groupId}
+          position={customField.position}
         />
       </div>
     </>

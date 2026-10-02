@@ -8,4 +8,6 @@ export type CustomFieldDraftPayload = Pick<
   userId: User["id"];
   options?: CustomField["options"];
   categories?: string[];
+  groupId?: string | null;
+  position?: number;
 };
