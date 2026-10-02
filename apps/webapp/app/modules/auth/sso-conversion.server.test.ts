@@ -604,7 +604,12 @@ describe("convertAllEligibleOnDomain", () => {
       actorUserId: "admin-id",
     });
 
-    expect(result).toEqual({ converted: 3, needsExtraSignIn: 0, failed: [] });
+    expect(result).toEqual({
+      converted: 3,
+      needsExtraSignIn: 0,
+      skippedOwners: 0,
+      failed: [],
+    });
     expect(seededUserIds()).toEqual(["u-std-1", "u-std-2", "u-std-3"]);
     expect(db.user.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -617,6 +622,27 @@ describe("convertAllEligibleOnDomain", () => {
     expect(db.$transaction).toHaveBeenCalledTimes(3);
   });
 
+  it("skips an account that became an owner of the SSO workspace after the listing", async () => {
+    // The listing saw "u-std-2" as a plain member; by the time its turn comes
+    // it owns the workspace linked to the domain.
+    vi.mocked(db.organization.count).mockImplementation(((args: {
+      where: { userId: string };
+    }) =>
+      Promise.resolve(
+        args.where.userId === "u-std-2" ? 1 : 0
+      )) as unknown as typeof db.organization.count);
+
+    const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
+
+    expect(result).toEqual({
+      converted: 2,
+      needsExtraSignIn: 0,
+      skippedOwners: 1,
+      failed: [],
+    });
+    expect(seededUserIds()).toEqual(["u-std-1", "u-std-3"]);
+  });
+
   it("converts the owner of a workspace that is not linked to the domain", async () => {
     // "u-owner" owns a workspace of their own, not the one linked to the
     // domain, so the scoped ownership queries find nothing.
@@ -624,7 +650,12 @@ describe("convertAllEligibleOnDomain", () => {
 
     const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
 
-    expect(result).toEqual({ converted: 4, needsExtraSignIn: 0, failed: [] });
+    expect(result).toEqual({
+      converted: 4,
+      needsExtraSignIn: 0,
+      skippedOwners: 0,
+      failed: [],
+    });
     expect(seededUserIds()).toEqual([
       "u-std-1",
       "u-owner",
@@ -638,7 +669,12 @@ describe("convertAllEligibleOnDomain", () => {
 
     const result = await convertAllEligibleOnDomain({ domain: "acme.com" });
 
-    expect(result).toEqual({ converted: 3, needsExtraSignIn: 2, failed: [] });
+    expect(result).toEqual({
+      converted: 3,
+      needsExtraSignIn: 2,
+      skippedOwners: 0,
+      failed: [],
+    });
   });
 
   it("keeps going after one account fails and reports it", async () => {

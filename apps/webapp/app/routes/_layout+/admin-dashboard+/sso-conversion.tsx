@@ -295,6 +295,12 @@ function describeConversionResult(result: SsoConversionResult): {
         message: `${result.email} was already an SSO account.`,
         rowText: "Was already an SSO account.",
       };
+    case "skipped_owner":
+      return {
+        title: "Account not converted",
+        message: `${result.email} owns the workspace that uses SSO and keeps password login.`,
+        rowText: "Workspace owner, not converted.",
+      };
   }
 }
 
@@ -311,10 +317,17 @@ function describeConvertAllResult(result: SsoConvertAllResult): {
 } {
   const converted = pluralizeAccounts(result.converted);
   const failed = result.failed.length;
-  const outcome =
+  const baseOutcome =
     failed > 0
       ? "See the summary on the page for the accounts that failed."
       : "Every eligible account on the domain now signs in via SSO.";
+  // Accounts that became an owner of the SSO workspace during the run.
+  const outcome =
+    result.skippedOwners > 0
+      ? `${baseOutcome} ${pluralizeAccounts(
+          result.skippedOwners
+        )} now owning the SSO workspace kept password login.`
+      : baseOutcome;
 
   return {
     title:
@@ -619,6 +632,12 @@ function ConvertAllSummary({ summary }: { summary: SsoConvertAllResult }) {
       {summary.needsExtraSignIn > 0 ? (
         <p className="text-warning-700">
           {describeExtraSignIns(summary.needsExtraSignIn)}
+        </p>
+      ) : null}
+      {summary.skippedOwners > 0 ? (
+        <p>
+          Skipped {pluralizeAccounts(summary.skippedOwners)} that now own the
+          workspace that uses SSO: they keep password login.
         </p>
       ) : null}
       {summary.failed.length > 0 ? (

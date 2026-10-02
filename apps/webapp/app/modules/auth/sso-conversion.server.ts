@@ -66,7 +66,11 @@ type SsoConversionTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 export type SsoConversionResult = {
   userId: string;
   email: string;
-  status: "converted" | "skipped_already_sso";
+  /**
+   * `skipped_owner` is returned only when the caller asked to skip owners of
+   * the domain's SSO workspace (Convert all) and the account is one.
+   */
+  status: "converted" | "skipped_already_sso" | "skipped_owner";
   /**
    * True when a converted user tried SSO before conversion, so their first SSO
    * sign-in merges that attempt and asks them to sign in once more. Always
@@ -104,6 +108,8 @@ export type SsoConvertAllResult = {
   converted: number;
   /** Converted accounts whose first SSO sign-in will ask them to sign in again. */
   needsExtraSignIn: number;
+  /** Accounts that owned the domain's SSO workspace by the time their turn came. */
+  skippedOwners: number;
   failed: SsoConvertAllFailure[];
 };
 
@@ -249,9 +255,16 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
 export async function convertAccountToSso({
   userId,
   actorUserId,
+  skipSsoWorkspaceOwner = false,
 }: {
   userId: string;
   actorUserId?: string;
+  /**
+   * Leave the account alone when it owns a workspace linked to its SSO
+   * domain. Convert all sets this so an owner keeps their password fallback
+   * even when they became an owner after the run listed its candidates.
+   */
+  skipSsoWorkspaceOwner?: boolean;
 }): Promise<SsoConversionResult> {
   try {
     const user = await db.user.findUnique({
@@ -277,6 +290,24 @@ export async function convertAccountToSso({
         status: "skipped_already_sso",
         needsExtraSignIn: false,
       };
+    }
+
+    if (skipSsoWorkspaceOwner) {
+      // Checked per account at conversion time, not from the candidate list,
+      // so an ownership change during a Convert all run is respected.
+      const { linkedOrganizations } = await checkDomainSSOStatus(user.email);
+      const ownsSsoWorkspace = await userOwnsLinkedSsoWorkspace(
+        user.id,
+        linkedOrganizations.map((org) => org.id)
+      );
+      if (ownsSsoWorkspace) {
+        return {
+          userId: user.id,
+          email: user.email,
+          status: "skipped_owner",
+          needsExtraSignIn: false,
+        };
+      }
     }
 
     const ssoProviderId = await requireSsoProviderIdForEmail(user.email);
@@ -577,6 +608,7 @@ export async function convertAllEligibleOnDomain({
   const result: SsoConvertAllResult = {
     converted: 0,
     needsExtraSignIn: 0,
+    skippedOwners: 0,
     failed: [],
   };
 
@@ -585,10 +617,13 @@ export async function convertAllEligibleOnDomain({
       const { status, needsExtraSignIn } = await convertAccountToSso({
         userId: candidate.id,
         actorUserId,
+        skipSsoWorkspaceOwner: true,
       });
       if (status === "converted") {
         result.converted += 1;
         if (needsExtraSignIn) result.needsExtraSignIn += 1;
+      } else if (status === "skipped_owner") {
+        result.skippedOwners += 1;
       }
     } catch (cause) {
       result.failed.push({
@@ -604,8 +639,8 @@ export async function convertAllEligibleOnDomain({
     `SSO conversion: convert all on ${normalized} by ${
       actorUserId ?? "unknown"
     }: ${eligible.length} eligible, ${result.converted} converted, ${
-      result.failed.length
-    } failed`
+      result.skippedOwners
+    } skipped as owners, ${result.failed.length} failed`
   );
 
   return result;

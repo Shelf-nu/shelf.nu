@@ -331,6 +331,7 @@ describe("admin sso-conversion route", () => {
         const summary = {
           converted: 3,
           needsExtraSignIn: 0,
+          skippedOwners: 0,
           failed: [
             { userId: "user-9", email: "kim@acme.com", message: "Boom." },
           ],
@@ -355,6 +356,7 @@ describe("admin sso-conversion route", () => {
         vi.mocked(convertAllEligibleOnDomain).mockResolvedValue({
           converted: 3,
           needsExtraSignIn: 2,
+          skippedOwners: 0,
           failed: [],
         });
 
