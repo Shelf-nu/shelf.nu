@@ -453,6 +453,14 @@ function pluralizeAccounts(count: number) {
 export default function SsoConversionPage() {
   const { domain, isConfiguredForSSO, candidates, linkedWorkspaces } =
     useLoaderData<typeof loader>();
+  // Mirrors the server rule: the domain requires SSO login unless it has
+  // linked workspaces and every one has "Require SSO login" switched off.
+  const ssoLoginRequired =
+    isConfiguredForSSO &&
+    !(
+      linkedWorkspaces.length > 0 &&
+      linkedWorkspaces.every((w) => !w.requireSsoLogin)
+    );
   const mappedWorkspaces = linkedWorkspaces.filter((w) => w.hasGroupMappings);
   // Mirrors rule 5 of sso-enforcement.server: legacy sign-in is relaxed only
   // while every linked workspace has the switch off.
@@ -593,6 +601,7 @@ export default function SsoConversionPage() {
                   candidate={candidate}
                   domain={domain}
                   isConfiguredForSSO={isConfiguredForSSO}
+                  ssoLoginRequired={ssoLoginRequired}
                 />
               ))}
             </tbody>
@@ -840,10 +849,13 @@ function CandidateRow({
   candidate,
   domain,
   isConfiguredForSSO,
+  ssoLoginRequired,
 }: {
   candidate: SsoConversionCandidate;
   domain: string;
   isConfiguredForSSO: boolean;
+  /** Whether the domain currently requires SSO login (see the page). */
+  ssoLoginRequired: boolean;
 }) {
   const fetcher = useFetcher<typeof action>();
   const submitting = useDisabled(fetcher);
@@ -896,7 +908,7 @@ function CandidateRow({
           <RevertAction
             candidate={candidate}
             domain={domain}
-            isConfiguredForSSO={isConfiguredForSSO}
+            ssoLoginRequired={ssoLoginRequired}
             fetcher={fetcher}
             submitting={submitting}
             confirmOpen={confirmOpen}
@@ -966,7 +978,8 @@ function CandidateRow({
  *
  * @param props.candidate - The SSO account to revert
  * @param props.domain - The searched domain, named in the disabled reason
- * @param props.isConfiguredForSSO - Whether the domain has an SSO provider
+ * @param props.ssoLoginRequired - Whether the domain currently requires SSO
+ *   login, so only an owner of its SSO workspace could use a password
  * @param props.fetcher - The owning row's fetcher, which shows the result
  * @param props.submitting - Whether that fetcher is in flight
  * @param props.confirmOpen - Whether the confirmation dialog is open
@@ -975,7 +988,7 @@ function CandidateRow({
 function RevertAction({
   candidate,
   domain,
-  isConfiguredForSSO,
+  ssoLoginRequired,
   fetcher,
   submitting,
   confirmOpen,
@@ -983,13 +996,13 @@ function RevertAction({
 }: {
   candidate: SsoConversionCandidate;
   domain: string;
-  isConfiguredForSSO: boolean;
+  ssoLoginRequired: boolean;
   fetcher: ReturnType<typeof useFetcher<typeof action>>;
   submitting: boolean;
   confirmOpen: boolean;
   setConfirmOpen: (open: boolean) => void;
 }) {
-  const blocked = isConfiguredForSSO && !candidate.ownsSsoWorkspace;
+  const blocked = ssoLoginRequired && !candidate.ownsSsoWorkspace;
   const reasonId = `revert-reason-${candidate.id}`;
 
   return (
@@ -1036,9 +1049,9 @@ function RevertAction({
       </AlertDialog>
       {blocked ? (
         <span id={reasonId} className="max-w-xs text-xs text-gray-600">
-          Only owners of the workspace that uses SSO for {domain} can be
-          reverted while it uses SSO. Anyone else could not sign in with a
-          password.
+          While {domain} requires SSO login, only owners of its SSO workspace
+          can be reverted. Switch &quot;Require SSO login&quot; off first, or
+          this account still could not sign in with a password.
         </span>
       ) : null}
     </div>

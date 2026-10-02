@@ -930,7 +930,9 @@ describe("revertAccountToStandard", () => {
       revertAccountToStandard({ userId: ORIGINAL_ID })
     ).rejects.toMatchObject({
       status: 400,
-      message: expect.stringMatching(/only an owner of the workspace/i),
+      message: expect.stringMatching(
+        /only an owner of the workspace that uses SSO/i
+      ),
     });
     expect(db.$transaction).not.toHaveBeenCalled();
     expect(db.$executeRaw).not.toHaveBeenCalled();
@@ -1026,6 +1028,24 @@ describe("revertAccountToStandard", () => {
     expect(result.status).toBe("reverted");
     // The owner queries are not needed once the domain is off SSO.
     expect(db.organization.count).not.toHaveBeenCalled();
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: ORIGINAL_ID },
+      data: { sso: false },
+    });
+  });
+
+  it("reverts a non-owner while the domain has Require SSO login switched off", async () => {
+    vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+      isConfiguredForSSO: true,
+      linkedOrganizations: [
+        { id: LINKED_ORG_ID, ssoDetails: { requireSsoLogin: false } },
+      ] as unknown as LinkedOrganizations,
+      ssoProviderId: PROVIDER_ID,
+    });
+
+    const result = await revertAccountToStandard({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("reverted");
     expect(db.user.update).toHaveBeenCalledWith({
       where: { id: ORIGINAL_ID },
       data: { sso: false },

@@ -46,7 +46,10 @@ import { OrganizationRoles } from "@prisma/client";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
-import { userOwnsLinkedSsoWorkspace } from "~/modules/auth/sso-enforcement.server";
+import {
+  isSsoLoginRelaxed,
+  userOwnsLinkedSsoWorkspace,
+} from "~/modules/auth/sso-enforcement.server";
 import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
@@ -795,7 +798,8 @@ function isStandardEmailTakenError(cause: unknown): boolean {
  *
  * Only allowed when the reverted account could then use password login, per
  * the same rules as `getLegacyLoginDecision`: the account owns a workspace
- * linked to its SSO domain, or its domain is no longer configured for SSO.
+ * linked to its SSO domain, its domain has "Require SSO login" switched off,
+ * or its domain is no longer configured for SSO.
  * Anyone else on an SSO domain (including the owner of some other workspace)
  * would be reverted into an account that cannot sign in at all.
  *
@@ -852,6 +856,7 @@ export async function revertAccountToStandard({
       await checkDomainSSOStatus(user.email);
     const canUsePasswordLogin =
       !isConfiguredForSSO ||
+      isSsoLoginRelaxed(linkedOrganizations) ||
       (await userOwnsLinkedSsoWorkspace(
         user.id,
         linkedOrganizations.map((org) => org.id)
@@ -861,7 +866,7 @@ export async function revertAccountToStandard({
       throw new ShelfError({
         cause: null,
         message:
-          "Only an owner of the workspace that uses SSO for this domain, or an account whose domain no longer uses SSO, can be reverted. Anyone else on an SSO domain still could not sign in with a password.",
+          'Only an owner of the workspace that uses SSO for this domain can be reverted while the domain requires SSO login. Switch "Require SSO login" off for the domain first, or the account still could not sign in with a password.',
         additionalData: { userId },
         label,
         status: 400,

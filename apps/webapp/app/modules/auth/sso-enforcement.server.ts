@@ -138,6 +138,27 @@ async function findAccountForEmail(
 }
 
 /**
+ * Whether staff have relaxed SSO-only login for a domain: it has at least one
+ * linked workspace and every one of them has "Require SSO login" switched off.
+ * A workspace that requires SSO wins, a missing `ssoDetails` counts as
+ * requiring it, and a domain with no linked workspace cannot be relaxed.
+ *
+ * @param linkedOrganizations - the domain's linked workspaces, as
+ *   `checkDomainSSOStatus` returns them
+ * @returns true when unconverted accounts on the domain may use a password
+ */
+export function isSsoLoginRelaxed(
+  linkedOrganizations: { ssoDetails: { requireSsoLogin: boolean } | null }[]
+): boolean {
+  return (
+    linkedOrganizations.length > 0 &&
+    linkedOrganizations.every(
+      (org) => org.ssoDetails?.requireSsoLogin === false
+    )
+  );
+}
+
+/**
  * Applies the rules in the file header to one account (or none) and the
  * address whose domain is checked.
  *
@@ -159,14 +180,7 @@ async function decideLegacyLogin(
 
   if (!user) return { allowed: false, reason: "sso_domain" };
 
-  // A missing `ssoDetails` counts as requiring SSO: only an explicit `false`
-  // relaxes the block.
-  const ssoLoginRelaxed =
-    linkedOrganizations.length > 0 &&
-    linkedOrganizations.every(
-      (org) => org.ssoDetails?.requireSsoLogin === false
-    );
-  if (ssoLoginRelaxed) return { allowed: true };
+  if (isSsoLoginRelaxed(linkedOrganizations)) return { allowed: true };
 
   const linkedOrgIds = linkedOrganizations.map((org) => org.id);
   if (await userOwnsLinkedSsoWorkspace(user.id, linkedOrgIds)) {
