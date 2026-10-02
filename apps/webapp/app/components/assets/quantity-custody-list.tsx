@@ -20,11 +20,18 @@
  * If no custody records exist, a placeholder message with the available
  * quantity is shown instead.
  *
+ * One line per person: a holder's operator rows (one per location the units
+ * came from) are grouped and summed. For a pool placed at two or more locations the
+ * line says where the units came from, and releasing a person who took units
+ * from several locations asks per location. Kit-inherited rows stay separate
+ * lines, released through the kit.
+ *
  * @see {@link file://./quantity-custody-dialog.tsx} - Assign custody dialog
  * @see {@link file://../../routes/api+/assets.release-quantity-custody.ts} - Release endpoint
  * @see {@link file://../../routes/_layout+/assets.$assetId.overview.tsx} - Consumer
  */
 
+import type { ReactNode } from "react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { ConsumptionType, User } from "@prisma/client";
 import { releaseCategory } from "@shelf/quantity-control";
@@ -50,16 +57,28 @@ import {
 } from "~/components/shared/tooltip";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { UNPLACED_SOURCE } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
 import { tw } from "~/utils/tw";
 import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { QuantityCustodyDialog } from "./quantity-custody-dialog";
+import type { CustodyGroup } from "./quantity-custody-groups";
+import {
+  describeCustodySources,
+  groupCustodyRecords,
+} from "./quantity-custody-groups";
+import { ReleaseBySourceButton } from "./release-by-source-button";
 
 /** Shape of a custody record as provided by the overview loader */
 interface CustodyRecord {
+  /** The custody row's id; keys the release dialog's fetcher. */
+  id?: string;
   createdAt: string | Date;
   quantity?: number;
+  /** Where the units were taken from. Null: unplaced, or not recorded. */
+  location?: { id: string; name: string } | null;
   /** When set, this row was inherited from a kit's custody. The UI must
    * not allow direct release — the only legitimate way to clear it is
    * to release the parent kit's custody (which cascades). */
@@ -104,6 +123,19 @@ export interface QuantityCustodyListProps {
    * Assign dialog as a soft informational note so the user knows operator
    * custody is tracked separately from the kit's allocation. */
   inKit?: { id: string; name: string } | null;
+  /**
+   * The pool's sources, from the asset detail loader. Drives the Assign
+   * dialog's "From location" field and, for a pool with two or more
+   * sources, the per-person source text and per-location release.
+   */
+  sources?: CustodySourceSummary | null;
+  /**
+   * How many OTHER people hold custody, counted by person on the server
+   * before redaction. A restricted viewer's payload has those holders'
+   * identities removed, so the list cannot tell two rows of one person
+   * from two people.
+   */
+  otherHoldersCount?: number;
 }
 
 /**
@@ -127,9 +159,16 @@ export function QuantityCustodyList({
   canViewAllCustody = true,
   canCustody = true,
   inKit,
+  sources,
+  otherHoldersCount,
 }: QuantityCustodyListProps) {
   const unitLabel = unitOfMeasure || "units";
   const allRecords = custody ?? [];
+  const multiSource = Boolean(sources?.multiSource);
+  /** Whether a NULL source reads "unplaced" rather than "not recorded". */
+  const poolHasUnplaced = Boolean(
+    sources?.options.some((option) => option.locationId === null)
+  );
 
   /**
    * The shared predicate decides this, so the label can never disagree with
@@ -147,8 +186,17 @@ export function QuantityCustodyList({
     ? allRecords
     : allRecords.filter((r) => r.custodian.userId === currentUserId);
 
-  /** Number of custody records hidden due to permission restrictions */
-  const hiddenCount = allRecords.length - records.length;
+  /** One line per person (operator rows) plus one per kit-inherited row */
+  const groups = groupCustodyRecords(records);
+
+  /**
+   * People whose custody is hidden by permission restrictions. The server's
+   * per-person count wins; the row difference is only a fallback for callers
+   * that do not send it.
+   */
+  const hiddenCount = canViewAllCustody
+    ? 0
+    : otherHoldersCount ?? allRecords.length - records.length;
 
   const noneAvailable = availableQuantity != null && availableQuantity <= 0;
 
@@ -175,6 +223,7 @@ export function QuantityCustodyList({
             unitOfMeasure={unitOfMeasure}
             availableQuantity={availableQuantity}
             inKit={inKit}
+            sources={sources}
             trigger={
               <Button
                 type="button"
@@ -197,17 +246,21 @@ export function QuantityCustodyList({
       </div>
 
       {/* List of custodians */}
-      {records.length > 0 ? (
+      {groups.length > 0 ? (
         <>
           <ul>
-            {records.map((record) => (
+            {groups.map((group) => (
               <CustodyRow
-                key={record.custodian.id}
-                record={record}
+                key={group.key}
+                group={group}
                 assetId={assetId}
                 unitLabel={unitLabel}
                 isConsumable={isConsumable}
-                canRelease={canRelease(record)}
+                canRelease={canRelease(
+                  group.kind === "kit" ? group.record : group.first
+                )}
+                multiSource={multiSource}
+                poolHasUnplaced={poolHasUnplaced}
               />
             ))}
           </ul>
@@ -238,33 +291,47 @@ export function QuantityCustodyList({
 
 /** Props for a single custody row */
 interface CustodyRowProps {
-  record: CustodyRecord;
+  /** One person's operator rows, or one kit-inherited row. */
+  group: CustodyGroup<CustodyRecord>;
   assetId: string;
   unitLabel: string;
   /** Whether the asset is a ONE_WAY consumable (see QuantityCustodyListProps) */
   isConsumable?: boolean;
   /** Whether the current user can release this custody record */
   canRelease?: boolean;
+  /** Whether the pool is placed at two or more locations (see `hasMultipleSources`). */
+  multiSource?: boolean;
+  /** Whether the pool has unplaced units, for the NULL-source wording. */
+  poolHasUnplaced?: boolean;
 }
 
 /**
- * Renders a single custodian row with their name, quantity, and the action
- * that ends the hold.
+ * Renders one line of the breakdown: a person with their summed quantity
+ * and the action that ends the hold, or a kit-inherited row with its badge.
  *
- * The action opens a confirmation dialog where the user can specify how many
- * units to release (or, for a consumable, mark as consumed).
+ * For a pool placed at two or more locations the quantity line adds where the
+ * units came from. A person holding units from several locations releases
+ * them per location; everyone else gets the single-quantity dialog.
  *
- * @param props - The custody record and context
+ * @param props - The custody group and context
  */
 function CustodyRow({
-  record,
+  group,
   assetId,
   unitLabel,
   isConsumable = false,
   canRelease = true,
+  multiSource = false,
+  poolHasUnplaced = false,
 }: CustodyRowProps) {
+  const record = group.kind === "kit" ? group.record : group.first;
   const custodianName = resolveTeamMemberName(record.custodian);
-  const quantity = record.quantity ?? 1;
+  const quantity = group.kind === "kit" ? record.quantity ?? 1 : group.quantity;
+
+  const sourceParts =
+    multiSource && group.kind === "operator"
+      ? describeCustodySources(group.rows, poolHasUnplaced)
+      : [];
 
   return (
     <li className="flex items-center justify-between border-b border-gray-100 px-4 py-3 last:border-b-0">
@@ -283,21 +350,55 @@ function CustodyRow({
           </p>
           <p className="text-[12px] text-gray-500">
             {quantity} {unitLabel}
+            {sourceParts.length > 0 ? (
+              <>
+                {" · "}
+                {sourceParts.map((part, index) => (
+                  <span
+                    key={part.key}
+                    className={part.muted ? "text-gray-400" : undefined}
+                  >
+                    {index > 0 ? ", " : null}
+                    {part.text}
+                  </span>
+                ))}
+              </>
+            ) : null}
           </p>
         </div>
       </div>
 
-      {record.kitCustodyId ? (
+      {group.kind === "kit" ? (
         <KitCustodyBadge kit={record.kitCustody?.kit} />
-      ) : canRelease ? (
+      ) : !canRelease ? null : multiSource && group.rows.length > 1 ? (
+        <ReleaseBySourceButton
+          assetId={assetId}
+          teamMemberId={record.custodian.id}
+          fetcherKey={`release-qty-${record.id ?? record.custodian.id}`}
+          rows={group.rows}
+          unitLabel={unitLabel}
+          isConsumable={isConsumable}
+          poolHasUnplaced={poolHasUnplaced}
+        />
+      ) : (
         <ReleaseButton
           assetId={assetId}
           teamMemberId={record.custodian.id}
+          fetcherKey={`release-qty-${record.id ?? record.custodian.id}`}
           maxQuantity={quantity}
           unitLabel={unitLabel}
           isConsumable={isConsumable}
+          source={
+            multiSource && group.rows.length === 1
+              ? {
+                  value: record.location?.id ?? UNPLACED_SOURCE,
+                  name: record.location?.name ?? null,
+                  poolHasUnplaced,
+                }
+              : null
+          }
         />
-      ) : null}
+      )}
     </li>
   );
 }
@@ -404,10 +505,56 @@ function releaseFormReducer(
 interface ReleaseButtonProps {
   assetId: string;
   teamMemberId: string;
+  /** Fetcher key, per custody row: one person can hold several rows. */
+  fetcherKey: string;
   maxQuantity: number;
   unitLabel: string;
   /** Consumable (ONE_WAY) assets are consumed, not returned */
   isConsumable?: boolean;
+  /**
+   * The held units' single source, for a pool placed at two or more locations:
+   * posted as `locationId` so the release targets that row, and named in a
+   * line saying where the units go back to (or which location loses the
+   * used-up ones). Null for every other pool: the form is unchanged.
+   */
+  source?: {
+    /** Location id, or `UNPLACED_SOURCE` for the unplaced units. */
+    value: string;
+    name: string | null;
+    poolHasUnplaced: boolean;
+  } | null;
+}
+
+/**
+ * The line under a single-source release saying what happens at the source.
+ * Null when there is nothing honest to say (a source never recorded).
+ */
+function releaseSourceInfo({
+  source,
+  isConsumable,
+  unitLabel,
+}: {
+  source: NonNullable<ReleaseButtonProps["source"]>;
+  isConsumable: boolean;
+  unitLabel: string;
+}): ReactNode {
+  if (source.name) {
+    return isConsumable ? (
+      <>
+        Used-up {unitLabel} are taken off{" "}
+        <span className="font-medium">{source.name}</span>.
+      </>
+    ) : (
+      <>
+        Goes back to <span className="font-medium">{source.name}</span>, where
+        the units came from.
+      </>
+    );
+  }
+  if (!source.poolHasUnplaced) return null;
+  return isConsumable
+    ? `Used-up ${unitLabel} come off the unplaced units.`
+    : "Goes back to the unplaced units, where the units came from.";
 }
 
 /**
@@ -420,12 +567,17 @@ interface ReleaseButtonProps {
 function ReleaseButton({
   assetId,
   teamMemberId,
+  fetcherKey,
   maxQuantity,
   unitLabel,
   isConsumable = false,
+  source = null,
 }: ReleaseButtonProps) {
   const [open, setOpen] = useState(false);
-  const fetcher = useFetcher({ key: `release-qty-${teamMemberId}` });
+  const fetcher = useFetcher({ key: fetcherKey });
+  const sourceInfo = source
+    ? releaseSourceInfo({ source, isConsumable, unitLabel })
+    : null;
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   const isSubmitting = isFormProcessing(fetcher.state);
@@ -523,6 +675,9 @@ function ReleaseButton({
         >
           <input type="hidden" name="assetId" value={assetId} />
           <input type="hidden" name="teamMemberId" value={teamMemberId} />
+          {source ? (
+            <input type="hidden" name="locationId" value={source.value} />
+          ) : null}
 
           <div className="flex flex-col gap-4">
             {isConsumable ? (
@@ -588,6 +743,12 @@ function ReleaseButton({
                 defaultValue={maxQuantity}
               />
             )}
+
+            {sourceInfo ? (
+              <p className="rounded border border-gray-200 bg-gray-25 px-3 py-2 text-[12px] text-gray-600">
+                {sourceInfo}
+              </p>
+            ) : null}
 
             <Input
               name="note"

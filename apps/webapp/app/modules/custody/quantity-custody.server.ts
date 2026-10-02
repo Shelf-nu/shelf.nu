@@ -36,6 +36,16 @@ import { AssetType, OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
+  isUnplacedSource,
+  unitsLeftAtSource,
+} from "~/modules/asset/custody-source";
+import {
+  assignSourceNoteSuffix,
+  loadCustodySources,
+  releaseSourceNoteSuffix,
+} from "~/modules/asset/custody-source.server";
+import type { ReleaseSourceLine } from "~/modules/asset/service.server";
+import {
   checkOutQuantity,
   releaseQuantity,
 } from "~/modules/asset/service.server";
@@ -118,20 +128,28 @@ export function splitQuantityAssetIds(
  * the write, but a refusal there arrives per asset and reads as a concurrent
  * change, so a submission that could never succeed would report a partial one.
  *
+ * A pool placed at two or more locations may also name where its units come
+ * from (`sourceLocations`, sent by the web scanner). That location caps the
+ * hand-over too: placed there minus already in custody from there, the same
+ * rule `checkOutQuantity` applies under its lock.
+ *
  * @param args.quantityAssetIds - Assets moved by units (see {@link splitQuantityAssetIds}).
  * @param args.quantities - Units per asset id.
+ * @param args.sourceLocations - Optional source per asset id: a location id,
+ *   or `"unplaced"`. Assets without an entry are checked pool-wide only.
  * @param args.organizationId - The caller's workspace.
  * @param args.custodian - Who receives the units.
  * @param args.role - The acting user's role.
  * @param args.userId - The acting user.
  * @throws {ShelfError} 403 when a self-service user assigns units to anyone
  *   but themselves; 400 "Nothing was assigned. ..." naming each asset that
- *   asked for more units than are free, is not tracked by quantity, or is not
- *   in the workspace.
+ *   asked for more units than are free (or than its chosen location has
+ *   left), is not tracked by quantity, or is not in the workspace.
  */
 export async function assertAssignableQuantities({
   quantityAssetIds,
   quantities,
+  sourceLocations = {},
   organizationId,
   custodian,
   role,
@@ -139,6 +157,7 @@ export async function assertAssignableQuantities({
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
+  sourceLocations?: Record<string, string>;
   organizationId: string;
   custodian: QuantityCustodian;
   /** The acting user's role: self-service may only assign to themselves. */
@@ -191,6 +210,32 @@ export async function assertAssignableQuantities({
       unavailable.push(
         `"${asset.title}" (asked for ${quantities[assetId]}, ${available} free)`
       );
+      continue;
+    }
+
+    const source = sourceLocations[assetId];
+    if (source !== undefined) {
+      const locationId = isUnplacedSource(source) ? null : source;
+      const { state } = await loadCustodySources(db, {
+        assetId,
+        total: asset.quantity ?? 0,
+      });
+      const left = unitsLeftAtSource(state, locationId);
+      if (quantities[assetId] > left) {
+        const where = locationId
+          ? `left at ${
+              (
+                await db.location.findFirst({
+                  where: { id: locationId, organizationId },
+                  select: { name: true },
+                })
+              )?.name ?? "the chosen location"
+            }`
+          : "unplaced left";
+        unavailable.push(
+          `"${asset.title}" (asked for ${quantities[assetId]}, ${left} ${where})`
+        );
+      }
     }
   }
 
@@ -225,7 +270,10 @@ export type ResolvedQuantityRelease = {
  *
  * Only operator-assigned rows are candidates: a `Custody` row carrying a
  * `kitCustodyId` came with the kit's custody and goes back by releasing the
- * kit, which cascade-deletes it.
+ * kit, which cascade-deletes it. One person can hold several operator rows on
+ * the same asset, one per location the units came from, so holders are
+ * counted by person and their units summed; `releaseQuantity` draws from
+ * those rows itself.
  *
  * Each `releaseQuantity` call commits its own transaction, so a refusal found
  * mid-loop would leave earlier assets released while the client reports a
@@ -276,23 +324,27 @@ export async function resolveQuantityReleases({
   });
 
   return quantityAssetIds.map((assetId) => {
-    const holders = custodyRows.filter((row) => row.assetId === assetId);
+    const rows = custodyRows.filter((row) => row.assetId === assetId);
+    const holderIds = new Set(rows.map((row) => row.custodian.id));
 
-    if (holders.length !== 1) {
+    if (holderIds.size !== 1) {
       throw new ShelfError({
         cause: null,
         status: 400,
         label: "Assets",
         shouldBeCaptured: false,
         message:
-          holders.length === 0
+          holderIds.size === 0
             ? "This asset has no units in anyone's custody to release."
-            : `"${holders[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
-        additionalData: { assetId, holders: holders.length },
+            : `"${rows[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
+        additionalData: { assetId, holders: holderIds.size },
       });
     }
 
-    const [holder] = holders;
+    const holder = {
+      ...rows[0],
+      quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+    };
     // `releaseQuantity` refuses anything else on the write, where the refusal
     // would read as a concurrent change after other assets were released.
     if (holder.asset.type !== AssetType.QUANTITY_TRACKED) {
@@ -356,6 +408,13 @@ type QuantityCustodyArgs = {
   role: OrganizationRoles;
   /** Optional operator text, appended to the audit note. */
   note?: string;
+  /**
+   * The source location: for an assignment, where the units come from; for
+   * a release, whose units go back. A location id, or `"unplaced"` / `""` /
+   * null for the unplaced units. Omit to let the service resolve it (see
+   * `resolveCustodySource` and the release drain order).
+   */
+  locationId?: string | null;
 };
 
 /**
@@ -378,8 +437,9 @@ export async function assignQuantityToCustodian({
   organizationId,
   role,
   note,
+  locationId,
 }: QuantityCustodyArgs): Promise<void> {
-  await checkOutQuantity({
+  const { source } = await checkOutQuantity({
     assetId,
     teamMemberId: custodian.id,
     quantity,
@@ -387,8 +447,12 @@ export async function assignQuantityToCustodian({
     organizationId,
     role,
     note,
+    locationId,
   });
 
+  // " from <Location>" for a pool placed at two or more locations; empty
+  // otherwise, so every other asset's note reads as it always has.
+  const fromSource = assignSourceNoteSuffix(source);
   await writeQuantityNote({
     assetId,
     userId,
@@ -396,10 +460,10 @@ export async function assignQuantityToCustodian({
     note,
     baseLine: (actor) =>
       role === OrganizationRoles.SELF_SERVICE
-        ? `${actor} took custody of **${quantity}** unit(s).`
+        ? `${actor} took custody of **${quantity}** unit(s)${fromSource}.`
         : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay(
             custodian
-          )}.`,
+          )}${fromSource}.`,
   });
 
   await runLowStockCheck({ assetId, userId, organizationId });
@@ -417,6 +481,8 @@ export async function assignQuantityToCustodian({
  * @param args - See {@link QuantityCustodyArgs}.
  * @param args.consumed - Of the released units, how many were used up. Omit to
  *   let the service derive it from the asset's consumption type.
+ * @param args.sources - Per-location lines, when the holder releases units
+ *   taken from several locations one location at a time.
  * @returns The units recorded as consumed and as returned to stock.
  * @throws {ShelfError} Whatever `releaseQuantity` refuses (more than is held,
  *   a self-service user releasing someone else's units).
@@ -430,22 +496,36 @@ export async function releaseQuantityFromCustodian({
   organizationId,
   role,
   note,
-}: QuantityCustodyArgs & { consumed?: number }): Promise<{
+  locationId,
+  sources,
+}: QuantityCustodyArgs & {
+  consumed?: number;
+  sources?: ReleaseSourceLine[];
+}): Promise<{
   consumed: number;
   returned: number;
 }> {
-  const { consumed: consumedUnits, returned: returnedUnits } =
-    await releaseQuantity({
-      assetId,
-      teamMemberId: custodian.id,
-      quantity,
-      consumed,
-      userId,
-      organizationId,
-      role,
-      note,
-    });
+  const {
+    consumed: consumedUnits,
+    returned: returnedUnits,
+    lines,
+    multiSource,
+  } = await releaseQuantity({
+    assetId,
+    teamMemberId: custodian.id,
+    quantity,
+    consumed,
+    userId,
+    organizationId,
+    role,
+    note,
+    locationId,
+    sources,
+  });
 
+  // For a pool placed at two or more locations the note says which
+  // locations the units came from; otherwise it carries no location at all.
+  const fromSources = releaseSourceNoteSuffix({ lines, multiSource });
   await writeQuantityNote({
     assetId,
     userId,
@@ -454,12 +534,12 @@ export async function releaseQuantityFromCustodian({
     baseLine: (actor) => {
       const holder = custodianDisplay(custodian);
       if (consumedUnits > 0 && returnedUnits > 0) {
-        return `${actor} ended ${holder}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`;
+        return `${actor} ended ${holder}'s hold on **${quantity}** unit(s)${fromSources}: **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`;
       }
       if (consumedUnits > 0) {
-        return `${actor} marked **${consumedUnits}** unit(s) held by ${holder} as consumed. Stock reduced permanently.`;
+        return `${actor} marked **${consumedUnits}** unit(s) held by ${holder} as consumed${fromSources}. Stock reduced permanently.`;
       }
-      return `${actor} released **${returnedUnits}** unit(s) from ${holder}'s custody.`;
+      return `${actor} released **${returnedUnits}** unit(s) from ${holder}'s custody${fromSources}.`;
     },
   });
 
@@ -490,6 +570,7 @@ export type QuantityRefusal = {
 export async function assignQuantities({
   quantityAssetIds,
   quantities,
+  sourceLocations = {},
   custodian,
   userId,
   organizationId,
@@ -497,6 +578,8 @@ export async function assignQuantities({
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
+  /** Optional source per asset id, as checked by {@link assertAssignableQuantities}. */
+  sourceLocations?: Record<string, string>;
   custodian: QuantityCustodian;
   userId: string;
   organizationId: string;
@@ -512,6 +595,9 @@ export async function assignQuantities({
         userId,
         organizationId,
         role,
+        // Undefined for pools the scanner showed no picker for: the service
+        // then resolves the source as for any caller that does not ask.
+        locationId: sourceLocations[assetId],
       });
     } catch (cause) {
       refusals.push(await refusalFor(assetId, organizationId, cause));
