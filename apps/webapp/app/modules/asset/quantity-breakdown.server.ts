@@ -93,52 +93,69 @@ export async function getAssetQuantityRows(
     });
   }
 
-  type BookingAssetRow = (typeof asset.bookingAssets)[number];
-
-  // Split the booking slices into RESERVED (pass-through) and active
-  // (ONGOING/OVERDUE, which carry the units still out instead).
-  const reservedRows: BookingAssetRow[] = [];
-  const activeRows: BookingAssetRow[] = [];
-  for (const ba of asset.bookingAssets) {
-    const status = ba.booking?.status;
-    if (status === "ONGOING" || status === "OVERDUE") {
-      activeRows.push(ba);
-    } else {
-      reservedRows.push(ba);
-    }
-  }
-
-  // One row per active booking, carrying the units still out on it.
   const stillOutByBooking = await computeCheckedOutByBookingForAsset(
     db,
     asset.id,
     organizationId
   );
-  const activeBookings = new Map<
-    string,
-    NonNullable<BookingAssetRow["booking"]>
-  >();
-  for (const ba of activeRows) {
-    if (ba.booking) activeBookings.set(ba.booking.id, ba.booking);
-  }
-  const effectiveActiveRows: BookingAssetRow[] = Array.from(
-    activeBookings.values()
-  ).map((booking) => ({
-    quantity: stillOutByBooking.get(booking.id)?.total ?? 0,
-    // Per-slice attribution collapses at the booking grain: surface as
-    // standalone (`null`) so the tooltip renders one line per booking.
-    assetKitId: null,
-    booking,
-  }));
-
-  // Drop active bookings with nothing still out: nothing went out yet, or
-  // everything that did has come back.
-  const cleanedActiveRows = effectiveActiveRows.filter(
-    (row) => (row.quantity ?? 0) > 0
-  );
 
   return {
     ...asset,
-    bookingAssets: [...reservedRows, ...cleanedActiveRows],
+    bookingAssets: toStillOutBookingRows(
+      asset.bookingAssets,
+      stillOutByBooking
+    ),
   };
+}
+
+/** The booking-slice fields {@link toStillOutBookingRows} reads. */
+type QuantityTooltipBookingRow = {
+  quantity: number;
+  assetKitId: string | null;
+  booking: { id: string; status: string } | null;
+};
+
+/**
+ * Rewrites an asset's booking slices into the rows the quantity tooltip
+ * (`getQuantityData`) expects.
+ *
+ * RESERVED rows pass through. ONGOING / OVERDUE rows collapse to one per
+ * booking carrying the units of the asset still off the shelf on it, from
+ * {@link computeCheckedOutByBookingForAsset}: what went out minus what came back
+ * or was used up. Their `assetKitId` is `null`, because the tooltip lists one
+ * line per booking. Active bookings with nothing still out are dropped.
+ *
+ * Every loader that feeds the tooltip goes through this, so the tooltip and
+ * the asset overview's "Checked out" figure cannot disagree.
+ *
+ * @param rows - The asset's RESERVED / ONGOING / OVERDUE booking slices.
+ * @param stillOutByBooking - Output of {@link computeCheckedOutByBookingForAsset}.
+ * @returns RESERVED rows first, then one row per active booking with units out.
+ */
+export function toStillOutBookingRows<Row extends QuantityTooltipBookingRow>(
+  rows: Row[],
+  stillOutByBooking: Map<string, { total: number }>
+): Row[] {
+  const reservedRows: Row[] = [];
+  const firstActiveRowByBooking = new Map<string, Row>();
+  for (const row of rows) {
+    const status = row.booking?.status;
+    if (status === "ONGOING" || status === "OVERDUE") {
+      if (row.booking && !firstActiveRowByBooking.has(row.booking.id)) {
+        firstActiveRowByBooking.set(row.booking.id, row);
+      }
+    } else {
+      reservedRows.push(row);
+    }
+  }
+
+  const activeRows: Row[] = [];
+  for (const [bookingId, row] of firstActiveRowByBooking) {
+    const stillOut = stillOutByBooking.get(bookingId)?.total ?? 0;
+    // Nothing went out yet, or everything that did has come back.
+    if (stillOut <= 0) continue;
+    activeRows.push({ ...row, quantity: stillOut, assetKitId: null });
+  }
+
+  return [...reservedRows, ...activeRows];
 }
