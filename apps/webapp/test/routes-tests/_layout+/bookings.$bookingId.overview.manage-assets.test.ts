@@ -9,12 +9,15 @@ import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import * as assetService from "~/modules/asset/service.server";
+import * as assetUtils from "~/modules/asset/utils.server";
 import * as bookingService from "~/modules/booking/service.server";
 import * as modelRequestService from "~/modules/booking-model-request/service.server";
 import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
+import { getDescendantIdsOfLocations } from "~/modules/location/descendants.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import * as rolesServer from "~/utils/roles.server";
 
 // Import the action + loader functions
@@ -47,7 +50,19 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: {
       findMany: vi.fn(),
     },
+    // why: the loader asks whether a ticked location has child locations,
+    // which decides if "Include assets from child locations" is offered.
+    // Tests stage the answer per case.
+    location: {
+      findFirst: vi.fn(),
+    },
   },
+}));
+
+// why: the descendant lookup is a recursive SQL query against Postgres, which
+// the unit suite cannot reach. Tests stand in a location tree for it.
+vi.mock("~/modules/location/descendants.server", () => ({
+  getDescendantIdsOfLocations: vi.fn(),
 }));
 
 vi.mock("~/modules/booking/service.server", () => ({
@@ -111,7 +126,9 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
     getParams: vi.fn(),
     parseData: vi.fn(),
     json: vi.fn((data) => data),
-    getCurrentSearchParams: vi.fn(),
+    // why: the real helper always returns the request's search params; an
+    // empty set is the "no filters" URL every test starts from.
+    getCurrentSearchParams: vi.fn(() => new URLSearchParams()),
     error: vi.fn((reason) => reason),
     // why: mirror the real `payload()` shape (`{ error: null, ...data }`) so
     // the Models-tab loader tests can inspect the returned keys directly.
@@ -1954,4 +1971,241 @@ describe("manage-assets loader: ownership gate", () => {
       ).resolves.toBeTruthy();
     }
   );
+});
+
+/**
+ * "Include assets from child locations" on the booking's Add assets list.
+ *
+ * The list (loader) and "select all" (action) both read the Locations filter
+ * from the URL. With the checkbox on, both must match the ticked locations plus
+ * every location nested under them, and it must be the SAME set: otherwise
+ * select-all adds assets the user was never shown, or skips ones they were.
+ * With the checkbox off, both stay on the ticked locations exactly.
+ */
+describe("manage-assets: include assets from child locations", () => {
+  const context = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const params = { bookingId: "booking123" };
+
+  /**
+   * The workspace's location tree, as the descendant lookup answers it
+   * (self first, then everything nested under it):
+   *
+   *   campus ─┬─ building-a ─── room-a1
+   *           └─ building-b
+   */
+  const SELF_AND_DESCENDANTS: Record<string, string[]> = {
+    campus: ["campus", "building-a", "building-b", "room-a1"],
+    "building-a": ["building-a", "room-a1"],
+    "building-b": ["building-b"],
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
+      organizationId: "org123",
+      userOrganizations: [],
+      isSelfServiceOrBase: false,
+      organizations: [],
+      currentOrganization: {} as any,
+      role: {} as any,
+      canSeeAllBookings: false,
+      canSeeAllCustody: false,
+      canUseBarcodes: false,
+      canUseAudits: false,
+    });
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(getDescendantIdsOfLocations).mockImplementation(
+      ({ locationIds }) =>
+        Promise.resolve([
+          ...new Set(
+            locationIds.flatMap((id) => SELF_AND_DESCENDANTS[id] ?? [])
+          ),
+        ])
+    );
+    vi.mocked(db.location.findFirst).mockResolvedValue(null);
+
+    // Loader: the list itself is mocked; the tests read what it was asked for.
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue({
+      search: null,
+      totalAssets: 0,
+      perPage: 20,
+      page: 1,
+      categories: [],
+      tags: [],
+      assets: [],
+      totalPages: 0,
+      totalCategories: 0,
+      totalTags: 0,
+      locations: [],
+      totalLocations: 0,
+    } as any);
+    vi.mocked(bookingService.getBooking).mockResolvedValue({
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from: new Date("2026-01-01"),
+      to: new Date("2026-01-02"),
+      bookingAssets: [],
+      modelRequests: [],
+    } as any);
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    // Action: select-all resolves its asset ids through the where-builder.
+    vi.mocked(assetUtils.getAssetsWhereInput).mockReturnValue({
+      organizationId: "org123",
+    });
+    vi.mocked(db.asset.findMany).mockResolvedValue([]);
+    vi.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+    vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      bookingAssets: [],
+      organizationId: "org123",
+    } as any);
+    vi.mocked(userService.getUserByID).mockResolvedValue({
+      id: "user123",
+      firstName: "John",
+      lastName: "Doe",
+      displayName: null,
+    } as any);
+    vi.mocked(bookingService.getDetailedPartialCheckinData).mockResolvedValue({
+      checkedInAssetIds: [],
+      partialCheckinDetails: {},
+    });
+  });
+
+  /** Makes the loader and the action read `query` as the request URL. */
+  function openUrl(query: string) {
+    vi.mocked(httpServer.getCurrentSearchParams).mockReturnValue(
+      new URLSearchParams(query)
+    );
+  }
+
+  /** The location ids the loader asked the list to match for `query`. */
+  async function listLocationIds(query: string) {
+    openUrl(query);
+    await loader(createLoaderArgs({ context, params }));
+    return vi.mocked(assetService.getPaginatedAndFilterableAssets).mock
+      .lastCall?.[0].locationIdsOverride;
+  }
+
+  /** The location ids "select all" matched for `query`. */
+  async function selectAllLocationIds(query: string) {
+    openUrl(query);
+    vi.mocked(httpServer.parseData).mockReturnValue({
+      assetIds: [ALL_SELECTED_KEY],
+      removedAssetIds: [],
+      redirectTo: null,
+    });
+    await action(createActionArgs({ context, request: mockRequest, params }));
+    return vi.mocked(assetUtils.getAssetsWhereInput).mock.lastCall?.[0]
+      .locationIdsOverride;
+  }
+
+  /** The location ids the REAL where-builder puts in the select-all clause. */
+  async function clauseLocationIds(query: string, override?: string[]) {
+    const { getAssetsWhereInput } = await vi.importActual<
+      typeof import("~/modules/asset/utils.server")
+    >("~/modules/asset/utils.server");
+    const where = getAssetsWhereInput({
+      organizationId: "org123",
+      currentSearchParams: query,
+      allowedTeamMemberIds: "all",
+      locationIdsOverride: override,
+    });
+    const inLocations = (where.assetLocations?.some?.locationId ??
+      where.OR?.find((clause) => clause.assetLocations?.some)?.assetLocations
+        ?.some?.locationId) as { in: string[] } | undefined;
+    return inLocations?.in;
+  }
+
+  it("keeps both on the ticked location exactly while the checkbox is off", async () => {
+    const query = "location=campus";
+
+    expect(await listLocationIds(query)).toBeUndefined();
+    expect(await selectAllLocationIds(query)).toBeUndefined();
+    expect(getDescendantIdsOfLocations).not.toHaveBeenCalled();
+    // No override: the builder matches the URL's own value, as for every
+    // other caller.
+    expect(await clauseLocationIds(query, undefined)).toEqual(["campus"]);
+  });
+
+  it("widens both to the parent plus sub-locations two levels deep when on", async () => {
+    const query = "location=campus&includeChildLocations=true";
+    const widened = ["building-a", "building-b", "campus", "room-a1"];
+
+    const listIds = await listLocationIds(query);
+    const selectAllIds = await selectAllLocationIds(query);
+
+    expect([...(listIds ?? [])].sort()).toEqual(widened);
+    expect(selectAllIds).toEqual(listIds);
+    // Select-all hands that set to the builder, which matches on it.
+    expect(
+      [...((await clauseLocationIds(query, selectAllIds)) ?? [])].sort()
+    ).toEqual(widened);
+    // ...and the ids select-all finds are what the booking receives.
+    expect(db.asset.findMany).toHaveBeenCalledWith({
+      where: { organizationId: "org123" },
+      select: { id: true },
+    });
+  });
+
+  it("keeps without-location in both sets with the checkbox on", async () => {
+    const query =
+      "location=without-location&location=building-a&includeChildLocations=true";
+
+    const listIds = await listLocationIds(query);
+    const selectAllIds = await selectAllLocationIds(query);
+
+    expect([...(listIds ?? [])].sort()).toEqual([
+      "building-a",
+      "room-a1",
+      "without-location",
+    ]);
+    expect(selectAllIds).toEqual(listIds);
+  });
+
+  it("offers the checkbox only when a ticked location has child locations", async () => {
+    vi.mocked(db.location.findFirst).mockResolvedValue({
+      id: "building-a",
+    } as any);
+    openUrl("location=campus");
+    const withChildren: any = await loader(
+      createLoaderArgs({ context, params })
+    );
+    expect(withChildren.tickedLocationHasChildren).toBe(true);
+
+    vi.mocked(db.location.findFirst).mockResolvedValue(null);
+    openUrl("location=building-b");
+    const leaf: any = await loader(createLoaderArgs({ context, params }));
+    expect(leaf.tickedLocationHasChildren).toBe(false);
+
+    vi.mocked(db.location.findFirst).mockClear();
+    openUrl("");
+    const unfiltered: any = await loader(createLoaderArgs({ context, params }));
+    expect(unfiltered.tickedLocationHasChildren).toBe(false);
+    expect(db.location.findFirst).not.toHaveBeenCalled();
+  });
 });
