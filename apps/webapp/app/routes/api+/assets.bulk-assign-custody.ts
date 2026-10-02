@@ -1,18 +1,15 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkAssignCustodySchema } from "~/components/assets/bulk-assign-custody-dialog";
-import { db } from "~/database/db.server";
-import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
-import {
-  isUnplacedSource,
-  unitsLeftAtSource,
-} from "~/modules/asset/custody-source";
-import { loadCustodySources } from "~/modules/asset/custody-source.server";
-import {
-  bulkCheckOutAssets,
-  checkOutQuantity,
-} from "~/modules/asset/service.server";
+import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  assertAssignableQuantities,
+  assignQuantities,
+  QUANTITY_CUSTODIAN_SELECT,
+  quantityRefusalsError,
+  splitQuantityAssetIds,
+} from "~/modules/custody/quantity-custody.server";
 import {
   getTeamMember,
   scopeCustodianFilterIds,
@@ -75,42 +72,24 @@ export async function action({ context, request }: ActionFunctionArgs) {
      * Bulk custody skips quantity-tracked assets because selecting rows on the
      * assets index gives no way to say how many units each hand-over covers.
      * The scanner does: it shows one row per scan with its own quantity input.
-     * So an asset named here is assigned through `checkOutQuantity`, the same
-     * single-asset primitive the asset page uses, and the bulk call below never
-     * sees it. An index submission sends no quantities and is unchanged.
+     * So an asset named here is assigned unit by unit, the way the asset page
+     * does it, and the bulk call below never sees it. An index submission
+     * sends no quantities and is unchanged.
      */
-    /**
-     * One entry per asset, not per scanned code.
-     *
-     * The scanner keys its rows by CODE, so an asset scanned through both its
-     * QR and its barcode arrives twice under the same id. The per-unit writes
-     * below run once per entry, so a duplicate would hand the quantity over
-     * twice; the bulk path matches on an id set and is unaffected either way.
-     * Duplicates carry no information (`quantities` holds one number per
-     * asset), so collapsing them is lossless, and kinder than refusing a scan
-     * where the operator did nothing wrong.
-     */
-    const uniqueAssetIds = [...new Set(assetIds)];
-
-    const quantityAssetIds = uniqueAssetIds.filter((id) =>
-      Object.prototype.hasOwnProperty.call(quantities, id)
-    );
-    const bulkAssetIds = uniqueAssetIds.filter(
-      (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
+    const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
+      assetIds,
+      quantities
     );
 
     /**
      * Validate the custodian belongs to the same organization (early 404).
-     * We don't keep the result around any more — the SELF_SERVICE
-     * "assign-to-self" guard moved into `bulkCheckOutAssets` (web + mobile
-     * share one implementation). The lookup here is still needed: it 404s
-     * the request if the requested custodianId is from another org or
-     * doesn't exist.
+     * The SELF_SERVICE "assign-to-self" guard lives in the services, not here.
+     * The name fields are what the per-unit audit notes render.
      */
-    await getTeamMember({
+    const custodianRecord = await getTeamMember({
       id: custodian.id,
       organizationId,
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -142,103 +121,25 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
+    // Every per-unit assignment is checked before anything is written,
+    // including the SELF_SERVICE rule and, for a pool placed at two or more
+    // locations, what the scanner's chosen location has left.
+    await assertAssignableQuantities({
+      quantityAssetIds,
+      quantities,
+      sourceLocations,
+      organizationId,
+      custodian: custodianRecord,
+      role,
+      userId,
+    });
+
     /**
-     * Check the whole scan before writing any of it.
-     *
-     * Each `checkOutQuantity` call is its own transaction, so once one has
-     * committed nothing puts it back. Without this pass, a scan whose third
-     * asset is over-subscribed would leave the first two assigned while the
-     * drawer reports the submission as failed, and a retry would then add
-     * those two a second time, because the call increments an existing custody
-     * row rather than setting it.
-     *
-     * This is a pre-flight, not a lock: each write re-checks availability
-     * under its own row lock, which is what actually prevents over-allocation
-     * if the pool moves in between. What the pre-flight buys is that the
-     * refusal operators can actually provoke (asking for more than is free)
-     * happens before anything is written.
+     * The whole-asset call runs before the per-unit writes: it validates and
+     * writes in one transaction, so if it refuses, nothing has been written.
+     * The per-unit writes after it were checked above; a refusal there can
+     * only come from a concurrent change, and is reported by asset.
      */
-    const unavailable: string[] = [];
-    for (const assetId of quantityAssetIds) {
-      const asset = await db.asset.findFirst({
-        where: { id: assetId, organizationId },
-        select: { title: true, quantity: true },
-      });
-
-      if (!asset) continue; // `checkOutQuantity` refuses it by name.
-
-      const { available } = await computeCustodyAvailability(db, {
-        assetId,
-        organizationId,
-        totalQuantity: asset.quantity ?? 0,
-      });
-
-      if (quantities[assetId] > available) {
-        unavailable.push(
-          `"${asset.title}" (asked for ${quantities[assetId]}, ${available} free)`
-        );
-        continue;
-      }
-
-      /**
-       * A pool placed at two or more locations names where its units come
-       * from; that location caps the hand-over too (placed there minus
-       * already in custody from there), the same rule `checkOutQuantity`
-       * applies under its lock. Checked here so the refusal still lands
-       * before anything is written.
-       */
-      const source = sourceLocations[assetId];
-      if (source !== undefined) {
-        const locationId = isUnplacedSource(source) ? null : source;
-        const { state } = await loadCustodySources(db, {
-          assetId,
-          total: asset.quantity ?? 0,
-        });
-        const left = unitsLeftAtSource(state, locationId);
-        if (quantities[assetId] > left) {
-          const where = locationId
-            ? `left at ${
-                (
-                  await db.location.findFirst({
-                    where: { id: locationId, organizationId },
-                    select: { name: true },
-                  })
-                )?.name ?? "the chosen location"
-              }`
-            : "unplaced left";
-          unavailable.push(
-            `"${asset.title}" (asked for ${quantities[assetId]}, ${left} ${where})`
-          );
-        }
-      }
-    }
-
-    if (unavailable.length) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not enough units available",
-        message: `Nothing was assigned. ${unavailable.join("; ")}.`,
-        additionalData: { unavailable },
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-
-    for (const assetId of quantityAssetIds) {
-      await checkOutQuantity({
-        assetId,
-        teamMemberId: custodian.id,
-        quantity: quantities[assetId],
-        userId,
-        organizationId,
-        role,
-        // Undefined for pools the scanner showed no picker for: the service
-        // then resolves the source as for any caller that does not ask.
-        locationId: sourceLocations[assetId],
-      });
-    }
-
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId,
@@ -263,6 +164,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }),
         })
       : { skippedQuantityTracked: 0 };
+
+    const refusals = await assignQuantities({
+      quantityAssetIds,
+      quantities,
+      sourceLocations,
+      custodian: custodianRecord,
+      userId,
+      organizationId,
+      role,
+    });
+    if (refusals.length) throw quantityRefusalsError("assigned", refusals);
 
     const skippedNote =
       skippedQuantityTracked > 0

@@ -2,12 +2,15 @@ import { AssetType, OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkReleaseCustodySchema } from "~/components/assets/bulk-release-custody-dialog";
 import { db } from "~/database/db.server";
-import {
-  bulkCheckInAssets,
-  releaseQuantity,
-} from "~/modules/asset/service.server";
+import { bulkCheckInAssets } from "~/modules/asset/service.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
+import {
+  quantityRefusalsError,
+  releaseQuantities,
+  resolveQuantityReleases,
+  splitQuantityAssetIds,
+} from "~/modules/custody/quantity-custody.server";
 import { scopeCustodianFilterIds } from "~/modules/team-member/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
@@ -53,28 +56,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
     /**
      * Units per quantity-tracked asset, sent only by the scanner. See the
      * field's note on `BulkReleaseCustodySchema`. Named assets are released
-     * through `releaseQuantity`, the same primitive the asset page uses, and
-     * never reach the bulk call. An index submission sends none, so its
-     * behaviour is unchanged.
+     * unit by unit, the way the asset page does it, and never reach the bulk
+     * call. An index submission sends none, so its behaviour is unchanged.
      */
-    /**
-     * One entry per asset, not per scanned code.
-     *
-     * The scanner keys its rows by CODE, so an asset scanned through both its
-     * QR and its barcode arrives twice under the same id. The per-unit writes
-     * below run once per entry, so a duplicate would hand the quantity over
-     * twice; the bulk path matches on an id set and is unaffected either way.
-     * Duplicates carry no information (`quantities` holds one number per
-     * asset), so collapsing them is lossless, and kinder than refusing a scan
-     * where the operator did nothing wrong.
-     */
-    const uniqueAssetIds = [...new Set(assetIds)];
-
-    const quantityAssetIds = uniqueAssetIds.filter((id) =>
-      Object.prototype.hasOwnProperty.call(quantities, id)
-    );
-    const bulkAssetIds = uniqueAssetIds.filter(
-      (id) => !Object.prototype.hasOwnProperty.call(quantities, id)
+    const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
+      assetIds,
+      quantities
     );
 
     /**
@@ -126,94 +113,15 @@ export async function action({ request, context }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    /**
-     * Releasing needs a custodian, and this scanner never asks for one: a
-     * bulk release takes the asset back from whoever holds it. For a
-     * quantity-tracked asset that is only unambiguous while one person holds
-     * it, so the single holder is resolved here and anything else is refused
-     * by name rather than guessed at. Splitting a release across custodians is
-     * what the asset's own custody list is for.
-     *
-     * Only operator-assigned rows are candidates: a `Custody` row carrying a
-     * `kitCustodyId` was inherited from the kit and goes back by releasing the
-     * kit, which cascade-deletes it.
-     *
-     * The whole scan is checked before any of it is released: both that each
-     * asset has exactly one holder AND that the holder has the units asked
-     * for. Each `releaseQuantity` call commits its own transaction, so a
-     * refusal discovered mid-loop would leave earlier assets already released
-     * while the drawer reports the submission failed, and a retry would then
-     * release them a second time. `releaseQuantity` re-checks the quantity
-     * under its own row lock, which is what actually prevents over-release if
-     * custody moves in between; this pass is what makes the refusal arrive
-     * before anything is written.
-     */
-    /** One resolved `{ assetId, teamMemberId }` per quantity-tracked scan. */
-    const resolvedReleases: { assetId: string; teamMemberId: string }[] = [];
-
-    if (quantityAssetIds.length) {
-      const custodyRows = await db.custody.findMany({
-        where: {
-          assetId: { in: quantityAssetIds },
-          kitCustodyId: null,
-          asset: { organizationId },
-        },
-        select: {
-          assetId: true,
-          teamMemberId: true,
-          quantity: true,
-          asset: { select: { title: true } },
-        },
-      });
-
-      for (const assetId of quantityAssetIds) {
-        const rows = custodyRows.filter((row) => row.assetId === assetId);
-        /**
-         * One person can hold several operator rows on the same asset, one
-         * per location the units came from, so holders are counted by team
-         * member and their units summed. `releaseQuantity` draws from those
-         * rows itself.
-         */
-        const holderIds = Array.from(
-          new Set(rows.map((row) => row.teamMemberId))
-        );
-        const held = rows.reduce((sum, row) => sum + row.quantity, 0);
-
-        if (holderIds.length !== 1) {
-          throw new ShelfError({
-            cause: null,
-            status: 400,
-            label: "Assets",
-            shouldBeCaptured: false,
-            message:
-              holderIds.length === 0
-                ? "This asset has no units in anyone's custody to release."
-                : `"${rows[0].asset.title}" is held by more than one person. Release it from the asset's custody list, where each holder is listed separately.`,
-            additionalData: { assetId, holders: holderIds.length },
-          });
-        }
-
-        if (quantities[assetId] > held) {
-          throw new ShelfError({
-            cause: null,
-            status: 400,
-            label: "Assets",
-            shouldBeCaptured: false,
-            message: `Nothing was released. "${rows[0].asset.title}" has only ${held} unit(s) in custody.`,
-            additionalData: {
-              assetId,
-              requested: quantities[assetId],
-              held,
-            },
-          });
-        }
-
-        resolvedReleases.push({
-          assetId,
-          teamMemberId: holderIds[0],
-        });
-      }
-    }
+    // Each per-unit release is resolved to its single holder and checked
+    // before anything is written.
+    const resolvedReleases = await resolveQuantityReleases({
+      quantityAssetIds,
+      quantities,
+      organizationId,
+      role,
+      userId,
+    });
 
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckInAssets({
@@ -239,26 +147,19 @@ export async function action({ request, context }: ActionFunctionArgs) {
       : { skippedQuantityTracked: 0 };
 
     /**
-     * The whole-asset path runs first, and the per-unit writes after it.
-     *
-     * Neither service joins the other's transaction (each opens its own), so
-     * a mixed submission cannot be made all-or-nothing without reworking
-     * primitives that four other custody routes depend on, and holding their
-     * row locks across a whole scan. What the order buys is that the operation
-     * which can still refuse mid-flight goes first: every quantity release
-     * below has already been checked against its holder and their units by the
-     * pass above, while `bulkCheckInAssets` validates its own set as it runs.
+     * The whole-asset call runs before the per-unit writes: it validates and
+     * writes in one transaction, so if it refuses, nothing has been written.
+     * The per-unit releases after it were checked above; a refusal there can
+     * only come from a concurrent change, and is reported by asset.
      */
-    for (const { assetId, teamMemberId } of resolvedReleases) {
-      await releaseQuantity({
-        assetId,
-        teamMemberId,
-        quantity: quantities[assetId],
-        userId,
-        organizationId,
-        role,
-      });
-    }
+    const refusals = await releaseQuantities({
+      releases: resolvedReleases,
+      quantities,
+      userId,
+      organizationId,
+      role,
+    });
+    if (refusals.length) throw quantityRefusalsError("released", refusals);
 
     const skippedNote =
       skippedQuantityTracked > 0
