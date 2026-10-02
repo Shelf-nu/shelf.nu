@@ -110,7 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
-        // the user up by email, so this must run before we mint a code.
+        // the user up by auth id, so this must run before we mint a code.
         // Same detection as the web callback; timeZone is null when the mobile
         // Request lacks the CH-time-zone cookie (see
         // detectFormatPrefsForPersistence), so the lazy backfill fills the real

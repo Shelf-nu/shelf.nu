@@ -381,7 +381,7 @@ describe("requireMobileAuth", () => {
   function signedInAs(dbRow: Record<string, unknown>) {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
-      data: { user: { email: dbRow.email } },
+      data: { user: { id: dbRow.id, email: dbRow.email } },
       error: null,
     });
     vi.mocked(getSupabaseAdmin).mockReturnValue({
@@ -404,6 +404,17 @@ describe("requireMobileAuth", () => {
     deletedAt: null,
     lastMobileActiveAt: null,
   };
+
+  it("resolves the user by the verified auth id, whatever the stored email's case", async () => {
+    // The stored row keeps capitals; Supabase returns the address lowercased.
+    const request = signedInAs({ ...BASE_ROW, email: "Jane@Acme.com" });
+
+    const { user } = await requireMobileAuth(request);
+
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({ id: BASE_ROW.id });
+    expect(user.id).toBe(BASE_ROW.id);
+  });
 
   it("refuses a password session for an address that must use SSO", async () => {
     vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({

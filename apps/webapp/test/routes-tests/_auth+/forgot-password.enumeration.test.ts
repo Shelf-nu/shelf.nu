@@ -63,12 +63,12 @@ vi.mock("~/integrations/supabase/client", () => ({
   }),
 }));
 
-const { mockUserFindFirst } = vi.hoisted(() => ({
-  mockUserFindFirst: vi.fn(),
+const { mockUserFindMany } = vi.hoisted(() => ({
+  mockUserFindMany: vi.fn(),
 }));
 // why: chooses whether the account exists — the entire variable under test.
 vi.mock("~/database/db.server", () => ({
-  db: { user: { findFirst: mockUserFindFirst } },
+  db: { user: { findMany: mockUserFindMany } },
 }));
 
 import { updateAccountPassword } from "~/modules/auth/service.server";
@@ -113,10 +113,10 @@ describe("forgot-password enumeration", () => {
   });
 
   it("responds IDENTICALLY for a registered and an unregistered address", async () => {
-    mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
+    mockUserFindMany.mockResolvedValueOnce([{ id: "user-1", sso: false }]);
     const registered = observable(await requestReset("real@example.com"));
 
-    mockUserFindFirst.mockResolvedValueOnce(null);
+    mockUserFindMany.mockResolvedValueOnce([]);
     const unknown = observable(await requestReset("real@example.com"));
 
     // Same email in both, so the redirect target cannot differ for any reason
@@ -126,25 +126,41 @@ describe("forgot-password enumeration", () => {
 
   it("responds identically for an SSO account as for a normal one", async () => {
     // `user.sso` is per-user, so answering it confirmed the account existed.
-    mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
+    mockUserFindMany.mockResolvedValueOnce([{ id: "user-1", sso: false }]);
     const normal = observable(await requestReset("x@example.com"));
 
-    mockUserFindFirst.mockResolvedValueOnce({ id: "user-2", sso: true });
+    mockUserFindMany.mockResolvedValueOnce([{ id: "user-2", sso: true }]);
     const ssoAccount = observable(await requestReset("x@example.com"));
 
     expect(ssoAccount).toEqual(normal);
   });
 
   it("still sends the link for a real non-SSO account", async () => {
-    mockUserFindFirst.mockResolvedValue({ id: "user-1", sso: false });
+    mockUserFindMany.mockResolvedValue([{ id: "user-1", sso: false }]);
 
     await requestReset("real@example.com");
 
     expect(mockSendResetPasswordLink).toHaveBeenCalledWith("real@example.com");
   });
 
+  it("finds an account stored with different letter case", async () => {
+    // The schema lowercases the address; the stored row keeps its capitals.
+    mockUserFindMany.mockResolvedValue([
+      { id: "user-1", email: "Jane@Acme.com", sso: false },
+    ]);
+
+    await requestReset("jane@acme.com");
+
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { email: expect.objectContaining({ mode: "insensitive" }) },
+      })
+    );
+    expect(mockSendResetPasswordLink).toHaveBeenCalledWith("jane@acme.com");
+  });
+
   it("sends NOTHING for an unknown address", async () => {
-    mockUserFindFirst.mockResolvedValue(null);
+    mockUserFindMany.mockResolvedValue([]);
 
     await requestReset("nobody@example.com");
 
@@ -152,7 +168,7 @@ describe("forgot-password enumeration", () => {
   });
 
   it("sends NOTHING for an SSO account", async () => {
-    mockUserFindFirst.mockResolvedValue({ id: "user-1", sso: true });
+    mockUserFindMany.mockResolvedValue([{ id: "user-1", sso: true }]);
 
     await requestReset("sso@example.com");
 
@@ -166,7 +182,7 @@ describe("forgot-password enumeration", () => {
     //
     // The unsettled promise is the assertion — if the action awaited delivery,
     // this test could never return.
-    mockUserFindFirst.mockResolvedValue({ id: "user-1", sso: false });
+    mockUserFindMany.mockResolvedValue([{ id: "user-1", sso: false }]);
     mockSendResetPasswordLink.mockImplementation(() => new Promise(() => {}));
 
     const res = observable(await requestReset("real@example.com"));
@@ -179,7 +195,7 @@ describe("forgot-password enumeration", () => {
     // `+` is valid in an email (gmail-style aliases) and is also the query
     // string's encoding for a space — so unencoded, `a+b@example.com` comes
     // back out of the URL as `a b@example.com`.
-    mockUserFindFirst.mockResolvedValue(null);
+    mockUserFindMany.mockResolvedValue([]);
 
     const res = observable(await requestReset("a+b@example.com"));
 
@@ -191,13 +207,13 @@ describe("forgot-password enumeration", () => {
     // address. Delivery is only attempted for an address that exists and is
     // not SSO, so any response that differs on failure states exactly what the
     // uniform response withholds.
-    mockUserFindFirst.mockResolvedValueOnce({ id: "user-1", sso: false });
+    mockUserFindMany.mockResolvedValueOnce([{ id: "user-1", sso: false }]);
     // The `.catch()` on the non-blocking call is what keeps a rejection here
     // from surfacing as an unhandled rejection.
     mockSendResetPasswordLink.mockRejectedValueOnce(new Error("smtp down"));
     const failed = observable(await requestReset("real@example.com"));
 
-    mockUserFindFirst.mockResolvedValueOnce(null);
+    mockUserFindMany.mockResolvedValueOnce([]);
     const unknown = observable(await requestReset("real@example.com"));
 
     expect(failed).toEqual(unknown);
@@ -206,7 +222,7 @@ describe("forgot-password enumeration", () => {
   it("hands a password account on an SSO domain to the send step, which decides", async () => {
     // The domain decision costs a different number of queries per answer, so
     // it runs inside the un-awaited send rather than before the response.
-    mockUserFindFirst.mockResolvedValue({ id: "legacy-1", sso: false });
+    mockUserFindMany.mockResolvedValue([{ id: "legacy-1", sso: false }]);
 
     await requestReset("old-timer@sso-corp.com");
 
@@ -219,12 +235,12 @@ describe("forgot-password enumeration", () => {
   it("responds identically, and logs nothing, when the send step refuses an SSO address", async () => {
     const loggerSpy = vi.spyOn(Logger, "error").mockImplementation(() => {});
 
-    mockUserFindFirst.mockResolvedValueOnce({ id: "legacy-1", sso: false });
+    mockUserFindMany.mockResolvedValueOnce([{ id: "legacy-1", sso: false }]);
     // A refusal sends nothing and resolves exactly as a send does.
     mockSendResetPasswordLink.mockResolvedValueOnce(undefined);
     const refused = observable(await requestReset("member@sso-corp.com"));
 
-    mockUserFindFirst.mockResolvedValueOnce(null);
+    mockUserFindMany.mockResolvedValueOnce([]);
     const unknown = observable(await requestReset("member@sso-corp.com"));
 
     // Let the un-awaited rejection settle before checking the log.

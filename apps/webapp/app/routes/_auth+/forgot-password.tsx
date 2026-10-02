@@ -11,7 +11,6 @@ import Input from "~/components/forms/input";
 import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -23,6 +22,7 @@ import {
   updateAccountPassword,
 } from "~/modules/auth/service.server";
 import { createSsoRequiredError } from "~/modules/auth/sso-enforcement.server";
+import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
@@ -122,13 +122,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * everyone — that helps without answering a question about any
          * particular address.
          */
-        const user = await db.user.findFirst({
-          where: { email },
-          select: {
-            id: true,
-            sso: true,
-          },
-        });
+        // Case-insensitive, like every other account lookup: a stored
+        // "Jane@Acme.com" must still get its reset code for "jane@acme.com".
+        const user = await findUserByEmail(email);
 
         if (user && !user.sso) {
           /**

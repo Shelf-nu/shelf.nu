@@ -87,9 +87,12 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Get the database user record — exclude soft-deleted users
+  // Get the database user record by the verified auth id, which is the Shelf
+  // user id. The stored email can differ in letter case from the one Supabase
+  // returns, so it does not identify the account. Soft-deleted users are
+  // excluded below.
   const user = await db.user.findUnique({
-    where: { email: authUser.email },
+    where: { id: authUser.id },
     select: {
       id: true,
       email: true,

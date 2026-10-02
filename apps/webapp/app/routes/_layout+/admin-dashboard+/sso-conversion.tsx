@@ -15,8 +15,9 @@
  * Already-SSO accounts can be reverted to standard login as a recovery tool,
  * for example when a customer's identity provider is unavailable. A revert is
  * only allowed when the account could then sign in with a password: an owner of
- * the workspace that uses SSO for the domain, or any account whose domain no
- * longer uses SSO.
+ * the workspace that uses SSO for the domain, any account while every linked
+ * workspace has "Require SSO login" off, or any account whose domain no longer
+ * uses SSO.
  *
  * The page also lists the workspaces that claim the domain and flags the ones
  * with SSO group mappings: at a converted user's first SSO login, membership in
