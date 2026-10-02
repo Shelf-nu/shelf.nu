@@ -435,6 +435,8 @@ export type QrResponse = {
     /**
      * The linked asset. Its quantity fields and holders come from the same
      * server shaper as the asset list; the scan tab's custody modes read them.
+     * A caller who may not see other people's custody gets only their own
+     * `custodyList` entries, and `custodyListOthersCount` for the rest.
      */
     asset:
       | ({
@@ -454,6 +456,8 @@ export type QrResponse = {
           assetModelId?: string | null;
           category: { name: string } | null;
           location: { name: string } | null;
+          /** Holders left out of `custodyList` for this caller; absent means 0. */
+          custodyListOthersCount?: number;
         } & AssetQuantityFields)
       | null;
     /** Set when the QR is linked to a kit instead of an asset */
@@ -519,6 +523,8 @@ export type BarcodeResponse = {
           assetModelId?: string | null;
           category: { name: string } | null;
           location: { name: string } | null;
+          /** Holders left out of `custodyList` for this caller; absent means 0. */
+          custodyListOthersCount?: number;
         } & AssetQuantityFields)
       | null;
     /** Set when the barcode is linked to a kit instead of an asset */

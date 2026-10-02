@@ -124,6 +124,7 @@ function quantityFacts(
     assignable: 10,
     holders: [{ teamMemberId: "tm-1", units: 4 }],
     hasKitHeldUnits: false,
+    hiddenHolders: 0,
     unitOfMeasure: "pcs",
     consumable: false,
     ...overrides,
@@ -251,6 +252,26 @@ test("a quantity row without known units is blocked, never sent", () => {
   const unknown = quantityRow({ quantityFacts: undefined });
   assert.deepEqual(idsFor("assign_custody", [unknown]), ["qty-nothing-free"]);
   assert.deepEqual(idsFor("release_custody", [unknown]), ["qty-nothing-held"]);
+});
+
+test("release counts holders hidden from the caller as other holders", () => {
+  // A caller who may not see other people's custody gets only their own
+  // entry, plus a count of the holders left out.
+  const ownPlusHidden = quantityRow({
+    quantityFacts: quantityFacts({ hiddenHolders: 1 }),
+  });
+  assert.deepEqual(idsFor("release_custody", [ownPlusHidden]), [
+    "qty-several-holders",
+  ]);
+});
+
+test("a caller who holds nothing is told so, even when others hold units", () => {
+  const onlyHidden = quantityRow({
+    quantityFacts: quantityFacts({ holders: [], hiddenHolders: 2 }),
+  });
+  assert.deepEqual(idsFor("release_custody", [onlyHidden]), [
+    "qty-nothing-held",
+  ]);
 });
 
 test("a row from a server that sends no asset type keeps the whole-row rules", () => {

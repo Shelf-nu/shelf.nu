@@ -48,6 +48,7 @@ function facts(overrides: Partial<ScanQuantityFacts> = {}): ScanQuantityFacts {
     assignable: 10,
     holders: [],
     hasKitHeldUnits: false,
+    hiddenHolders: 0,
     unitOfMeasure: "pcs",
     consumable: false,
     ...overrides,
@@ -193,6 +194,21 @@ test("release facts list operator holders with the units they can hand back", ()
   assert.equal(built.hasKitHeldUnits, true);
   assert.equal(built.consumable, true);
   assert.equal(unitsFor("release_custody", built), 8);
+});
+
+test("holders hidden from the caller are counted, and absent means none", () => {
+  const scanned = {
+    quantity: 20,
+    custodyList: [holder("tm-self", 4)],
+  };
+  assert.equal(
+    buildQuantityFacts({
+      scanned: { ...scanned, custodyListOthersCount: 2 },
+      detail: null,
+    }).hiddenHolders,
+    2
+  );
+  assert.equal(buildQuantityFacts({ scanned, detail: null }).hiddenHolders, 0);
 });
 
 test("a holder without releasableQuantity counts all of their units", () => {

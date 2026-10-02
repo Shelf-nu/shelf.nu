@@ -61,6 +61,12 @@ export type ScanQuantityFacts = {
   holders: QuantityHolder[];
   /** True when some units are held because the asset's kit is in custody. */
   hasKitHeldUnits: boolean;
+  /**
+   * Holders the server left out of `holders` because the caller may not see
+   * other people's custody. They still hold units, so a release scan is not
+   * down to a single holder when this is above 0.
+   */
+  hiddenHolders: number;
   /** Display unit, e.g. "m" or "pcs"; null when the asset has none. */
   unitOfMeasure: string | null;
   /** True when a release records the units as used up (one-way assets). */
@@ -105,6 +111,8 @@ export function buildQuantityFacts({
     unitOfMeasure?: string | null;
     consumptionType?: ConsumptionType | null;
     custodyList?: AssetCustodyListEntry[];
+    /** Holders left out of `custodyList` for this caller; absent means 0. */
+    custodyListOthersCount?: number;
   };
   detail: {
     quantity?: number | null;
@@ -129,6 +137,7 @@ export function buildQuantityFacts({
     hasKitHeldUnits: custodyList.some(
       (entry) => operatorUnits(entry) < entry.quantity
     ),
+    hiddenHolders: scanned.custodyListOthersCount ?? 0,
     unitOfMeasure: scanned.unitOfMeasure?.trim() || null,
     consumable: releaseCategory(scanned.consumptionType) === "CONSUME",
   };

@@ -776,6 +776,8 @@ function ScannerContent() {
               assetModelId?: string | null;
               category: { name: string } | null;
               location: { name: string } | null;
+              /** Holders left out of `custodyList` for this caller. */
+              custodyListOthersCount?: number;
             } & AssetQuantityFields)
           | null;
         // The kit a kit-linked code resolves to (full object for batch ops).

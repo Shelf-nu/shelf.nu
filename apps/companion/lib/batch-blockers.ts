@@ -263,7 +263,14 @@ function candidatesFor(
       },
       {
         key: "qty-several-holders",
-        affected: quantityRows.filter((i) => holdersOf(i).length > 1),
+        // Holders hidden from this caller count too: with the caller's own
+        // units plus anyone else's, the asset is not down to one holder. A
+        // caller who holds nothing gets `qty-nothing-held` instead.
+        affected: quantityRows.filter((i) => {
+          const visible = holdersOf(i).length;
+          const hidden = i.quantityFacts?.hiddenHolders ?? 0;
+          return visible > 1 || (visible === 1 && hidden > 0);
+        }),
         message: (n) =>
           `${countNoun(
             n,
