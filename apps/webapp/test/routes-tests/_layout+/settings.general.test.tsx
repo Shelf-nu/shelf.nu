@@ -147,6 +147,7 @@ describe("settings.general loader", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -318,6 +319,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: false,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -363,6 +365,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true, // ✅ Tier allows hiding
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -425,6 +428,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -484,6 +488,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true, // Tier allows it
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -542,6 +547,7 @@ describe("settings.general action", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);
@@ -583,6 +589,7 @@ describe("settings.general transfer-ownership authorization", () => {
       canExportAssets: true,
       canImportNRM: true,
       canHideShelfBranding: true,
+      canUseReports: true,
       maxCustomFields: 0,
       maxOrganizations: 1,
     } as any);

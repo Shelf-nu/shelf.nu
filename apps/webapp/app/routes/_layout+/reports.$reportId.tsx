@@ -3,7 +3,8 @@
  *
  * Dynamic route that renders a specific report based on the reportId param.
  * The route owns three concerns:
- *   1. Permission + data loading via the per-report `*Report` server helpers.
+ *   1. Permission, plan and data loading via the per-report `*Report` server
+ *      helpers. A workspace whose plan has no reports goes to the unlock page.
  *   2. The page chrome (header, footer).
  *   3. Stitching together the small set of composition primitives
  *      (`ReportExportActions`, `ReportFilterBar`, `ReportContentSwitch`)
@@ -19,7 +20,7 @@
  */
 
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
-import { data, useLoaderData, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 
 import Header from "~/components/layout/header";
 import {
@@ -58,13 +59,15 @@ import type {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
-import { ShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { getIntParam } from "~/utils/search-params-number";
+import { workspaceCanUseReports } from "~/utils/subscription.server";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -87,7 +90,11 @@ export const handle = {
  * Numeric parameters that are missing or unreadable fall back to their
  * defaults rather than reaching the report as `NaN`.
  *
- * @returns The report's data for the current filters, its id, and the page header
+ * Reports are part of the Plus and Team plans: when the workspace's plan does
+ * not include them, the loader redirects to `/reports`, the unlock page.
+ *
+ * @returns The report's data for the current filters, its id, and the page
+ *   header; or a redirect to `/reports` when the plan does not include reports
  * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
  *   when the caller lacks `reports: read`
  */
@@ -95,225 +102,240 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
+  // Read outside the try so the catch can name the report.
   const { reportId } = params;
-  if (!reportId) {
-    throw new ShelfError({
-      cause: null,
-      message: "Report ID is required",
-      label: "Report",
-    });
-  }
 
-  // Validate report exists and is enabled
-  const reportDef = getReportById(reportId);
-  if (!reportDef) {
-    throw new ShelfError({
-      cause: null,
-      message: `Report "${reportId}" not found`,
-      label: "Report",
-      status: 404,
-    });
-  }
-
-  if (!reportDef.enabled) {
-    throw new ShelfError({
-      cause: null,
-      message: `Report "${reportDef.title}" is not yet available`,
-      label: "Report",
-      status: 403,
-    });
-  }
-
-  // Check permissions. `currentOrganization` supplies the workspace currency
-  // for the reports whose KPI strings carry money values.
-  const { organizationId, currentOrganization } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.reports,
-    action: PermissionAction.read,
-  });
-
-  // Parse search params for filters
-  const url = new URL(request.url);
-  const timeframePreset =
-    (url.searchParams.get("timeframe") as TimeframePreset) || "last_30d";
-  const customFrom = url.searchParams.get("from");
-  const customTo = url.searchParams.get("to");
-
-  // Resolve the acting user's date/time formatting preferences so timeframe
-  // labels (e.g. custom ranges) render in their configured format.
-  const formatPrefs = await resolveUserFormatPrefsById(
-    userId,
-    getClientHint(request)
-  );
-
-  const timeframe = resolveTimeframe(
-    timeframePreset,
-    customFrom ? new Date(customFrom) : undefined,
-    customTo ? new Date(customTo) : undefined,
-    formatPrefs
-  );
-
-  // Load report data based on report ID
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let reportData: ReportPayload<any>;
-
-  switch (reportId) {
-    case "booking-compliance": {
-      // Parse sort params for server-side sorting
-      const sortBy = (url.searchParams.get("sortBy") ||
-        "scheduledEnd") as BookingComplianceSortColumn;
-      const sortOrder = (url.searchParams.get("sortOrder") || "desc") as
-        | "asc"
-        | "desc";
-      reportData = await bookingComplianceReport({
-        organizationId,
-        timeframe,
-        // Anchor trend-chart axis labels in the acting user's timezone (D2).
-        timeZone: formatPrefs.timeZone,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-        sortBy,
-        sortOrder,
-      });
-      break;
-    }
-
-    case "overdue-items":
-      reportData = await overdueItemsReport({
-        organizationId,
-        currency: currentOrganization.currency,
-        custodianId: url.searchParams.get("custodian") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "idle-assets":
-      reportData = await idleAssetsReport({
-        organizationId,
-        currency: currentOrganization.currency,
-        // A threshold below one day puts the cutoff at or after now, which
-        // marks every asset idle.
-        idleThresholdDays: getIntParam(url.searchParams, "days", 30, {
-          min: 1,
-        }),
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "custody-snapshot":
-      reportData = await custodySnapshotReport({
-        organizationId,
-        currency: currentOrganization.currency,
-        teamMemberId: url.searchParams.get("teamMember") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "top-booked-assets":
-      reportData = await topBookedAssetsReport({
-        organizationId,
-        timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "top-booked-kits":
-      reportData = await topBookedKitsReport({
-        organizationId,
-        timeframe,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "distribution":
-      reportData = await assetDistributionReport({
-        organizationId,
-        currency: currentOrganization.currency,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "asset-inventory":
-      reportData = await assetInventoryReport({
-        organizationId,
-        currency: currentOrganization.currency,
-        categoryIds:
-          url.searchParams.get("categories")?.split(",").filter(Boolean) ||
-          undefined,
-        locationIds:
-          url.searchParams.get("locations")?.split(",").filter(Boolean) ||
-          undefined,
-        statuses:
-          url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
-          undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "monthly-booking-trends":
-      reportData = await monthlyBookingTrendsReport({
-        organizationId,
-        timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 12),
-      });
-      break;
-
-    case "asset-utilization":
-      reportData = await assetUtilizationReport({
-        organizationId,
-        timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    case "asset-activity":
-      reportData = await assetActivityReport({
-        organizationId,
-        timeframe,
-        assetId: url.searchParams.get("asset") || undefined,
-        categoryId: url.searchParams.get("category") || undefined,
-        page: getIntParam(url.searchParams, "page", 1),
-        pageSize: getIntParam(url.searchParams, "pageSize", 50),
-      });
-      break;
-
-    default:
+  try {
+    if (!reportId) {
       throw new ShelfError({
         cause: null,
-        message: `Report "${reportId}" is not implemented`,
+        message: "Report ID is required",
         label: "Report",
-        status: 500,
       });
-  }
+    }
 
-  return data({
-    ...reportData,
-    reportId,
-    // Standard header object for the app's Header component
-    header: {
-      title: reportData.report.title,
-      subHeading: reportData.report.description,
-    },
-  });
+    // Validate report exists and is enabled
+    const reportDef = getReportById(reportId);
+    if (!reportDef) {
+      throw new ShelfError({
+        cause: null,
+        message: `Report "${reportId}" not found`,
+        label: "Report",
+        status: 404,
+      });
+    }
+
+    if (!reportDef.enabled) {
+      throw new ShelfError({
+        cause: null,
+        message: `Report "${reportDef.title}" is not yet available`,
+        label: "Report",
+        status: 403,
+      });
+    }
+
+    // Check permissions. `currentOrganization` supplies the workspace currency
+    // for the reports whose KPI strings carry money values.
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.read,
+      });
+
+    // Reports are part of the Plus and Team plans. A workspace without them
+    // goes to the reports index, which explains that and offers the upgrade,
+    // rather than to an error screen.
+    if (!(await workspaceCanUseReports({ organizationId, organizations }))) {
+      return redirect("/reports");
+    }
+
+    // Parse search params for filters
+    const url = new URL(request.url);
+    const timeframePreset =
+      (url.searchParams.get("timeframe") as TimeframePreset) || "last_30d";
+    const customFrom = url.searchParams.get("from");
+    const customTo = url.searchParams.get("to");
+
+    // Resolve the acting user's date/time formatting preferences so timeframe
+    // labels (e.g. custom ranges) render in their configured format.
+    const formatPrefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
+
+    const timeframe = resolveTimeframe(
+      timeframePreset,
+      customFrom ? new Date(customFrom) : undefined,
+      customTo ? new Date(customTo) : undefined,
+      formatPrefs
+    );
+
+    // Load report data based on report ID
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let reportData: ReportPayload<any>;
+
+    switch (reportId) {
+      case "booking-compliance": {
+        // Parse sort params for server-side sorting
+        const sortBy = (url.searchParams.get("sortBy") ||
+          "scheduledEnd") as BookingComplianceSortColumn;
+        const sortOrder = (url.searchParams.get("sortOrder") || "desc") as
+          | "asc"
+          | "desc";
+        reportData = await bookingComplianceReport({
+          organizationId,
+          timeframe,
+          // Anchor trend-chart axis labels in the acting user's timezone (D2).
+          timeZone: formatPrefs.timeZone,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+          sortBy,
+          sortOrder,
+        });
+        break;
+      }
+
+      case "overdue-items":
+        reportData = await overdueItemsReport({
+          organizationId,
+          currency: currentOrganization.currency,
+          custodianId: url.searchParams.get("custodian") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "idle-assets":
+        reportData = await idleAssetsReport({
+          organizationId,
+          currency: currentOrganization.currency,
+          // A threshold below one day puts the cutoff at or after now, which
+          // marks every asset idle.
+          idleThresholdDays: getIntParam(url.searchParams, "days", 30, {
+            min: 1,
+          }),
+          categoryId: url.searchParams.get("category") || undefined,
+          locationId: url.searchParams.get("location") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "custody-snapshot":
+        reportData = await custodySnapshotReport({
+          organizationId,
+          currency: currentOrganization.currency,
+          teamMemberId: url.searchParams.get("teamMember") || undefined,
+          locationId: url.searchParams.get("location") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "top-booked-assets":
+        reportData = await topBookedAssetsReport({
+          organizationId,
+          timeframe,
+          categoryId: url.searchParams.get("category") || undefined,
+          locationId: url.searchParams.get("location") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "top-booked-kits":
+        reportData = await topBookedKitsReport({
+          organizationId,
+          timeframe,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "distribution":
+        reportData = await assetDistributionReport({
+          organizationId,
+          currency: currentOrganization.currency,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "asset-inventory":
+        reportData = await assetInventoryReport({
+          organizationId,
+          currency: currentOrganization.currency,
+          categoryIds:
+            url.searchParams.get("categories")?.split(",").filter(Boolean) ||
+            undefined,
+          locationIds:
+            url.searchParams.get("locations")?.split(",").filter(Boolean) ||
+            undefined,
+          statuses:
+            url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
+            undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "monthly-booking-trends":
+        reportData = await monthlyBookingTrendsReport({
+          organizationId,
+          timeframe,
+          categoryId: url.searchParams.get("category") || undefined,
+          locationId: url.searchParams.get("location") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 12),
+        });
+        break;
+
+      case "asset-utilization":
+        reportData = await assetUtilizationReport({
+          organizationId,
+          timeframe,
+          categoryId: url.searchParams.get("category") || undefined,
+          locationId: url.searchParams.get("location") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      case "asset-activity":
+        reportData = await assetActivityReport({
+          organizationId,
+          timeframe,
+          assetId: url.searchParams.get("asset") || undefined,
+          categoryId: url.searchParams.get("category") || undefined,
+          page: getIntParam(url.searchParams, "page", 1),
+          pageSize: getIntParam(url.searchParams, "pageSize", 50),
+        });
+        break;
+
+      default:
+        throw new ShelfError({
+          cause: null,
+          message: `Report "${reportId}" is not implemented`,
+          label: "Report",
+          status: 500,
+        });
+    }
+
+    return data({
+      ...reportData,
+      reportId,
+      // Standard header object for the app's Header component
+      header: {
+        title: reportData.report.title,
+        subHeading: reportData.report.description,
+      },
+    });
+  } catch (cause) {
+    const reason = makeShelfError(cause, { userId, reportId });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportPage() {
