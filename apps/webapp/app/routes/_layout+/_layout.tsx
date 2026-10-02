@@ -41,7 +41,8 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
-import { getLegacyLoginDecision } from "~/modules/auth/sso-enforcement.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import {
   getSelectedOrganization,
@@ -108,8 +109,9 @@ export const shouldRevalidate = skipRevalidationOnClientViewChange;
  * @returns The user, their organizations, subscription state and layout prefs
  * @throws {Response} A redirect to `/onboarding` for a user who has not
  *   finished signing up, or an error response when a gate refuses. A user
- *   whose address must now sign in with SSO is signed out and redirected to
- *   `/login?sso_required=true` (returned, not thrown).
+ *   whose address must now sign in with SSO has every session revoked, is
+ *   signed out and redirected to `/login?sso_required=true` (returned, not
+ *   thrown).
  */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -160,9 +162,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // configured for SSO. End it, so the refusal applies to sessions already
     // open and not only to new sign-ins. SSO users are never refused here: their
     // session came from SSO.
+    // Every session of the account is revoked server-side, not only this
+    // cookie: the refresh-token row is the auth boundary, so a session left
+    // open in another browser would otherwise keep refreshing.
     if (!user.sso) {
-      const decision = await getLegacyLoginDecision(user.email);
+      const decision = await getLegacyLoginDecisionForUser({
+        userId: user.id,
+        email: user.email,
+      });
       if (!decision.allowed) {
+        await revokeAllSessions(authSession.accessToken);
         context.destroySession();
         return redirect("/login?sso_required=true");
       }

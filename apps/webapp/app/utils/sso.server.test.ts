@@ -1,5 +1,5 @@
 import { AuthApiError } from "@supabase/supabase-js";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import { ShelfError } from "~/utils/error";
 
@@ -132,7 +132,29 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * Answers the provider-binding lookup an email-matched callback runs: whether
+ * the authenticated auth user holds an identity from the SSO provider
+ * registered for the session email's domain.
+ */
+function givenSessionHoldsDomainIdentity(held: boolean) {
+  vi.mocked(mockDb.db.$queryRaw).mockReset();
+  vi.mocked(mockDb.db.$queryRaw).mockResolvedValue([
+    { held },
+  ] as unknown as Awaited<ReturnType<typeof mockDb.db.$queryRaw>>);
+}
+
 describe("resolveUserAndOrgForSsoCallback", () => {
+  beforeEach(() => {
+    givenSessionHoldsDomainIdentity(true);
+  });
+
+  // The default answer above must not reach the suites below, which queue
+  // their own raw-query results.
+  afterEach(() => {
+    vi.mocked(mockDb.db.$queryRaw).mockReset();
+  });
+
   describe("existing user flows", () => {
     it("rejects an un-approved email-auth account without reconciling it", async () => {
       seedUsers({
@@ -390,11 +412,109 @@ describe("resolveUserAndOrgForSsoCallback", () => {
 
       expect(error).toBeInstanceOf(ShelfError);
       expect(error).toMatchObject({ status: 409 });
+      // The refusal is captured, so it names the accounts by id only.
+      expect((error as ShelfError).cause).toMatchObject({
+        additionalData: { userIds: ["account-a", "account-b"] },
+      });
+      expect(
+        ((error as ShelfError).cause as ShelfError).additionalData
+      ).not.toHaveProperty("email");
       expect(mockAuth.getAuthUserById).not.toHaveBeenCalled();
       expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
       expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
       expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("binding an email match to the domain's provider", () => {
+    /** The provider-binding lookup's SQL text and bound values. */
+    function bindingQuery() {
+      const calls = vi.mocked(mockDb.db.$queryRaw).mock.calls;
+      expect(calls).toHaveLength(1);
+      const [strings, ...values] = calls[0] as unknown as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      return { sql: strings.join("?").replace(/\s+/g, " "), values };
+    }
+
+    it("refuses an email-matched account when the session's identity is from another provider, touching nothing", async () => {
+      givenSessionHoldsDomainIdentity(false);
+      const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: true };
+      seedUsers(approvedUser);
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({
+        status: 403,
+        message: "Please sign in with your organization's single sign-on.",
+        shouldBeCaptured: true,
+      });
+      expect(isSsoAccountLinkedError(error)).toBe(false);
+      expect(mockAuth.getAuthUserById).not.toHaveBeenCalled();
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
+      expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("refuses the SCIM re-key when the session's identity is from another provider", async () => {
+      givenSessionHoldsDomainIdentity(false);
+      seedUsers({ ...shelfUser, id: "cuid-placeholder-from-scim" });
+      // @ts-expect-error - vitest mock type
+      mockAuth.getAuthUserById.mockRejectedValue(wrappedAuthError(404));
+
+      await expect(
+        resolveUserAndOrgForSsoCallback(baseInput)
+      ).rejects.toMatchObject({ status: 403 });
+      expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("checks the authenticated auth user against the provider of the email's domain", async () => {
+      const approvedUser = { ...shelfUser, id: ORIGINAL_UUID, sso: false };
+      seedUsers(approvedUser);
+      // @ts-expect-error - vitest mock type
+      mockAuth.getAuthUserById.mockResolvedValue({
+        id: ORIGINAL_UUID,
+        app_metadata: { provider: "sso:provider-1" },
+      });
+      // @ts-expect-error - vitest mock type
+      mockUser.updateUserFromSSO.mockResolvedValue({
+        user: { id: ORIGINAL_UUID },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback({
+        ...baseInput,
+        authSession: { ...baseAuthSession, email: "Jane@Example.com" },
+      });
+
+      const { sql, values } = bindingQuery();
+      expect(sql).toContain("FROM auth.identities i");
+      expect(sql).toContain("JOIN auth.sso_domains d");
+      expect(sql).toContain("i.provider = 'sso:' || d.sso_provider_id::text");
+      expect(values).toEqual([SUPABASE_UUID, "example.com"]);
+      expect(mockUser.updateUserFromSSO).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not run the binding check for an account matched by id", async () => {
+      givenSessionHoldsDomainIdentity(false);
+      seedUsers(shelfUser);
+      // @ts-expect-error - vitest mock type
+      mockUser.updateUserFromSSO.mockResolvedValue({
+        user: { id: shelfUser.id },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback(baseInput);
+
+      expect(mockDb.db.$queryRaw).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).toHaveBeenCalledTimes(1);
     });
   });
 

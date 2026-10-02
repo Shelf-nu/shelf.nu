@@ -12,14 +12,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: the engine writes to the `auth` schema with raw SQL, which needs a real
 // Supabase database. `$transaction` runs its callback against the same mock so
-// raw writes inside the transaction land on `db.$executeRaw`, where the tests
-// read the SQL text and bound values back.
+// raw writes inside the transaction land on `db.$executeRaw` / `db.$queryRaw`,
+// where the tests read the SQL text and bound values back.
 vi.mock("~/database/db.server", () => {
   const db = {
     $transaction: vi.fn(),
     $executeRaw: vi.fn(),
     $queryRaw: vi.fn(),
     user: {
+      count: vi.fn(),
       findUnique: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
@@ -125,16 +126,45 @@ function rawQueries(): RawCall[] {
   });
 }
 
+/** Who holds an SSO identity, as the conversion's holder lookup returns it. */
+type IdentityHolder = {
+  userId: string;
+  isSsoUser: boolean;
+  hasShelfUser: boolean;
+};
+
+/** What the mocked `$queryRaw` answers, per query the engine runs. */
+const rawAnswers: {
+  /** Lowercased emails the earlier-SSO-login lookup reports. */
+  earlierSsoEmails: string[];
+  /** Whether the identity INSERT seeds a row (false: ON CONFLICT hit). */
+  seeded: boolean;
+  /** The holder lookup's row when the INSERT seeded nothing. */
+  identityHolder: IdentityHolder | null;
+} = { earlierSsoEmails: [], seeded: true, identityHolder: null };
+
 /**
  * Makes the earlier-SSO-login lookup report `emails` (lowercased) as having
  * another SSO auth user.
  */
 function earlierSsoLoginFor(emails: string[]) {
-  vi.mocked(db.$queryRaw).mockResolvedValue(
-    emails.map((email) => ({ email })) as unknown as Awaited<
-      ReturnType<typeof db.$queryRaw>
-    >
-  );
+  rawAnswers.earlierSsoEmails = emails;
+}
+
+/**
+ * Makes the identity INSERT hit ON CONFLICT, with `holder` already holding the
+ * `(provider_id, provider)` pair (null: the holder lookup finds nothing).
+ */
+function identityAlreadyHeldBy(holder: IdentityHolder | null) {
+  rawAnswers.seeded = false;
+  rawAnswers.identityHolder = holder;
+}
+
+/** The single raw query whose SQL contains `fragment`; fails if not exactly one. */
+function rawQueryMatching(fragment: string): RawCall {
+  const matches = rawQueries().filter((c) => c.sql.includes(fragment));
+  expect(matches).toHaveLength(1);
+  return matches[0];
 }
 
 /** The single raw call whose SQL contains `fragment`; fails if not exactly one. */
@@ -153,7 +183,30 @@ beforeEach(() => {
   vi.mocked(db.$executeRaw).mockReset();
   vi.mocked(db.$executeRaw).mockResolvedValue(1);
   vi.mocked(db.$queryRaw).mockReset();
-  earlierSsoLoginFor([]);
+  rawAnswers.earlierSsoEmails = [];
+  rawAnswers.seeded = true;
+  rawAnswers.identityHolder = null;
+  // Each raw query is answered by what it reads: the identity INSERT returns
+  // the seeded row, the holder lookup its holder, and the earlier-SSO-login
+  // lookup its emails.
+  vi.mocked(db.$queryRaw).mockImplementation(((
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => {
+    const sql = strings.join("");
+    if (sql.includes("INSERT INTO auth.identities")) {
+      return Promise.resolve(rawAnswers.seeded ? [{ userId: values[0] }] : []);
+    }
+    if (sql.includes("FROM auth.identities")) {
+      return Promise.resolve(
+        rawAnswers.identityHolder ? [rawAnswers.identityHolder] : []
+      );
+    }
+    return Promise.resolve(
+      rawAnswers.earlierSsoEmails.map((email) => ({ email }))
+    );
+  }) as unknown as typeof db.$queryRaw);
+  vi.mocked(db.user.count).mockResolvedValue(0);
   vi.mocked(db.user.findUnique).mockResolvedValue(
     baseUser as unknown as Awaited<ReturnType<typeof db.user.findUnique>>
   );
@@ -202,9 +255,9 @@ describe("convertAccountToSso", () => {
   it("seeds the SSO identity with the lowercased email", async () => {
     await convertAccountToSso({ userId: ORIGINAL_ID });
 
-    const insert = rawCallMatching("INSERT INTO auth.identities");
+    const insert = rawQueryMatching("INSERT INTO auth.identities");
     expect(insert.sql).toContain(
-      "ON CONFLICT (provider_id, provider) DO NOTHING"
+      "ON CONFLICT (provider_id, provider) DO NOTHING RETURNING user_id"
     );
     // user_id, provider_id, provider, sub, email
     expect(insert.values).toEqual([
@@ -219,13 +272,56 @@ describe("convertAccountToSso", () => {
   it("looks up an earlier SSO login for this user only, by lowercased email", async () => {
     await convertAccountToSso({ userId: ORIGINAL_ID });
 
-    const queries = rawQueries();
-    expect(queries).toHaveLength(1);
-    expect(queries[0].sql).toContain("FROM auth.users");
-    expect(queries[0].sql).toContain("is_sso_user = true");
-    expect(queries[0].sql).toContain("lower(email) = ANY(");
-    expect(queries[0].sql).toContain("id::text <> ALL(");
-    expect(queries[0].values).toEqual([["jane.doe@acme.com"], [ORIGINAL_ID]]);
+    const lookup = rawQueryMatching("FROM auth.users");
+    expect(lookup.sql).toContain("is_sso_user = true");
+    expect(lookup.sql).toContain("lower(email) = ANY(");
+    expect(lookup.sql).toContain("id::text <> ALL(");
+    // An SSO auth user with its own Shelf account is someone else, not a
+    // duplicate left by a refused sign-in.
+    expect(lookup.sql).toContain(
+      'NOT EXISTS ( SELECT 1 FROM "User" u WHERE u.id = auth.users.id::text )'
+    );
+    expect(lookup.values).toEqual([["jane.doe@acme.com"], [ORIGINAL_ID]]);
+  });
+
+  it("refuses with a 409 when another live account uses the email in different case", async () => {
+    vi.mocked(db.user.count).mockResolvedValue(1);
+
+    const error = await convertAccountToSso({ userId: ORIGINAL_ID }).catch(
+      (e: unknown) => e
+    );
+
+    expect(error).toMatchObject({
+      status: 409,
+      message:
+        "Another Shelf account uses this email address with different letter case. Resolve the duplicate before converting.",
+      shouldBeCaptured: false,
+    });
+    // The email is personal data and stays out of the error.
+    const { cause } = error as { cause: { additionalData: unknown } };
+    expect(cause.additionalData).toEqual({ userId: ORIGINAL_ID });
+    expect(db.user.count).toHaveBeenCalledWith({
+      where: {
+        id: { not: ORIGINAL_ID },
+        deletedAt: null,
+        email: { in: ["jane.doe@acme.com"], mode: "insensitive" },
+      },
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.$executeRaw).not.toHaveBeenCalled();
+    expect(db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 for a deleted user", async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      ...baseUser,
+      deletedAt: new Date(),
+    } as unknown as Awaited<ReturnType<typeof db.user.findUnique>>);
+
+    await expect(
+      convertAccountToSso({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 404 });
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("reports the extra sign-in when the user tried SSO before conversion", async () => {
@@ -310,6 +406,10 @@ describe("reconcileDuplicateSsoLogin", () => {
     const remove = rawCallMatching("DELETE FROM auth.users");
     expect(remove.sql).toContain("is_sso_user = true");
     expect(remove.sql).toContain("id <> ?::uuid");
+    // Never an auth user that has a Shelf account of its own.
+    expect(remove.sql).toContain(
+      'NOT EXISTS ( SELECT 1 FROM "User" u WHERE u.id = auth.users.id::text )'
+    );
     expect(remove.values).toEqual([DUPLICATE_ID, ORIGINAL_ID]);
 
     expect(rawCallMatching("DELETE FROM auth.sessions").values).toEqual([
@@ -488,8 +588,10 @@ describe("findEligibleAccountsForSsoConversion", () => {
     const queries = rawQueries();
     expect(queries).toHaveLength(1);
     expect(queries[0].sql).toContain("is_sso_user = true");
-    // The candidates' own auth rows are excluded by id.
+    // The candidates' own auth rows are excluded by id, and so is any SSO
+    // auth user that has a Shelf account of its own.
     expect(queries[0].sql).toContain("id::text <> ALL(");
+    expect(queries[0].sql).toContain('NOT EXISTS ( SELECT 1 FROM "User" u');
     expect(queries[0].values).toEqual([
       ["a@acme.com", "b@acme.com"],
       ["u1", "u2"],
@@ -537,28 +639,92 @@ describe("findEligibleAccountsForSsoConversion", () => {
 });
 
 describe("convertAccountToSso when the SSO identity already exists", () => {
-  it("still converts the account", async () => {
-    // ON CONFLICT DO NOTHING: an identity already held (by this user on a
-    // re-run, or by an SSO auth user from a sign-in before conversion) seeds
-    // nothing. The callback's reconcile merges any duplicate at sign-in.
-    vi.mocked(db.$executeRaw).mockImplementation(((
-      strings: TemplateStringsArray
-    ) =>
-      Promise.resolve(
-        strings.join("").includes("INSERT INTO auth.identities") ? 0 : 1
-      )) as unknown as typeof db.$executeRaw);
-
-    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
-
-    expect(result.status).toBe("converted");
-    expect(rawCallMatching("INSERT INTO auth.identities").sql).toContain(
-      "ON CONFLICT (provider_id, provider) DO NOTHING"
-    );
+  /** Asserts the conversion sealed and flagged the account. */
+  function expectConverted() {
     rawCallMatching("UPDATE auth.users");
     expect(db.user.update).toHaveBeenCalledWith({
       where: { id: ORIGINAL_ID },
       data: { sso: true, onboarded: true },
     });
+  }
+
+  /** Asserts the conversion stopped before sealing anything. */
+  function expectNothingSealed() {
+    expect(rawCalls().some((c) => c.sql.includes("UPDATE auth.users"))).toBe(
+      false
+    );
+    expect(
+      rawCalls().some((c) => c.sql.includes("DELETE FROM auth.sessions"))
+    ).toBe(false);
+    expect(db.user.update).not.toHaveBeenCalled();
+  }
+
+  it("converts on a re-run, when the account itself holds the identity", async () => {
+    identityAlreadyHeldBy({
+      userId: ORIGINAL_ID,
+      isSsoUser: true,
+      hasShelfUser: true,
+    });
+
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+    const holder = rawQueryMatching("FROM auth.identities i");
+    expect(holder.values).toEqual(["jane.doe@acme.com", PROVIDER]);
+    expect(holder.sql).toContain('FROM "User" su');
+    expectConverted();
+  });
+
+  it("converts when a duplicate SSO auth user with no Shelf account holds it", async () => {
+    // The refused pre-conversion sign-in; the callback's reconcile merges it.
+    identityAlreadyHeldBy({
+      userId: DUPLICATE_ID,
+      isSsoUser: true,
+      hasShelfUser: false,
+    });
+
+    const result = await convertAccountToSso({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("converted");
+    expectConverted();
+  });
+
+  it("refuses with a 409 and seals nothing when another Shelf account holds it", async () => {
+    identityAlreadyHeldBy({
+      userId: DUPLICATE_ID,
+      isSsoUser: true,
+      hasShelfUser: true,
+    });
+
+    await expect(
+      convertAccountToSso({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/belongs to another account/i),
+    });
+    expectNothingSealed();
+  });
+
+  it("refuses with a 409 when a non-SSO auth user holds it", async () => {
+    identityAlreadyHeldBy({
+      userId: DUPLICATE_ID,
+      isSsoUser: false,
+      hasShelfUser: false,
+    });
+
+    await expect(
+      convertAccountToSso({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 409 });
+    expectNothingSealed();
+  });
+
+  it("refuses with a 409 when the holder cannot be found", async () => {
+    identityAlreadyHeldBy(null);
+
+    await expect(
+      convertAccountToSso({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 409 });
+    expectNothingSealed();
   });
 });
 
@@ -593,7 +759,7 @@ describe("convertAllEligibleOnDomain", () => {
 
   /** User ids whose SSO identity INSERT ran, in order. */
   function seededUserIds(): unknown[] {
-    return rawCalls()
+    return rawQueries()
       .filter((c) => c.sql.includes("INSERT INTO auth.identities"))
       .map((c) => c.values[0]);
   }
@@ -744,6 +910,19 @@ describe("revertAccountToStandard", () => {
     await expect(
       revertAccountToStandard({ userId: ORIGINAL_ID })
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("returns 404 for a deleted user", async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      ...baseUser,
+      sso: true,
+      deletedAt: new Date(),
+    } as unknown as Awaited<ReturnType<typeof db.user.findUnique>>);
+
+    await expect(
+      revertAccountToStandard({ userId: ORIGINAL_ID })
+    ).rejects.toMatchObject({ status: 404 });
+    expect(db.$transaction).not.toHaveBeenCalled();
   });
 
   it("refuses a non-owner whose domain still uses SSO", async () => {

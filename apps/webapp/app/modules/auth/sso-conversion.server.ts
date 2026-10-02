@@ -47,6 +47,7 @@ import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
 import { userOwnsLinkedSsoWorkspace } from "~/modules/auth/sso-enforcement.server";
+import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -178,9 +179,11 @@ async function sealAuthUserAsSso(
 
 /**
  * Finds which of the given accounts tried SSO before being converted: another
- * auth user exists with the same email (case-insensitive) and
- * `is_sso_user = true`. That is the duplicate a refused pre-conversion SSO
+ * auth user exists with the same email (case-insensitive), `is_sso_user = true`
+ * and no Shelf `User` row. That is the duplicate a refused pre-conversion SSO
  * sign-in leaves behind, which the first SSO sign-in after conversion lands on.
+ * An SSO auth user that has its own Shelf account is a separate person's
+ * account, never a duplicate to merge.
  *
  * One query for the whole list; none when the list is empty. An account's own
  * auth row never counts, even once it is SSO itself.
@@ -202,6 +205,9 @@ async function findEmailsWithEarlierSsoLogin(
     WHERE is_sso_user = true
       AND lower(email) = ANY(${emails}::text[])
       AND id::text <> ALL(${ids}::text[])
+      AND NOT EXISTS (
+        SELECT 1 FROM "User" u WHERE u.id = auth.users.id::text
+      )
   `;
 
   return new Set(rows.map((row) => row.email));
@@ -231,12 +237,70 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
 }
 
 /**
+ * Checks who holds an SSO identity the conversion could not seed because the
+ * `(provider_id, provider)` pair already exists. Two holders are acceptable:
+ *   - the account being converted itself (a re-run), and
+ *   - an SSO auth user with no Shelf `User` row: the duplicate a refused
+ *     pre-conversion SSO sign-in left behind, which `reconcileDuplicateSsoLogin`
+ *     merges at the next SSO callback.
+ * Anyone else (an auth user with its own Shelf account, or a non-SSO auth
+ * user) is a different account, and sealing this one as SSO-only would leave
+ * it unable to sign in. Throws so the surrounding transaction rolls back
+ * before anything is sealed.
+ *
+ * @param tx - active Prisma transaction client
+ * @param args.userId - the auth user id being converted
+ * @param args.subject - the seeded `provider_id` (the lowercased email)
+ * @param args.provider - the seeded `provider` (`sso:<providerId>`)
+ * @throws {ShelfError} 409 when the identity is held by another account
+ */
+async function assertExistingSsoIdentityIsReconcilable(
+  tx: SsoConversionTx,
+  {
+    userId,
+    subject,
+    provider,
+  }: { userId: string; subject: string; provider: string }
+): Promise<void> {
+  const [holder] = await tx.$queryRaw<
+    { userId: string; isSsoUser: boolean; hasShelfUser: boolean }[]
+  >`
+    SELECT
+      i.user_id::text AS "userId",
+      u.is_sso_user AS "isSsoUser",
+      EXISTS (
+        SELECT 1 FROM "User" su WHERE su.id = i.user_id::text
+      ) AS "hasShelfUser"
+    FROM auth.identities i
+    JOIN auth.users u ON u.id = i.user_id
+    WHERE i.provider_id = ${subject}
+      AND i.provider = ${provider}
+  `;
+
+  if (holder?.userId === userId) return;
+  if (holder && holder.isSsoUser && !holder.hasShelfUser) return;
+
+  throw new ShelfError({
+    cause: null,
+    message:
+      "The single sign-on identity for this email address belongs to another account. Resolve that account before converting.",
+    additionalData: { userId, holderUserId: holder?.userId ?? null },
+    label,
+    status: 409,
+    shouldBeCaptured: true,
+  });
+}
+
+/**
  * Admin-initiated conversion. Attaches an SSO identity to the user's existing
  * auth account so their next SSO login lands on the original UUID, then seals
  * the account as SSO-only and signs out its current sessions.
  *
- * Guards: skips users already SSO (idempotent); requires the domain to have a
- * configured SSO provider; requires the auth account to exist. Owners of the
+ * Guards: refuses deleted users; skips users already SSO (idempotent); refuses
+ * when another live account's email differs from this one only in case;
+ * requires the domain to have a configured SSO provider; requires the auth
+ * account to exist; refuses when the SSO identity it would seed is already held
+ * by another account that is not a reconcilable duplicate. Owners of the
  * domain's SSO workspace are converted like anyone else; a converted owner
  * loses the password login an unconverted one keeps, and support can undo it
  * with `revertAccountToStandard`.
@@ -250,7 +314,9 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
  * @param args.actorUserId - the admin performing the conversion, for the log
  * @returns the conversion result: `converted` or `skipped_already_sso`, and
  *   whether the user's first SSO sign-in will ask them to sign in again
- * @throws {ShelfError} on any guard failure
+ * @throws {ShelfError} 404 for an unknown or deleted user, 409 for a
+ *   case-variant duplicate account or an SSO identity held by another account,
+ *   and on any other guard failure
  */
 export async function convertAccountToSso({
   userId,
@@ -269,10 +335,10 @@ export async function convertAccountToSso({
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, sso: true },
+      select: { id: true, email: true, sso: true, deletedAt: true },
     });
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       throw new ShelfError({
         cause: null,
         message: "User not found.",
@@ -310,6 +376,29 @@ export async function convertAccountToSso({
       }
     }
 
+    // The seeded identity is keyed on the lowercased email, and the SSO
+    // callback matches Shelf accounts without regard to case, so a second
+    // account whose email differs only in case would share this SSO identity.
+    // The email stays out of additionalData: it is personal data.
+    const caseVariantAccounts = await db.user.count({
+      where: {
+        id: { not: user.id },
+        deletedAt: null,
+        email: caseInsensitiveEmailFilter(user.email),
+      },
+    });
+    if (caseVariantAccounts > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "Another Shelf account uses this email address with different letter case. Resolve the duplicate before converting.",
+        additionalData: { userId },
+        label,
+        status: 409,
+        shouldBeCaptured: false,
+      });
+    }
+
     const ssoProviderId = await requireSsoProviderIdForEmail(user.email);
     const provider = `sso:${ssoProviderId}`;
     const subject = user.email.toLowerCase();
@@ -330,8 +419,9 @@ export async function convertAccountToSso({
 
     await db.$transaction(async (tx) => {
       // ON CONFLICT keeps a re-run idempotent, and leaves an identity already
-      // held by an earlier SSO auth user to the callback's reconcile.
-      await tx.$executeRaw`
+      // held by an earlier SSO auth user to the callback's reconcile. When it
+      // seeds nothing, the holder is checked before anything is sealed.
+      const seeded = await tx.$queryRaw<{ userId: string }[]>`
         INSERT INTO auth.identities
           (user_id, provider_id, provider, identity_data, last_sign_in_at, created_at, updated_at)
         VALUES (
@@ -346,7 +436,16 @@ export async function convertAccountToSso({
           now(), now(), now()
         )
         ON CONFLICT (provider_id, provider) DO NOTHING
+        RETURNING user_id::text AS "userId"
       `;
+
+      if (seeded.length === 0) {
+        await assertExistingSsoIdentityIsReconcilable(tx, {
+          userId: user.id,
+          subject,
+          provider,
+        });
+      }
 
       await sealAuthUserAsSso(tx, user.id, ssoProviderId);
 
@@ -391,10 +490,17 @@ export async function convertAccountToSso({
  * existed. Moves the duplicate's SSO identity onto the original account, seals
  * the original as SSO-only, and deletes the duplicate auth user.
  *
- * It can only ever delete an SSO auth user that is not the original: the
- * delete is guarded on `is_sso_user = true AND id <> original`, and the whole
- * transaction rolls back unless exactly one identity moved and exactly one
- * auth user was deleted.
+ * It can only ever delete an SSO auth user that is not the original and has
+ * no Shelf `User` row: the delete is guarded on `is_sso_user = true`,
+ * `id <> original` and the absence of a `User` row, and the whole transaction
+ * rolls back unless exactly one identity moved and exactly one auth user was
+ * deleted.
+ *
+ * SECURITY: `authSession` must be a session the caller has just obtained from
+ * `refreshAccessToken` and checked with `assertSsoAuthenticatedSession`. Its
+ * `userId` names the auth user whose identity is moved and which is deleted,
+ * so a session built from request input, or one not proven to come from SSO,
+ * would let a caller choose which account to merge and delete.
  *
  * The active session belongs to the deleted duplicate, so the caller must not
  * issue it. It asks the user to sign in again instead (see
@@ -464,6 +570,9 @@ export async function reconcileDuplicateSsoLogin({
       WHERE id = ${duplicateUserId}::uuid
         AND is_sso_user = true
         AND id <> ${existingUser.id}::uuid
+        AND NOT EXISTS (
+          SELECT 1 FROM "User" u WHERE u.id = auth.users.id::text
+        )
     `;
 
     if (deletedUsers !== 1) {
@@ -698,9 +807,9 @@ function isStandardEmailTakenError(cause: unknown): boolean {
  * @param args.userId - the Shelf `User.id` (same as the auth UUID) to revert
  * @param args.actorUserId - the admin performing the revert, for the log
  * @returns the reverted account
- * @throws {ShelfError} 404 when the user does not exist, 400 when it is not an
- *   SSO account or could not use password login after the revert, 409 when
- *   another standard account already uses the email address
+ * @throws {ShelfError} 404 when the user does not exist or is deleted, 400
+ *   when it is not an SSO account or could not use password login after the
+ *   revert, 409 when another standard account already uses the email address
  */
 export async function revertAccountToStandard({
   userId,
@@ -712,10 +821,10 @@ export async function revertAccountToStandard({
   try {
     const user = await db.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, sso: true },
+      select: { id: true, email: true, sso: true, deletedAt: true },
     });
 
-    if (!user) {
+    if (!user || user.deletedAt) {
       throw new ShelfError({
         cause: null,
         message: "User not found.",

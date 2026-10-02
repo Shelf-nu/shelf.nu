@@ -10,6 +10,10 @@
  *   then answer (403 for a password, the wrong-code error for a code);
  * - sending a code or a reset link refuses silently, returning as a send does.
  *
+ * The post-authentication decision is asked for the session's own user id.
+ * `revokeAllSessions`, which ends a refused account's other sessions, is
+ * covered at the end.
+ *
  * @see {@link file://./service.server.ts}
  * @see {@link file://./sso-enforcement.server.ts} the decision itself
  */
@@ -18,13 +22,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   INVALID_CREDENTIALS_MESSAGE,
   INVALID_OTP_MESSAGE,
+  revokeAllSessions,
   sendOTP,
   sendResetPasswordLink,
   signInWithEmail,
   verifyOtpAndSignin,
 } from "./service.server";
 import type * as SsoEnforcementModule from "./sso-enforcement.server";
-import { getLegacyLoginDecision } from "./sso-enforcement.server";
+import {
+  getLegacyLoginDecision,
+  getLegacyLoginDecisionForUser,
+} from "./sso-enforcement.server";
 
 // why: the decision has its own tests (sso-enforcement.server.test.ts); here
 // only when each path asks it, and what it does with the answer, matters. The
@@ -34,6 +42,7 @@ vi.mock("./sso-enforcement.server", async (importOriginal) => {
   return {
     createSsoRequiredError: actual.createSsoRequiredError,
     getLegacyLoginDecision: vi.fn(),
+    getLegacyLoginDecisionForUser: vi.fn(),
   };
 });
 
@@ -65,12 +74,14 @@ const SUPABASE_SESSION = {
   user: { id: "user-1", email: EMAIL },
 };
 
-/** Makes the decision refuse the address. */
+/** The decision asked after authentication, keyed by the session's user. */
+const AUTHENTICATED_DECISION_ARGS = { userId: "user-1", email: EMAIL };
+
+/** Makes the decision refuse the address, by address and by user alike. */
 function givenRefused() {
-  vi.mocked(getLegacyLoginDecision).mockResolvedValue({
-    allowed: false,
-    reason: "sso_domain",
-  });
+  const refused = { allowed: false, reason: "sso_domain" } as const;
+  vi.mocked(getLegacyLoginDecision).mockResolvedValue(refused);
+  vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue(refused);
 }
 
 /** Captures what a promise rejects with. */
@@ -86,6 +97,7 @@ async function rejectionOf(promise: Promise<unknown>) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getLegacyLoginDecision).mockResolvedValue({ allowed: true });
+  vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({ allowed: true });
   supabaseMocks.signInWithPassword.mockResolvedValue({
     data: { session: SUPABASE_SESSION },
     error: null,
@@ -117,7 +129,7 @@ describe("signInWithEmail", () => {
       message: INVALID_CREDENTIALS_MESSAGE,
       shouldBeCaptured: false,
     });
-    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
     expect(supabaseMocks.admin.signOut).not.toHaveBeenCalled();
   });
 
@@ -131,7 +143,10 @@ describe("signInWithEmail", () => {
         "This email address signs in with single sign-on. Please use Login with SSO.",
       shouldBeCaptured: false,
     });
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith(EMAIL);
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith(
+      AUTHENTICATED_DECISION_ARGS
+    );
+    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
     expect(supabaseMocks.admin.signOut).toHaveBeenCalledWith("access", "local");
   });
 
@@ -148,7 +163,7 @@ describe("signInWithEmail", () => {
   });
 
   it("revokes the new session when the decision cannot be made", async () => {
-    vi.mocked(getLegacyLoginDecision).mockRejectedValue(
+    vi.mocked(getLegacyLoginDecisionForUser).mockRejectedValue(
       new Error("database unavailable")
     );
 
@@ -163,7 +178,9 @@ describe("signInWithEmail", () => {
       email: EMAIL,
       password: "password123",
     });
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith(EMAIL);
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith(
+      AUTHENTICATED_DECISION_ARGS
+    );
     expect(supabaseMocks.admin.signOut).not.toHaveBeenCalled();
     expect(session).toMatchObject({
       userId: "user-1",
@@ -225,7 +242,7 @@ describe("verifyOtpAndSignin", () => {
       message: INVALID_OTP_MESSAGE,
       shouldBeCaptured: false,
     });
-    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
   });
 
   it("revokes the session and answers a refused address exactly as a wrong code", async () => {
@@ -250,8 +267,30 @@ describe("verifyOtpAndSignin", () => {
       token: "123456",
       type: "email",
     });
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith(EMAIL);
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith(
+      AUTHENTICATED_DECISION_ARGS
+    );
     expect(supabaseMocks.admin.signOut).not.toHaveBeenCalled();
     expect(session).toMatchObject({ userId: "user-1", email: EMAIL });
+  });
+});
+
+describe("revokeAllSessions", () => {
+  it("signs the user out of every session", async () => {
+    await revokeAllSessions("access");
+
+    expect(supabaseMocks.admin.signOut).toHaveBeenCalledWith(
+      "access",
+      "global"
+    );
+  });
+
+  it("does not throw when Supabase refuses the sign-out", async () => {
+    supabaseMocks.admin.signOut.mockResolvedValue({
+      data: null,
+      error: new AuthApiError("session not found", 404, "session_not_found"),
+    });
+
+    await expect(revokeAllSessions("access")).resolves.toBeUndefined();
   });
 });

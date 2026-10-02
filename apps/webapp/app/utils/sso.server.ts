@@ -5,6 +5,7 @@ import { db } from "~/database/db.server";
 import {
   deleteAuthAccount,
   getAuthUserById,
+  type refreshAccessToken,
   revokeSession,
 } from "~/modules/auth/service.server";
 import { reconcileDuplicateSsoLogin } from "~/modules/auth/sso-conversion.server";
@@ -47,7 +48,9 @@ async function findSsoCallbackUserByEmail(email: string) {
       title: "Account needs attention",
       message:
         "More than one Shelf account uses this email address. Please contact our support team so we can sign you in to the right one.",
-      additionalData: { email, userIds: matches.map((m) => m.id) },
+      // The email stays out: this error is captured, and the ids identify the
+      // accounts without carrying personal data.
+      additionalData: { userIds: matches.map((m) => m.id) },
       label: "Auth",
     });
   }
@@ -75,6 +78,53 @@ async function findAuthUserOrNull(userId: string) {
     }
     throw error;
   }
+}
+
+/**
+ * Refuses an SSO callback that matched a Shelf account by email unless the
+ * authenticated auth user holds an identity from the SSO provider registered
+ * for the session email's domain (`provider = 'sso:<id>'`, the same binding
+ * the account conversion seeds and the claims reader trusts).
+ *
+ * Every email-matched branch rewrites or updates an account the session does
+ * not own by id (the SCIM re-key, the duplicate merge, the profile update), so
+ * the email alone must not decide it: an identity from another provider can
+ * carry any email the IdP behind it chooses to assert. One query covers both
+ * the domain's provider and the identity.
+ *
+ * @param authSession - the session just refreshed and checked as SAML
+ * @param matchedUserId - the Shelf account matched by email, for the log
+ * @throws {ShelfError} 403 when the session holds no identity from the
+ *   domain's provider, or the domain has none
+ */
+async function assertSessionHoldsDomainProviderIdentity(
+  authSession: AuthSession,
+  matchedUserId: string
+): Promise<void> {
+  const domain = authSession.email.split("@")[1]?.toLowerCase() ?? "";
+
+  const [binding] = await db.$queryRaw<{ held: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM auth.identities i
+      JOIN auth.sso_domains d
+        ON i.provider = 'sso:' || d.sso_provider_id::text
+      WHERE i.user_id = ${authSession.userId}::uuid
+        AND lower(d.domain) = ${domain}
+    ) AS "held"
+  `;
+
+  if (binding?.held) return;
+
+  throw new ShelfError({
+    cause: null,
+    status: 403,
+    title: "Single sign-on required",
+    message: "Please sign in with your organization's single sign-on.",
+    additionalData: { userId: authSession.userId, matchedUserId },
+    label: "Auth",
+    shouldBeCaptured: true,
+  });
 }
 
 /**
@@ -145,6 +195,13 @@ function readAmrMethods(accessToken: string): string[] {
 }
 
 /**
+ * A session as `refreshAccessToken` returns it. Structurally the same as
+ * `AuthSession`; the name states where `assertSsoAuthenticatedSession` expects
+ * its input to come from.
+ */
+type RefreshedAuthSession = Awaited<ReturnType<typeof refreshAccessToken>>;
+
+/**
  * Refuses an SSO callback whose session was not obtained through SSO.
  *
  * The callback routes accept a refresh token posted by the browser, and any
@@ -155,11 +212,17 @@ function readAmrMethods(accessToken: string): string[] {
  * opened does not outlive the request. Call it right after
  * `refreshAccessToken` and before anything else reads the session.
  *
+ * SECURITY: pass only a session returned by `refreshAccessToken` in this same
+ * request. The check reads the access token's `amr` claim WITHOUT verifying
+ * its signature, which is sound only because that token came straight from
+ * GoTrue over the server-side refresh. A token taken from a cookie, a header or
+ * a form could carry any `amr` its author wrote.
+ *
  * @param authSession - the session just refreshed server-side
  * @throws {ShelfError} 403 when the session's `amr` has no SAML entry
  */
 export async function assertSsoAuthenticatedSession(
-  authSession: AuthSession
+  authSession: RefreshedAuthSession
 ): Promise<void> {
   if (readAmrMethods(authSession.accessToken).includes(SSO_SAML_AMR_METHOD)) {
     return;
@@ -380,7 +443,10 @@ export function isSsoAccountLinkedError(cause: unknown): cause is ShelfError {
  *    user is an email/password account is refused instead.
  *
  * Otherwise the Shelf user is matched by email without regard to letter case
- * (see `findSsoCallbackUserByEmail`); no match means a new user. For a match:
+ * (see `findSsoCallbackUserByEmail`); no match means a new user. A match is
+ * acted on only when the authenticated auth user holds an identity from the
+ * SSO provider registered for the email's domain (403 otherwise, touching
+ * nothing). For a match:
  * 2. Look up the Shelf user's auth account. Only a genuine 404 counts as
  *    "no auth account"; any other failure is rethrown.
  * 3. No auth account and the ids differ: a SCIM-provisioned placeholder. Re-key
@@ -497,6 +563,10 @@ export async function resolveUserAndOrgForSsoCallback({
     const user = await findSsoCallbackUserByEmail(authSession.email);
 
     if (user) {
+      // Everything below acts on an account matched by email only, so the
+      // session must first prove it came from the domain's own provider.
+      await assertSessionHoldsDomainProviderIdentity(authSession, user.id);
+
       const authUser = await findAuthUserOrNull(user.id);
 
       // SCIM-provisioned user: Shelf user exists but has no Supabase auth

@@ -1,9 +1,11 @@
 // @vitest-environment node
 /**
- * Tests for the legacy sign-in decision (`getLegacyLoginDecision`), the error a
- * refusal is shown with (`createSsoRequiredError`), and the domain-level hint
- * (`isSsoDomainEmail`): which addresses may use password login, email OTP and
- * password reset, and which must use SSO.
+ * Tests for the legacy sign-in decision (`getLegacyLoginDecision`, and
+ * `getLegacyLoginDecisionForUser` for a known account), the error a refusal is
+ * shown with (`createSsoRequiredError`), the email change guard
+ * (`assertEmailChangeAllowed`) and the domain-level hint (`isSsoDomainEmail`):
+ * which addresses may use password login, email OTP and password reset, and
+ * which must use SSO.
  *
  * @see {@link file://./sso-enforcement.server.ts}
  */
@@ -26,7 +28,7 @@ vi.mock("~/utils/env", async (importOriginal) => {
 // sets the rows they return.
 vi.mock("~/database/db.server", () => ({
   db: {
-    user: { findMany: vi.fn() },
+    user: { findMany: vi.fn(), findUnique: vi.fn() },
     organization: { count: vi.fn() },
     userOrganization: { count: vi.fn() },
   },
@@ -43,9 +45,12 @@ import type * as EnvModule from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 import {
+  assertEmailChangeAllowed,
   createSsoRequiredError,
   getLegacyLoginDecision,
+  getLegacyLoginDecisionForUser,
   isSsoDomainEmail,
+  SSO_EMAIL_CHANGE_REFUSED_MESSAGE,
 } from "./sso-enforcement.server";
 
 const EMAIL = "jane@acme.com";
@@ -61,6 +66,13 @@ function givenUsers(rows: AccountRow[]) {
   // selects these three fields.
   vi.mocked(db.user.findMany).mockResolvedValue(
     rows as unknown as Awaited<ReturnType<typeof db.user.findMany>>
+  );
+}
+
+/** Sets the row the by-id user lookup returns. */
+function givenUserById(row: Pick<AccountRow, "id" | "sso"> | null) {
+  vi.mocked(db.user.findUnique).mockResolvedValue(
+    row as unknown as Awaited<ReturnType<typeof db.user.findUnique>>
   );
 }
 
@@ -110,6 +122,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   env.disableSso = false;
   givenUsers([]);
+  givenUserById(null);
   givenDomainIsSso(false);
   givenOwnership({ ownedOrgs: 0, ownerMemberships: 0 });
 });
@@ -309,5 +322,98 @@ describe("isSsoDomainEmail", () => {
     await isSsoDomainEmail(EMAIL);
 
     expect(db.user.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("getLegacyLoginDecisionForUser", () => {
+  it("decides for the account with that id, not for the address", async () => {
+    // Another account holds the address in different case; the decision must
+    // still be about the signed-in one.
+    givenUsers([{ id: "other", email: EMAIL, sso: true }]);
+    givenUserById({ id: "user-1", sso: false });
+    givenDomainIsSso(true);
+    givenOwnership({ ownedOrgs: 1, ownerMemberships: 0 });
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: true });
+    expect(db.user.findUnique).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: { id: true, sso: true },
+    });
+    expect(db.user.findMany).not.toHaveBeenCalled();
+    expect(db.organization.count).toHaveBeenCalledWith({
+      where: { userId: "user-1", id: { in: [LINKED_ORG_ID] } },
+    });
+  });
+
+  it("refuses a converted account", async () => {
+    givenUserById({ id: "user-1", sso: true });
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: false, reason: "sso_account" });
+  });
+
+  it("refuses a non-owner on an SSO domain", async () => {
+    givenUserById({ id: "user-1", sso: false });
+    givenDomainIsSso(true);
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: false, reason: "sso_domain" });
+  });
+
+  it("allows everything without a lookup when SSO is disabled", async () => {
+    env.disableSso = true;
+    givenUserById({ id: "user-1", sso: true });
+
+    await expect(
+      getLegacyLoginDecisionForUser({ userId: "user-1", email: EMAIL })
+    ).resolves.toEqual({ allowed: true });
+    expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+});
+
+describe("assertEmailChangeAllowed", () => {
+  it("refuses a standard account that must sign in with SSO", async () => {
+    givenUserById({ id: "user-1", sso: false });
+    givenDomainIsSso(true);
+
+    await expect(
+      assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).rejects.toMatchObject({
+      status: 403,
+      message: SSO_EMAIL_CHANGE_REFUSED_MESSAGE,
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("allows an unconverted owner of the domain's SSO workspace", async () => {
+    givenUserById({ id: "user-1", sso: false });
+    givenDomainIsSso(true);
+    givenOwnership({ ownedOrgs: 0, ownerMemberships: 1 });
+
+    await expect(
+      assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).resolves.toBeUndefined();
+  });
+
+  it("allows a standard account on a domain without SSO", async () => {
+    givenUserById({ id: "user-1", sso: false });
+
+    await expect(
+      assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not check an account converted to SSO", async () => {
+    givenUserById({ id: "user-1", sso: true });
+    givenDomainIsSso(true);
+
+    await expect(
+      assertEmailChangeAllowed({ userId: "user-1", email: EMAIL })
+    ).resolves.toBeUndefined();
+    expect(checkDomainSSOStatus).not.toHaveBeenCalled();
   });
 });

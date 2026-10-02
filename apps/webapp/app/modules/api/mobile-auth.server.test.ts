@@ -8,8 +8,9 @@ import {
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
-import { getLegacyLoginDecision } from "~/modules/auth/sso-enforcement.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
 import { recordMobileActivity } from "./mobile-usage.server";
@@ -57,9 +58,15 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   const actual = await importOriginal<typeof SsoEnforcementModule>();
   return {
     createSsoRequiredError: actual.createSsoRequiredError,
-    getLegacyLoginDecision: vi.fn(),
+    getLegacyLoginDecisionForUser: vi.fn(),
   };
 });
+
+// why: revoking a refused account's sessions is a Supabase Auth admin call;
+// the spy records whether `requireMobileAuth` made it.
+vi.mock("~/modules/auth/service.server", () => ({
+  revokeAllSessions: vi.fn(),
+}));
 
 /**
  * Tests for `shapeMobileAssetResponse` — the back-compat helper that flattens
@@ -365,7 +372,9 @@ describe("requireMobileAuth", () => {
   // assertions read only its own call, not calls accumulated by earlier suites.
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getLegacyLoginDecision).mockResolvedValue({ allowed: true });
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: true,
+    });
   });
 
   /** Stubs a valid Bearer JWT and the user row it resolves to. */
@@ -397,7 +406,7 @@ describe("requireMobileAuth", () => {
   };
 
   it("refuses a password session for an address that must use SSO", async () => {
-    vi.mocked(getLegacyLoginDecision).mockResolvedValue({
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
       allowed: false,
       reason: "sso_domain",
     });
@@ -409,7 +418,11 @@ describe("requireMobileAuth", () => {
       message:
         "This email address signs in with single sign-on. Please use Login with SSO.",
     });
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith("jane@acme.com");
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).toHaveBeenCalledWith("valid-token");
     expect(recordMobileActivity).not.toHaveBeenCalled();
   });
 
@@ -418,7 +431,11 @@ describe("requireMobileAuth", () => {
 
     const { user } = await requireMobileAuth(request);
 
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith("jane@acme.com");
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(user.id).toBe("user-1");
   });
 
@@ -427,7 +444,7 @@ describe("requireMobileAuth", () => {
 
     const { user } = await requireMobileAuth(request);
 
-    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
     expect(user.id).toBe("user-1");
     // `sso` is read for the guard only and stays out of the returned user.
     expect(user).not.toHaveProperty("sso");

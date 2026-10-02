@@ -470,7 +470,8 @@ export default function SsoConversionPage() {
                     ? "that workspace"
                     : "those workspaces"}{" "}
                   is re-derived from their IdP groups. A user whose groups map
-                  to no role loses access there.
+                  to no role loses access there; the workspace owner keeps the
+                  Owner role and access either way.
                 </p>
               </div>
             </div>

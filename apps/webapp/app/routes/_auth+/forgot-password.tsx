@@ -213,7 +213,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * fails, revokes the recovery session.
          */
         const refusal = await refuseAuthenticatedLegacySession({
-          // The address the code verified, which is the session's own.
+          // The account and address the code verified, which are the
+          // session's own.
+          userId: otpData.user.id,
           email: otpData.user.email ?? email,
           accessToken: recoveryAccessToken,
         });

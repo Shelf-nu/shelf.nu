@@ -3,8 +3,9 @@
  *
  * A session opened by password or OTP keeps working after its address starts
  * being refused (a domain newly configured for SSO, a deploy). The layout
- * loader ends such a session and sends the person to `/login`, which explains
- * why. SSO users are never asked: their session came from SSO.
+ * loader revokes every session of the account server-side, ends this one and
+ * sends the person to `/login`, which explains why. SSO users are never asked:
+ * their session came from SSO.
  *
  * The non-refused cases use a user who has not onboarded, so the loader stops
  * at the onboarding redirect right after the guard without needing the
@@ -13,7 +14,8 @@
  * @see {@link file://./../../../app/routes/_layout+/_layout.tsx}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getLegacyLoginDecision } from "~/modules/auth/sso-enforcement.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { loader } from "~/routes/_layout+/_layout";
 
@@ -22,7 +24,13 @@ import { loader } from "~/routes/_layout+/_layout";
 // why: the decision has its own tests (sso-enforcement.server.test.ts); here
 // only what the loader does with its answer matters.
 vi.mock("~/modules/auth/sso-enforcement.server", () => ({
-  getLegacyLoginDecision: vi.fn(),
+  getLegacyLoginDecisionForUser: vi.fn(),
+}));
+
+// why: revoking sessions is a Supabase Auth admin call; the spy records
+// whether the loader made it.
+vi.mock("~/modules/auth/service.server", () => ({
+  revokeAllSessions: vi.fn(),
 }));
 
 // why: supplies the signed-in user row, the input the guard reads.
@@ -63,7 +71,11 @@ async function load() {
     request: new Request("https://app.shelf.nu/assets"),
     params: {},
     context: {
-      getSession: () => ({ userId: "user-1", email: USER.email }),
+      getSession: () => ({
+        userId: "user-1",
+        email: USER.email,
+        accessToken: "access-token",
+      }),
       destroySession,
     },
   } as unknown as Parameters<typeof loader>[0])) as Response;
@@ -73,19 +85,25 @@ async function load() {
 describe("_layout loader SSO session guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getLegacyLoginDecision).mockResolvedValue({ allowed: true });
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: true,
+    });
   });
 
   it("signs out a non-SSO user whose address must now use SSO", async () => {
     vi.mocked(getUserByID).mockResolvedValue(USER as never);
-    vi.mocked(getLegacyLoginDecision).mockResolvedValue({
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
       allowed: false,
       reason: "sso_domain",
     });
 
     const { response, destroySession } = await load();
 
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith("member@sso-corp.com");
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "member@sso-corp.com",
+    });
+    expect(revokeAllSessions).toHaveBeenCalledWith("access-token");
     expect(destroySession).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(302);
     expect(response.headers.get("Location")).toBe("/login?sso_required=true");
@@ -96,7 +114,11 @@ describe("_layout loader SSO session guard", () => {
 
     const { response, destroySession } = await load();
 
-    expect(getLegacyLoginDecision).toHaveBeenCalledWith("member@sso-corp.com");
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "member@sso-corp.com",
+    });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();
     expect(response.headers.get("Location")).toBe("/onboarding");
   });
@@ -106,7 +128,8 @@ describe("_layout loader SSO session guard", () => {
 
     const { response, destroySession } = await load();
 
-    expect(getLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(revokeAllSessions).not.toHaveBeenCalled();
     expect(destroySession).not.toHaveBeenCalled();
     expect(response.headers.get("Location")).toBe("/onboarding");
   });

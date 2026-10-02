@@ -16,6 +16,7 @@ import { mapAuthSession } from "./mappers.server";
 import {
   createSsoRequiredError,
   getLegacyLoginDecision,
+  getLegacyLoginDecisionForUser,
 } from "./sso-enforcement.server";
 import type {
   LegacyLoginDecision,
@@ -86,6 +87,38 @@ export async function revokeSession(accessToken: string): Promise<void> {
 }
 
 /**
+ * Ends every session of the user behind `accessToken` (scope `global`), so all
+ * of their refresh tokens die with it. The web auth boundary is the
+ * refresh-token row, so this is what stops a refused account's other browsers
+ * and devices, not only the request at hand.
+ *
+ * Best-effort, like `revokeSession`: the caller refuses the request whether or
+ * not this succeeds, so a failure is logged rather than thrown.
+ *
+ * @param accessToken - an access token of any of the user's sessions
+ */
+export async function revokeAllSessions(accessToken: string): Promise<void> {
+  try {
+    const { error } = await getSupabaseAdmin().auth.admin.signOut(
+      accessToken,
+      "global"
+    );
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message:
+          "Failed to revoke the sessions of an account that must sign in with SSO.",
+        label,
+      })
+    );
+  }
+}
+
+/**
  * Asks the legacy sign-in decision for an address that has just authenticated,
  * and ends the session it opened when the address must use SSO.
  *
@@ -95,17 +128,24 @@ export async function revokeSession(accessToken: string): Promise<void> {
  *
  * @param authSession - the session Supabase just opened; the decision is asked
  *   about its authenticated address. `email` must be that session's own
- *   authenticated address, never one taken from the request.
+ *   authenticated address, never one taken from the request. Pass `userId`
+ *   (the session's auth user id) whenever it is known, so the decision is
+ *   made for exactly that account rather than for whichever account the
+ *   address resolves to.
  * @returns null when the sign-in may proceed, otherwise why it is refused
  * @throws {ShelfError} If the decision fails (the session is already revoked)
  */
 export async function refuseAuthenticatedLegacySession(
-  authSession: Pick<AuthSession, "email" | "accessToken">
+  authSession: Pick<AuthSession, "email" | "accessToken"> & {
+    userId?: string;
+  }
 ): Promise<LegacyLoginRefusalReason | null> {
-  const { email, accessToken } = authSession;
+  const { email, accessToken, userId } = authSession;
   let decision: LegacyLoginDecision;
   try {
-    decision = await getLegacyLoginDecision(email);
+    decision = userId
+      ? await getLegacyLoginDecisionForUser({ userId, email })
+      : await getLegacyLoginDecision(email);
   } catch (cause) {
     await revokeSession(accessToken);
     throw new ShelfError({

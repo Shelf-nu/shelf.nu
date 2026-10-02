@@ -14,9 +14,10 @@ import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
 import {
   createSsoRequiredError,
-  getLegacyLoginDecision,
+  getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
 import {
   isSelfServiceOrBaseRole,
@@ -123,10 +124,16 @@ export async function requireMobileAuth(request: Request) {
   // The companion signs in with a password straight against Supabase, so this
   // is the first point Shelf sees that session. Refuse it when the address must
   // use SSO, as the web sign-in would. SSO users pass without a lookup: the
-  // companion's SSO sessions belong to `User.sso` accounts.
+  // companion's SSO sessions belong to `User.sso` accounts. A refused account
+  // has every session revoked first, so its refresh token cannot mint another
+  // access token for the companion or the web.
   if (!user.sso) {
-    const decision = await getLegacyLoginDecision(user.email);
+    const decision = await getLegacyLoginDecisionForUser({
+      userId: user.id,
+      email: user.email,
+    });
     if (!decision.allowed) {
+      await revokeAllSessions(token);
       throw createSsoRequiredError(decision.reason);
     }
   }

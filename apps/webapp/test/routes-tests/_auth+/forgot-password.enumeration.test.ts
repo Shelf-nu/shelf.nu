@@ -10,8 +10,8 @@
  * The SSO domain decision (`getLegacyLoginDecision`) is asked inside
  * `sendResetPasswordLink`, which the route does not await, and a refusal there
  * sends nothing and resolves as a send does, so the response is unchanged too. The confirm step asks the same decision
- * once the code has verified, so a code sent before an address was refused
- * cannot set a password.
+ * (for the verified account, by id) once the code has verified, so a code sent
+ * before an address was refused cannot set a password.
  *
  * detail.dev finding D100.
  *
@@ -32,9 +32,11 @@ vi.mock("~/modules/auth/service.server", async (importOriginal) => ({
   signInWithEmail: vi.fn(),
 }));
 
-const { mockGetLegacyLoginDecision } = vi.hoisted(() => ({
-  mockGetLegacyLoginDecision: vi.fn(),
-}));
+const { mockGetLegacyLoginDecision, mockGetLegacyLoginDecisionForUser } =
+  vi.hoisted(() => ({
+    mockGetLegacyLoginDecision: vi.fn(),
+    mockGetLegacyLoginDecisionForUser: vi.fn(),
+  }));
 // why: the decision has its own tests (sso-enforcement.server.test.ts); here
 // only what the confirm step does with its answer matters.
 vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
@@ -45,6 +47,7 @@ vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
   return {
     createSsoRequiredError: actual.createSsoRequiredError,
     getLegacyLoginDecision: mockGetLegacyLoginDecision,
+    getLegacyLoginDecisionForUser: mockGetLegacyLoginDecisionForUser,
   };
 });
 
@@ -266,7 +269,7 @@ describe("forgot-password confirm step", () => {
   });
 
   it("refuses to set a password for an address that must use SSO", async () => {
-    mockGetLegacyLoginDecision.mockResolvedValue({
+    mockGetLegacyLoginDecisionForUser.mockResolvedValue({
       allowed: false,
       reason: "sso_domain",
     });
@@ -282,7 +285,9 @@ describe("forgot-password confirm step", () => {
   });
 
   it("revokes the recovery session and answers generically when the decision fails", async () => {
-    mockGetLegacyLoginDecision.mockRejectedValue(new Error("database down"));
+    mockGetLegacyLoginDecisionForUser.mockRejectedValue(
+      new Error("database down")
+    );
 
     const res = observable(await confirmReset("member@sso-corp.com"));
 
@@ -295,7 +300,7 @@ describe("forgot-password confirm step", () => {
   });
 
   it("revokes the recovery session when the password update refuses an SSO account", async () => {
-    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
+    mockGetLegacyLoginDecisionForUser.mockResolvedValue({ allowed: true });
     vi.mocked(updateAccountPassword).mockRejectedValueOnce(
       new ShelfError({
         cause: null,
@@ -316,7 +321,7 @@ describe("forgot-password confirm step", () => {
     expect(destroySession).not.toHaveBeenCalled();
   });
 
-  it("asks the decision about the address the code verified", async () => {
+  it("asks the decision about the account and address the code verified", async () => {
     mockVerifyOtp.mockResolvedValue({
       data: {
         user: { id: "user-1", email: "verified@sso-corp.com" },
@@ -324,13 +329,14 @@ describe("forgot-password confirm step", () => {
       },
       error: null,
     });
-    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
+    mockGetLegacyLoginDecisionForUser.mockResolvedValue({ allowed: true });
 
     await confirmReset("posted@sso-corp.com");
 
-    expect(mockGetLegacyLoginDecision).toHaveBeenCalledWith(
-      "verified@sso-corp.com"
-    );
+    expect(mockGetLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "verified@sso-corp.com",
+    });
   });
 
   it("asks the decision only after the code verifies", async () => {
@@ -344,11 +350,11 @@ describe("forgot-password confirm step", () => {
     const res = observable(await confirmReset("member@sso-corp.com"));
 
     expect(res.errorMessage).toBe("Invalid or expired verification code");
-    expect(mockGetLegacyLoginDecision).not.toHaveBeenCalled();
+    expect(mockGetLegacyLoginDecisionForUser).not.toHaveBeenCalled();
   });
 
   it("sets the password for an allowed address", async () => {
-    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
+    mockGetLegacyLoginDecisionForUser.mockResolvedValue({ allowed: true });
 
     const res = observable(await confirmReset("owner@sso-corp.com"));
 

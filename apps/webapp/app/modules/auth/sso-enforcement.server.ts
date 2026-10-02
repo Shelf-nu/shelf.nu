@@ -131,21 +131,17 @@ async function findAccountForEmail(
 }
 
 /**
- * Decides whether an email address may sign in through a legacy path
- * (password, email OTP, password reset). See the file header for the rules.
+ * Applies the rules in the file header to one account (or none) and the
+ * address whose domain is checked.
  *
- * @param email - the address the person is signing in with
- * @returns `{ allowed: true }`, or `{ allowed: false, reason }` when the
- *   address must use SSO
- * @throws {ShelfError} If a lookup fails
+ * @param email - the address whose domain decides rules 3 to 6
+ * @param user - the account behind the address, or null when there is none
+ * @returns the decision
  */
-export async function getLegacyLoginDecision(
-  email: string
+async function decideLegacyLogin(
+  email: string,
+  user: { id: string; sso: boolean } | null
 ): Promise<LegacyLoginDecision> {
-  if (DISABLE_SSO) return { allowed: true };
-
-  const user = await findAccountForEmail(email);
-
   // A converted account has no password or email identity left, whatever its
   // domain, so it is refused before the domain is even looked up.
   if (user?.sso) return { allowed: false, reason: "sso_account" };
@@ -162,6 +158,102 @@ export async function getLegacyLoginDecision(
   }
 
   return { allowed: false, reason: "sso_domain" };
+}
+
+/**
+ * Decides whether an email address may sign in through a legacy path
+ * (password, email OTP, password reset). See the file header for the rules.
+ *
+ * For callers that know only an address (before authentication). A caller
+ * holding the authenticated user's id uses `getLegacyLoginDecisionForUser`,
+ * which cannot resolve to a different account that shares the address in
+ * another letter case.
+ *
+ * @param email - the address the person is signing in with
+ * @returns `{ allowed: true }`, or `{ allowed: false, reason }` when the
+ *   address must use SSO
+ * @throws {ShelfError} If a lookup fails
+ */
+export async function getLegacyLoginDecision(
+  email: string
+): Promise<LegacyLoginDecision> {
+  if (DISABLE_SSO) return { allowed: true };
+
+  return decideLegacyLogin(email, await findAccountForEmail(email));
+}
+
+/**
+ * The same decision as `getLegacyLoginDecision`, for a caller that already
+ * knows which account is signed in: the account is loaded by id, so it is
+ * exactly the authenticated one. The domain rules read `email`.
+ *
+ * @param args.userId - the Shelf `User.id` of the authenticated account
+ * @param args.email - the account's address: the session's authenticated
+ *   address, or the account's stored email when the caller loaded it
+ * @returns `{ allowed: true }`, or `{ allowed: false, reason }` when the
+ *   account must use SSO
+ * @throws {ShelfError} If a lookup fails
+ */
+export async function getLegacyLoginDecisionForUser({
+  userId,
+  email,
+}: {
+  userId: string;
+  email: string;
+}): Promise<LegacyLoginDecision> {
+  if (DISABLE_SSO) return { allowed: true };
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { id: true, sso: true },
+  });
+
+  return decideLegacyLogin(email, user);
+}
+
+/** The message a refused email change shows the person. */
+export const SSO_EMAIL_CHANGE_REFUSED_MESSAGE =
+  "Your account signs in with single sign-on; ask your administrator to change your email.";
+
+/**
+ * Refuses a self-service email change for a standard account that the legacy
+ * decision refuses. Changing the address to one on a domain without SSO would
+ * otherwise turn the account back into one that may sign in with a password.
+ *
+ * Accounts converted to SSO are not checked here: their sign-in no longer
+ * depends on the address.
+ *
+ * @param args.userId - the Shelf `User.id` of the signed-in account
+ * @param args.email - the session's current authenticated address
+ * @throws {ShelfError} 403 when the account must use SSO; any lookup failure
+ */
+export async function assertEmailChangeAllowed({
+  userId,
+  email,
+}: {
+  userId: string;
+  email: string;
+}): Promise<void> {
+  if (DISABLE_SSO) return;
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { id: true, sso: true },
+  });
+  if (user?.sso) return;
+
+  const decision = await decideLegacyLogin(email, user);
+  if (decision.allowed) return;
+
+  throw new ShelfError({
+    cause: null,
+    status: 403,
+    title: "Single sign-on required",
+    message: SSO_EMAIL_CHANGE_REFUSED_MESSAGE,
+    label: "Auth",
+    shouldBeCaptured: false,
+    additionalData: { userId, reason: decision.reason },
+  });
 }
 
 /** The message every refused legacy sign-in shows the person. */
