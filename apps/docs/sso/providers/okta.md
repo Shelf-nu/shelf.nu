@@ -18,7 +18,7 @@ Your Okta admin does not need a Shelf account. Everything in §1 to §6 happens 
 Read the general [SSO prerequisites](../index.md#before-you-start-prerequisites) first, in particular:
 
 - You have a **non-SSO owner account** ready to own the Shelf workspace.
-- Any existing **standard accounts** on your SSO domain are ready to be removed.
+- You've told your Shelf contact about any existing **standard accounts** on your SSO domain, so they can be converted to SSO (they keep their data, so nothing needs to be deleted). See [Moving existing Shelf users to SSO](#moving-existing-shelf-users-to-sso).
 - You've planned which Okta groups map to which Shelf role (Administrator, Self service, Base).
 
 ## 1. Create the app integration [#](#create-app)
@@ -127,6 +127,10 @@ Go to `/sso-login`, enter your domain, and sign in as a test user who is assigne
 - A user with **no matching group** lands on the pending-assignment screen. This is expected, and it resolves as soon as an admin maps their group.
 
 You can also preview what Okta sends: on the **Sign On** tab, click **Preview SAML** (or use the **Preview the SAML assertion** link while editing the SAML settings) and check that `mail`, `firstname`, `lastname` and `groups` are all present.
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. The first SSO sign-in after conversion lands the user in their existing account, with all their data and workspaces. The `EmailAddress` Name ID from §2 is all it needs. The one exception is a user who tried to sign in with SSO before their account was converted: their first SSO sign-in after conversion shows "Your account is now on single sign-on" and asks them to sign in with SSO once more. After that they sign in once, as usual. Convert accounts before announcing SSO to your team to avoid this extra step. Map your groups (§7) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login (the workspace owner keeps their Owner role and access). See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.
 
 ## Troubleshooting [#](#troubleshooting)
 
