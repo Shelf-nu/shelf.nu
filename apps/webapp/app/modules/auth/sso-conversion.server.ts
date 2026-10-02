@@ -227,7 +227,7 @@ async function requireSsoProviderIdForEmail(email: string): Promise<string> {
       cause: null,
       message:
         "This email domain is not configured for SSO. Configure the SSO provider for the domain before converting accounts.",
-      additionalData: { email },
+      additionalData: { domain: email.split("@")[1]?.toLowerCase() },
       label,
       status: 400,
       shouldBeCaptured: false,
@@ -408,7 +408,7 @@ export async function convertAccountToSso({
       throw new ShelfError({
         cause: null,
         message: "No auth account found for this user.",
-        additionalData: { userId, email: user.email },
+        additionalData: { userId },
         label,
       });
     }
@@ -456,9 +456,9 @@ export async function convertAccountToSso({
     });
 
     Logger.info(
-      `SSO conversion: converted user ${user.id} (${
-        user.email
-      }) to SSO provider ${ssoProviderId}, performed by ${
+      `SSO conversion: converted user ${
+        user.id
+      } to SSO provider ${ssoProviderId}, performed by ${
         actorUserId ?? "unknown"
       }`
     );
@@ -599,7 +599,7 @@ export async function reconcileDuplicateSsoLogin({
   });
 
   Logger.info(
-    `SSO conversion: reconciled duplicate auth user ${duplicateUserId} onto user ${existingUser.id} (${existingUser.email}) for SSO provider ${ssoProviderId}`
+    `SSO conversion: reconciled duplicate auth user ${duplicateUserId} onto user ${existingUser.id} for SSO provider ${ssoProviderId}`
   );
 }
 
@@ -839,7 +839,7 @@ export async function revertAccountToStandard({
       throw new ShelfError({
         cause: null,
         message: "This account is not an SSO account.",
-        additionalData: { userId, email: user.email },
+        additionalData: { userId },
         label,
         status: 400,
         shouldBeCaptured: false,
@@ -862,7 +862,7 @@ export async function revertAccountToStandard({
         cause: null,
         message:
           "Only an owner of the workspace that uses SSO for this domain, or an account whose domain no longer uses SSO, can be reverted. Anyone else on an SSO domain still could not sign in with a password.",
-        additionalData: { userId, email: user.email },
+        additionalData: { userId },
         label,
         status: 400,
         shouldBeCaptured: false,
@@ -924,9 +924,9 @@ export async function revertAccountToStandard({
     });
 
     Logger.info(
-      `SSO conversion: reverted user ${user.id} (${
-        user.email
-      }) to a standard account, performed by ${actorUserId ?? "unknown"}`
+      `SSO conversion: reverted user ${
+        user.id
+      } to a standard account, performed by ${actorUserId ?? "unknown"}`
     );
 
     return { userId: user.id, email: user.email, status: "reverted" };

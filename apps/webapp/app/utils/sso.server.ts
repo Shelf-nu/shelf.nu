@@ -48,8 +48,8 @@ async function findSsoCallbackUserByEmail(email: string) {
       title: "Account needs attention",
       message:
         "More than one Shelf account uses this email address. Please contact our support team so we can sign you in to the right one.",
-      // The email stays out: this error is captured, and the ids identify the
-      // accounts without carrying personal data.
+      // The email stays out of the logs: the ids identify the accounts
+      // without carrying personal data.
       additionalData: { userIds: matches.map((m) => m.id) },
       label: "Auth",
     });
@@ -676,8 +676,10 @@ export async function resolveUserAndOrgForSsoCallback({
       cause,
       title: cause.title || "Authentication failed",
       message: cause.message || "Failed to authenticate user",
+      // The auth user id and domain identify the login for support without
+      // writing the address to the server logs.
       additionalData: {
-        email: authSession.email,
+        userId: authSession.userId,
         domain: authSession.email.split("@")[1],
       },
       label: "Auth",
