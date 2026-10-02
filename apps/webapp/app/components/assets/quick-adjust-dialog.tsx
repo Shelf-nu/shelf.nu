@@ -27,6 +27,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "~/components/shared/tabs";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { isFormProcessing } from "~/utils/form";
@@ -45,10 +51,13 @@ export interface QuickAdjustDialogProps {
   open?: boolean;
   /** Callback when the dialog open state changes (controlled mode) */
   onOpenChange?: (open: boolean) => void;
+  /** The current total quantity of the asset */
+  totalQuantity?: number | null;
 }
 
 /**
  * Dialog for quickly adding or removing stock from a quantity-tracked asset.
+ * Supports relative adjustments (Add/Remove) or setting an absolute new total.
  *
  * Supports two modes:
  * - **Uncontrolled** (default): Pass a `trigger` element. The dialog manages
@@ -69,6 +78,7 @@ export function QuickAdjustDialog({
   availableQuantity,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
+  totalQuantity,
 }: QuickAdjustDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -85,6 +95,7 @@ export function QuickAdjustDialog({
   );
   /** Client-side validation error for the quantity field */
   const [quantityError, setQuantityError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"adjust" | "total">("adjust");
   const fetcher = useFetcher({ key: "adjust-quantity" });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
@@ -110,8 +121,17 @@ export function QuickAdjustDialog({
       setOpen(false);
       setQuantityError(null);
       formRef.current?.reset();
+      setActiveTab("adjust");
     }
   }, [fetcher.state, fetcher.data, setOpen]);
+
+  useEffect(() => {
+    if (!open) {
+      setQuantityError(null);
+      formRef.current?.reset();
+      setActiveTab("adjust");
+    }
+  }, [open]);
 
   /**
    * Submits the adjustment form with the given direction and category.
@@ -127,6 +147,11 @@ export function QuickAdjustDialog({
 
     const formData = new FormData(form);
     const qty = Number(formData.get("quantity"));
+
+    if (isNaN(qty) || qty <= 0) {
+      setQuantityError("Quantity must be a positive number.");
+      return;
+    }
 
     /** Client-side guard: can't remove more than available */
     if (
@@ -150,6 +175,62 @@ export function QuickAdjustDialog({
     });
   }
 
+  /**
+   * Submits the absolute total adjustment form by calculating the difference.
+   */
+  function handleSetTotal() {
+    const form = formRef.current;
+    if (!form || totalQuantity === undefined || totalQuantity === null) return;
+
+    const formData = new FormData(form);
+    const newTotalVal = formData.get("newTotal");
+    if (newTotalVal === null || newTotalVal === "") {
+      setQuantityError("Please enter a new total quantity.");
+      return;
+    }
+    const newTotal = Number(newTotalVal);
+
+    if (isNaN(newTotal) || newTotal < 0) {
+      setQuantityError("New total must be a non-negative number.");
+      return;
+    }
+
+    if (newTotal === totalQuantity) {
+      setQuantityError("New total is the same as the current total quantity.");
+      return;
+    }
+
+    if (newTotal > totalQuantity) {
+      const diff = newTotal - totalQuantity;
+      formData.set("quantity", String(diff));
+      formData.set("direction", "add");
+      formData.set("category", "RESTOCK");
+    } else {
+      const diff = totalQuantity - newTotal;
+
+      /** Client-side guard: can't remove more than available */
+      if (availableQuantity != null && diff > availableQuantity) {
+        const minNewTotal = totalQuantity - availableQuantity;
+        setQuantityError(
+          `Cannot reduce total to ${newTotal} ${unitLabel}. This would remove ${diff} ${unitLabel}, but only ${availableQuantity} are available (the rest is in custody). Minimum total allowed is ${minNewTotal} ${unitLabel}.`
+        );
+        return;
+      }
+
+      formData.set("quantity", String(diff));
+      formData.set("direction", "subtract");
+      formData.set("category", "LOSS");
+    }
+
+    setQuantityError(null);
+    void fetcher.submit(formData, {
+      method: "POST",
+      action: "/api/assets/adjust-quantity",
+    });
+  }
+
+  const hasTotal = totalQuantity !== undefined && totalQuantity !== null;
+
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       {trigger ? (
@@ -160,8 +241,9 @@ export function QuickAdjustDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Adjust Quantity</AlertDialogTitle>
           <AlertDialogDescription>
-            Add or remove stock for this asset. Enter the number of {unitLabel}{" "}
-            to adjust.
+            {hasTotal && activeTab === "total"
+              ? "Set the new total stock for this asset."
+              : `Add or remove stock for this asset. Enter the number of ${unitLabel} to adjust.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
@@ -172,21 +254,71 @@ export function QuickAdjustDialog({
         >
           <input type="hidden" name="assetId" value={assetId} />
 
-          <div className="flex flex-col gap-4">
-            <Input
-              ref={quantityInputRef}
-              name="quantity"
-              type="number"
-              label={`Quantity (${unitLabel})`}
-              placeholder="Enter quantity"
-              min={1}
-              step={1}
-              required
-              data-dialog-initial-focus
-              error={quantityError || serverError || undefined}
-              onChange={() => setQuantityError(null)}
-            />
+          {hasTotal ? (
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab(v as "adjust" | "total")}
+              className="w-full"
+            >
+              <TabsList className="mb-4 grid w-full grid-cols-2">
+                <TabsTrigger value="adjust">Adjust by amount</TabsTrigger>
+                <TabsTrigger value="total">Set new total</TabsTrigger>
+              </TabsList>
 
+              <TabsContent value="adjust" className="flex flex-col gap-4">
+                <Input
+                  ref={quantityInputRef}
+                  name="quantity"
+                  type="number"
+                  label={`Quantity (${unitLabel})`}
+                  placeholder="Enter quantity"
+                  min={1}
+                  step={1}
+                  required={activeTab === "adjust"}
+                  error={quantityError || serverError || undefined}
+                  onChange={() => setQuantityError(null)}
+                />
+              </TabsContent>
+
+              <TabsContent value="total" className="flex flex-col gap-4">
+                <div className="mb-1 text-sm text-gray-500">
+                  Current total:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {totalQuantity} {unitLabel}
+                  </span>
+                </div>
+                <Input
+                  name="newTotal"
+                  type="number"
+                  label={`New Total Quantity (${unitLabel})`}
+                  placeholder="Enter new total quantity"
+                  min={0}
+                  step={1}
+                  required={activeTab === "total"}
+                  error={quantityError || serverError || undefined}
+                  onChange={() => setQuantityError(null)}
+                />
+              </TabsContent>
+            </Tabs>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <Input
+                ref={quantityInputRef}
+                name="quantity"
+                type="number"
+                label={`Quantity (${unitLabel})`}
+                placeholder="Enter quantity"
+                min={1}
+                step={1}
+                required
+                data-dialog-initial-focus
+                error={quantityError || serverError || undefined}
+                onChange={() => setQuantityError(null)}
+              />
+            </div>
+          )}
+
+          <div className="mt-4">
             <Input
               name="note"
               inputType="textarea"
@@ -197,30 +329,43 @@ export function QuickAdjustDialog({
           </div>
         </fetcher.Form>
 
-        <AlertDialogFooter className="mt-4 ">
+        <AlertDialogFooter className="mt-4">
           <AlertDialogCancel asChild>
             <Button type="button" variant="secondary" disabled={isSubmitting}>
               Cancel
             </Button>
           </AlertDialogCancel>
 
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => handleSubmit("subtract")}
-            disabled={disabled}
-          >
-            {isSubmitting ? "Removing..." : "Remove"}
-          </Button>
+          {hasTotal && activeTab === "total" ? (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={handleSetTotal}
+              disabled={disabled}
+            >
+              {isSubmitting ? "Saving..." : "Set Total"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => handleSubmit("subtract")}
+                disabled={disabled}
+              >
+                {isSubmitting ? "Removing..." : "Remove"}
+              </Button>
 
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => handleSubmit("add")}
-            disabled={disabled}
-          >
-            {isSubmitting ? "Adding..." : "Add"}
-          </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => handleSubmit("add")}
+                disabled={disabled}
+              >
+                {isSubmitting ? "Adding..." : "Add"}
+              </Button>
+            </>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
