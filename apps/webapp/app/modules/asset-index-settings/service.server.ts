@@ -15,6 +15,7 @@ import {
   defaultFields,
   fixedFields,
   generateBarcodeColumns,
+  insertMissingDefaultColumns,
 } from "./helpers";
 import { getOrganizationById } from "../organization/service.server";
 
@@ -439,12 +440,13 @@ async function validateColumns({
       (name) => !existingDefaultFields.includes(name)
     );
 
-    // If default fields are missing, add them from our static defaults
+    // If default fields are missing, add them from our static defaults at
+    // their default positions, keeping the saved order of everything else
     if (missingDefaultFields.length > 0) {
-      const fieldsToAdd = defaultFields.filter((field) =>
-        missingDefaultFields.includes(field.name)
+      updatedColumns = insertMissingDefaultColumns(
+        updatedColumns,
+        missingDefaultFields
       );
-      updatedColumns = [...updatedColumns, ...fieldsToAdd];
       needsUpdate = true;
     }
 
