@@ -35,6 +35,7 @@ import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
+import { createLatestRequest } from "@/lib/latest-request";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -96,6 +97,7 @@ function AssetsListContent() {
   );
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
+  const latestRequest = useRef(createLatestRequest()).current;
   const listRef = useRef<FlatList>(null);
   useScrollToTop(listRef);
 
@@ -129,14 +131,20 @@ function AssetsListContent() {
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
       const filter = FILTERS[activeFilter];
-      const { data, error: fetchErr } = await api.assets(currentOrg.id, {
-        search: debouncedSearch || undefined,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-        status: filter.status || undefined,
-        myCustody: filter.myCustody || undefined,
-      });
-      if (!data && !fetchErr) return; // Request cancelled (navigation) — ignore
+      const { data, error: fetchErr } = await api.assets(
+        currentOrg.id,
+        {
+          search: debouncedSearch || undefined,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          status: filter.status || undefined,
+          myCustody: filter.myCustody || undefined,
+        },
+        { signal: latestRequest.begin() }
+      );
+      // An abort answers with neither data nor error. A newer search, filter
+      // or page has taken over, and this answer is already out of date.
+      if (!data && !fetchErr) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load assets");
         return;
@@ -152,7 +160,7 @@ function AssetsListContent() {
           return [...prev, ...newItems];
         });
     },
-    [currentOrg, debouncedSearch, activeFilter]
+    [currentOrg, debouncedSearch, activeFilter, latestRequest]
   );
 
   // Track whether we've done the initial load so we can skip the skeleton
@@ -162,12 +170,15 @@ function AssetsListContent() {
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
+    // An answer about the workspace being left must not land afterwards and
+    // refill the list with another workspace's assets.
+    latestRequest.cancel();
     lastFetchedAt.current = 0;
     hasFetchedAssets.current = false;
     setAssets([]);
     setError(null);
     nextPage.current = 1;
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, latestRequest]);
 
   // Refresh on search/filter change — resets the stale timer so useFocusEffect picks it up
   const isFirstRender = useRef(true);

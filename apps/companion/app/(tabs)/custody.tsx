@@ -27,6 +27,7 @@ import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AssetListSkeleton } from "@/components/skeleton-loader";
 import { announce } from "@/lib/a11y";
+import { createLatestRequest } from "@/lib/latest-request";
 
 const custodyKeyExtractor = (item: AssetListItem) => item.id;
 
@@ -54,6 +55,7 @@ function MyCustodyContent() {
   const [totalPages, setTotalPages] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const nextPage = useRef(1);
+  const latestRequest = useRef(createLatestRequest()).current;
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput.trim()), 400);
@@ -63,13 +65,18 @@ function MyCustodyContent() {
   const fetchAssets = useCallback(
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
-      const { data, error: fetchErr } = await api.assets(currentOrg.id, {
-        search: debouncedSearch || undefined,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-        myCustody: true,
-      });
-      // Request cancelled (navigation) — ignore
+      const { data, error: fetchErr } = await api.assets(
+        currentOrg.id,
+        {
+          search: debouncedSearch || undefined,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          myCustody: true,
+        },
+        { signal: latestRequest.begin() }
+      );
+      // An abort answers with neither data nor error. A newer search, filter
+      // or page has taken over, and this answer is already out of date.
       if (!data && !fetchErr) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load custody items");
@@ -82,7 +89,7 @@ function MyCustodyContent() {
       if (reset) setAssets(data.assets);
       else setAssets((prev) => [...prev, ...data.assets]);
     },
-    [currentOrg, debouncedSearch]
+    [currentOrg, debouncedSearch, latestRequest]
   );
 
   // Refresh on search change (including clearing search)
@@ -106,12 +113,15 @@ function MyCustodyContent() {
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
+    // An answer about the workspace being left must not land afterwards and
+    // refill the list with another workspace's custody items.
+    latestRequest.cancel();
     lastFetchedAt.current = 0;
     hasFetchedCustody.current = false;
     setAssets([]);
     setError(null);
     nextPage.current = 1;
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, latestRequest]);
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
