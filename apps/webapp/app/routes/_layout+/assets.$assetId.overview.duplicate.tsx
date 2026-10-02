@@ -35,6 +35,16 @@ import { requirePermission } from "~/utils/roles.server";
 
 export const meta = () => [{ title: appendToMetaTitle("Duplicate asset") }];
 
+/**
+ * Loads the source asset for the duplicate dialog.
+ *
+ * Requires `asset: create`, since duplicating creates assets. The asset is read
+ * org-scoped and carries its `type` and `quantity`, which the dialog uses to
+ * refuse a quantity-tracked asset with no units in stock before submitting.
+ *
+ * @throws {Response} The error payload with its status when the user lacks
+ *   permission or the asset is not in the active organization
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -157,6 +167,15 @@ export function links() {
   return [{ rel: "stylesheet", href: styles }];
 }
 
+/**
+ * Dialog for duplicating an asset, opened from the asset's Actions menu and the
+ * assets index quick actions.
+ *
+ * Previews the source asset and asks how many copies to create. For a
+ * quantity-tracked asset with no units in stock it explains why and disables
+ * the form, matching the refusal in `duplicateAsset`. Server errors from the
+ * action are shown below the buttons.
+ */
 export default function DuplicateAsset() {
   const zo = useZorm("DuplicateAsset", DuplicateAssetSchema);
   const { asset } = useLoaderData<typeof loader>();
