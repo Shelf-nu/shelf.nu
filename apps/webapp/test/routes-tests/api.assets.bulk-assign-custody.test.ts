@@ -389,10 +389,40 @@ describe("api/assets/bulk-assign-custody", () => {
         role: OrganizationRoles.SELF_SERVICE,
         canUseBarcodes: false,
       } as Awaited<ReturnType<typeof requirePermission>>);
+      // The caller's own team member: the shape QUANTITY_CUSTODIAN_SELECT reads.
       mockGetTeamMember.mockResolvedValue({
         id: "team-member-123",
-        userId: "user-123",
+        name: "Valid Team Member",
+        user: {
+          id: "user-123",
+          firstName: null,
+          lastName: null,
+          displayName: null,
+        },
       });
+    });
+
+    it("refuses a self-service hand-over to someone else before any write", async () => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-123",
+        name: "Valid Team Member",
+        user: {
+          id: "someone-else",
+          firstName: null,
+          lastName: null,
+          displayName: null,
+        },
+      });
+
+      const response = (await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
+      )) as unknown as Response;
+
+      // Refused per asset by checkOutQuantity, this would come back as a 409
+      // saying everything else was assigned, when nothing was.
+      expect(response.status).toBe(403);
+      expect(mockCheckOutQuantity).not.toHaveBeenCalled();
+      expect(bulkCheckOutAssets).not.toHaveBeenCalled();
     });
 
     it("hands a named asset to checkOutQuantity and forwards the acting role", async () => {

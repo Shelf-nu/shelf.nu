@@ -128,11 +128,15 @@ export async function action({ request }: ActionFunctionArgs) {
      * Without it, a SELF_SERVICE user could assign custody to any
      * team member (hex-security r3202162994).
      */
-    // Every per-unit assignment is checked before anything is written.
+    // Every per-unit assignment is checked before anything is written,
+    // including the SELF_SERVICE rule.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       organizationId,
+      custodian: teamMember,
+      role,
+      userId: user.id,
     });
 
     /**

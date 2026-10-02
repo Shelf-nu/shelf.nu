@@ -114,7 +114,7 @@ function holder(
   return {
     assetId,
     quantity,
-    asset: { title: `Asset ${assetId}` },
+    asset: { title: `Asset ${assetId}`, type: "QUANTITY_TRACKED" },
     custodian: {
       id: teamMemberId,
       name: `Member ${teamMemberId}`,

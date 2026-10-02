@@ -115,11 +115,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
       getClientHint(request)
     );
 
-    // Every per-unit assignment is checked before anything is written.
+    // Every per-unit assignment is checked before anything is written,
+    // including the SELF_SERVICE rule.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       organizationId,
+      custodian: custodianRecord,
+      role,
+      userId,
     });
 
     /**

@@ -114,10 +114,18 @@ export function splitQuantityAssetIds(
  * for more than is free) arrives before anything is written, naming every
  * asset that asked for too much.
  *
+ * The self-service rule is checked here too. `checkOutQuantity` enforces it on
+ * the write, but a refusal there arrives per asset and reads as a concurrent
+ * change, so a submission that could never succeed would report a partial one.
+ *
  * @param args.quantityAssetIds - Assets moved by units (see {@link splitQuantityAssetIds}).
  * @param args.quantities - Units per asset id.
  * @param args.organizationId - The caller's workspace.
- * @throws {ShelfError} 400 "Nothing was assigned. ..." naming each asset that
+ * @param args.custodian - Who receives the units.
+ * @param args.role - The acting user's role.
+ * @param args.userId - The acting user.
+ * @throws {ShelfError} 403 when a self-service user assigns units to anyone
+ *   but themselves; 400 "Nothing was assigned. ..." naming each asset that
  *   asked for more units than are free, is not tracked by quantity, or is not
  *   in the workspace.
  */
@@ -125,11 +133,37 @@ export async function assertAssignableQuantities({
   quantityAssetIds,
   quantities,
   organizationId,
+  custodian,
+  role,
+  userId,
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
   organizationId: string;
+  custodian: QuantityCustodian;
+  /** The acting user's role: self-service may only assign to themselves. */
+  role: OrganizationRoles;
+  /** The acting user. */
+  userId: string;
 }): Promise<void> {
+  if (!quantityAssetIds.length) return;
+
+  if (
+    role === OrganizationRoles.SELF_SERVICE &&
+    custodian.user?.id !== userId
+  ) {
+    throw new ShelfError({
+      cause: null,
+      title: "Action not allowed",
+      status: 403,
+      label: "Assets",
+      shouldBeCaptured: false,
+      message:
+        "Nothing was assigned. Self-service users can only assign custody to themselves.",
+      additionalData: { userId, custodianId: custodian.id },
+    });
+  }
+
   const unavailable: string[] = [];
 
   for (const assetId of quantityAssetIds) {
@@ -206,7 +240,8 @@ export type ResolvedQuantityRelease = {
  * @param args.userId - The acting user.
  * @returns One resolved release per asset, in the given order.
  * @throws {ShelfError} 400 when an asset has no operator-held units, more than
- *   one holder, or fewer units held than asked for; 403 when a self-service
+ *   one holder, is not tracked by quantity, or has fewer units held than asked
+ *   for; 403 when a self-service
  *   user asks to release units someone else holds.
  */
 export async function resolveQuantityReleases({
@@ -235,7 +270,7 @@ export async function resolveQuantityReleases({
     select: {
       assetId: true,
       quantity: true,
-      asset: { select: { title: true } },
+      asset: { select: { title: true, type: true } },
       custodian: { select: QUANTITY_CUSTODIAN_SELECT },
     },
   });
@@ -258,6 +293,19 @@ export async function resolveQuantityReleases({
     }
 
     const [holder] = holders;
+    // `releaseQuantity` refuses anything else on the write, where the refusal
+    // would read as a concurrent change after other assets were released.
+    if (holder.asset.type !== AssetType.QUANTITY_TRACKED) {
+      throw new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Assets",
+        shouldBeCaptured: false,
+        message: `Nothing was released. "${holder.asset.title}" is not tracked by quantity, so it is released whole, not by units.`,
+        additionalData: { assetId },
+      });
+    }
+
     // `releaseQuantity` applies the same rule on the write; checking it here
     // makes the refusal arrive before anything is written.
     if (

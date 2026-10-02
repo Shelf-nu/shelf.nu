@@ -147,6 +147,9 @@ describe("assertAssignableQuantities", () => {
         quantityAssetIds: ["q1", "q2"],
         quantities: { q1: 5, q2: 1 },
         organizationId: "org-1",
+        custodian,
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
       })
     ).resolves.toBeUndefined();
   });
@@ -158,6 +161,9 @@ describe("assertAssignableQuantities", () => {
         quantityAssetIds: ["q1", "q2", "q3"],
         quantities: { q1: 6, q2: 1, q3: 10 },
         organizationId: "org-1",
+        custodian,
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({
       status: 400,
@@ -173,6 +179,9 @@ describe("assertAssignableQuantities", () => {
         quantityAssetIds: ["elsewhere", "camera", "q1"],
         quantities: { elsewhere: 1, camera: 1, q1: 2 },
         organizationId: "org-1",
+        custodian,
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
       })
     ).rejects.toMatchObject({
       status: 400,
@@ -180,14 +189,84 @@ describe("assertAssignableQuantities", () => {
         'Nothing was assigned. an asset that is not in this workspace; "Asset camera" (not tracked by quantity).',
     });
   });
+
+  describe("for a self-service user", () => {
+    function custodianFor(userId: string | null): QuantityCustodian {
+      return {
+        id: "tm-1",
+        name: "Holder",
+        user: userId
+          ? { id: userId, firstName: null, lastName: null, displayName: null }
+          : null,
+      };
+    }
+
+    it("passes when the units go to the caller", async () => {
+      freeUnits({ q1: 5 });
+      await expect(
+        assertAssignableQuantities({
+          quantityAssetIds: ["q1"],
+          quantities: { q1: 2 },
+          organizationId: "org-1",
+          custodian: custodianFor("user-self"),
+          role: OrganizationRoles.SELF_SERVICE,
+          userId: "user-self",
+        })
+      ).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ["a colleague", "user-other"],
+      ["a team member without an account", null],
+    ])(
+      "refuses before any lookup when the units go to %s",
+      async (_label, receiver) => {
+        freeUnits({ q1: 5 });
+        await expect(
+          assertAssignableQuantities({
+            quantityAssetIds: ["q1"],
+            quantities: { q1: 2 },
+            organizationId: "org-1",
+            custodian: custodianFor(receiver),
+            role: OrganizationRoles.SELF_SERVICE,
+            userId: "user-self",
+          })
+        ).rejects.toMatchObject({
+          status: 403,
+          message:
+            "Nothing was assigned. Self-service users can only assign custody to themselves.",
+        });
+        expect(dbMocks.assetFindFirst).not.toHaveBeenCalled();
+      }
+    );
+
+    it("leaves a submission with no unit rows to the bulk service", async () => {
+      // Whole assets are refused by bulkCheckOutAssets with its own message.
+      await expect(
+        assertAssignableQuantities({
+          quantityAssetIds: [],
+          quantities: {},
+          organizationId: "org-1",
+          custodian: custodianFor("user-other"),
+          role: OrganizationRoles.SELF_SERVICE,
+          userId: "user-self",
+        })
+      ).resolves.toBeUndefined();
+    });
+  });
 });
 
 describe("resolveQuantityReleases", () => {
-  function row(assetId: string, teamMemberId: string, quantity: number) {
+  function row(
+    assetId: string,
+    teamMemberId: string,
+    quantity: number,
+    type = "QUANTITY_TRACKED"
+  ) {
     return {
       assetId,
       quantity,
-      asset: { title: `Asset ${assetId}` },
+      asset: { title: `Asset ${assetId}`, type },
       custodian: { id: teamMemberId, name: teamMemberId, user: null },
     };
   }
@@ -246,6 +325,13 @@ describe("resolveQuantityReleases", () => {
       [row("q1", "tm-1", 2)],
       'Nothing was released. "Asset q1" has only 2 unit(s) in custody.',
     ],
+    [
+      // releaseQuantity would refuse it on the write, after earlier assets
+      // were released, and the route would report a partial success.
+      "the asset is not tracked by quantity",
+      [row("q1", "tm-1", 1, "INDIVIDUAL")],
+      'Nothing was released. "Asset q1" is not tracked by quantity, so it is released whole, not by units.',
+    ],
   ])("refuses when %s", async (_label, rows, message) => {
     dbMocks.custodyFindMany.mockResolvedValue(rows);
     await expect(
@@ -265,7 +351,7 @@ describe("resolveQuantityReleases for a self-service user", () => {
     return {
       assetId: "q1",
       quantity: 5,
-      asset: { title: "Cable" },
+      asset: { title: "Cable", type: "QUANTITY_TRACKED" },
       custodian: {
         id: "tm-1",
         name: "Holder",
