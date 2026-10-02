@@ -63,9 +63,8 @@ function MyCustodyContent() {
   }, [searchInput]);
 
   const fetchAssets = useCallback(
-    async (pageNum: number, reset: boolean) => {
+    async (pageNum: number, reset: boolean, signal: AbortSignal) => {
       if (!currentOrg) return;
-      const signal = latestRequest.begin();
       const { data, error: fetchErr } = await api.assets(
         currentOrg.id,
         {
@@ -91,7 +90,7 @@ function MyCustodyContent() {
       if (reset) setAssets(data.assets);
       else setAssets((prev) => [...prev, ...data.assets]);
     },
-    [currentOrg, debouncedSearch, latestRequest]
+    [currentOrg, debouncedSearch]
   );
 
   // Refresh on search change (including clearing search)
@@ -104,7 +103,14 @@ function MyCustodyContent() {
     if (!currentOrg) return;
     setIsLoading(true);
     nextPage.current = 1;
-    fetchAssets(1, true).finally(() => setIsLoading(false));
+    const signal = latestRequest.begin();
+    fetchAssets(1, true, signal).finally(() => {
+      // The signal identifies this request. An abandoned one must not stamp
+      // freshness or clear the spinner: the request that replaced it is still
+      // running and will do both when it answers.
+      if (signal.aborted) return;
+      setIsLoading(false);
+    });
     // why: debounced search drives this effect; fetchAssets and currentOrg captured stably
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch]);
@@ -136,30 +142,42 @@ function MyCustodyContent() {
         setIsLoading(true);
       }
       nextPage.current = 1;
-      fetchAssets(1, true).finally(() => {
+      const signal = latestRequest.begin();
+      fetchAssets(1, true, signal).finally(() => {
+        // The signal identifies this request. An abandoned one must not stamp
+        // freshness or clear the spinner: the request that replaced it is still
+        // running and will do both when it answers.
+        if (signal.aborted) return;
         setIsLoading(false);
         lastFetchedAt.current = Date.now();
         hasFetchedCustody.current = true;
       });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentOrg?.id, fetchAssets])
+    }, [currentOrg?.id, fetchAssets, latestRequest])
   );
 
   const onRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsRefreshing(true);
     nextPage.current = 1;
-    await fetchAssets(1, true);
+    await fetchAssets(1, true, latestRequest.begin());
+    // Unguarded on purpose: the operator pulled this spinner, so it stops
+    // whatever happened to the request behind it.
     setIsRefreshing(false);
+    // Clears the shared skeleton too: this is the newest request, and the one
+    // it superseded deliberately skipped its own clear. Every path that starts
+    // a request clears this on completion, so none can strand it.
+    setIsLoading(false);
     announce("Content refreshed");
   };
 
   const onEndReached = async () => {
     if (isLoadingMore || nextPage.current > totalPages) return;
     setIsLoadingMore(true);
-    await fetchAssets(nextPage.current, false);
+    await fetchAssets(nextPage.current, false, latestRequest.begin());
     setIsLoadingMore(false);
+    setIsLoading(false);
   };
 
   const renderAsset = useCallback(
