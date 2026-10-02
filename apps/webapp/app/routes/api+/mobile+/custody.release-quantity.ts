@@ -84,6 +84,13 @@ const ReleaseQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Release only the units taken from this source: a location id, or
+   * `null` / `""` for the unplaced units. Optional and additive: an app
+   * build that does not send it has the holder's rows drawn in the
+   * service's fixed order.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -133,7 +140,8 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, consumed, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, consumed, note, locationId } =
+      parsed.data;
 
     /**
      * Validate that the team member belongs to the same organization.
@@ -188,6 +196,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       role,
       note,
+      locationId,
     });
 
     // No route-level sendNotification success toast here: that's the web's

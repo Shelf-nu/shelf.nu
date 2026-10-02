@@ -335,6 +335,57 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       expect(noteContent()).toContain("**30** returned to stock");
     });
 
+    it("forwards the source location, and null for the unplaced units", async () => {
+      for (const locationId of ["loc-studio", null]) {
+        const request = createReleaseQuantityRequest({
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          quantity: 1,
+          locationId,
+        });
+        await action(createActionArgs({ request }));
+        expect(releaseQuantity).toHaveBeenLastCalledWith(
+          expect.objectContaining({ locationId })
+        );
+      }
+    });
+
+    it("names where the units came from for a pool with several sources", async () => {
+      (releaseQuantity as any).mockResolvedValue({
+        asset: { id: "asset-1" },
+        consumed: 3,
+        returned: 0,
+        multiSource: true,
+        lines: [
+          {
+            locationId: "loc-camera",
+            locationName: "Camera Room",
+            quantity: 2,
+            consumed: 2,
+            returned: 0,
+          },
+          {
+            locationId: null,
+            locationName: null,
+            quantity: 1,
+            consumed: 1,
+            returned: 0,
+          },
+        ],
+      });
+
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+      await action(createActionArgs({ request }));
+
+      expect(noteContent()).toContain(
+        'as consumed (2 from {% link to="/locations/loc-camera" text="Camera Room" /%}, 1 unplaced)'
+      );
+    });
+
     it("forwards an absent consumed field as undefined so the server derives the split", async () => {
       // An app build predating the split sends no `consumed`; the service must
       // still be free to pick the outcome from the asset row.

@@ -34,6 +34,7 @@ import {
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
 
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import PartialCheckoutDrawer from "./partial-checkout-drawer";
 
 // why: react-router's `useLoaderData` runs outside a real Remix route
@@ -146,6 +147,8 @@ function makeLoaderData(
     remainingToCheckOutByAsset?: Record<string, number>;
     /** Override per-asset live status (default: AVAILABLE). */
     statusByAssetId?: Record<string, AssetStatus>;
+    /** Pools at two or more locations still to go out, see the loader. */
+    checkoutSourceQuestions?: CheckoutSourceQuestion[];
   } = {}
 ) {
   const bookingAssets = assets.map((a) => ({
@@ -176,6 +179,7 @@ function makeLoaderData(
     checkedOutAssetIds: overrides.checkedOutAssetIds ?? ([] as string[]),
     checkedInAssetIds: overrides.checkedInAssetIds ?? ([] as string[]),
     remainingToCheckOutByAsset: overrides.remainingToCheckOutByAsset ?? {},
+    checkoutSourceQuestions: overrides.checkoutSourceQuestions ?? [],
   };
 }
 
@@ -338,6 +342,7 @@ function makeLoaderDataFromExpected(
     checkedOutAssetIds: overrides.checkedOutAssetIds ?? ([] as string[]),
     checkedInAssetIds: overrides.checkedInAssetIds ?? ([] as string[]),
     remainingToCheckOutByAsset,
+    checkoutSourceQuestions: [] as CheckoutSourceQuestion[],
   };
 }
 
@@ -421,6 +426,67 @@ describe("PartialCheckoutDrawer", () => {
     // Each input is clamped to the slice's remaining via `max`.
     const maxes = inputs.map((i) => Number(i.max)).sort((a, b) => a - b);
     expect(maxes).toEqual([3, 8]);
+  });
+
+  it("asks where a pool at two locations leaves from, beside its quantity", () => {
+    const assets: ScannedAssetFixture[] = [
+      {
+        id: "asset-qty-a",
+        title: "Battery pack",
+        kind: "QUANTITY_TRACKED",
+        bookedQuantity: 8,
+        unitOfMeasure: "pcs",
+      },
+    ];
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData(assets, {
+        checkoutSourceQuestions: [
+          {
+            sliceId: "ba-asset-qty-a",
+            assetId: "asset-qty-a",
+            title: "Battery pack",
+            unitOfMeasure: "pcs",
+            quantity: 8,
+            placements: [
+              {
+                locationId: "loc-store",
+                name: "Store Room",
+                placed: 5,
+                inCustody: 0,
+                onBooking: 0,
+                left: 5,
+              },
+              {
+                locationId: "loc-studio",
+                name: "Studio",
+                placed: 20,
+                inCustody: 0,
+                onBooking: 0,
+                left: 20,
+              },
+            ],
+            unplaced: 3,
+            defaultLocationId: "loc-studio",
+          },
+        ],
+      })
+    );
+    const store = seedStore({ "qr-qty-a": scannedAsset(assets[0]) });
+
+    renderDrawer(store);
+
+    const select = screen.getByLabelText(
+      "From location for Battery pack"
+    ) as HTMLSelectElement;
+    expect(select.name).toBe("sourceLocation.ba-asset-qty-a");
+    expect(select.value).toBe("loc-studio");
+    expect([...select.options].map((option) => option.text)).toEqual([
+      "Store Room · 5 pcs",
+      "Studio · 20 pcs",
+      "Unplaced · 3 pcs",
+    ]);
+    // The row sits outside the footer form; `form=` joins it to the submit.
+    expect(select.getAttribute("form")).toBe("partial-checkout-form");
   });
 
   it("does NOT show a qty input for INDIVIDUAL scanned assets", () => {

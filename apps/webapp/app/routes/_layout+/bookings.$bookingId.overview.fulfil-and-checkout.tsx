@@ -52,6 +52,8 @@ import { db } from "~/database/db.server";
 import { useBookingFulfilSessionInitialization } from "~/hooks/use-booking-fulfil-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
+import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
@@ -226,6 +228,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
+    /**
+     * Pools already on the booking at two or more locations that have not
+     * gone out yet. The check-out confirmation asks where each one's units
+     * leave from.
+     */
+    const checkoutSourceQuestions = await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId: booking.id,
+    });
+
     return payload({
       title,
       header,
@@ -233,6 +245,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       expectedModelRequests,
       alreadyIncluded,
       checksOutScannedOnly,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -333,6 +346,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
       requireExplicitCheckout,
+      // The confirm dialog's "From location" picks, keyed by slice id, for
+      // pools already on the booking at two or more placements. A pool this
+      // scan adds has no slice yet, so it gets the default (see
+      // `recordCheckoutSourceLocations`).
+      sourceLocations: parseSourceLocationsFromFormData(formData),
     });
 
     sendNotification({
@@ -394,6 +412,7 @@ export default function FulfilAndCheckoutForBooking() {
     expectedModelRequests,
     alreadyIncluded,
     checksOutScannedOnly,
+    checkoutSourceQuestions,
   } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
@@ -427,7 +446,10 @@ export default function FulfilAndCheckoutForBooking() {
     <>
       <Header hidePageDescription />
 
-      <FulfilReservationsDrawer isLoading={isLoading} />
+      <FulfilReservationsDrawer
+        isLoading={isLoading}
+        sourceQuestions={checkoutSourceQuestions}
+      />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

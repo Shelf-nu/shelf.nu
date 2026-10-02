@@ -45,6 +45,12 @@ import {
   combineDispatchedWithStoredUnits,
   computeDispatchedUnitsByAsset,
 } from "~/modules/booking/checkout-attribution";
+import {
+  getCheckoutSourceQuestions,
+  loadMultiPlacedPoolIds,
+  loadSliceSourceLocations,
+} from "~/modules/booking/checkout-source-location.server";
+import type { SliceSourceLocation } from "~/modules/booking/checkout-source-location.server";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import {
   bookingDraftVisibilityClause,
@@ -171,6 +177,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: true,
             quantity: true,
             assetKitId: true,
+            // Where a pool slice's units left from, recorded at check-out.
+            // Resolved to `{ id, name }` per slice below.
+            sourceLocationId: true,
             asset: {
               select: {
                 id: true,
@@ -292,7 +301,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       quantity: number;
       assetKitId: string | null;
       kit: { id: string; name: string } | null;
+      /**
+       * The location this pool slice's units left from, recorded when it was
+       * first checked out. Set only where the web booking row shows "from
+       * <Location>": a standalone slice of a pool at two or more placements.
+       * `null` otherwise (individual assets, kit slices, pools at one
+       * location, slices not out yet, the unplaced units, a deleted location).
+       */
+      sourceLocation: SliceSourceLocation | null;
     };
+    const sourcedPoolSlices = booking.bookingAssets.filter(
+      (ba) =>
+        ba.asset.type === AssetType.QUANTITY_TRACKED &&
+        !ba.assetKitId &&
+        ba.sourceLocationId
+    );
+    const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
+      loadSliceSourceLocations({
+        organizationId,
+        locationIds: sourcedPoolSlices.map((ba) => ba.sourceLocationId),
+      }),
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: sourcedPoolSlices.map((ba) => ba.asset.id),
+      }),
+    ]);
     type CollapsedRow = {
       assetId: string;
       first: (typeof booking.bookingAssets)[number];
@@ -315,6 +348,13 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         quantity: ba.quantity,
         assetKitId: ba.assetKitId,
         kit: sliceKit,
+        sourceLocation:
+          ba.asset.type === AssetType.QUANTITY_TRACKED &&
+          !ba.assetKitId &&
+          ba.sourceLocationId &&
+          multiPlacedPoolIds.has(ba.asset.id)
+            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
+            : null,
       };
       const existing = byAssetId.get(ba.asset.id);
       if (existing) {
@@ -890,6 +930,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           ).hasAlreadyBookedAssets
         : false;
 
+    /**
+     * Pools on this booking that sit at two or more locations and have not
+     * gone out yet, with the options a "From location" picker needs. The same
+     * data the web check-out dialogs read, so the phone can ask the same
+     * question and send the answers as `sourceLocations`. Empty unless the
+     * booking can still check out. Additive: older apps ignore it.
+     */
+    const checkoutSourceQuestions = (
+      [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ] as BookingStatus[]
+    ).includes(booking.status)
+      ? await getCheckoutSourceQuestions({
+          organizationId,
+          bookingId: booking.id,
+        })
+      : [];
+
     return data({
       booking: {
         id: booking.id,
@@ -936,6 +996,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       canCheckinAll,
       canQuickCheckout,
       bookingActions,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);
