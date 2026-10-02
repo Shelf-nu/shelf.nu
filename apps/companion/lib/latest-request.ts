@@ -37,6 +37,33 @@ export type LatestRequest = {
 };
 
 /**
+ * Mirrors an abandoned request onto the controller that carries it out.
+ *
+ * `addEventListener` is never called back for an abort that already happened,
+ * so a signal has to be tested as well as listened to. Anything that waits
+ * before chaining, such as resolving an access token, can otherwise let an
+ * abort fall through the gap: the listener attaches to a signal that has
+ * already fired, nothing cancels the request, and it answers with data the
+ * caller has moved past. Chain before the first await, not after it.
+ *
+ * @param controller - The controller to abort
+ * @param signal - The caller's signal, if it gave one
+ */
+export function chainAbort(
+  controller: AbortController,
+  signal?: AbortSignal | null
+): void {
+  if (!signal) {
+    return;
+  }
+  if (signal.aborted) {
+    controller.abort();
+    return;
+  }
+  signal.addEventListener("abort", () => controller.abort());
+}
+
+/**
  * Creates a {@link LatestRequest} for one screen.
  *
  * @returns A fresh tracker with nothing in flight

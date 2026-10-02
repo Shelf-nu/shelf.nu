@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createLatestRequest } from "./latest-request";
+import { chainAbort, createLatestRequest } from "./latest-request";
 
 describe("createLatestRequest", () => {
   it("leaves the first request alone", () => {
@@ -56,5 +56,49 @@ describe("createLatestRequest", () => {
   it("gives each request its own signal", () => {
     const latest = createLatestRequest();
     assert.notEqual(latest.begin(), latest.begin());
+  });
+});
+
+describe("chainAbort", () => {
+  it("passes a later abort on to the controller", () => {
+    const latest = createLatestRequest();
+    const signal = latest.begin();
+    const controller = new AbortController();
+
+    chainAbort(controller, signal);
+    assert.equal(controller.signal.aborted, false);
+
+    latest.cancel();
+    assert.equal(controller.signal.aborted, true);
+  });
+
+  // The gap this exists to close: a signal that aborted while the caller was
+  // awaiting something else. A listener attached now is never called back, so
+  // the request would run to completion and answer with data nobody wants.
+  it("aborts at once for a signal that already fired", () => {
+    const latest = createLatestRequest();
+    const signal = latest.begin();
+    latest.cancel();
+    assert.equal(signal.aborted, true, "precondition: already aborted");
+
+    const controller = new AbortController();
+    chainAbort(controller, signal);
+
+    assert.equal(controller.signal.aborted, true);
+  });
+
+  it("does nothing when the caller gave no signal", () => {
+    const controller = new AbortController();
+    chainAbort(controller, undefined);
+    chainAbort(controller, null);
+
+    assert.equal(controller.signal.aborted, false);
+  });
+
+  it("leaves the controller alone while the signal holds", () => {
+    const controller = new AbortController();
+    chainAbort(controller, createLatestRequest().begin());
+
+    assert.equal(controller.signal.aborted, false);
   });
 });

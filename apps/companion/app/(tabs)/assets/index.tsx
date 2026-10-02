@@ -131,6 +131,7 @@ function AssetsListContent() {
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
       const filter = FILTERS[activeFilter];
+      const signal = latestRequest.begin();
       const { data, error: fetchErr } = await api.assets(
         currentOrg.id,
         {
@@ -140,11 +141,12 @@ function AssetsListContent() {
           status: filter.status || undefined,
           myCustody: filter.myCustody || undefined,
         },
-        { signal: latestRequest.begin() }
+        { signal }
       );
-      // An abort answers with neither data nor error. A newer search, filter
-      // or page has taken over, and this answer is already out of date.
-      if (!data && !fetchErr) return;
+      // Refused two ways. An abort answers with neither data nor error, and a
+      // response that landed before the abort but after this request was
+      // superseded still carries rows for a query the operator has moved past.
+      if (signal.aborted || (!data && !fetchErr)) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load assets");
         return;

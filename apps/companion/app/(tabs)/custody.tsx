@@ -65,6 +65,7 @@ function MyCustodyContent() {
   const fetchAssets = useCallback(
     async (pageNum: number, reset: boolean) => {
       if (!currentOrg) return;
+      const signal = latestRequest.begin();
       const { data, error: fetchErr } = await api.assets(
         currentOrg.id,
         {
@@ -73,11 +74,12 @@ function MyCustodyContent() {
           perPage: PAGE_SIZE,
           myCustody: true,
         },
-        { signal: latestRequest.begin() }
+        { signal }
       );
-      // An abort answers with neither data nor error. A newer search, filter
-      // or page has taken over, and this answer is already out of date.
-      if (!data && !fetchErr) return;
+      // Refused two ways. An abort answers with neither data nor error, and a
+      // response that landed before the abort but after this request was
+      // superseded still carries rows for a query the operator has moved past.
+      if (signal.aborted || (!data && !fetchErr)) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load custody items");
         return;
