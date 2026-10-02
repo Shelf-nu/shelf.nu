@@ -1,10 +1,9 @@
 import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 
-import { Dialog, DialogPortal } from "~/components/layout/dialog";
+import { ImagePreviewDialog } from "~/components/image-with-preview/image-preview-dialog";
 import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
-import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
 import type { AssetImageProps } from "./types";
 import { isAssetForPreview } from "./utils";
@@ -446,26 +445,6 @@ export const AssetImage = ({
   //   }
   // }, [assetId, currentMainImage, currentThumbnail]);
 
-  // Handle dialog keyboard shortcuts
-  useEffect(
-    function handleEscShortcut() {
-      if (!withPreview || !isDialogOpen) {
-        return;
-      }
-
-      function handleKeydown(event: KeyboardEvent) {
-        if (event.key === DIALOG_CLOSE_SHORTCUT) {
-          event.preventDefault();
-          handleCloseDialog();
-        }
-      }
-
-      window.addEventListener("keydown", handleKeydown);
-      return () => window.removeEventListener("keydown", handleKeydown);
-    },
-    [isDialogOpen, withPreview]
-  );
-
   return (
     <>
       <div className={tw("relative overflow-hidden", className)}>
@@ -513,46 +492,21 @@ export const AssetImage = ({
           {...rest}
         />
       </div>
-      {withPreview && (
-        <DialogPortal>
-          <Dialog
-            open={isDialogOpen}
-            onClose={handleCloseDialog}
-            className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
-            title={
-              <div>
-                <div className="text-lg font-semibold text-gray-900">{alt}</div>
-                <div className="text-sm font-normal text-gray-600">
-                  1 image(s)
-                </div>
-              </div>
-            }
-          >
-            <div
-              className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
-              }
-            >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
-                {/* Always use full-size image in the preview dialog */}
-                <img src={previewImageUrl} className={"max-h-full"} alt={alt} />
-              </div>
-              <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
-                <Button to={`/assets/${assetId}/edit`} variant="secondary">
-                  Edit image(s)
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleCloseDialog}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          </Dialog>
-        </DialogPortal>
-      )}
+      {withPreview ? (
+        <ImagePreviewDialog
+          open={isDialogOpen}
+          onClose={handleCloseDialog}
+          // Always the full-size image, never the thumbnail.
+          imageUrl={previewImageUrl}
+          alt={alt}
+          subtitle="1 image(s)"
+          actions={
+            <Button to={`/assets/${assetId}/edit`} variant="secondary">
+              Edit image(s)
+            </Button>
+          }
+        />
+      ) : null}
     </>
   );
 };

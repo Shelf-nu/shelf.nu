@@ -215,3 +215,59 @@ describe("audit receipt PDF — Code column", () => {
     expect(screen.getByText("Camera")).toBeInTheDocument();
   });
 });
+
+describe("audit receipt PDF: photos", () => {
+  const photo = (id: string, auditAsset: unknown = null) => ({
+    id,
+    imageUrl: `https://storage.test/audits/${id}.webp`,
+    thumbnailUrl: `https://storage.test/audits/${id}-thumbnail.webp`,
+    description: null,
+    auditAsset,
+  });
+
+  function renderWithPhotos() {
+    const pdfMeta = {
+      ...pdfMetaWith({ displayCode: SAM_CODE }),
+      generalImages: [photo("general-1")],
+      assetImages: [
+        photo("asset-photo-1", { asset: { id: "asset-1", title: "Camera" } }),
+      ],
+    } as unknown as AuditPdfDbResult;
+    return render(
+      <AuditPDFContent componentRef={{ current: null }} pdfMeta={pdfMeta} />
+    );
+  }
+
+  it("prints each photo's full image, never its thumbnail", () => {
+    renderWithPhotos();
+
+    const general = screen.getByAltText("Audit image");
+    const ofAsset = screen.getByAltText("Photo of Camera");
+    expect(general.getAttribute("src")).toBe(
+      "https://storage.test/audits/general-1.webp"
+    );
+    expect(ofAsset.getAttribute("src")).toBe(
+      "https://storage.test/audits/asset-photo-1.webp"
+    );
+    expect(document.body.innerHTML).not.toContain("-thumbnail.webp");
+  });
+
+  it("prints photos two to a row, whole, at their natural aspect ratio", () => {
+    renderWithPhotos();
+
+    const img = screen.getByAltText("Photo of Camera");
+    const cell = img.parentElement!;
+    expect(cell.parentElement?.className).toContain("grid-cols-2");
+    expect(cell.className).toContain("break-inside-avoid");
+    expect(img.className).toContain("w-full");
+    expect(img.className).not.toContain("object-cover");
+  });
+
+  it("scales a photo taller than most of the page down to fit it", () => {
+    renderWithPhotos();
+
+    const img = screen.getByAltText("Photo of Camera");
+    expect(img.className).toMatch(/max-h-\[\d+mm\]/);
+    expect(img.className).toContain("object-contain");
+  });
+});

@@ -13,9 +13,8 @@ import { useEffect, useState } from "react";
 import type { Kit } from "@prisma/client";
 import { useFetcher } from "react-router";
 import type { action } from "~/routes/api+/kit.refresh-image";
-import { DIALOG_CLOSE_SHORTCUT } from "~/utils/constants";
 import { tw } from "~/utils/tw";
-import { Dialog, DialogPortal } from "../layout/dialog";
+import { ImagePreviewDialog } from "../image-with-preview/image-preview-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
@@ -97,25 +96,6 @@ export default function KitImage({
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
   };
-  useEffect(
-    function handleEscShortcut() {
-      if (!withPreview || !isDialogOpen) {
-        return;
-      }
-
-      function handleKeydown(event: KeyboardEvent) {
-        if (event.key === DIALOG_CLOSE_SHORTCUT) {
-          event.preventDefault();
-          handleCloseDialog();
-        }
-      }
-
-      window.addEventListener("keydown", handleKeydown);
-      return () => window.removeEventListener("keydown", handleKeydown);
-    },
-    [isDialogOpen, withPreview]
-  );
-
   return (
     <>
       <div className={tw("relative overflow-hidden", className)}>
@@ -157,47 +137,21 @@ export default function KitImage({
           {...rest}
         />
       </div>
-      {withPreview && (
-        <DialogPortal>
-          <Dialog
-            open={isDialogOpen}
-            onClose={handleCloseDialog}
-            className="h-dvh w-full md:h-[calc(100vh-4rem)] md:w-[90%] md:p-0"
-            title={
-              <div>
-                <div className=" text-lg font-semibold text-gray-900">
-                  {kit.alt}
-                </div>
-                <div className="text-sm font-normal text-gray-600">
-                  1 image(s)
-                </div>
-              </div>
-            }
-          >
-            <div
-              className={
-                "relative z-10 flex h-full flex-col bg-white shadow-lg md:rounded"
-              }
-            >
-              <div className="flex max-h-[calc(100%-4rem)] grow items-center justify-center border-y border-gray-200 bg-gray-50">
-                <img src={url} className={"max-h-full"} alt={alt} />
-              </div>
-              <div className="flex w-full justify-center gap-3 px-6 py-3 md:justify-end">
-                <Button to={`/kits/${kitId}/edit`} variant="secondary">
-                  Edit image(s)
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleCloseDialog}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
-          </Dialog>
-        </DialogPortal>
-      )}
+      {withPreview ? (
+        <ImagePreviewDialog
+          open={isDialogOpen}
+          onClose={handleCloseDialog}
+          imageUrl={url}
+          alt={alt}
+          title={kit.alt}
+          subtitle="1 image(s)"
+          actions={
+            <Button to={`/kits/${kitId}/edit`} variant="secondary">
+              Edit image(s)
+            </Button>
+          }
+        />
+      ) : null}
     </>
   );
 }

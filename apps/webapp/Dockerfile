@@ -40,6 +40,14 @@ RUN pnpm prune --prod
 # Finally, build the production image with minimal footprint
 FROM base AS release
 
+# Fonts for text that sharp renders into images (the audit photo capture
+# stamp). The slim base image has none, and SVG text with no font renders
+# nothing, so the build fails when DejaVu is missing.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends fontconfig fonts-dejavu-core && \
+    rm -rf /var/lib/apt/lists/*
+RUN fc-list | grep -qi dejavu
+
 COPY --from=build /src/node_modules /src/node_modules
 COPY --from=build /src/apps/webapp/node_modules /src/apps/webapp/node_modules
 COPY --from=build /src/packages/database /src/packages/database
