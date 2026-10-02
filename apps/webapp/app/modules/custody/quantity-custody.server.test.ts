@@ -11,6 +11,8 @@
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
+import { loadCustodySources } from "~/modules/asset/custody-source.server";
+import type * as CustodySourceServer from "~/modules/asset/custody-source.server";
 import {
   checkOutQuantity,
   releaseQuantity,
@@ -35,12 +37,21 @@ import {
 const dbMocks = vi.hoisted(() => ({
   assetFindFirst: vi.fn(),
   custodyFindMany: vi.fn(),
+  locationFindFirst: vi.fn(),
 }));
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findFirst: dbMocks.assetFindFirst },
     custody: { findMany: dbMocks.custodyFindMany },
+    location: { findFirst: dbMocks.locationFindFirst },
   },
+}));
+
+// why: a pool's placements, custody and booked-out units come from several
+// tables; these tests are about what the pre-flight decides from that state
+vi.mock("~/modules/asset/custody-source.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof CustodySourceServer>()),
+  loadCustodySources: vi.fn(),
 }));
 
 // why: the free-unit count has its own suite in the availability leaf
@@ -200,6 +211,59 @@ describe("assertAssignableQuantities", () => {
       status: 400,
       message:
         'Nothing was assigned. an asset that is not in this workspace; "Asset camera" (not tracked by quantity).',
+    });
+  });
+
+  describe("with a chosen source location", () => {
+    beforeEach(() => {
+      freeUnits({ q1: 50 });
+      // 30 placed at the Store, all 10 Studio units out on a booking.
+      vi.mocked(loadCustodySources).mockResolvedValue({
+        state: {
+          total: 50,
+          placements: [
+            { locationId: "loc-store", quantity: 30 },
+            { locationId: "loc-studio", quantity: 10 },
+          ],
+          operatorCustody: [],
+          bookedOut: [{ locationId: "loc-studio", quantity: 10 }],
+        },
+        rows: [],
+      });
+      dbMocks.locationFindFirst.mockResolvedValue({ name: "Studio" });
+    });
+
+    function assignFrom(locationId: string, quantity: number) {
+      return assertAssignableQuantities({
+        quantityAssetIds: ["q1"],
+        quantities: { q1: quantity },
+        sourceLocations: { q1: locationId },
+        organizationId: "org-1",
+        custodian,
+        role: OrganizationRoles.ADMIN,
+        userId: "user-1",
+      });
+    }
+
+    it("passes when the location has the units left", async () => {
+      await expect(assignFrom("loc-store", 30)).resolves.toBeUndefined();
+    });
+
+    it("names how many are left at a placed location", async () => {
+      await expect(assignFrom("loc-studio", 1)).rejects.toMatchObject({
+        status: 400,
+        message:
+          'Nothing was assigned. "Asset q1" (asked for 1, 0 left at Studio).',
+      });
+    });
+
+    it("refuses a location the pool is not placed at, without counting units there", async () => {
+      await expect(assignFrom("loc-removed", 1)).rejects.toMatchObject({
+        status: 400,
+        message:
+          'Nothing was assigned. "Asset q1" (not placed at the chosen location).',
+      });
+      expect(dbMocks.locationFindFirst).not.toHaveBeenCalled();
     });
   });
 
