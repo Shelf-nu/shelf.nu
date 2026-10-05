@@ -51,6 +51,9 @@ export const assetMutationsApi = {
       {
         method: "POST",
         body: JSON.stringify({ name }),
+        // why: not retried. Each call creates a tag, so a request that timed
+        // out after the server had already written it would leave two.
+        retry: false,
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/tags");
@@ -106,6 +109,9 @@ export const assetMutationsApi = {
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify(payload),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
 
   /** Update an existing asset (partial update -- only provided fields change) */

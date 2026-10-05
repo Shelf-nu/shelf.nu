@@ -345,33 +345,35 @@ describe("FulfilReservationsDrawer layout", () => {
   });
 
   describe("folding the model list", () => {
-    it("starts folded when the list is long enough to need its own scroll", () => {
-      // Fixed chrome competes with the scan list for one screen. A list that
-      // cannot be read at a glance is not worth the height by default.
+    it("starts folded when many models are reserved", () => {
+      // Fixed chrome competes with the scan list for one screen, and the
+      // summary row already carries overall progress.
       renderDrawer(40);
 
       expect(queryModelListNode()).toBeNull();
       expect(getModelsToggle()).toHaveAttribute("aria-expanded", "false");
     });
 
-    it("starts open when the whole list is visible at once", () => {
+    it("starts folded even when the whole list would fit", () => {
+      // Size does not decide this. A short list opening by itself and a long
+      // one staying shut is the screen changing shape under the operator.
       renderDrawer(3);
 
-      expect(queryModelListNode()?.children).toHaveLength(3);
-      expect(getModelsToggle()).toHaveAttribute("aria-expanded", "true");
+      expect(queryModelListNode()).toBeNull();
+      expect(getModelsToggle()).toHaveAttribute("aria-expanded", "false");
     });
 
-    it("folds and unfolds on demand", async () => {
+    it("unfolds and refolds on demand", async () => {
       const user = userEvent.setup();
       renderDrawer(3);
+
+      await user.click(getModelsToggle());
+      expect(queryModelListNode()?.children).toHaveLength(3);
 
       await user.click(getModelsToggle());
       // Asserted against the DOM, not the a11y tree: a list that is merely
       // marked hidden still occupies the drawer.
       expect(queryModelListNode()).toBeNull();
-
-      await user.click(getModelsToggle());
-      expect(queryModelListNode()?.children).toHaveLength(3);
     });
 
     it("keeps overall progress visible while folded", () => {

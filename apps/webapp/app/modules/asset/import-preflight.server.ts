@@ -24,19 +24,22 @@ import {
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { isLikeShelfError } from "~/utils/error";
+import {
+  MAX_REPORTED_ROW_ERRORS,
+  type ImportPreflightResult,
+  type ImportRowError,
+  spreadsheetRowNumber,
+} from "~/utils/import-row-errors";
 import { validateQtyTrackedFields } from "./qty-validation.server";
 import type { CreateAssetFromContentImportPayload } from "./types";
 
 /** The largest content-import file accepted, in data rows. */
 export const MAX_CONTENT_IMPORT_ROWS = 1000;
 
-/**
- * The most row errors listed back to the browser. A file where every row is
- * wrong would otherwise produce a response measured in megabytes, so the list
- * is truncated and {@link ImportPreflightResult.totalErrors} carries how many
- * there really were.
- */
-export const MAX_REPORTED_ROW_ERRORS = 100;
+// The row-error shape is shared by every CSV import; re-exported so this
+// module stays the single import for the asset preflight and its tests.
+export { MAX_REPORTED_ROW_ERRORS };
+export type { ImportPreflightResult, ImportRowError };
 
 /**
  * Every custom field type the database will accept.
@@ -48,32 +51,6 @@ export const MAX_REPORTED_ROW_ERRORS = 100;
  */
 const CUSTOM_FIELD_TYPES = Object.values(CustomFieldType);
 const CUSTOM_FIELD_TYPE_SET = new Set<string>(CUSTOM_FIELD_TYPES);
-
-/**
- * One problem found in one row.
- *
- * `row` is the line number as the user's spreadsheet shows it — the header
- * occupies row 1, so the first data row is row 2. A `row` of 0 marks a
- * whole-file problem that belongs to no single line, such as the row cap.
- */
-export type ImportRowError = {
-  row: number;
-  title: string;
-  message: string;
-};
-
-/**
- * The outcome of a pre-flight pass.
- *
- * `errors` is truncated to {@link MAX_REPORTED_ROW_ERRORS} so the response
- * stays a sane size; `totalErrors` counts every problem found. The two differ
- * exactly when a file had more problems than are listed, which is what lets the
- * import page say "showing the first 100 of 412".
- */
-export type ImportPreflightResult = {
-  errors: ImportRowError[];
-  totalErrors: number;
-};
 
 /**
  * Reads one CSV cell as the string the column validators expect.
@@ -160,7 +137,7 @@ export function validateContentImportRows({
   const inFileTypeByName = new Map<string, { type: string; header: string }>();
 
   for (const [index, asset] of data.entries()) {
-    const row = index + 2;
+    const row = spreadsheetRowNumber(index);
     const rowLabel = `asset "${asset.title}"`;
 
     // ── quantity-tracked columns ──────────────────────────────────────

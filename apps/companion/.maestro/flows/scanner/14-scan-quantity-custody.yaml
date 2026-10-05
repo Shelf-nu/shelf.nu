@@ -1,0 +1,110 @@
+appId: com.shelf.companion.carlos
+name: "Scanner - Assign and release units of a quantity-tracked asset"
+tags:
+  - scanner
+  - custody
+  - quantity
+  - high-impact
+
+---
+# Test: a quantity-tracked asset scanned in Assign custody gets a per-row unit
+# count, goes out in the same submit as a whole asset, and comes back the same
+# way in Release custody. The release returns the fixture to its start state.
+#
+# Env (see env/test.env.example):
+#   SHELF_TEST_QT_QR_ID     QR of a quantity-tracked asset with 3+ free units
+#                           and no units in anyone's custody
+#   SHELF_TEST_QT_TITLE     that asset's title (regex fragment, no parentheses)
+#   SHELF_TEST_ASSET_QR_ID  QR of an available INDIVIDUAL asset, not in a kit
+#   SHELF_TEST_CUSTODIAN    a team member name in the test workspace
+
+- runFlow: ../../shared/login.yaml
+- tapOn:
+    text: "Quick Actions"
+- runFlow: ../../shared/switch-to-team-ws.yaml
+
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+
+# ── Assign: one whole asset and three units ──────────
+- tapOn: "Scanner action: Assign"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 20000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ASSET_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 20000
+# The manual-entry keyboard covers the drawer.
+- tapOn: "Close manual entry"
+
+# The quantity row starts at one unit.
+- extendedWaitUntil:
+    visible: "Units for ${SHELF_TEST_QT_TITLE}: 1 of .*"
+    timeout: 5000
+- tapOn: "Units for ${SHELF_TEST_QT_TITLE}: 1 of .*"
+- extendedWaitUntil:
+    visible: "Units to assign"
+    timeout: 5000
+- tapOn: "Increase quantity"
+- tapOn: "Increase quantity"
+- tapOn: "Set 3.*"
+- extendedWaitUntil:
+    visible: "Units for ${SHELF_TEST_QT_TITLE}: 3 of .*"
+    timeout: 5000
+- takeScreenshot: scanner-quantity-assign-row
+
+- tapOn: "Choose Custodian"
+- tapOn: "Select ${SHELF_TEST_CUSTODIAN}"
+- extendedWaitUntil:
+    visible: "Assign .*3 .* to ${SHELF_TEST_CUSTODIAN}\\?"
+    timeout: 5000
+- tapOn: "^Assign$"
+- extendedWaitUntil:
+    visible: "Assigned .*3 .* to ${SHELF_TEST_CUSTODIAN}\\."
+    timeout: 30000
+- takeScreenshot: scanner-quantity-assign-done
+- tapOn: "OK"
+
+# ── Release: the same two rows come back ─────────────
+- tapOn: "Scanner action: Release"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_QT_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 20000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ASSET_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 20000
+- tapOn: "Close manual entry"
+
+# Release starts at every unit the holder has.
+- extendedWaitUntil:
+    visible: "Units for ${SHELF_TEST_QT_TITLE}: 3 of 3.*"
+    timeout: 5000
+- tapOn: "Release All"
+- tapOn: "^Release$"
+- extendedWaitUntil:
+    visible: "Released custody of .*3 .*\\."
+    timeout: 30000
+- takeScreenshot: scanner-quantity-release-done
+- tapOn: "OK"
