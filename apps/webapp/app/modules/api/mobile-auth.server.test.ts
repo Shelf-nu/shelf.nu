@@ -8,18 +8,22 @@ import {
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
 } from "~/modules/api/mobile-auth.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
+import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
+import { recordMobileActivity } from "./mobile-usage.server";
 
 // why: importing the module transitively loads `~/database/db.server`, which
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
-// Mocking the db module short-circuits the connection; `user.findUnique` is a
-// spy so the `requireMobileAuth` test can assert the select shape.
+// Mocking the db module short-circuits the connection; `user.findMany` is a
+// spy so the `requireMobileAuth` test can assert the lookup and select shape.
 vi.mock("~/database/db.server", () => ({
   db: {
-    user: { findUnique: vi.fn() },
+    user: { findMany: vi.fn() },
     // why: `getMobileAssetForViewer` reads the asset row, and a re-signed photo
     // is written back with a guarded `updateMany`; both are asserted below.
     asset: { findUnique: vi.fn(), updateMany: vi.fn() },
@@ -45,6 +49,23 @@ vi.mock("~/integrations/supabase/client", () => ({
 // irrelevant to the auth/format-prefs contract, so stub it to a no-op.
 vi.mock("./mobile-usage.server", () => ({
   recordMobileActivity: vi.fn(),
+}));
+
+// why: the SSO decision has its own tests (sso-enforcement.server.test.ts);
+// here only whether `requireMobileAuth` asks it, and what it does with the
+// answer, matters. The error factory stays real so the 403 is the shared one.
+vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
+  const actual = await importOriginal<typeof SsoEnforcementModule>();
+  return {
+    createSsoRequiredError: actual.createSsoRequiredError,
+    getLegacyLoginDecisionForUser: vi.fn(),
+  };
+});
+
+// why: revoking a refused account's sessions is a Supabase Auth admin call;
+// the spy records whether `requireMobileAuth` made it.
+vi.mock("~/modules/auth/service.server", () => ({
+  revokeAllSessions: vi.fn(),
 }));
 
 /**
@@ -340,13 +361,112 @@ describe("shapeMobileAssetResponse", () => {
  * select, the companion silently falls back to device-local formatting — a
  * regression with no other automated guard.
  *
+ * Also pins the SSO guard: the companion signs in with a password directly
+ * against Supabase, so this is where a non-SSO session for an address that
+ * must use SSO is refused.
+ *
  * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
  */
 describe("requireMobileAuth", () => {
-  // Reset the module-scoped `findUnique` spy before each test so this suite's
+  // Reset the module-scoped `findMany` spy before each test so this suite's
   // assertions read only its own call, not calls accumulated by earlier suites.
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: true,
+    });
+  });
+
+  /** Stubs a valid Bearer JWT and the user row it resolves to. */
+  function signedInAs(
+    dbRow: Record<string, unknown>,
+    authEmail: unknown = dbRow.email
+  ) {
+    // why: stub the Supabase JWT validation to yield a valid auth user.
+    const getUser = vi.fn().mockResolvedValue({
+      data: { user: { id: dbRow.id, email: authEmail } },
+      error: null,
+    });
+    vi.mocked(getSupabaseAdmin).mockReturnValue({
+      auth: { getUser },
+    } as unknown as ReturnType<typeof getSupabaseAdmin>);
+    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
+
+    return new Request("https://shelf.test/api/mobile/me", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+  }
+
+  const BASE_ROW = {
+    id: "user-1",
+    email: "jane@acme.com",
+    firstName: "Jane",
+    lastName: "Doe",
+    profilePicture: null,
+    onboarded: true,
+    deletedAt: null,
+    lastMobileActiveAt: null,
+  };
+
+  it("resolves the user by email whatever the stored email's case", async () => {
+    // The stored row keeps capitals; Supabase returns the address lowercased.
+    const request = signedInAs(
+      { ...BASE_ROW, email: "Jane@Acme.com" },
+      "jane@acme.com"
+    );
+
+    const { user } = await requireMobileAuth(request);
+
+    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({
+      email: expect.objectContaining({ mode: "insensitive" }),
+    });
+    expect(user.id).toBe(BASE_ROW.id);
+  });
+
+  it("refuses a password session for an address that must use SSO", async () => {
+    vi.mocked(getLegacyLoginDecisionForUser).mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+    const request = signedInAs({ ...BASE_ROW, sso: false });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 403,
+      title: "Single sign-on required",
+      message:
+        "This email address signs in with single sign-on. Please use Login with SSO.",
+    });
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).toHaveBeenCalledWith("valid-token");
+    expect(recordMobileActivity).not.toHaveBeenCalled();
+  });
+
+  it("lets an allowed non-SSO user through", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: false });
+
+    const { user } = await requireMobileAuth(request);
+
+    expect(getLegacyLoginDecisionForUser).toHaveBeenCalledWith({
+      userId: "user-1",
+      email: "jane@acme.com",
+    });
+    expect(revokeAllSessions).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+  });
+
+  it("lets an SSO user through without asking the decision", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: true });
+
+    const { user } = await requireMobileAuth(request);
+
+    expect(getLegacyLoginDecisionForUser).not.toHaveBeenCalled();
+    expect(user.id).toBe("user-1");
+    // `sso` is read for the guard only and stays out of the returned user.
+    expect(user).not.toHaveProperty("sso");
   });
 
   it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
@@ -374,8 +494,9 @@ describe("requireMobileAuth", () => {
       timeZone: "Asia/Tokyo",
       deletedAt: null,
       lastMobileActiveAt: null,
+      sso: false,
     };
-    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
 
     const request = new Request("https://shelf.test/api/mobile/me", {
       headers: { Authorization: "Bearer valid-token" },
@@ -386,7 +507,7 @@ describe("requireMobileAuth", () => {
     // The 4 format-pref columns are part of the select (regression guard). Read
     // the LATEST call so a future test that reaches requireMobileAuth first
     // can't shift the call this assertion inspects.
-    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
     const select = lastCall?.[0].select;
     expect(select).toMatchObject({
       dateFormat: true,
@@ -406,6 +527,7 @@ describe("requireMobileAuth", () => {
     // Internal-only fields are stripped by the `safeUser` destructure.
     expect(user).not.toHaveProperty("deletedAt");
     expect(user).not.toHaveProperty("lastMobileActiveAt");
+    expect(user).not.toHaveProperty("sso");
   });
 });
 
