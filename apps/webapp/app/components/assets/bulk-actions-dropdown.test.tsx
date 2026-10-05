@@ -174,8 +174,42 @@ describe("assets index bulk menu: custody of kit members", () => {
 
     expect(capturedDisabled["assign-custody"]).toBe(false);
   });
+});
 
-  it("keeps the existing kit reason on Release custody", () => {
+/**
+ * The older "custody assigned via a kit" reason must fire in both index modes.
+ * Simple-mode rows carry the kit only in `assetKits`; reading `row.kit` alone
+ * left this reason dead there.
+ */
+describe("assets index bulk menu: assets whose kit is not available", () => {
+  const KIT_CUSTODY_REASON =
+    "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead.";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedDisabled = {};
+  });
+
+  it("explains Release custody for a simple-mode row whose kit is in custody", () => {
+    renderWithSelection([
+      row({
+        id: "tripod",
+        title: "Tripod",
+        status: "IN_CUSTODY",
+        assetKits: [
+          {
+            kit: { id: "kit-camera", name: "Camera Kit", status: "IN_CUSTODY" },
+          },
+        ],
+      }),
+    ]);
+
+    expect(capturedDisabled["release-custody"]).toEqual({
+      reason: KIT_CUSTODY_REASON,
+    });
+  });
+
+  it("explains Release custody for an advanced-mode row whose kit is in custody", () => {
     renderWithSelection([
       row({
         id: "tripod",
@@ -186,8 +220,26 @@ describe("assets index bulk menu: custody of kit members", () => {
     ]);
 
     expect(capturedDisabled["release-custody"]).toEqual({
-      reason:
-        "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead.",
+      reason: KIT_CUSTODY_REASON,
+    });
+  });
+
+  it("does not use that reason for a row whose kit is available", () => {
+    renderWithSelection([
+      row({
+        id: "tripod",
+        title: "Tripod",
+        status: "IN_CUSTODY",
+        assetKits: [
+          {
+            kit: { id: "kit-camera", name: "Camera Kit", status: "AVAILABLE" },
+          },
+        ],
+      }),
+    ]);
+
+    expect(capturedDisabled["release-custody"]).not.toEqual({
+      reason: KIT_CUSTODY_REASON,
     });
   });
 });

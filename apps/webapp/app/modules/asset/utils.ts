@@ -111,6 +111,34 @@ export function isIndividualKitMember(
   return isPartOfKit && !isQuantityTracked(asset);
 }
 
+/** A kit as either index row shape carries it: only its status is read. */
+type RowKit = { status?: string | null } | null | undefined;
+
+/**
+ * Returns the status of the kit an index row's asset belongs to, or `null` when
+ * it is in no kit.
+ *
+ * Assets index rows carry kit membership in two shapes: simple mode loads the
+ * `assetKits` pivot rows (`assetIndexFields`), advanced mode a flattened `kit`
+ * object built in raw SQL. Read the kit through this helper rather than
+ * `row.kit`, which is absent from every simple-mode row and so silently reads
+ * as "no kit" there. Both shapes name the asset's primary (oldest) kit.
+ *
+ * @param asset - An index row, in either mode
+ * @returns The kit's status (e.g. `"IN_CUSTODY"`), or `null` for no kit
+ */
+export function getRowKitStatus(
+  asset?: {
+    kit?: RowKit;
+    assetKits?: Array<{ kit?: RowKit }> | null;
+    // Index signature so loosely-typed list rows (`ListItemData`) are
+    // assignable; see `KitMembershipProjection`.
+    [key: string]: unknown;
+  } | null
+): string | null {
+  return asset?.kit?.status ?? asset?.assetKits?.[0]?.kit?.status ?? null;
+}
+
 /**
  * Returns true when the asset's kit membership should block booking it
  * directly (outside of its kit). Same rule as {@link isIndividualKitMember}:

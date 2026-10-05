@@ -7,7 +7,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { isIndividualKitMember } from "~/modules/asset/utils";
+import { getRowKitStatus, isIndividualKitMember } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
@@ -106,9 +106,15 @@ function ConditionalDropdown() {
     (asset) => asset.status === "CHECKED_OUT"
   );
 
-  const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
-  );
+  /**
+   * A selected asset whose kit is not available (in custody or checked out):
+   * its custody is the kit's to change. Read through `getRowKitStatus`, which
+   * understands both index row shapes; simple-mode rows carry no `kit` field.
+   */
+  const someAssetPartOfUnavailableKit = selectedAssets.some((asset) => {
+    const kitStatus = getRowKitStatus(asset);
+    return kitStatus !== null && kitStatus !== "AVAILABLE";
+  });
 
   /**
    * An individually tracked kit member takes custody through its kit, so bulk
