@@ -287,6 +287,88 @@ describe("fetchCheckinReceiptData", () => {
     );
   });
 
+  it("leaves a multi-slice asset's rows blank when its check-in events disagree", async () => {
+    // A quantity asset booked loose and through a kit: two printed rows, one
+    // asset id on every event. Returned in two sessions by different methods,
+    // the events cannot be told apart by slice, so neither row claims one.
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-loose", "asset-qty", "XLR cable"),
+          pdfRow("ba-kit", "asset-qty", "XLR cable"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      ...["ba-loose", "ba-kit"].map((id) => ({
+        id,
+        assetId: "asset-qty",
+        quantity: 3,
+        assetKitId: id === "ba-kit" ? "ak-1" : null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 3,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      })),
+      {
+        id: "ba-2",
+        assetId: "asset-2",
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    // Both slices came back in full, so the sheet dates them as returned.
+    mockOf(db.consumptionLog.findMany).mockResolvedValue(
+      ["ba-loose", "ba-kit"].map((bookingAssetId) => ({
+        assetId: "asset-qty",
+        bookingAssetId,
+        category: "RETURN",
+        quantity: 3,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        occurredAt: new Date("2026-09-03T10:00:00.000Z"),
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+      // The single-slice asset keeps its latest event's method.
+      {
+        assetId: "asset-2",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "scanned", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      null,
+      null,
+      "Scanned on the web",
+    ]);
+    // A returned row without a phrase keeps the header line away too.
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
   it("gives the header one method line when every returned row agrees", async () => {
     mockOf(fetchAllPdfRelatedData).mockResolvedValue(
       pdfResultWith(

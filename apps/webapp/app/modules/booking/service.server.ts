@@ -154,6 +154,7 @@ import {
 import {
   bookingMethodClause,
   bookingMethodMeta,
+  narrowSelectedAssetIds,
   type BookingMethodProvenance,
 } from "./checkout-method";
 import {
@@ -17135,7 +17136,10 @@ export async function checkinAssets({
     userId,
     hints,
     intentChoice: checkinIntentChoice,
-    provenance: withSelectedAssetIds(provenance, selectedAssetIds),
+    provenance: withSelectedAssetIds(provenance, selectedAssetIds, [
+      ...(assetIds ?? []),
+      ...(checkins ?? []).map((checkin) => checkin.assetId),
+    ]),
   });
 
   /** Effective count of assets touched in this session — for toast messaging. */
@@ -17370,7 +17374,10 @@ export async function checkoutAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
-    provenance: withSelectedAssetIds(provenance, selectedAssetIds),
+    provenance: withSelectedAssetIds(provenance, selectedAssetIds, [
+      ...(assetIds ?? []),
+      ...(checkouts ?? []).map((checkout) => checkout.assetId),
+    ]),
   });
 
   return respondToPartialCheckout({
@@ -17385,24 +17392,25 @@ export async function checkoutAssets({
  * Adds the rows a scan page's form marked as ticked to the route's provenance.
  *
  * The scan drawers post `selectedAssetIds[]` for the quantity rows checked
- * "without scanning"; the list dialogs post none. An empty list leaves the
- * provenance as the route stated it.
+ * "without scanning"; the list dialogs post none. Only ids that are part of
+ * the batch are kept ({@link narrowSelectedAssetIds}), and an empty result
+ * leaves the provenance as the route stated it.
  *
  * @param provenance - What the route knows about the batch
  * @param selectedAssetIds - The ticked rows, from the form
+ * @param batchAssetIds - Every asset the batch submits
  * @returns The provenance with the ticked rows named
  */
 function withSelectedAssetIds(
   provenance: BookingMethodProvenance,
-  selectedAssetIds: string[] | undefined
+  selectedAssetIds: string[] | undefined,
+  batchAssetIds: string[]
 ): BookingMethodProvenance {
-  if (!selectedAssetIds || selectedAssetIds.length === 0) return provenance;
+  const ticked = narrowSelectedAssetIds(selectedAssetIds, batchAssetIds);
+  if (ticked.length === 0) return provenance;
   return {
     ...provenance,
-    selectedAssetIds: [
-      ...(provenance.selectedAssetIds ?? []),
-      ...selectedAssetIds,
-    ],
+    selectedAssetIds: [...(provenance.selectedAssetIds ?? []), ...ticked],
   };
 }
 

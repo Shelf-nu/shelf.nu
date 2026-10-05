@@ -80,6 +80,26 @@ export function resolveBookingMethod(
 }
 
 /**
+ * Keeps only the ticked rows that are part of the batch.
+ *
+ * The scan drawers post `selectedAssetIds[]` next to the rows they submit; an
+ * id outside the batch would sit in the provenance unused, so it is dropped
+ * here and the provenance names exactly the batch rows that were ticked.
+ *
+ * @param selectedAssetIds - The ticked rows, as the form posted them
+ * @param batchAssetIds - Every asset the batch submits
+ * @returns The ticked rows that the batch contains, deduplicated
+ */
+export function narrowSelectedAssetIds(
+  selectedAssetIds: readonly string[] | undefined,
+  batchAssetIds: readonly string[]
+): string[] {
+  if (!selectedAssetIds || selectedAssetIds.length === 0) return [];
+  const inBatch = new Set(batchAssetIds);
+  return [...new Set(selectedAssetIds.filter((id) => inBatch.has(id)))];
+}
+
+/**
  * The `meta` keys an event carries for its method.
  *
  * Spread into the event's `meta` next to the quantity keys. Returns `{}` when

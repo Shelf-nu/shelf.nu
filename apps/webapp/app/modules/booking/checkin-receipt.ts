@@ -269,24 +269,28 @@ export type CheckinReceiptRowAsset = {
 };
 
 /**
- * The one method line the sheet's header prints when every row that recorded
- * a method recorded the same one. Rows then do not repeat it.
+ * The one method line the sheet's header prints when every row the sheet
+ * dates as returned recorded the same method. Rows then do not repeat it.
  *
- * `null` when no row recorded a method, or when the rows disagree; the rows
- * then carry their own phrase, so a mixed return prints what happened to each
- * item rather than a majority.
+ * `null` otherwise: when the returned rows disagree, when none recorded a
+ * method, and also when one returned row recorded nothing (a return made
+ * before methods were recorded, or by a phone bundle that declared none). In
+ * every one of those cases the rows carry their own phrase instead, so the
+ * header never claims a way of returning for an item whose way was not
+ * recorded. Rows that never came back have no method to agree on and are
+ * ignored.
  *
- * @param rows - The printed rows, with their recorded method phrase
+ * @param rows - The printed rows, with their recorded method phrase and
+ *   whether the sheet dates them as returned
  * @returns The shared phrase, or `null`
  */
 export function summariseCheckinMethods(
-  rows: ReadonlyArray<{ checkedInHow: string | null }>
+  rows: ReadonlyArray<{ checkedInHow: string | null; checkedInAt: Date | null }>
 ): string | null {
-  const phrases = new Set(
-    rows
-      .map((row) => row.checkedInHow)
-      .filter((phrase): phrase is string => phrase !== null)
-  );
+  const returned = rows.filter((row) => row.checkedInAt !== null);
+  if (returned.length === 0) return null;
+  if (returned.some((row) => row.checkedInHow === null)) return null;
+  const phrases = new Set(returned.map((row) => row.checkedInHow));
   return phrases.size === 1 ? [...phrases][0] : null;
 }
 

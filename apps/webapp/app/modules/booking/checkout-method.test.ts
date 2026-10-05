@@ -15,6 +15,7 @@ import {
   describeBatchMethod,
   describeBookingMethod,
   describeBookingMethodCapitalised,
+  narrowSelectedAssetIds,
   readBookingMethodMeta,
   resolveBookingMethod,
 } from "./checkout-method";
@@ -47,6 +48,22 @@ describe("bookingMethodMeta", () => {
 
   it("writes no method keys at all without provenance", () => {
     expect(bookingMethodMeta(undefined, "asset-1")).toEqual({});
+  });
+});
+
+describe("narrowSelectedAssetIds", () => {
+  it("keeps only the ticked rows the batch submits, once each", () => {
+    expect(
+      narrowSelectedAssetIds(
+        ["asset-2", "asset-2", "asset-9"],
+        ["asset-1", "asset-2"]
+      )
+    ).toEqual(["asset-2"]);
+  });
+
+  it("is empty without ticked rows", () => {
+    expect(narrowSelectedAssetIds(undefined, ["asset-1"])).toEqual([]);
+    expect(narrowSelectedAssetIds([], ["asset-1"])).toEqual([]);
   });
 });
 

@@ -238,18 +238,18 @@ export async function fetchCheckinReceiptData(
       }),
     ]);
 
-    // The method the latest check-in of each asset recorded. An event without
-    // a readable method (written before methods were recorded, or by a phone
-    // bundle that declared none) leaves the asset without a phrase, so the
-    // sheet prints nothing rather than a guess.
-    const checkedInHowByAsset = new Map<string, string | null>();
+    // The method each asset's check-in events recorded, in the order they were
+    // written. An event without a readable method (written before methods were
+    // recorded, or by a phone bundle that declared none) contributes `null`.
+    const checkedInHowEventsByAsset = new Map<string, Array<string | null>>();
     for (const event of checkinEvents) {
       if (!event.assetId) continue;
       const meta = readBookingMethodMeta(event.meta);
-      checkedInHowByAsset.set(
-        event.assetId,
-        meta && meta.method ? describeBookingMethodCapitalised(meta) : null
-      );
+      const phrase =
+        meta && meta.method ? describeBookingMethodCapitalised(meta) : null;
+      const forAsset = checkedInHowEventsByAsset.get(event.assetId) ?? [];
+      forAsset.push(phrase);
+      checkedInHowEventsByAsset.set(event.assetId, forAsset);
     }
 
     // The most recent session naming each asset. Kept as a moment rather than a
@@ -358,6 +358,28 @@ export async function fetchCheckinReceiptData(
       const forSlice = returnRecordsBySlice.get(sliceId) ?? [];
       forSlice.push({ at: log.createdAt, byId: log.userId });
       returnRecordsBySlice.set(sliceId, forSlice);
+    }
+
+    /**
+     * The phrase a printed row may carry, resolved per asset.
+     *
+     * Events name the asset, not the slice. For an asset with ONE slice on the
+     * booking that is exact, and its latest check-in event is the one that
+     * dated the row, so the latest wins (a re-dispatched item is described by
+     * its last return). For an asset with SEVERAL slices (a quantity asset
+     * booked loose and through a kit) the events cannot be told apart by slice,
+     * so a phrase is given only when every event agrees; otherwise the rows
+     * stay blank rather than lending one slice's method to another.
+     */
+    const checkedInHowByAsset = new Map<string, string | null>();
+    for (const [assetId, phrases] of checkedInHowEventsByAsset) {
+      const sliceCount = slicesByAsset.get(assetId)?.length ?? 0;
+      if (sliceCount <= 1) {
+        checkedInHowByAsset.set(assetId, phrases[phrases.length - 1] ?? null);
+        continue;
+      }
+      const distinct = new Set(phrases);
+      checkedInHowByAsset.set(assetId, distinct.size === 1 ? phrases[0] : null);
     }
 
     // Reconcile exactly the slices the sheet prints, in the order it prints
