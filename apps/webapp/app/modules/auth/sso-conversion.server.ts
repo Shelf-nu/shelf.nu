@@ -47,7 +47,7 @@ import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
 import {
-  isSsoLoginRelaxed,
+  isSsoLoginEnforced,
   userOwnsLinkedSsoWorkspace,
 } from "~/modules/auth/sso-enforcement.server";
 import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
@@ -856,7 +856,7 @@ export async function revertAccountToStandard({
       await checkDomainSSOStatus(user.email);
     const canUsePasswordLogin =
       !isConfiguredForSSO ||
-      isSsoLoginRelaxed(linkedOrganizations) ||
+      !isSsoLoginEnforced(linkedOrganizations) ||
       (await userOwnsLinkedSsoWorkspace(
         user.id,
         linkedOrganizations.map((org) => org.id)
@@ -866,7 +866,7 @@ export async function revertAccountToStandard({
       throw new ShelfError({
         cause: null,
         message:
-          'Only an owner of the workspace that uses SSO for this domain can be reverted while the domain requires SSO login. Switch "Require SSO login" off for the domain first, or the account still could not sign in with a password.',
+          'Only an owner of the workspace that uses SSO for this domain can be reverted while the domain requires SSO login. Switch "Require SSO login" off on every linked workspace with SSO enabled first, or the account still could not sign in with a password.',
         additionalData: { userId },
         label,
         status: 400,

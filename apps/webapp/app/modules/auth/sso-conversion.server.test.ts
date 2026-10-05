@@ -88,11 +88,15 @@ type LinkedOrganizations = Awaited<
 >["linkedOrganizations"];
 
 /**
- * Linked-organization rows for `checkDomainSSOStatus`. The engine reads only
- * their ids.
+ * Linked-organization rows for `checkDomainSSOStatus`, each with SSO enabled
+ * and the default "Require SSO login" switch. The engine reads only their ids,
+ * the SSO flag and the switch.
  */
 function linkedOrgs(ids: string[]): LinkedOrganizations {
-  return ids.map((id) => ({ id })) as unknown as LinkedOrganizations;
+  return ids.map((id) => ({
+    id,
+    enabledSso: true,
+  })) as unknown as LinkedOrganizations;
 }
 
 const existingSsoUser = {
@@ -954,19 +958,24 @@ describe("revertAccountToStandard", () => {
     expect(db.$executeRaw).not.toHaveBeenCalled();
   });
 
-  it("refuses everyone when the SSO domain has no linked workspace", async () => {
+  it("reverts a non-owner while no linked workspace has SSO enabled", async () => {
     vi.mocked(checkDomainSSOStatus).mockResolvedValue({
       isConfiguredForSSO: true,
-      linkedOrganizations: [],
+      linkedOrganizations: [
+        {
+          id: LINKED_ORG_ID,
+          enabledSso: false,
+          ssoDetails: { requireSsoLogin: true },
+        },
+      ] as unknown as LinkedOrganizations,
       ssoProviderId: PROVIDER_ID,
     });
-    vi.mocked(db.organization.count).mockResolvedValue(1);
 
-    await expect(
-      revertAccountToStandard({ userId: ORIGINAL_ID })
-    ).rejects.toMatchObject({ status: 400 });
+    const result = await revertAccountToStandard({ userId: ORIGINAL_ID });
+
+    expect(result.status).toBe("reverted");
+    // Nothing enforces SSO login, so ownership is never asked.
     expect(db.organization.count).not.toHaveBeenCalled();
-    expect(db.$executeRaw).not.toHaveBeenCalled();
   });
 
   it("reverts an owner of the linked workspace on an SSO domain", async () => {
@@ -1038,7 +1047,11 @@ describe("revertAccountToStandard", () => {
     vi.mocked(checkDomainSSOStatus).mockResolvedValue({
       isConfiguredForSSO: true,
       linkedOrganizations: [
-        { id: LINKED_ORG_ID, ssoDetails: { requireSsoLogin: false } },
+        {
+          id: LINKED_ORG_ID,
+          enabledSso: true,
+          ssoDetails: { requireSsoLogin: false },
+        },
       ] as unknown as LinkedOrganizations,
       ssoProviderId: PROVIDER_ID,
     });

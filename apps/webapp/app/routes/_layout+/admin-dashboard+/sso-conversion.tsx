@@ -71,6 +71,7 @@ import {
   findEligibleAccountsForSsoConversion,
   revertAccountToStandard,
 } from "~/modules/auth/sso-conversion.server";
+import { isSsoLoginEnforced } from "~/modules/auth/sso-enforcement.server";
 import { setRequireSsoLogin } from "~/modules/organization/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -96,8 +97,13 @@ type LinkedWorkspace = {
    */
   hasGroupMappings: boolean;
   /**
-   * The workspace's "Require SSO login" switch. Legacy sign-in on the domain is
-   * allowed only while every linked workspace has it off.
+   * Whether SSO is enabled for the workspace. Only a workspace with SSO
+   * enabled can make the domain enforce SSO login.
+   */
+  enabledSso: boolean;
+  /**
+   * The workspace's "Require SSO login" switch. The domain enforces SSO login
+   * while at least one linked workspace with SSO enabled has it on.
    */
   requireSsoLogin: boolean;
 };
@@ -139,6 +145,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         isConfiguredForSSO: false,
         candidates: [] as SsoConversionCandidate[],
         linkedWorkspaces: [] as LinkedWorkspace[],
+        ssoLoginRequired: false,
       });
     }
 
@@ -157,6 +164,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             org.ssoDetails?.selfServiceGroupId ||
             org.ssoDetails?.baseUserGroupId
         ),
+        enabledSso: org.enabledSso,
         // A linked workspace always has SSO details; the fallback mirrors the
         // column default.
         requireSsoLogin: org.ssoDetails?.requireSsoLogin ?? true,
@@ -168,6 +176,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       isConfiguredForSSO,
       candidates,
       linkedWorkspaces,
+      // The same rule the sign-in paths apply, so the page never disagrees
+      // with what a user is actually allowed to do.
+      ssoLoginRequired:
+        isConfiguredForSSO && isSsoLoginEnforced(linkedOrganizations),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -456,22 +468,14 @@ function pluralizeAccounts(count: number) {
 }
 
 export default function SsoConversionPage() {
-  const { domain, isConfiguredForSSO, candidates, linkedWorkspaces } =
-    useLoaderData<typeof loader>();
-  // Mirrors the server rule: the domain requires SSO login unless it has
-  // linked workspaces and every one has "Require SSO login" switched off.
-  const ssoLoginRequired =
-    isConfiguredForSSO &&
-    !(
-      linkedWorkspaces.length > 0 &&
-      linkedWorkspaces.every((w) => !w.requireSsoLogin)
-    );
+  const {
+    domain,
+    isConfiguredForSSO,
+    candidates,
+    linkedWorkspaces,
+    ssoLoginRequired,
+  } = useLoaderData<typeof loader>();
   const mappedWorkspaces = linkedWorkspaces.filter((w) => w.hasGroupMappings);
-  // Mirrors rule 5 of sso-enforcement.server: legacy sign-in is relaxed only
-  // while every linked workspace has the switch off.
-  const ssoLoginRelaxed =
-    linkedWorkspaces.length > 0 &&
-    linkedWorkspaces.every((w) => !w.requireSsoLogin);
   // Mirrors the server's own selection in convertAllEligibleOnDomain, which is
   // what actually decides; this count only labels the button.
   const eligibleCount = candidates.filter(
@@ -536,14 +540,15 @@ export default function SsoConversionPage() {
             </p>
           )}
 
-          {ssoLoginRelaxed ? (
+          {!ssoLoginRequired ? (
             <p
               role="status"
               className="rounded border border-warning-300 bg-warning-25 p-4 text-sm text-warning-700"
             >
-              Require SSO login is off for every workspace linked to {domain}:
-              unconverted users can still sign in with a password. Turn it back
-              on after Convert all.
+              SSO login is not enforced for {domain}: no linked workspace has
+              SSO enabled with Require SSO login on, so unconverted users can
+              still sign in with a password. It is enforced once a workspace
+              with SSO enabled claims the domain and keeps the switch on.
             </p>
           ) : null}
 
@@ -658,6 +663,9 @@ function LinkedWorkspaceRow({
           {workspace.hasGroupMappings
             ? " (group mappings set)"
             : " (no group mappings)"}
+          {workspace.enabledSso ? null : (
+            <span className="text-warning-700"> (SSO not enabled)</span>
+          )}
         </span>
         <span className="flex items-center gap-2">
           <label htmlFor={switchId} className="text-sm text-gray-700">
@@ -685,7 +693,7 @@ function LinkedWorkspaceRow({
       <span id={descriptionId} className="text-xs text-gray-600">
         {checked
           ? "On: unconverted users on this domain must sign in with SSO, except owners of this workspace."
-          : "Off: unconverted users can still sign in with a password while every linked workspace has it off. Turn it on after Convert all."}
+          : "Off: this workspace does not make unconverted users sign in with SSO. Turn it on after Convert all."}
       </span>
       {fetcherError ? (
         <span className="text-xs text-error-500" role="alert">

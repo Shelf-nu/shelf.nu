@@ -22,21 +22,24 @@
  *   3. A domain not configured for SSO is allowed.
  *   4. On an SSO domain, an address with no account is refused (signup is
  *      already blocked there).
- *   5. An unconverted account is allowed when the domain has linked workspaces
- *      (ones whose SSO settings list the domain) and every one of them has
- *      "Require SSO login" (`SsoDetails.requireSsoLogin`) switched off. Shelf
- *      staff switch it off while a customer sets up and tests SSO with a few
- *      users. One linked workspace that requires SSO is enough to keep the
- *      block, and a domain with no linked workspace has nothing to switch off.
+ *   5. An unconverted account is allowed while the domain does not enforce
+ *      SSO login. A domain enforces it only when at least one linked workspace
+ *      (one whose SSO settings list the domain) has SSO enabled
+ *      (`Organization.enabledSso`) and "Require SSO login"
+ *      (`SsoDetails.requireSsoLogin`) switched on. Registering a domain with
+ *      the identity provider is therefore never enough on its own: until a
+ *      workspace with SSO enabled claims it, its accounts keep their password.
+ *      Shelf staff switch "Require SSO login" off while a customer sets up and
+ *      tests SSO with a few users; one enforcing workspace keeps the block for
+ *      the whole domain.
  *   6. An unconverted owner of a workspace linked to that SSO domain is
  *      allowed, so the customer keeps a password owner as the administrative
  *      fallback. Owning any other workspace grants nothing: anyone can create
  *      a workspace of their own.
- *   7. Everyone else on an SSO domain is refused.
+ *   7. Everyone else on an enforcing domain is refused.
  *
  * The cheapest checks run first: the owner queries only run for a non-SSO user
- * on an SSO domain whose linked workspaces require SSO, and only over those
- * workspaces.
+ * on a domain that enforces SSO login, and only over its linked workspaces.
  *
  * The user is looked up here with its own query rather than `findUserByEmail`,
  * because `~/modules/user/service.server` imports `~/modules/auth/service.server`,
@@ -67,8 +70,8 @@ import { checkDomainSSOStatus } from "~/utils/sso.server";
  *
  * - `sso_account`: the account itself has been converted to SSO.
  * - `sso_domain`: the address is on a domain configured for SSO, and either
- *   has no account, or a linked workspace requires SSO login and the account
- *   is not an unconverted owner of the domain's SSO workspace.
+ *   has no account, or the domain enforces SSO login and the account is not
+ *   an unconverted owner of the domain's SSO workspace.
  */
 export type LegacyLoginRefusalReason = "sso_account" | "sso_domain";
 
@@ -137,24 +140,33 @@ async function findAccountForEmail(
   );
 }
 
+/** The fields of a linked workspace that decide whether it enforces SSO. */
+type SsoEnforcingWorkspace = {
+  enabledSso: boolean;
+  ssoDetails: { requireSsoLogin: boolean } | null;
+};
+
 /**
- * Whether staff have relaxed SSO-only login for a domain: it has at least one
- * linked workspace and every one of them has "Require SSO login" switched off.
- * A workspace that requires SSO wins, a missing `ssoDetails` counts as
- * requiring it, and a domain with no linked workspace cannot be relaxed.
+ * Whether a domain enforces SSO-only login: at least one of its linked
+ * workspaces has SSO enabled and "Require SSO login" switched on. A domain
+ * with no linked workspace, or whose linked workspaces do not have SSO
+ * enabled yet, enforces nothing. A missing `ssoDetails` counts as the switch
+ * being on, matching the column default.
  *
  * @param linkedOrganizations - the domain's linked workspaces, as
  *   `checkDomainSSOStatus` returns them
- * @returns true when unconverted accounts on the domain may use a password
+ * @param options.ignoreSwitch - treat "Require SSO login" as on everywhere.
+ *   For checks that must not follow a temporary relaxation.
+ * @returns true when unconverted non-owners on the domain must use SSO
  */
-export function isSsoLoginRelaxed(
-  linkedOrganizations: { ssoDetails: { requireSsoLogin: boolean } | null }[]
+export function isSsoLoginEnforced(
+  linkedOrganizations: SsoEnforcingWorkspace[],
+  { ignoreSwitch = false }: { ignoreSwitch?: boolean } = {}
 ): boolean {
-  return (
-    linkedOrganizations.length > 0 &&
-    linkedOrganizations.every(
-      (org) => org.ssoDetails?.requireSsoLogin === false
-    )
+  return linkedOrganizations.some(
+    (org) =>
+      org.enabledSso &&
+      (ignoreSwitch || org.ssoDetails?.requireSsoLogin !== false)
   );
 }
 
@@ -191,7 +203,11 @@ async function decideLegacyLogin(
 
   if (!user) return { allowed: false, reason: "sso_domain" };
 
-  if (honourRelaxation && isSsoLoginRelaxed(linkedOrganizations)) {
+  if (
+    !isSsoLoginEnforced(linkedOrganizations, {
+      ignoreSwitch: !honourRelaxation,
+    })
+  ) {
     return { allowed: true };
   }
 

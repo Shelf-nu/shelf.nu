@@ -121,11 +121,13 @@ function linkedOrg(
   groups: Partial<
     Record<"adminGroupId" | "selfServiceGroupId" | "baseUserGroupId", string>
   > = {},
-  requireSsoLogin = true
+  requireSsoLogin = true,
+  enabledSso = true
 ) {
   return {
     id,
     name: `Workspace ${id}`,
+    enabledSso,
     ssoDetails: {
       id: `sso-${id}`,
       domain: "acme.com",
@@ -211,15 +213,39 @@ describe("admin sso-conversion route", () => {
               id: "mapped",
               name: "Workspace mapped",
               hasGroupMappings: true,
+              enabledSso: true,
               requireSsoLogin: true,
             },
             {
               id: "unmapped",
               name: "Workspace unmapped",
               hasGroupMappings: false,
+              enabledSso: true,
               requireSsoLogin: false,
             },
           ],
+          // "mapped" has SSO enabled and the switch on.
+          ssoLoginRequired: true,
+        })
+      );
+    });
+
+    it("reports SSO login as not required while no linked workspace has SSO enabled", async () => {
+      vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+        isConfiguredForSSO: true,
+        linkedOrganizations: [linkedOrg("pending", {}, true, false)],
+        ssoProviderId: "provider-1",
+      } as never);
+      vi.mocked(findEligibleAccountsForSsoConversion).mockResolvedValue([]);
+
+      const result = await loader(loaderArgs("?domain=acme.com"));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          linkedWorkspaces: [
+            expect.objectContaining({ id: "pending", enabledSso: false }),
+          ],
+          ssoLoginRequired: false,
         })
       );
     });
