@@ -27,6 +27,29 @@ export type LatestRequest = {
    */
   begin: () => AbortSignal;
   /**
+   * {@link begin}, for a request that will replace the rows rather than add to
+   * them: a new search, a filter change, a pull to refresh.
+   *
+   * @returns The signal to pass to the new request
+   */
+  beginReset: () => AbortSignal;
+  /**
+   * Marks a reset finished. Does nothing if a newer reset has since claimed the
+   * slot, so a slow one cannot clear its successor.
+   *
+   * @param signal - The signal {@link beginReset} returned
+   */
+  endReset: (signal: AbortSignal) => void;
+  /**
+   * Whether a reset is still on its way.
+   *
+   * Paging must not start while one is: the rows it would add belong to the
+   * query being replaced, and claiming the slot would abandon the reset and
+   * leave both queries' rows on screen together. A reset that was abandoned
+   * does not count, or paging would be refused for good.
+   */
+  isResetPending: () => boolean;
+  /**
    * Abandons whatever is in flight without starting anything.
    *
    * For the moment a screen's subject changes, such as a switch to another
@@ -70,16 +93,32 @@ export function chainAbort(
  */
 export function createLatestRequest(): LatestRequest {
   let inFlight: AbortController | null = null;
+  let pendingReset: AbortSignal | null = null;
+
+  function begin() {
+    inFlight?.abort();
+    inFlight = new AbortController();
+    return inFlight.signal;
+  }
 
   return {
-    begin() {
-      inFlight?.abort();
-      inFlight = new AbortController();
-      return inFlight.signal;
+    begin,
+    beginReset() {
+      pendingReset = begin();
+      return pendingReset;
+    },
+    endReset(signal) {
+      if (pendingReset === signal) {
+        pendingReset = null;
+      }
+    },
+    isResetPending() {
+      return pendingReset !== null && !pendingReset.aborted;
     },
     cancel() {
       inFlight?.abort();
       inFlight = null;
+      pendingReset = null;
     },
   };
 }

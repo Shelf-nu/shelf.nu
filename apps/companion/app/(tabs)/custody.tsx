@@ -103,8 +103,9 @@ function MyCustodyContent() {
     if (!currentOrg) return;
     setIsLoading(true);
     nextPage.current = 1;
-    const signal = latestRequest.begin();
+    const signal = latestRequest.beginReset();
     fetchAssets(1, true, signal).finally(() => {
+      latestRequest.endReset(signal);
       // The signal identifies this request. An abandoned one must not stamp
       // freshness or clear the spinner: the request that replaced it is still
       // running and will do both when it answers.
@@ -142,8 +143,9 @@ function MyCustodyContent() {
         setIsLoading(true);
       }
       nextPage.current = 1;
-      const signal = latestRequest.begin();
+      const signal = latestRequest.beginReset();
       fetchAssets(1, true, signal).finally(() => {
+        latestRequest.endReset(signal);
         // The signal identifies this request. An abandoned one must not stamp
         // freshness or clear the spinner: the request that replaced it is still
         // running and will do both when it answers.
@@ -161,8 +163,9 @@ function MyCustodyContent() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsRefreshing(true);
     nextPage.current = 1;
-    const signal = latestRequest.begin();
+    const signal = latestRequest.beginReset();
     await fetchAssets(1, true, signal);
+    latestRequest.endReset(signal);
     // The operator pulled this spinner, so it stops either way.
     setIsRefreshing(false);
     // The shared skeleton belongs to whichever request is still current. A
@@ -177,6 +180,10 @@ function MyCustodyContent() {
 
   const onEndReached = async () => {
     if (isLoadingMore || nextPage.current > totalPages) return;
+    // The rows on screen are about to be replaced, so there is nothing
+    // meaningful to add a page to. Claiming the slot here would also abandon
+    // that reset and leave both queries' rows on screen together.
+    if (latestRequest.isResetPending()) return;
     setIsLoadingMore(true);
     const signal = latestRequest.begin();
     await fetchAssets(nextPage.current, false, signal);

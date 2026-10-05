@@ -102,3 +102,70 @@ describe("chainAbort", () => {
     assert.equal(controller.signal.aborted, false);
   });
 });
+
+describe("reset tracking", () => {
+  it("reports a reset as pending until it finishes", () => {
+    const latest = createLatestRequest();
+    assert.equal(latest.isResetPending(), false);
+
+    const signal = latest.beginReset();
+    assert.equal(latest.isResetPending(), true);
+
+    latest.endReset(signal);
+    assert.equal(latest.isResetPending(), false);
+  });
+
+  it("does not treat an ordinary request as a reset", () => {
+    const latest = createLatestRequest();
+    latest.begin();
+
+    assert.equal(latest.isResetPending(), false);
+  });
+
+  // The regression: paging that claims the slot mid-reset abandons it and
+  // appends the new query's first page to the old rows.
+  it("still reports pending while paging has superseded nothing", () => {
+    const latest = createLatestRequest();
+    latest.beginReset();
+
+    assert.equal(
+      latest.isResetPending(),
+      true,
+      "paging must be refused at this point"
+    );
+  });
+
+  it("lets a newer reset keep the slot when a slow one finishes late", () => {
+    const latest = createLatestRequest();
+    const first = latest.beginReset();
+    const second = latest.beginReset();
+
+    latest.endReset(first);
+    assert.equal(
+      latest.isResetPending(),
+      true,
+      "the second reset is still on its way"
+    );
+
+    latest.endReset(second);
+    assert.equal(latest.isResetPending(), false);
+  });
+
+  it("stops reporting pending once the reset is abandoned", () => {
+    const latest = createLatestRequest();
+    latest.beginReset();
+    // A workspace switch abandons it, and nothing will call endReset for a
+    // request whose answer is never applied. Paging must not stay refused.
+    latest.cancel();
+
+    assert.equal(latest.isResetPending(), false);
+  });
+
+  it("stops reporting pending when an ordinary request supersedes the reset", () => {
+    const latest = createLatestRequest();
+    latest.beginReset();
+    latest.begin();
+
+    assert.equal(latest.isResetPending(), false);
+  });
+});
