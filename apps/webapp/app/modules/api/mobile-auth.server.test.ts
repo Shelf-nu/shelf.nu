@@ -19,11 +19,11 @@ import { recordMobileActivity } from "./mobile-usage.server";
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
-// Mocking the db module short-circuits the connection; `user.findUnique` is a
-// spy so the `requireMobileAuth` test can assert the select shape.
+// Mocking the db module short-circuits the connection; `user.findMany` is a
+// spy so the `requireMobileAuth` test can assert the lookup and select shape.
 vi.mock("~/database/db.server", () => ({
   db: {
-    user: { findUnique: vi.fn() },
+    user: { findMany: vi.fn() },
     // why: `getMobileAssetForViewer` reads the asset row, and a re-signed photo
     // is written back with a guarded `updateMany`; both are asserted below.
     asset: { findUnique: vi.fn(), updateMany: vi.fn() },
@@ -368,7 +368,7 @@ describe("shapeMobileAssetResponse", () => {
  * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
  */
 describe("requireMobileAuth", () => {
-  // Reset the module-scoped `findUnique` spy before each test so this suite's
+  // Reset the module-scoped `findMany` spy before each test so this suite's
   // assertions read only its own call, not calls accumulated by earlier suites.
   beforeEach(() => {
     vi.clearAllMocks();
@@ -378,16 +378,19 @@ describe("requireMobileAuth", () => {
   });
 
   /** Stubs a valid Bearer JWT and the user row it resolves to. */
-  function signedInAs(dbRow: Record<string, unknown>) {
+  function signedInAs(
+    dbRow: Record<string, unknown>,
+    authEmail: unknown = dbRow.email
+  ) {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
-      data: { user: { id: dbRow.id, email: dbRow.email } },
+      data: { user: { id: dbRow.id, email: authEmail } },
       error: null,
     });
     vi.mocked(getSupabaseAdmin).mockReturnValue({
       auth: { getUser },
     } as unknown as ReturnType<typeof getSupabaseAdmin>);
-    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
 
     return new Request("https://shelf.test/api/mobile/me", {
       headers: { Authorization: "Bearer valid-token" },
@@ -405,14 +408,19 @@ describe("requireMobileAuth", () => {
     lastMobileActiveAt: null,
   };
 
-  it("resolves the user by the verified auth id, whatever the stored email's case", async () => {
+  it("resolves the user by email whatever the stored email's case", async () => {
     // The stored row keeps capitals; Supabase returns the address lowercased.
-    const request = signedInAs({ ...BASE_ROW, email: "Jane@Acme.com" });
+    const request = signedInAs(
+      { ...BASE_ROW, email: "Jane@Acme.com" },
+      "jane@acme.com"
+    );
 
     const { user } = await requireMobileAuth(request);
 
-    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
-    expect(lastCall?.[0].where).toEqual({ id: BASE_ROW.id });
+    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({
+      email: expect.objectContaining({ mode: "insensitive" }),
+    });
     expect(user.id).toBe(BASE_ROW.id);
   });
 
@@ -488,7 +496,7 @@ describe("requireMobileAuth", () => {
       lastMobileActiveAt: null,
       sso: false,
     };
-    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
+    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
 
     const request = new Request("https://shelf.test/api/mobile/me", {
       headers: { Authorization: "Bearer valid-token" },
@@ -499,7 +507,7 @@ describe("requireMobileAuth", () => {
     // The 4 format-pref columns are part of the select (regression guard). Read
     // the LATEST call so a future test that reaches requireMobileAuth first
     // can't shift the call this assertion inspects.
-    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
     const select = lastCall?.[0].select;
     expect(select).toMatchObject({
       dateFormat: true,

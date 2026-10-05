@@ -19,6 +19,7 @@ import {
   createSsoRequiredError,
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
+import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import {
   isSelfServiceOrBaseRole,
   resolveCanSeeAllBookings,
@@ -87,12 +88,16 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Get the database user record by the verified auth id, which is the Shelf
-  // user id. The stored email can differ in letter case from the one Supabase
-  // returns, so it does not identify the account. Soft-deleted users are
-  // excluded below.
-  const user = await db.user.findUnique({
-    where: { id: authUser.id },
+  // Get the database user record by the verified email, without regard to
+  // letter case (stored emails keep their case). Not by auth id: the
+  // companion's SSO session is minted by magic link in `mobile-sso.server.ts`,
+  // which can belong to a separate non-SSO auth user with the same address, so
+  // the auth id does not always identify the Shelf account. Soft-deleted users
+  // are excluded below.
+  const candidates = await db.user.findMany({
+    where: { email: caseInsensitiveEmailFilter(authUser.email) },
+    orderBy: { createdAt: "asc" },
+    take: 2,
     select: {
       id: true,
       email: true,
@@ -114,6 +119,11 @@ export async function requireMobileAuth(request: Request) {
       sso: true,
     },
   });
+  // Prefer the row whose stored email is exactly the verified one; conversion
+  // refuses accounts that differ only in letter case, so this rarely matters.
+  const verifiedEmail = authUser.email.toLowerCase();
+  const user =
+    candidates.find((c) => c.email === verifiedEmail) ?? candidates[0] ?? null;
 
   if (!user || user.deletedAt) {
     throw new ShelfError({
