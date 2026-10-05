@@ -123,6 +123,16 @@ const CHECKIN_EVENT_ACTIONS = [
 ] as const;
 
 /**
+ * The events that mark an asset's departure. The latest one is the boundary of
+ * the asset's current dispatch: only check-in events from then on describe the
+ * return the receipt prints, and an earlier trip's return is left behind.
+ */
+const CHECKOUT_EVENT_ACTIONS = [
+  "BOOKING_CHECKED_OUT",
+  "BOOKING_PARTIAL_CHECKOUT",
+] as const;
+
+/**
  * Reads a booking's check-in receipt.
  *
  * @param bookingId - The booking to print.
@@ -175,7 +185,7 @@ export async function fetchCheckinReceiptData(
       dispositionLogs,
       checkInTimes,
       checkinSessions,
-      checkinEvents,
+      dispatchEvents,
     ] = await Promise.all([
       db.bookingAsset.findMany({
         where: { bookingId, booking: { organizationId } },
@@ -224,26 +234,47 @@ export async function fetchCheckinReceiptData(
           checkedInById: true,
         },
       }),
-      // How each asset came back. Events carry no org column of their own
-      // beyond `organizationId`, so the booking's org scopes them.
+      // How each asset came back, and when it last left. Events carry no org
+      // column of their own beyond `organizationId`, so the booking's org
+      // scopes them.
       db.activityEvent.findMany({
         where: {
           bookingId,
           organizationId,
-          action: { in: [...CHECKIN_EVENT_ACTIONS] },
+          action: { in: [...CHECKIN_EVENT_ACTIONS, ...CHECKOUT_EVENT_ACTIONS] },
         },
-        select: { assetId: true, occurredAt: true, meta: true },
-        // Ascending so the latest check-in of a re-dispatched asset wins.
+        select: { assetId: true, action: true, occurredAt: true, meta: true },
         orderBy: { occurredAt: "asc" },
       }),
     ]);
 
-    // The method each asset's check-in events recorded, in the order they were
-    // written. An event without a readable method (written before methods were
-    // recorded, or by a phone bundle that declared none) contributes `null`.
-    const checkedInHowEventsByAsset = new Map<string, Array<string | null>>();
-    for (const event of checkinEvents) {
+    // When each asset last left: the start of the dispatch the receipt prints
+    // the return of. An asset with no check-out event (one dispatched before
+    // events were recorded) has every check-in event count.
+    const latestDispatchAtByAsset = new Map<string, Date>();
+    for (const event of dispatchEvents) {
       if (!event.assetId) continue;
+      if (
+        (CHECKOUT_EVENT_ACTIONS as readonly string[]).includes(event.action)
+      ) {
+        latestDispatchAtByAsset.set(event.assetId, event.occurredAt);
+      }
+    }
+
+    // The method each asset's check-in events of the current dispatch recorded,
+    // in the order they were written. An event without a readable method
+    // (written before methods were recorded, or by a phone bundle that declared
+    // none) contributes `null`.
+    const checkedInHowEventsByAsset = new Map<string, Array<string | null>>();
+    for (const event of dispatchEvents) {
+      if (!event.assetId) continue;
+      if (
+        !(CHECKIN_EVENT_ACTIONS as readonly string[]).includes(event.action)
+      ) {
+        continue;
+      }
+      const dispatchedAt = latestDispatchAtByAsset.get(event.assetId);
+      if (dispatchedAt && event.occurredAt < dispatchedAt) continue;
       const meta = readBookingMethodMeta(event.meta);
       const phrase =
         meta && meta.method ? describeBookingMethodCapitalised(meta) : null;
@@ -363,21 +394,16 @@ export async function fetchCheckinReceiptData(
     /**
      * The phrase a printed row may carry, resolved per asset.
      *
-     * Events name the asset, not the slice. For an asset with ONE slice on the
-     * booking that is exact, and its latest check-in event is the one that
-     * dated the row, so the latest wins (a re-dispatched item is described by
-     * its last return). For an asset with SEVERAL slices (a quantity asset
-     * booked loose and through a kit) the events cannot be told apart by slice,
-     * so a phrase is given only when every event agrees; otherwise the rows
-     * stay blank rather than lending one slice's method to another.
+     * Events name the asset, not the slice, and a row aggregates every unit
+     * that came back in the current dispatch. A quantity slice returned in
+     * parts by different methods, or an asset whose slices (loose and through a
+     * kit) came back by different methods, cannot be described by one phrase,
+     * so a phrase is given only when every check-in event of the dispatch
+     * agrees; otherwise the rows stay blank rather than lending one return's
+     * method to the rest.
      */
     const checkedInHowByAsset = new Map<string, string | null>();
     for (const [assetId, phrases] of checkedInHowEventsByAsset) {
-      const sliceCount = slicesByAsset.get(assetId)?.length ?? 0;
-      if (sliceCount <= 1) {
-        checkedInHowByAsset.set(assetId, phrases[phrases.length - 1] ?? null);
-        continue;
-      }
       const distinct = new Set(phrases);
       checkedInHowByAsset.set(assetId, distinct.size === 1 ? phrases[0] : null);
     }

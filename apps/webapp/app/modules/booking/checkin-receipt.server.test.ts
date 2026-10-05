@@ -246,24 +246,39 @@ describe("fetchCheckinReceiptData", () => {
       }))
     );
     mockOf(db.activityEvent.findMany).mockResolvedValue([
-      // An earlier trip of asset-1, superseded by the later event below.
+      // An earlier trip of asset-1: returned, sent out again, returned below.
+      // Only the events from the latest departure on describe the row.
       {
         assetId: "asset-1",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: new Date("2026-08-01T10:00:00.000Z"),
         meta: { method: "selected", surface: "web" },
       },
       {
         assetId: "asset-1",
+        action: "BOOKING_CHECKED_OUT",
+        occurredAt: new Date("2026-08-02T10:00:00.000Z"),
+        meta: {},
+      },
+      {
+        assetId: "asset-1",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: CHECKED_IN_AT,
         meta: { method: "scanned", surface: "phone" },
       },
       {
         assetId: "asset-2",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: CHECKED_IN_AT,
         meta: { quantity: 1, method: "selected", surface: "web" },
       },
       // Written before methods were recorded: nothing to say for asset-3.
-      { assetId: "asset-3", occurredAt: CHECKED_IN_AT, meta: {} },
+      {
+        assetId: "asset-3",
+        action: "BOOKING_CHECKED_IN",
+        occurredAt: CHECKED_IN_AT,
+        meta: {},
+      },
     ]);
     mockOf(db.user.findMany).mockResolvedValue([]);
 
@@ -281,7 +296,14 @@ describe("fetchCheckinReceiptData", () => {
         where: expect.objectContaining({
           bookingId: "booking-1",
           organizationId: "org-1",
-          action: { in: ["BOOKING_CHECKED_IN", "BOOKING_PARTIAL_CHECKIN"] },
+          action: {
+            in: [
+              "BOOKING_CHECKED_IN",
+              "BOOKING_PARTIAL_CHECKIN",
+              "BOOKING_CHECKED_OUT",
+              "BOOKING_PARTIAL_CHECKOUT",
+            ],
+          },
         }),
       })
     );
@@ -341,17 +363,20 @@ describe("fetchCheckinReceiptData", () => {
     mockOf(db.activityEvent.findMany).mockResolvedValue([
       {
         assetId: "asset-qty",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: new Date("2026-09-03T10:00:00.000Z"),
         meta: { method: "scanned", surface: "phone" },
       },
       {
         assetId: "asset-qty",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: CHECKED_IN_AT,
         meta: { method: "selected", surface: "web" },
       },
       // The single-slice asset keeps its latest event's method.
       {
         assetId: "asset-2",
+        action: "BOOKING_CHECKED_IN",
         occurredAt: CHECKED_IN_AT,
         meta: { method: "scanned", surface: "web" },
       },
@@ -366,6 +391,77 @@ describe("fetchCheckinReceiptData", () => {
       "Scanned on the web",
     ]);
     // A returned row without a phrase keeps the header line away too.
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
+  it("leaves a quantity slice blank when its units came back by different methods in one dispatch", async () => {
+    // Five rolls of tape on one slice: three scanned back first, the last two
+    // ticked back later. The row aggregates all five, so it cannot claim the
+    // last return's method for the lot, and the header stays away too.
+    const firstReturnAt = new Date(CHECKED_IN_AT.getTime() - 60 * 60 * 1000);
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-qty", "Gaffer tape")],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-qty",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 5,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-1",
+      },
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 2,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      },
+    ]);
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_CHECKED_OUT",
+        occurredAt: CHECKED_OUT_AT,
+        meta: { quantity: 5, method: "quick", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: firstReturnAt,
+        meta: { method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([null]);
     expect(receipt.checkedInHow).toBeNull();
   });
 
@@ -396,6 +492,7 @@ describe("fetchCheckinReceiptData", () => {
     mockOf(db.activityEvent.findMany).mockResolvedValue(
       ["asset-1", "asset-2"].map((assetId) => ({
         assetId,
+        action: "BOOKING_CHECKED_IN",
         occurredAt: CHECKED_IN_AT,
         meta: { method: "quick", surface: "web" },
       }))
