@@ -4114,6 +4114,11 @@ export async function fulfilModelRequestsAndCheckout({
           // One event per BookingAsset ROW (not deduped). For multi-row
           // qty-tracked, each event carries that row's own quantity in
           // `meta.quantity` (no-op for INDIVIDUAL).
+          // Only the rows this scan put on the booking went through the
+          // scanner. Rows assigned beforehand go out with the batch without
+          // being scanned, so their method is recorded as not said rather
+          // than as the batch's.
+          const scannedAssetIds = new Set(addedAssetIds);
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4125,7 +4130,12 @@ export async function fulfilModelRequestsAndCheckout({
               assetId: ba.asset.id,
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
-                ...bookingMethodMeta(provenance, [ba.id]),
+                ...bookingMethodMeta(
+                  provenance && !scannedAssetIds.has(ba.asset.id)
+                    ? { ...provenance, method: null }
+                    : provenance,
+                  [ba.id]
+                ),
               },
             })),
             tx
@@ -7013,11 +7023,20 @@ export async function partialCheckinBooking({
         outstandingAssetIds.length > 0 &&
         outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
-        // Don't create a PartialBookingCheckin row — the redirect to
-        // `checkinBooking` handles completion itself.
+        // No PartialBookingCheckin row: `checkinBooking` handles completion
+        // itself. The asset-side note says how this batch was made, as the
+        // provenance recorded it; the batch may have been scanned, selected
+        // from the list, or both. Resolved over the booking's own slices for
+        // the batch's assets, as the delegated events are: a bare asset-id
+        // payload names no slice itself.
         const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
-          content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
+          content: `${actor} checked in the last items still out${bookingMethodClause(
+            provenance,
+            bookingFound.bookingAssets
+              .filter((ba) => effectiveAssetIds.includes(ba.assetId))
+              .map((ba) => ba.id)
+          )}, which completed the booking.`,
           type: "UPDATE",
           userId,
           assetIds: effectiveAssetIds,

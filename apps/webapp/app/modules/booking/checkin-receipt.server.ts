@@ -261,6 +261,19 @@ export async function fetchCheckinReceiptData(
       }
     }
 
+    // How many slices each asset holds on the booking. Events name the asset,
+    // not the slice, so the dispatch boundary can only be trusted for an asset
+    // with ONE slice: with several, a later departure of one slice would
+    // discard the other slice's return and lend it the later method. Such an
+    // asset keeps every check-in event, and all of them must agree.
+    const sliceCountByAsset = new Map<string, number>();
+    for (const slice of slices) {
+      sliceCountByAsset.set(
+        slice.assetId,
+        (sliceCountByAsset.get(slice.assetId) ?? 0) + 1
+      );
+    }
+
     // The method each asset's check-in events of the current dispatch recorded,
     // in the order they were written. An event without a readable method
     // (written before methods were recorded, or by a phone bundle that declared
@@ -274,7 +287,13 @@ export async function fetchCheckinReceiptData(
         continue;
       }
       const dispatchedAt = latestDispatchAtByAsset.get(event.assetId);
-      if (dispatchedAt && event.occurredAt < dispatchedAt) continue;
+      if (
+        dispatchedAt &&
+        (sliceCountByAsset.get(event.assetId) ?? 0) <= 1 &&
+        event.occurredAt < dispatchedAt
+      ) {
+        continue;
+      }
       const meta = readBookingMethodMeta(event.meta);
       const phrase =
         meta && meta.method ? describeBookingMethodCapitalised(meta) : null;
@@ -398,9 +417,9 @@ export async function fetchCheckinReceiptData(
      * that came back in the current dispatch. A quantity slice returned in
      * parts by different methods, or an asset whose slices (loose and through a
      * kit) came back by different methods, cannot be described by one phrase,
-     * so a phrase is given only when every check-in event of the dispatch
-     * agrees; otherwise the rows stay blank rather than lending one return's
-     * method to the rest.
+     * so a phrase is given only when every check-in event that counts agrees;
+     * otherwise the rows stay blank rather than lending one return's method to
+     * the rest.
      */
     const checkedInHowByAsset = new Map<string, string | null>();
     for (const [assetId, phrases] of checkedInHowEventsByAsset) {

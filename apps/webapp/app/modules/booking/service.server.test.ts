@@ -5701,7 +5701,7 @@ describe("fulfilModelRequestsAndCheckout", () => {
     );
   });
 
-  it("records the scan's method and the phone surface on every BOOKING_CHECKED_OUT it writes", async () => {
+  it("records the scan's method on the rows it scanned, and no method on rows already on the booking", async () => {
     expect.assertions(1);
 
     const mockBooking = buildPreTxBooking({
@@ -5804,10 +5804,11 @@ describe("fulfilModelRequestsAndCheckout", () => {
     ).mock.calls
       .flatMap(([events]) => events as Array<Record<string, unknown>>)
       .filter((event) => event.action === "BOOKING_CHECKED_OUT");
-    // One event per row (hp-1 + 3 Dells), every one carrying the method and
-    // the surface the route handed in.
+    // One event per row (hp-1 + 3 Dells). The three Dells went through the
+    // scanner; the HP was on the booking beforehand and went out with the
+    // batch unscanned, so its method is not said. Every row keeps the surface.
     expect(checkedOutEvents.map((event) => event.meta)).toEqual([
-      { method: "scanned", surface: "phone" },
+      { method: null, surface: "phone" },
       { method: "scanned", surface: "phone" },
       { method: "scanned", surface: "phone" },
       { method: "scanned", surface: "phone" },
@@ -17401,7 +17402,7 @@ describe("check-in and check-out method on activity events", () => {
   });
 
   it("resolves each row's slice when a web batch with a ticked slice closes the booking through the full check-in", async () => {
-    expect.assertions(1);
+    expect.assertions(2);
 
     // The scan page scanned asset-1 and ticked asset-2's slice "without
     // scanning"; both rows come back in one batch, so the partial path hands
@@ -17431,6 +17432,15 @@ describe("check-in and check-out method on activity events", () => {
       ["asset-1", { method: "scanned", surface: "web" }],
       ["asset-2", { method: "selected", surface: "web" }],
     ]);
+    // The asset-side note the final batch writes says how it was made rather
+    // than claiming every item was scanned.
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          "checked in the last items still out (scanned and selected on the web), which completed the booking."
+        ),
+      })
+    );
   });
 
   it("partialCheckinBooking keeps the batch's method on rows that name no slice, whatever slices were ticked", async () => {
