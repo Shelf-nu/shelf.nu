@@ -22,8 +22,6 @@ import {
   readBookingMethodMeta,
   resolveBookingMethod,
   resolveBookingMethodForSlices,
-  webFormMethodSchema,
-  webFormProvenance,
 } from "./checkout-method";
 
 // @vitest-environment node
@@ -113,34 +111,6 @@ describe("narrowSelectedBookingAssetIds", () => {
   it("is empty without ticked slices", () => {
     expect(narrowSelectedBookingAssetIds(undefined, ["ba-1"])).toEqual([]);
     expect(narrowSelectedBookingAssetIds([], ["ba-1"])).toEqual([]);
-  });
-});
-
-describe("webFormMethodSchema and webFormProvenance", () => {
-  it("records the header's one-click post, which declares nothing, as quick", () => {
-    const { method } = webFormMethodSchema.parse({});
-    expect(webFormProvenance(method)).toEqual({
-      surface: "web",
-      method: "quick",
-    });
-  });
-
-  it("records the list dialog's post, which declares selected, as selected", () => {
-    const { method } = webFormMethodSchema.parse({ method: "selected" });
-    expect(webFormProvenance(method)).toEqual({
-      surface: "web",
-      method: "selected",
-    });
-  });
-
-  it("refuses a form that claims a method the overview cannot produce", () => {
-    // Nothing scans on the overview, and quick is the route's own assertion.
-    expect(webFormMethodSchema.safeParse({ method: "scanned" }).success).toBe(
-      false
-    );
-    expect(webFormMethodSchema.safeParse({ method: "quick" }).success).toBe(
-      false
-    );
   });
 });
 

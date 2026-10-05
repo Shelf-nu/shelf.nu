@@ -41,10 +41,6 @@ import {
   BOOKING_DISPOSITION_CATEGORIES,
   computeBookingSliceUnitCounts,
 } from "~/modules/booking/booking-slice-unit-counts.server";
-import {
-  webFormMethodSchema,
-  webFormProvenance,
-} from "~/modules/booking/checkout-method";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   archiveBooking,
@@ -1833,16 +1829,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           })
         ).map((a) => a.id);
 
-        // Which flow posted. The header's one-click button declares nothing
-        // and is recorded as quick; the "Check in selected items" dialog
-        // declares `method=selected`. Read off the form, never inferred from
-        // the rows the post happens to name.
-        const { method: declaredMethod } = parseData(
-          formData,
-          webFormMethodSchema,
-          { additionalData: { userId, bookingId: id } }
-        );
-
         const booking = await checkinBooking({
           id,
           organizationId,
@@ -1851,7 +1837,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
           specificAssetIds:
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
-          provenance: webFormProvenance(declaredMethod),
+          // The header's one-click check-in. The "Check in selected items"
+          // dialog posts `partial-checkin` on every path, the early final one
+          // included, so this intent is always quick and the explicit-rule
+          // guard above is right to refuse it.
+          provenance: { surface: "web", method: "quick" },
         });
 
         // Only write notes for assets that were actually checked out before

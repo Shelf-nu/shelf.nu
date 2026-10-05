@@ -17310,12 +17310,12 @@ describe("check-in and check-out method on activity events", () => {
     ).toEqual([{ method: "selected", surface: "web" }]);
   });
 
-  it("partialCheckinBooking keeps the batch's method when the last rows close the booking through the full check-in", async () => {
-    expect.assertions(1);
-
-    // Both outstanding rows come back in one phone batch, so the partial path
-    // hands the batch to `checkinBooking`, whose BOOKING_CHECKED_IN events must
-    // still say the rows were selected on the phone.
+  /**
+   * Two outstanding rows, `ba-d1` for asset-1 and `ba-d2` for asset-2, both
+   * out on an ongoing booking, so a batch naming both closes the booking
+   * through `checkinBooking`.
+   */
+  function setupTwoRowsThatCloseTheBooking() {
     const bookingWithAssets = {
       ...mockBookingData,
       bookingAssets: ["asset-1", "asset-2"].map((assetId, i) => ({
@@ -17370,6 +17370,15 @@ describe("check-in and check-out method on activity events", () => {
         );
       }
     );
+  }
+
+  it("partialCheckinBooking keeps the batch's method when the last rows close the booking through the full check-in", async () => {
+    expect.assertions(1);
+
+    // Both outstanding rows come back in one phone batch, so the partial path
+    // hands the batch to `checkinBooking`, whose BOOKING_CHECKED_IN events must
+    // still say the rows were selected on the phone.
+    setupTwoRowsThatCloseTheBooking();
 
     await partialCheckinBooking({
       id: "booking-1",
@@ -17388,6 +17397,39 @@ describe("check-in and check-out method on activity events", () => {
     ).toEqual([
       ["asset-1", { method: "selected", surface: "phone" }],
       ["asset-2", { method: "selected", surface: "phone" }],
+    ]);
+  });
+
+  it("resolves each row's slice when a web batch with a ticked slice closes the booking through the full check-in", async () => {
+    expect.assertions(1);
+
+    // The scan page scanned asset-1 and ticked asset-2's slice "without
+    // scanning"; both rows come back in one batch, so the partial path hands
+    // it to `checkinBooking`, whose per-row events must keep the tick on its
+    // own slice rather than stamp the batch's method on both.
+    setupTwoRowsThatCloseTheBooking();
+
+    await partialCheckinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+      hints: mockClientHints,
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-d2"],
+      },
+    });
+
+    expect(
+      recordedEvents("BOOKING_CHECKED_IN").map((event) => [
+        event.assetId,
+        event.meta,
+      ])
+    ).toEqual([
+      ["asset-1", { method: "scanned", surface: "web" }],
+      ["asset-2", { method: "selected", surface: "web" }],
     ]);
   });
 

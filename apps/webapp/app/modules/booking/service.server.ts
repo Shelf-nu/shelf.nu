@@ -3288,6 +3288,7 @@ async function runCheckoutSideEffects({
   organizationId,
   isExpired,
   provenance,
+  bookingSliceIds,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -3298,6 +3299,12 @@ async function runCheckoutSideEffects({
   isExpired: boolean;
   /** How the check-out was made, for the activity line; see {@link checkoutBooking}. */
   provenance?: BookingMethodProvenance;
+  /**
+   * The booking's slices, so a batch that scanned some rows and ticked others
+   * before closing the booking reads "scanned and selected" rather than one of
+   * the two. The one-click actions pass none.
+   */
+  bookingSliceIds?: readonly BatchSliceId[];
 }) {
   // Create status transition note. `organizationId` is required by
   // the hardened signature merged from `main` (cross-org safety
@@ -3310,7 +3317,7 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
-      methodClause: bookingMethodClause(provenance),
+      methodClause: bookingMethodClause(provenance, bookingSliceIds),
     });
   }
 
@@ -3683,7 +3690,15 @@ export async function checkoutBooking({
                 assetId,
                 meta: {
                   ...(asset ? assetQtyMeta(asset, totalQty) : {}),
-                  ...bookingMethodMeta(provenance),
+                  // A batch that closes the booking through this path may have
+                  // ticked one of the asset's slices and scanned another, so
+                  // the asset's event resolves over all of its slices.
+                  ...bookingMethodMeta(
+                    provenance,
+                    bookingFound.bookingAssets
+                      .filter((ba) => ba.asset.id === assetId)
+                      .map((ba) => ba.id)
+                  ),
                 },
               };
             }),
@@ -3719,6 +3734,7 @@ export async function checkoutBooking({
       organizationId,
       isExpired,
       provenance,
+      bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -4026,6 +4042,7 @@ export async function fulfilModelRequestsAndCheckout({
         const postScanBookingAssets = await tx.bookingAsset.findMany({
           where: { bookingId },
           select: {
+            id: true,
             quantity: true,
             // Needed to exclude kit-driven slices from the standalone
             // availability guard below (#2790) — see the filter's rationale.
@@ -4108,7 +4125,7 @@ export async function fulfilModelRequestsAndCheckout({
               assetId: ba.asset.id,
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
-                ...bookingMethodMeta(provenance),
+                ...bookingMethodMeta(provenance, [ba.id]),
               },
             })),
             tx
@@ -5896,7 +5913,7 @@ export async function checkinBooking({
               assetId: ba.asset.id,
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
-                ...bookingMethodMeta(provenance),
+                ...bookingMethodMeta(provenance, [ba.id]),
               },
             })),
             tx
@@ -6036,7 +6053,10 @@ export async function checkinBooking({
           content: `${wrapUserLinkForNote(
             user!
           )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
-            provenance
+            provenance,
+            bookingFound.bookingAssets
+              .filter((ba) => specificAssetIds.includes(ba.asset.id))
+              .map((ba) => ba.id)
           )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
 
@@ -6061,7 +6081,10 @@ export async function checkinBooking({
           toStatus: BookingStatus.COMPLETE,
           userId,
           custodianUserId: updatedBooking.custodianUserId || undefined,
-          methodClause: bookingMethodClause(provenance),
+          methodClause: bookingMethodClause(
+            provenance,
+            bookingFound.bookingAssets.map((ba) => ba.id)
+          ),
         });
       }
     }

@@ -713,6 +713,55 @@ describe("partialCheckoutBooking", () => {
     ]);
   });
 
+  it("keeps a ticked slice selected when the batch closes the booking through the full check-out", async () => {
+    expect.assertions(2);
+
+    // Every row of the reserved booking in one web batch: ba-2 was ticked
+    // "without scanning", the rest scanned. The partial path hands the batch
+    // to `checkoutBooking`, whose per-asset events must still resolve each
+    // asset's slice rather than stamp the batch's method on every row.
+    const withSlices = {
+      ...reservedBooking,
+      bookingAssets: reservedBooking.bookingAssets.map((ba, i) => ({
+        ...ba,
+        id: `ba-${i + 1}`,
+      })),
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValue({ ...withSlices, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-2"],
+      },
+    });
+
+    const checkedOutMetas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT")
+      .map((event) => [event.assetId, event.meta]);
+
+    expect(checkedOutMetas).toEqual([
+      ["asset-1", { method: "scanned", surface: "web" }],
+      ["asset-2", { method: "selected", surface: "web" }],
+      ["asset-3", { method: "scanned", surface: "web" }],
+    ]);
+    // The booking's status line names both ways.
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("(scanned and selected on the web)"),
+      })
+    );
+  });
+
   it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
     expect.assertions(1);
 

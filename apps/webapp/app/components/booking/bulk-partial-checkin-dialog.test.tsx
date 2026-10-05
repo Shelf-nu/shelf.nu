@@ -1,13 +1,14 @@
 /**
  * Tests for the "Check in selected items" dialog's form.
  *
- * The booking overview records how a check-in was made from what the posting
- * form declares, so this dialog must say `method=selected` itself, on both of
- * its submit paths: the partial check-in button, and the early check-in dialog
- * that closes the booking when the selection is the last of it.
+ * The booking overview records how a check-in was made from the intent the
+ * posting form carries, so this dialog must post `partial-checkin` on both of
+ * its submit paths: the plain button, and the early check-in dialog that closes
+ * the booking when the selection is the last of it. The whole-booking `checkIn`
+ * intent is the header's one-click path, which the explicit rule refuses.
  *
  * @see {@link file://./bulk-partial-checkin-dialog.tsx}
- * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} - the `checkIn` branch that reads it
+ * @see {@link file://./../../routes/_layout+/bookings.$bookingId.overview.tsx} - the `partial-checkin` branch that records it
  */
 import type { ReactNode } from "react";
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
@@ -39,12 +40,19 @@ vi.mock("~/components/custom-form", () => ({
 }));
 
 // why: the early check-in branch renders CheckinDialog, whose react-router
-// dependencies this harness does not mount. The stub marks that the branch was
-// taken and which rows it would post.
+// dependencies this harness does not mount. The stub records the intent and
+// the rows the dialog would post.
 vi.mock("./checkin-dialog", () => ({
-  default: ({ specificAssetIds }: { specificAssetIds?: string[] }) => (
+  default: ({
+    intent,
+    specificAssetIds,
+  }: {
+    intent?: string;
+    specificAssetIds?: string[];
+  }) => (
     <div
       data-testid="checkin-dialog-mock"
+      data-intent={intent ?? "checkIn"}
       data-specific={JSON.stringify(specificAssetIds ?? [])}
     />
   ),
@@ -129,13 +137,13 @@ function loaderData(rows: Array<typeof camera>) {
   };
 }
 
-/** The dialog's form and the `method` it declares. */
-function declaredMethod() {
+/** The dialog's own form, which both submit paths post. */
+function dialogForm() {
   const form = document.querySelector<HTMLFormElement>(
     "form#bulk-partial-checkin-form"
   );
   expect(form).not.toBeNull();
-  return form!.querySelector<HTMLInputElement>('input[name="method"]')?.value;
+  return form!;
 }
 
 describe("BulkPartialCheckinDialog form", () => {
@@ -145,36 +153,42 @@ describe("BulkPartialCheckinDialog form", () => {
     useLoaderDataMock.mockReturnValue(loaderData([camera, tripod]));
   });
 
-  it("declares method=selected next to the rows of a partial check-in", () => {
-    // One of two checked-out items: a partial check-in, posted by the button.
+  it("posts a partial check-in of the selected rows from its button", () => {
+    // One of two checked-out items: not final, so the plain button.
     mockSelectedBulkItems = [camera];
 
     render(<BulkPartialCheckinDialog open setOpen={vi.fn()} />);
 
-    expect(declaredMethod()).toBe("selected");
+    const form = dialogForm();
     expect(
-      document.querySelector<HTMLInputElement>('input[name="assetIds[0]"]')
-        ?.value
+      form.querySelector<HTMLInputElement>('input[name="assetIds[0]"]')?.value
     ).toBe(camera.id);
     expect(
-      document.querySelector(
+      form.querySelector(
         'button[type="submit"][name="intent"][value="partial-checkin"]'
       )
     ).not.toBeNull();
+    // Nothing on this form posts the header's whole-booking intent.
+    expect(form.querySelector('[name="intent"][value="checkIn"]')).toBeNull();
   });
 
-  it("declares method=selected on the early check-in that closes the booking too", () => {
-    // Both remaining items: the final check-in, early, so the confirming
-    // dialog posts `intent=checkIn` through this same form.
+  it("keeps the early final check-in on the partial intent, so the explicit rule does not refuse it", () => {
+    // Both remaining items, long before the booking ends: the confirming
+    // dialog, which must post this same form with `partial-checkin` rather
+    // than the one-click `checkIn` the explicit-rule guard refuses.
     mockSelectedBulkItems = [camera, tripod];
 
     const { getByTestId } = render(
       <BulkPartialCheckinDialog open setOpen={vi.fn()} />
     );
 
-    expect(getByTestId("checkin-dialog-mock").dataset.specific).toBe(
+    const confirming = getByTestId("checkin-dialog-mock");
+    expect(confirming.dataset.intent).toBe("partial-checkin");
+    expect(confirming.dataset.specific).toBe(
       JSON.stringify([camera.id, tripod.id])
     );
-    expect(declaredMethod()).toBe("selected");
+    expect(
+      dialogForm().querySelector('[name="intent"][value="checkIn"]')
+    ).toBeNull();
   });
 });

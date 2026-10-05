@@ -20,8 +20,6 @@
  * @see {@link file://./service.server.ts} - the four event writers
  * @see {@link file://./../../routes/api+/mobile+/bookings.partial-checkout.ts} - a client-declared method
  */
-import { z } from "zod";
-
 /** Every method a check-in or check-out row can record. */
 export const BOOKING_METHODS = ["quick", "scanned", "selected"] as const;
 
@@ -41,33 +39,6 @@ export type ClientDeclaredBookingMethod =
 
 /** Where the request came from. */
 export type BookingSurface = "web" | "phone";
-
-/**
- * What a form posted to the booking overview may declare about its method.
- *
- * The header's one-click buttons post no `method`; the "Check in selected
- * items" dialog posts `method=selected` next to its `intent`. Only
- * `"selected"` is accepted here: the overview has no scanner, so a form
- * claiming `"scanned"` is refused, and `"quick"` is asserted by the route
- * itself rather than read off the form. Parse with this, then build the
- * provenance with {@link webFormProvenance}.
- */
-export const webFormMethodSchema = z.object({
-  method: z.literal("selected").optional(),
-});
-
-/**
- * The provenance of a whole-booking action posted to the booking overview.
- *
- * @param method - What the form declared, parsed by {@link webFormMethodSchema}
- * @returns `"quick"` on the web when the form declared nothing, otherwise the
- *   declared method on the web
- */
-export function webFormProvenance(
-  method: "selected" | undefined
-): BookingMethodProvenance {
-  return { surface: "web", method: method ?? "quick" };
-}
 
 /**
  * What a route knows about how a check-in or check-out batch was made.

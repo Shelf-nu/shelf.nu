@@ -211,11 +211,6 @@ export default function BulkPartialCheckinDialog({
         >
           <input type="hidden" name="returnJson" value="true" />
 
-          {/* Which flow this is. The overview's check-in branch records the
-              rows as selected because this dialog says so, never because the
-              post happened to name them. */}
-          <input type="hidden" name="method" value="selected" />
-
           {/* Deduped asset ids only (kits excluded); same list used for
               final-checkin detection above. */}
           {selectedAssetIds.map((assetId: string, index: number) => (
@@ -365,7 +360,13 @@ export default function BulkPartialCheckinDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-in */}
+            {/* Submit button: a confirming CheckinDialog for an early final
+                check-in, a plain submit otherwise. Both post this same form
+                with intent="partial-checkin", so the overview routes every
+                path through checkinAssets, which records the batch as
+                selected and applies the date choice. The whole-booking
+                checkIn intent is the header's one-click path, which the
+                explicit rule refuses. */}
             {isEarlyCheckin ? (
               <CheckinDialog
                 booking={{
@@ -379,6 +380,7 @@ export default function BulkPartialCheckinDialog({
                 disabled={disabled}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
+                intent="partial-checkin"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedAssetIds}
                 fullWidth
