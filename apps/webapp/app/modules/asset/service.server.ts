@@ -68,7 +68,10 @@ import {
   createCategoriesIfNotExists,
   getCategory,
 } from "~/modules/category/service.server";
-import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
+import {
+  assertNoKitDerivedCustody,
+  assertNotKitMembers,
+} from "~/modules/custody/service.server";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import {
   createCustomFieldsIfNotExists,
@@ -6340,7 +6343,8 @@ export async function bulkDeleteAssets({
  *
  * Sets each asset's status to IN_CUSTODY, creates custody records linking
  * them to the custodian, and logs activity notes. Only AVAILABLE assets
- * can be assigned — throws if any selected asset is unavailable.
+ * can be assigned, and never an individually tracked kit member (custody of
+ * that comes from its kit). Throws if any selected asset is either.
  *
  * Supports both explicit asset IDs and the ALL_SELECTED filter pattern
  * (via `currentSearchParams` + `settings`).
@@ -6350,7 +6354,8 @@ export async function bulkDeleteAssets({
  *   is written
  * @param params.organizationId - The caller's validated organization ID
  * @throws {ShelfError} If the custodian does not belong to `organizationId`,
- *   or if any selected asset is not AVAILABLE
+ *   if any selected asset is not AVAILABLE, or 400 if any selected
+ *   individually tracked asset belongs to a kit
  */
 export async function bulkCheckOutAssets({
   userId,
@@ -6520,6 +6525,11 @@ export async function bulkCheckOutAssets({
         { teamMemberId: custodianId, organizationId },
         tx
       );
+
+      // Custody of an individually tracked kit member comes from its kit.
+      // This one call covers every caller: the web assets index bulk action,
+      // the mobile bulk route and the mobile single-asset route.
+      await assertNotKitMembers(tx, assetIdsToCustody, organizationId);
 
       /** Clean up any stale custody records that may exist despite AVAILABLE status.
        * This prevents P2002 unique constraint violations when a previous

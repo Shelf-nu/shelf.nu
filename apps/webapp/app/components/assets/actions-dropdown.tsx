@@ -5,6 +5,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { kitMemberCustodyBlockedReason } from "@shelf/labels";
 import { AlarmClockIcon, ArrowUpDownIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -12,7 +13,11 @@ import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useUserData } from "~/hooks/use-user-data";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
+import {
+  getPrimaryKit,
+  isIndividualKitMember,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
 import {
@@ -70,6 +75,15 @@ const ConditionalActionsDropdown = () => {
     assetKitMembership && assetKitMembership.status !== "AVAILABLE"
   );
   const custodyActionDisabled = assetIsCheckedOut && !assetCanBeReleased;
+  /**
+   * An individually tracked kit member takes custody through its kit, so
+   * "Assign custody" is disabled with the reason. The server refuses the same
+   * request (`assertNotKitMembers`); this only says so before the click.
+   */
+  const assignCustodyKitReason =
+    assetKitMembership && isIndividualKitMember(asset)
+      ? kitMemberCustodyBlockedReason(assetKitMembership.name)
+      : null;
 
   function handleMenuClose() {
     setOpen(false);
@@ -220,7 +234,12 @@ const ConditionalActionsDropdown = () => {
                       className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                       width="full"
                       onClick={handleMenuClose}
-                      disabled={custodyActionDisabled}
+                      disabled={
+                        custodyActionDisabled ||
+                        (assignCustodyKitReason
+                          ? { reason: assignCustodyKitReason }
+                          : false)
+                      }
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}

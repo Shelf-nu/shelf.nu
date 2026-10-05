@@ -230,6 +230,41 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
+// Why an individually tracked asset that belongs to a kit cannot be put into
+// custody on its own. Custody of such an asset comes from its kit: assign
+// custody to the kit, or take the asset out of the kit first. One register for
+// every surface that states the rule: the server's 400 on every assign path,
+// the web asset page and assets index menus, and the companion asset screen.
+//
+// Quantity-tracked assets are not covered. A kit holds only a slice of a pool,
+// and the units outside every kit can still be assigned on their own.
+export const KIT_MEMBER_CUSTODY_BLOCKED_TITLE = "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param {string} kitName - the name of the kit the asset belongs to
+ * @returns {string}
+ */
+export function kitMemberCustodyBlockedReason(kitName) {
+  return `This asset is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param {{ assetTitle: string; kitName: string }} names
+ * @returns {string}
+ */
+export function kitMemberCustodyRefusal({ assetTitle, kitName }) {
+  return `"${assetTitle}" is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+// The reason a bulk "Assign custody" action is disabled when the selection
+// holds at least one kit member.
+export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
+  "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
 /**
  * The semantic weight a status badge carries, independent of any palette.
  *

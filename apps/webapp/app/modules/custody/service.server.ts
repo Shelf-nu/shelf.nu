@@ -1,5 +1,9 @@
 import type { Asset, User } from "@prisma/client";
-import { AssetStatus, OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles } from "@prisma/client";
+import {
+  KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
+  kitMemberCustodyRefusal,
+} from "@shelf/labels";
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
@@ -52,6 +56,72 @@ export async function assertNoKitDerivedCustody(
       message:
         "This asset is in custody because its kit is. Release the kit's custody instead.",
       additionalData: { assetId: kitDerived.assetId, organizationId },
+      label: "Custody",
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Refuses to put an individually tracked kit member into custody on its own.
+ *
+ * Custody of an asset that belongs to a kit comes from the kit: assign custody
+ * to the kit, or take the asset out of the kit first. Both scanners already
+ * refuse such an asset; this is the server-side rule every assign path calls,
+ * so no request can reach a state the scanners would refuse.
+ *
+ * `QUANTITY_TRACKED` assets are not refused. A kit holds only a slice of a
+ * pool, and the units outside every kit can still be assigned on their own.
+ *
+ * Release is not covered and must not be: custody rows written before this
+ * rule existed stay releasable.
+ *
+ * Call it inside the assign transaction, before the custody rows are written,
+ * so the refusal rolls back anything the transaction already did. Like
+ * {@link assertNoKitDerivedCustody}, it is a plain read under READ COMMITTED:
+ * an asset added to a kit after this read is not seen. Adding an asset that is
+ * already in custody to a kit is refused on the kit side, which covers the
+ * other order.
+ *
+ * @param tx - the active transaction the assignment runs in
+ * @param assetIds - assets about to be put into custody (request input)
+ * @param organizationId - the caller's workspace; memberships in any other
+ *   workspace are ignored
+ * @throws {ShelfError} 400 naming the first kit member found and its kit
+ */
+export async function assertNotKitMembers(
+  tx: Pick<typeof db, "assetKit">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  if (assetIds.length === 0) return;
+
+  const membership = await tx.assetKit.findFirst({
+    where: {
+      assetId: { in: assetIds },
+      organizationId,
+      asset: { type: AssetType.INDIVIDUAL },
+    },
+    select: {
+      asset: { select: { id: true, title: true } },
+      kit: { select: { id: true, name: true } },
+    },
+  });
+
+  if (membership) {
+    throw new ShelfError({
+      cause: null,
+      title: KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
+      message: kitMemberCustodyRefusal({
+        assetTitle: membership.asset.title,
+        kitName: membership.kit.name,
+      }),
+      additionalData: {
+        assetId: membership.asset.id,
+        kitId: membership.kit.id,
+        organizationId,
+      },
       label: "Custody",
       status: 400,
       shouldBeCaptured: false,

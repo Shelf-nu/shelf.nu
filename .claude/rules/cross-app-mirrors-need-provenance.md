@@ -48,6 +48,7 @@ Existing mirrors:
 | `lib/booking-model-reservation.ts` → `modelReservationBounds` + `canCancelModelReservation` | `apps/webapp/app/utils/booking-model-requests.ts` + the upsert bounds in `booking-model-request/service.server.ts`               | a pure `packages/*` booking module (none yet) |
 | `lib/custody-scan-quantities.ts` → `unitsFor` + the holder counts                           | `apps/webapp/app/components/scanner/drawer/custody-scan-quantities.ts`                                                           | `@shelf/quantity-control`                     |
 | `lib/batch-blockers.ts` → the custody blockers                                              | `apps/webapp/app/components/scanner/drawer/uses/custody-blockers.tsx`                                                            | a pure `packages/*` scanner module (none yet) |
+| `lib/kit-member-custody.ts` → `kitMemberCustodyBlock`                                       | `apps/webapp/app/modules/asset/utils.ts` → `isIndividualKitMember`                                                               | a pure `packages/*` asset module (none yet)   |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

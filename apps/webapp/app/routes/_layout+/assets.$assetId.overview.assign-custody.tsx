@@ -22,7 +22,10 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { AssignCustodySchema } from "~/modules/custody/schema";
-import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
+import {
+  assertNoKitDerivedCustody,
+  assertNotKitMembers,
+} from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -140,6 +143,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (asset && hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
     }
+
+    // An individually tracked kit member takes custody through its kit, so the
+    // page refuses to open for one, with the same 400 the action gives.
+    await assertNotKitMembers(db, [assetId], organizationId);
 
     const searchParams = getCurrentSearchParams(request);
 
@@ -370,6 +377,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           });
         }
 
+        // Custody of an individually tracked kit member comes from its kit.
+        // Read inside the transaction so the refusal rolls back the claim
+        // above.
+        await assertNotKitMembers(tx, [assetId], organizationId);
+
         // `kitCustodyId: null` — this assign owns only operator-assigned rows.
         // A row a kit put here belongs to the kit, and deleting it would leave
         // the KitCustody naming a custodian for an asset that no longer has
@@ -423,8 +435,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return updated;
       })
       .catch((cause) => {
-        // Deliberate, user-facing failures (the CHECKED_OUT conflict above)
-        // must survive this wrapper. `ShelfError` inherits `title` and `status`
+        // Deliberate, user-facing failures (the CHECKED_OUT conflict and the
+        // kit guards above) must survive this wrapper. `ShelfError` inherits `title` and `status`
         // from its cause but ALWAYS assigns its own `message`
         // (`~/utils/error.ts`), and the form renders only
         // `actionData.error.message` — so wrapping would swap the specific

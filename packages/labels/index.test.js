@@ -32,10 +32,13 @@ import {
   CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
+  KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
   isAuditCompleted,
+  kitMemberCustodyBlockedReason,
+  kitMemberCustodyRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -243,4 +246,27 @@ test("CONSUMPTION_TYPE maps cover the ConsumptionType enum", () => {
     CONSUMPTION_TYPE_DESCRIPTIONS,
     Object.keys(CONSUMPTION_TYPE_LABELS)
   );
+});
+
+test("the kit-member custody reasons name the kit and give both ways out", () => {
+  // The single-asset reason, the server refusal and the bulk reason are read
+  // side by side (a disabled menu item, then the 400 from a direct request), so
+  // all three must offer the same two ways out.
+  const waysOut =
+    /Assign custody to the kit, or remove (the asset|them) from the kit first\.$/;
+
+  assert.equal(
+    kitMemberCustodyBlockedReason("Camera Kit"),
+    'This asset is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.equal(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    '"Tripod" is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.match(kitMemberCustodyBlockedReason("Camera Kit"), waysOut);
+  assert.match(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    waysOut
+  );
+  assert.match(KIT_MEMBERS_CUSTODY_BLOCKED_REASON, waysOut);
 });
