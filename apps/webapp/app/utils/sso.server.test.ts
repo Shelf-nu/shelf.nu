@@ -169,7 +169,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       });
 
       await expect(resolveUserAndOrgForSsoCallback(baseInput)).rejects.toThrow(
-        /linked to a personal account/
+        /has not been moved to single sign-on yet/
       );
 
       expect(mockAuth.getAuthUserById).toHaveBeenCalledWith(ORIGINAL_UUID);
@@ -221,7 +221,7 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       });
 
       await expect(resolveUserAndOrgForSsoCallback(baseInput)).rejects.toThrow(
-        /linked to a personal account/
+        /has not been moved to single sign-on yet/
       );
 
       expect(mockAuth.getAuthUserById).toHaveBeenCalledWith(shelfUser.id);

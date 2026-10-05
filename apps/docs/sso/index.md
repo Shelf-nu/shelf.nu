@@ -80,7 +80,7 @@ If users on your domain already have standard (email/password) Shelf accounts, f
 - **SSO-only login is on by default.** If you want to set up and test SSO with a few users first, Shelf staff can temporarily relax it: while it is off for **every** workspace that uses SSO for your domain, accounts on the domain that are not converted yet can still sign in with their password (converted accounts always use SSO). If any of those workspaces keeps it on, it applies to the whole domain. Ask for it to be turned back on once everyone is converted.
 - **If your identity provider becomes unavailable**, Shelf support can revert a converted owner of the workspace that uses SSO for the domain to standard login. The owner then sets a new password with **Forgot password** on the login page and signs in with it. Other accounts can be reverted only while SSO-only login is relaxed for every workspace linked to the domain (during setup), or once the domain no longer uses SSO; otherwise they would still be refused a password login.
 
-Mixing SSO and standard (password) users on the same domain, apart from the workspace owner described above, is not currently supported. If you need this, contact support.
+Keeping SSO and standard (password) users side by side on the same domain for good, apart from the workspace owner described above, is not currently supported: the temporary relaxation described above is meant for setup and testing, and new accounts on the domain can only join through SSO. If you need a permanent mix, contact support.
 
 ### Disable SSO for your team [#](#disable-sso-for-your-team)
 

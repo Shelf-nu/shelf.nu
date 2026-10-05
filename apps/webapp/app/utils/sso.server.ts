@@ -134,9 +134,9 @@ async function assertSessionHoldsDomainProviderIdentity(
 function createEmailAccountExistsError() {
   return new ShelfError({
     cause: null,
-    title: "User already exists",
+    title: "Account not on single sign-on yet",
     message:
-      "It looks like the email you're using is linked to a personal account in Shelf. Please contact our support team to update your personal workspace to a different email account.",
+      "This email already has a Shelf account that has not been moved to single sign-on yet. Ask your Shelf administrator or our support team to convert it: you keep all your data and workspaces, and can then sign in with SSO.",
     label: "Auth",
     shouldBeCaptured: false,
   });
