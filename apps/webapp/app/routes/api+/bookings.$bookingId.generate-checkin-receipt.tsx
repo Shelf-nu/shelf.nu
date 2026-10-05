@@ -128,6 +128,7 @@ export const loader = async ({
       returnedAt: printMoment(receipt.returnedAt),
       latenessNote: receipt.latenessNote,
       checkedInByNames: receipt.checkedInByNames,
+      checkedInHow: receipt.checkedInHow,
     };
 
     return data(payload({ pdfMeta }));

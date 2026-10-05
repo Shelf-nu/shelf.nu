@@ -217,6 +217,16 @@ describe("fulfil-and-checkout action", () => {
     expect(bookingSettingsMock).toHaveBeenCalledWith("org-1");
   });
 
+  it("records every unit the fulfil scanner sends out as scanned on the web", async () => {
+    await post({ roles: [OrganizationRoles.ADMIN] });
+
+    expect(fulfilMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "web", method: "scanned" },
+      })
+    );
+  });
+
   it("checks ownership before it reads the workspace settings", async () => {
     // A SELF_SERVICE user on someone else's booking is refused first; the
     // explicit check-out rule is never consulted for a booking they cannot

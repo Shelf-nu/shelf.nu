@@ -102,6 +102,12 @@ export type CheckoutDispositionInput = z.infer<
  */
 export const partialCheckoutAssetsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
+  /**
+   * Rows the operator checked "without scanning" rather than scanning. The
+   * action records them as `"selected"` while the rest of the batch stays
+   * `"scanned"`; absent from the list dialogs, which never scan.
+   */
+  selectedAssetIds: z.array(z.string()).optional(),
   checkouts: z
     .string()
     .optional()
@@ -594,6 +600,26 @@ export default function PartialCheckoutDrawer({
     return [...out];
   }, [items, qtyByBookingAssetId, expectedAssets]);
 
+  /**
+   * Assets the operator checked "without scanning": their entry sits under a
+   * synthetic quick-check-out key rather than a scanned QR id. The action
+   * records these rows as selected and every other row of the batch as
+   * scanned, so the activity line and the receipt can say which was which.
+   */
+  const selectedAssetIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          Object.entries(items).flatMap(([key, item]) =>
+            key.startsWith(QUICK_CHECKOUT_QR_PREFIX) && item?.data?.id
+              ? [item.data.id]
+              : []
+          )
+        )
+      ),
+    [items]
+  );
+
   // Serialize the active qty slices into the `checkouts` JSON payload
   // submitted alongside `assetIds[]`. Empty / 0 quantities are skipped
   // — the schema requires `quantity >= 1`.
@@ -1074,6 +1100,7 @@ export default function PartialCheckoutDrawer({
         form={
           <CustomForm
             assetIdsForCheckout={assetIdsForCheckout}
+            selectedAssetIds={selectedAssetIds}
             checkoutsPayload={checkoutsPayload}
             isEarlyCheckout={isEarlyCheckout}
             booking={booking}
@@ -1576,6 +1603,8 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 // Custom form component that handles early check-out dialog
 type CustomFormProps = {
   assetIdsForCheckout: string[];
+  /** Rows checked "without scanning"; posted so the action records them as selected. */
+  selectedAssetIds: string[];
   /**
    * Per-slice qty payload (Wave B). Emitted alongside `assetIds[]` as a
    * single JSON-encoded `checkouts` hidden field — same pattern the
@@ -1590,6 +1619,7 @@ type CustomFormProps = {
 
 const CustomForm = ({
   assetIdsForCheckout,
+  selectedAssetIds,
   checkoutsPayload,
   isEarlyCheckout,
   booking,
@@ -1630,6 +1660,15 @@ const CustomForm = ({
             value={JSON.stringify(checkoutsPayload)}
           />
         ) : null}
+
+        {selectedAssetIds.map((assetId, index) => (
+          <input
+            key={`selectedAssetIds-${assetId}`}
+            type="hidden"
+            name={`selectedAssetIds[${index}]`}
+            value={assetId}
+          />
+        ))}
 
         {/* Cancel button */}
         <Button type="button" variant="secondary" to=".." className="ml-auto">

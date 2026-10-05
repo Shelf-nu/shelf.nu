@@ -9,6 +9,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -49,6 +50,7 @@ import {
  *   bookingId: string,
  *   assetIds: string[],   // concrete assets the operator scanned
  *   kitIds?: string[],    // scanned kits; the server resolves their members, whose INDIVIDUAL units answer reservations
+ *   method?: "scanned" | "selected", // how the app collected the units; absent = recorded as null
  *   timeZone?: string,    // device tz for scheduler/email timestamps
  * }
  *
@@ -73,16 +75,20 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds, timeZone } = await parseMobileBody(
-      z.object({
-        bookingId: z.string().min(1),
-        assetIds: z.array(z.string()).default([]),
-        kitIds: z.array(z.string()).optional().default([]),
-        timeZone: z.string().optional(),
-      }),
-      request,
-      "Booking"
-    );
+    const { bookingId, assetIds, kitIds, method, timeZone } =
+      await parseMobileBody(
+        z.object({
+          bookingId: z.string().min(1),
+          assetIds: z.array(z.string()).default([]),
+          kitIds: z.array(z.string()).optional().default([]),
+          // The fulfil scanner declares `"scanned"`; older bundles send nothing
+          // and are recorded as null rather than guessed.
+          method: z.enum(CLIENT_DECLARED_BOOKING_METHODS).optional(),
+          timeZone: z.string().optional(),
+        }),
+        request,
+        "Booking"
+      );
 
     // Load the booking's reservation window so the full check-out can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
@@ -156,6 +162,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // "without-adjusted-date" checkout).
       from: existingBooking.from,
       to: existingBooking.to,
+      provenance: { surface: "phone", method: method ?? null },
     });
 
     return data({

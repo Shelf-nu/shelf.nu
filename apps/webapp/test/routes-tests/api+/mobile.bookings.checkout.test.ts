@@ -181,6 +181,8 @@ describe("POST /api/mobile/bookings/checkout", () => {
       userId: "user-1",
       from: BOOKING_FROM,
       to: BOOKING_TO,
+      // "Check Out All Assets" is the phone's one tap; the server states it.
+      provenance: { surface: "phone", method: "quick" },
     });
   });
 

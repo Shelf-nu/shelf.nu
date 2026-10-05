@@ -14,6 +14,7 @@
  * @see {@link file://./explicit-requirement-settings-card.tsx}
  */
 import type { ReactNode } from "react";
+import { EXPLICIT_REQUIREMENT_LABELS } from "@shelf/labels";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -60,7 +61,7 @@ vi.mock("~/hooks/user-user-role-helper", () => ({
   useUserRoleHelper: () => mockUseUserRoleHelper(),
 }));
 
-const checkoutHeader = { title: "Explicit check-out requirement" };
+const checkoutHeader = { title: EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.TITLE };
 
 /** The form the card handed to `fetcher.submit`, as the action receives it. */
 function submittedFormData() {
@@ -89,12 +90,12 @@ describe("ExplicitCheckoutSettings", () => {
 
     expect(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Admins",
+        name: "Admins",
       })
     ).toHaveAttribute("aria-checked", "true");
     expect(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Self Service",
+        name: "Self Service users",
       })
     ).toHaveAttribute("aria-checked", "false");
   });
@@ -112,7 +113,7 @@ describe("ExplicitCheckoutSettings", () => {
 
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Self Service",
+        name: "Self Service users",
       })
     );
 
@@ -137,7 +138,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
     const adminSwitch = () =>
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Admins",
+        name: "Admins",
       });
 
     fireEvent.click(adminSwitch());
@@ -155,7 +156,7 @@ describe("ExplicitCheckoutSettings", () => {
     expect(adminSwitch()).toHaveAttribute("aria-checked", "false");
     expect(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Self Service",
+        name: "Self Service users",
       })
     ).toHaveAttribute("aria-checked", "true");
 
@@ -163,7 +164,7 @@ describe("ExplicitCheckoutSettings", () => {
     mockSubmit.mockClear();
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Self Service",
+        name: "Self Service users",
       })
     );
     const formData = submittedFormData();
@@ -185,7 +186,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
 
     const adminSwitch = screen.getByRole("switch", {
-      name: "Require explicit check-out for Admins",
+      name: "Admins",
     });
     expect(adminSwitch).toBeDisabled();
     expect(
@@ -201,7 +202,7 @@ describe("ExplicitCheckinSettings", () => {
   it("posts its own fields under the check-in intent", () => {
     render(
       <ExplicitCheckinSettings
-        header={{ title: "Explicit check-in requirement" }}
+        header={{ title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE }}
         defaultValues={{
           requireExplicitCheckinForAdmin: false,
           requireExplicitCheckinForSelfService: true,
@@ -211,7 +212,7 @@ describe("ExplicitCheckinSettings", () => {
 
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Require explicit check-in for Admins",
+        name: "Admins",
       })
     );
 
@@ -219,5 +220,65 @@ describe("ExplicitCheckinSettings", () => {
     expect(formData.get("intent")).toBe("updateExplicitCheckin");
     expect(formData.get("requireExplicitCheckinForAdmin")).toBe("on");
     expect(formData.get("requireExplicitCheckinForSelfService")).toBe("on");
+  });
+});
+
+describe("what the cards say", () => {
+  it("states on the check-in card itself who is never restricted, and what the switch removes", () => {
+    render(
+      <ExplicitCheckinSettings
+        header={{ title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE }}
+        defaultValues={{
+          requireExplicitCheckinForAdmin: false,
+          requireExplicitCheckinForSelfService: false,
+        }}
+      />
+    );
+
+    // Always visible text, not a tooltip: a reader must not have to hover to
+    // learn that the owner is exempt and that Base users cannot check in.
+    expect(
+      screen.getByText(
+        "The workspace owner is never restricted. Base users cannot check in."
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Removes the one-click check-in for Self Service users. They check items in by scanning them or by selecting them from the list."
+      )
+    ).toBeVisible();
+  });
+
+  it("uses the same words on the check-out card, verb aside", () => {
+    render(
+      <ExplicitCheckoutSettings
+        header={checkoutHeader}
+        defaultValues={{
+          requireExplicitCheckoutForAdmin: false,
+          requireExplicitCheckoutForSelfService: false,
+        }}
+      />
+    );
+
+    expect(
+      screen.getByText(
+        "The workspace owner is never restricted. Base users cannot check out."
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Removes the one-click check-out for Admins. They check items out by scanning them or by selecting them from the list."
+      )
+    ).toBeVisible();
+    // Both cards name the roles the same way, so the two cards read as one rule.
+    expect(screen.getByRole("switch", { name: "Admins" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Self Service users" })
+    ).toBeInTheDocument();
   });
 });

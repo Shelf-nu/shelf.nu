@@ -2,10 +2,15 @@
  * Explicit Requirement Settings Card
  *
  * Owner-only card on Settings > Bookings with one switch per restricted role
- * (Admin, Self Service). A switch that is on means that role must move a
+ * (Admins, Self Service users). A switch that is on means that role must move a
  * booking's assets through the explicit flow (scan or select them) instead of
  * the one-click action. The check-in and check-out cards share this layout and
  * differ only in their fields, copy and action intent.
+ *
+ * The card states on its face who the switches never apply to: the workspace
+ * owner is never restricted, and Base users hold no check-in or check-out
+ * permission. That sentence is plain text under the heading, never a tooltip,
+ * so nobody has to hover to learn why a switch changes nothing for a role.
  *
  * The switches save on change: every change submits the whole form through a
  * fetcher, so the action always receives both values. Only the workspace owner
@@ -40,16 +45,21 @@ export type ExplicitRequirementSwitch = {
  * Renders a save-on-change card of explicit-requirement switches.
  *
  * @param props.header - Card title and sub-heading
+ * @param props.exemption - The always-visible sentence naming who is never
+ *   restricted by these switches
  * @param props.intent - Action intent that persists this card's switches
  * @param props.switches - One switch per role, in display order
  * @returns The settings card
  */
 export function ExplicitRequirementSettingsCard({
   header,
+  exemption,
   intent,
   switches,
 }: {
   header: { title: string; subHeading?: string };
+  /** Who the switches never apply to, shown under the heading at all times */
+  exemption: string;
   intent: "updateExplicitCheckin" | "updateExplicitCheckout";
   switches: ExplicitRequirementSwitch[];
 }) {
@@ -79,6 +89,7 @@ export function ExplicitRequirementSettingsCard({
       <div className="mb-4 border-b pb-4">
         <h3 className="text-text-lg font-semibold">{header.title}</h3>
         <p className="text-sm text-gray-600">{header.subHeading}</p>
+        <p className="mt-2 text-sm font-medium text-gray-700">{exemption}</p>
       </div>
       <div>
         <fetcher.Form

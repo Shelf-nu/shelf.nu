@@ -33,6 +33,7 @@ import {
   QUICK_CHECKOUT_QR_PREFIX,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { partialCheckoutAssetsSchema } from "./partial-checkout-drawer";
 
 import PartialCheckoutDrawer from "./partial-checkout-drawer";
 
@@ -793,5 +794,20 @@ describe("PartialCheckoutDrawer", () => {
     expect(screen.queryByText("Elysian")).not.toBeInTheDocument();
     expect(screen.queryByText("Justiciar")).not.toBeInTheDocument();
     expect(screen.queryByText("Spectral")).not.toBeInTheDocument();
+  });
+});
+
+describe("partialCheckoutAssetsSchema: rows checked without scanning", () => {
+  it("accepts the ticked rows next to the scanned ones", () => {
+    const parsed = partialCheckoutAssetsSchema.parse({
+      assetIds: ["asset-1", "asset-2"],
+      selectedAssetIds: ["asset-2"],
+    });
+    expect(parsed.selectedAssetIds).toEqual(["asset-2"]);
+  });
+
+  it("needs no ticked rows, so the list dialogs post as before", () => {
+    const parsed = partialCheckoutAssetsSchema.parse({ assetIds: ["asset-1"] });
+    expect(parsed.selectedAssetIds).toBeUndefined();
   });
 });

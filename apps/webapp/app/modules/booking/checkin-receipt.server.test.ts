@@ -23,6 +23,9 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: { findMany: vi.fn() },
     consumptionLog: { findMany: vi.fn() },
     partialBookingCheckin: { findMany: vi.fn() },
+    // why: the check-in events carry how each row came back; a case stages
+    // them to prove the method reaches the row, and defaults to none.
+    activityEvent: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
   },
 }));
@@ -162,6 +165,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockOf(db.partialBookingCheckin.findMany).mockResolvedValue([]);
   mockOf(db.consumptionLog.findMany).mockResolvedValue([]);
+  mockOf(db.activityEvent.findMany).mockResolvedValue([]);
   mockOf(resolveCheckInTimes).mockResolvedValue(new Map());
 });
 
@@ -214,6 +218,111 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.checkedInByNames).toEqual(["Ada Lovelace"]);
     expect(receipt.rows[0].checkedInByName).toBe("Ada Lovelace");
     expect(receipt.rows[0].title).toBe("Tripod");
+  });
+
+  it("says how each returned row came back, from its check-in event", async () => {
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+          pdfRow("ba-3", "asset-3", "Cable"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2", "ba-3"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      // An earlier trip of asset-1, superseded by the later event below.
+      {
+        assetId: "asset-1",
+        occurredAt: new Date("2026-08-01T10:00:00.000Z"),
+        meta: { method: "selected", surface: "web" },
+      },
+      {
+        assetId: "asset-1",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-2",
+        occurredAt: CHECKED_IN_AT,
+        meta: { quantity: 1, method: "selected", surface: "web" },
+      },
+      // Written before methods were recorded: nothing to say for asset-3.
+      { assetId: "asset-3", occurredAt: CHECKED_IN_AT, meta: {} },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([
+      "Scanned on the phone",
+      "Selected on the web",
+      null,
+    ]);
+    // The rows disagree, so there is no single line for the header.
+    expect(receipt.checkedInHow).toBeNull();
+    expect(mockOf(db.activityEvent.findMany)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          action: { in: ["BOOKING_CHECKED_IN", "BOOKING_PARTIAL_CHECKIN"] },
+        }),
+      })
+    );
+  });
+
+  it("gives the header one method line when every returned row agrees", async () => {
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [
+          pdfRow("ba-1", "asset-1", "Tripod"),
+          pdfRow("ba-2", "asset-2", "Monitor"),
+        ],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue(
+      ["ba-1", "ba-2"].map((id, index) => ({
+        id,
+        assetId: `asset-${index + 1}`,
+        quantity: 1,
+        assetKitId: null,
+        checkedOutAt: CHECKED_OUT_AT,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 0,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.INDIVIDUAL },
+      }))
+    );
+    mockOf(db.activityEvent.findMany).mockResolvedValue(
+      ["asset-1", "asset-2"].map((assetId) => ({
+        assetId,
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "quick", surface: "web" },
+      }))
+    );
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.checkedInHow).toBe("In one click on the web");
   });
 
   it("dates a partly returned quantity slice from the log that recorded it", async () => {

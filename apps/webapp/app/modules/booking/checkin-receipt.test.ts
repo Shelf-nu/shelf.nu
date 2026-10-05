@@ -24,6 +24,7 @@ import {
   buildCheckinReceipt,
   formatLatenessNote,
   resolveSentUnits,
+  summariseCheckinMethods,
 } from "./checkin-receipt";
 
 const CHECKED_OUT_AT = new Date("2026-09-01T09:00:00.000Z");
@@ -847,5 +848,32 @@ describe("resolveSentUnits", () => {
         checkedOutQuantity: 6,
       })
     ).toBe(6);
+  });
+});
+
+describe("summariseCheckinMethods", () => {
+  it("gives one line when every recorded row came back the same way", () => {
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: "Scanned on the phone" },
+        { checkedInHow: "Scanned on the phone" },
+        // A row that recorded nothing does not break the agreement.
+        { checkedInHow: null },
+      ])
+    ).toBe("Scanned on the phone");
+  });
+
+  it("gives nothing when the rows disagree, so each prints its own", () => {
+    expect(
+      summariseCheckinMethods([
+        { checkedInHow: "Scanned on the phone" },
+        { checkedInHow: "Selected on the web" },
+      ])
+    ).toBeNull();
+  });
+
+  it("gives nothing when no row recorded a method", () => {
+    expect(summariseCheckinMethods([{ checkedInHow: null }])).toBeNull();
+    expect(summariseCheckinMethods([])).toBeNull();
   });
 });

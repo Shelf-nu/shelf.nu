@@ -333,6 +333,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
       requireExplicitCheckout,
+      // The fulfil scanner: every unit it sends out was scanned here.
+      provenance: { surface: "web", method: "scanned" },
     });
 
     sendNotification({

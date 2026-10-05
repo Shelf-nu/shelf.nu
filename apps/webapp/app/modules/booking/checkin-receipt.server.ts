@@ -10,7 +10,9 @@
  * `fetchAllPdfRelatedData`, so the two sheets can never disagree about what was
  * booked. This module adds only what the checklist has no reason to read: the
  * slice check-out / check-in markers, the disposition units attributed to each
- * slice, the completion event, and the users behind the markers.
+ * slice, the completion event, the check-in events that say how each row came
+ * back (scanned, selected, one click; web or phone), and the users behind the
+ * markers.
  *
  * @see {@link file://./checkin-receipt.ts} — the reconciliation rules
  * @see {@link file://./pdf-helpers.ts} — the shared row list
@@ -34,7 +36,12 @@ import {
   buildCheckinReceipt,
   formatLatenessNote,
   resolveSentUnits,
+  summariseCheckinMethods,
 } from "./checkin-receipt";
+import {
+  describeBookingMethodCapitalised,
+  readBookingMethodMeta,
+} from "./checkout-method";
 import {
   getLatenessMs,
   resolvePlannedEnd,
@@ -98,7 +105,22 @@ export type CheckinReceiptDbResult = {
   latenessNote: CheckinLatenessNote | null;
   /** Distinct receiving users, ordered by their first check-in. */
   checkedInByNames: string[];
+  /**
+   * The one method line for the header when every returned row recorded the
+   * same method; `null` when they differ or none recorded one.
+   */
+  checkedInHow: string | null;
 };
+
+/**
+ * The events that say how a row was checked in. Both the one-click check-in
+ * and the progressive one write one per asset, each carrying `meta.method` and
+ * `meta.surface`.
+ */
+const CHECKIN_EVENT_ACTIONS = [
+  "BOOKING_CHECKED_IN",
+  "BOOKING_PARTIAL_CHECKIN",
+] as const;
 
 /**
  * Reads a booking's check-in receipt.
@@ -148,56 +170,87 @@ export async function fetchCheckinReceiptData(
     // returns, and the slice projection behind its rows keeps only the columns
     // the checklist prints — so the markers this sheet is built on need their
     // own read.
-    const [slices, dispositionLogs, checkInTimes, checkinSessions] =
-      await Promise.all([
-        db.bookingAsset.findMany({
-          where: { bookingId, booking: { organizationId } },
-          select: {
-            id: true,
-            assetId: true,
-            quantity: true,
-            assetKitId: true,
-            checkedOutAt: true,
-            checkedOutById: true,
-            checkedOutQuantity: true,
-            checkedInAt: true,
-            checkedInById: true,
-            asset: { select: { type: true } },
-          },
-        }),
-        db.consumptionLog.findMany({
-          where: {
-            bookingId,
-            booking: { organizationId },
-            category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
-          },
-          select: {
-            assetId: true,
-            bookingAssetId: true,
-            category: true,
-            quantity: true,
-            // A quantity slice returned in part never gets a check-in marker,
-            // so its log is the only record of when those units came back and
-            // who took them.
-            createdAt: true,
-            userId: true,
-          },
-        }),
-        resolveCheckInTimes([bookingId]),
-        // Progressive check-in sessions, for slices reconciled before the
-        // per-slice markers existed. The completion gate accepts a session at or
-        // after a slice's departure as proof an INDIVIDUAL asset came back, so
-        // the receipt reads them too — otherwise a booking the gate closed prints
-        // as still out.
-        db.partialBookingCheckin.findMany({
-          where: { bookingId, booking: { organizationId } },
-          select: {
-            assetIds: true,
-            checkinTimestamp: true,
-            checkedInById: true,
-          },
-        }),
-      ]);
+    const [
+      slices,
+      dispositionLogs,
+      checkInTimes,
+      checkinSessions,
+      checkinEvents,
+    ] = await Promise.all([
+      db.bookingAsset.findMany({
+        where: { bookingId, booking: { organizationId } },
+        select: {
+          id: true,
+          assetId: true,
+          quantity: true,
+          assetKitId: true,
+          checkedOutAt: true,
+          checkedOutById: true,
+          checkedOutQuantity: true,
+          checkedInAt: true,
+          checkedInById: true,
+          asset: { select: { type: true } },
+        },
+      }),
+      db.consumptionLog.findMany({
+        where: {
+          bookingId,
+          booking: { organizationId },
+          category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+        },
+        select: {
+          assetId: true,
+          bookingAssetId: true,
+          category: true,
+          quantity: true,
+          // A quantity slice returned in part never gets a check-in marker,
+          // so its log is the only record of when those units came back and
+          // who took them.
+          createdAt: true,
+          userId: true,
+        },
+      }),
+      resolveCheckInTimes([bookingId]),
+      // Progressive check-in sessions, for slices reconciled before the
+      // per-slice markers existed. The completion gate accepts a session at or
+      // after a slice's departure as proof an INDIVIDUAL asset came back, so
+      // the receipt reads them too: otherwise a booking the gate closed prints
+      // as still out.
+      db.partialBookingCheckin.findMany({
+        where: { bookingId, booking: { organizationId } },
+        select: {
+          assetIds: true,
+          checkinTimestamp: true,
+          checkedInById: true,
+        },
+      }),
+      // How each asset came back. Events carry no org column of their own
+      // beyond `organizationId`, so the booking's org scopes them.
+      db.activityEvent.findMany({
+        where: {
+          bookingId,
+          organizationId,
+          action: { in: [...CHECKIN_EVENT_ACTIONS] },
+        },
+        select: { assetId: true, occurredAt: true, meta: true },
+        // Ascending so the latest check-in of a re-dispatched asset wins.
+        orderBy: { occurredAt: "asc" },
+      }),
+    ]);
+
+    // The method the latest check-in of each asset recorded. An event without
+    // a readable method (written before methods were recorded, or by a phone
+    // bundle that declared none) leaves the asset without a phrase, so the
+    // sheet prints nothing rather than a guess.
+    const checkedInHowByAsset = new Map<string, string | null>();
+    for (const event of checkinEvents) {
+      if (!event.assetId) continue;
+      const meta = readBookingMethodMeta(event.meta);
+      checkedInHowByAsset.set(
+        event.assetId,
+        meta && meta.method ? describeBookingMethodCapitalised(meta) : null
+      );
+    }
 
     // The most recent session naming each asset. Kept as a moment rather than a
     // flag: a slice that departed twice has a session for the first trip whose
@@ -418,6 +471,12 @@ export async function fetchCheckinReceiptData(
             .map((id) => nameByUserId.get(id) ?? "")
             .filter((name) => name !== "")
             .join(", "),
+          // Only a row the sheet dates as returned says how it came back; a
+          // row still out has no return to describe.
+          checkedInHow:
+            row.checkedInAt !== null
+              ? checkedInHowByAsset.get(row.assetId) ?? null
+              : null,
         },
       ];
     });
@@ -468,6 +527,7 @@ export async function fetchCheckinReceiptData(
       checkedInByNames: checkedInUserIdsInOrder
         .map((id) => nameByUserId.get(id) ?? "")
         .filter((name) => name !== ""),
+      checkedInHow: summariseCheckinMethods(rows),
     };
   } catch (cause) {
     throw new ShelfError({

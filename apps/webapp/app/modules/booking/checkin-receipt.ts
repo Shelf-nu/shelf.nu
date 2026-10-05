@@ -259,7 +259,36 @@ export type CheckinReceiptRowAsset = {
    * Never substituted with the custodian or the printing user.
    */
   checkedInByName: string;
+  /**
+   * How this row was checked in, as the activity event recorded it:
+   * "Scanned on the phone", "Selected on the web", "In one click on the web".
+   * `null` when nothing recorded a method, which is every return made before
+   * the method was recorded. Never guessed from the surface alone.
+   */
+  checkedInHow: string | null;
 };
+
+/**
+ * The one method line the sheet's header prints when every row that recorded
+ * a method recorded the same one. Rows then do not repeat it.
+ *
+ * `null` when no row recorded a method, or when the rows disagree; the rows
+ * then carry their own phrase, so a mixed return prints what happened to each
+ * item rather than a majority.
+ *
+ * @param rows - The printed rows, with their recorded method phrase
+ * @returns The shared phrase, or `null`
+ */
+export function summariseCheckinMethods(
+  rows: ReadonlyArray<{ checkedInHow: string | null }>
+): string | null {
+  const phrases = new Set(
+    rows
+      .map((row) => row.checkedInHow)
+      .filter((phrase): phrase is string => phrase !== null)
+  );
+  return phrases.size === 1 ? [...phrases][0] : null;
+}
 
 /**
  * A printed row on the wire: the check-in moment is already a formatted date,
@@ -329,6 +358,12 @@ export type CheckinReceiptView = {
   latenessNote: CheckinLatenessNote | null;
   /** Distinct receiving users, ordered by their first check-in. */
   checkedInByNames: string[];
+  /**
+   * How the items were checked in, when every row with a recorded method
+   * agrees ({@link summariseCheckinMethods}); otherwise `null` and each row
+   * prints its own.
+   */
+  checkedInHow: string | null;
 };
 
 /** Arguments for {@link buildCheckinReceipt}. */

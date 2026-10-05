@@ -61,6 +61,40 @@ describe("checkout-assets action", () => {
     vi.clearAllMocks();
   });
 
+  it("records the page's batch as scanned on the web, leaving ticked rows to the form", async () => {
+    // The page is the scanner: everything on it was scanned unless the drawer
+    // named the row in `selectedAssetIds[]`, which the sink reads off the form.
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userOrganizations: [],
+    });
+    getBookingMock.mockResolvedValue({
+      id: "booking-1",
+      status: "RESERVED",
+      creatorId: "someone-else",
+      custodianUserId: "someone-else",
+      from: new Date("2026-01-01T09:00:00Z"),
+      to: new Date("2099-01-02T09:00:00Z"),
+    });
+    checkoutAssetsMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+    await action({
+      request: new Request(
+        "https://app.shelf.nu/bookings/booking-1/overview/checkout-assets",
+        { method: "POST", body: new URLSearchParams({ "assetIds[0]": "a-1" }) }
+      ),
+      params: { bookingId: "booking-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as never);
+
+    expect(checkoutAssetsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "web", method: "scanned" },
+      })
+    );
+  });
+
   it("refuses SELF_SERVICE on a booking they do not hold with a 403 and no check-out", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",

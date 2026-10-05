@@ -32,6 +32,9 @@ import {
   CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
+  EXPLICIT_REQUIREMENT_LABELS,
+  EXPLICIT_REQUIREMENT_ROLE_LABELS,
+  explicitRequirementSwitchDescription,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -243,4 +246,50 @@ test("CONSUMPTION_TYPE maps cover the ConsumptionType enum", () => {
     CONSUMPTION_TYPE_DESCRIPTIONS,
     Object.keys(CONSUMPTION_TYPE_LABELS)
   );
+});
+
+// ---------------------------------------------------------------------------
+// Explicit check-in / check-out requirement
+// ---------------------------------------------------------------------------
+
+test("the two explicit-requirement cards say the same thing, verb aside", () => {
+  const { CHECKIN, CHECKOUT } = EXPLICIT_REQUIREMENT_LABELS;
+  // A reader who learned one card must be able to read the other without
+  // re-reading it, so the sentences differ only in "check in" vs "check out".
+  const sameShape = (a, b) =>
+    a.replace(/check-in|check in/gi, "check-X") ===
+    b.replace(/check-out|check out/gi, "check-X");
+  assert.ok(sameShape(CHECKIN.TITLE, CHECKOUT.TITLE));
+  assert.ok(sameShape(CHECKIN.EXEMPTION, CHECKOUT.EXEMPTION));
+  assert.ok(sameShape(CHECKIN.PHONE_HINT, CHECKOUT.PHONE_HINT));
+});
+
+test("the exemption names both roles the switches never apply to", () => {
+  for (const direction of ["CHECKIN", "CHECKOUT"]) {
+    const sentence = EXPLICIT_REQUIREMENT_LABELS[direction].EXEMPTION;
+    assert.match(sentence, /workspace owner is never restricted/);
+    assert.match(sentence, /Base users cannot check (in|out)/);
+  }
+});
+
+test("a switch description names its role and both explicit ways", () => {
+  const admin = explicitRequirementSwitchDescription("CHECKIN", "ADMIN");
+  assert.equal(
+    admin,
+    "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+  );
+  const selfService = explicitRequirementSwitchDescription(
+    "CHECKOUT",
+    "SELF_SERVICE"
+  );
+  assert.equal(
+    selfService,
+    "Removes the one-click check-out for Self Service users. They check items out by scanning them or by selecting them from the list."
+  );
+});
+
+test("the switch roles are exactly the two the rule can cover", () => {
+  // OWNER is exempt and BASE holds no check-in or check-out permission, so a
+  // switch for either would be a switch that changes nothing.
+  assertSameKeys(EXPLICIT_REQUIREMENT_ROLE_LABELS, ["ADMIN", "SELF_SERVICE"]);
 });

@@ -39,6 +39,7 @@ import {
   bookingExpectedAssetsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { partialCheckinAssetsSchema } from "./partial-checkin-drawer";
 
 import PartialCheckinDrawer from "./partial-checkin-drawer";
 
@@ -466,5 +467,20 @@ describe("PartialCheckinDrawer", () => {
     // Substring match — the blocker copy may evolve. We key off the
     // stable phrase about "no quantity entered".
     expect(await screen.findByText(/no quantity entered/i)).toBeInTheDocument();
+  });
+});
+
+describe("partialCheckinAssetsSchema: rows checked without scanning", () => {
+  it("accepts the ticked rows next to the scanned ones", () => {
+    const parsed = partialCheckinAssetsSchema.parse({
+      assetIds: ["asset-1", "asset-2"],
+      selectedAssetIds: ["asset-2"],
+    });
+    expect(parsed.selectedAssetIds).toEqual(["asset-2"]);
+  });
+
+  it("needs no ticked rows, so the list dialogs post as before", () => {
+    const parsed = partialCheckinAssetsSchema.parse({ assetIds: ["asset-1"] });
+    expect(parsed.selectedAssetIds).toBeUndefined();
   });
 });

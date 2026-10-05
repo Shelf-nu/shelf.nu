@@ -163,7 +163,55 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
       assetIds: ["asset-1", "asset-2"],
       userId: "user-1",
       hints: { timeZone: "UTC", locale: "en-US" },
+      // A bundle that declared no method is recorded as null, never guessed.
+      provenance: { surface: "phone", method: null },
     });
+  });
+
+  it("hands the service the method the app declared, on the phone", async () => {
+    (partialCheckinBooking as any).mockResolvedValue({
+      checkedInAssetCount: 1,
+      remainingAssetCount: 0,
+      isComplete: true,
+      booking: { id: "booking-1", name: "Test Booking", status: "COMPLETE" },
+    });
+
+    for (const method of ["scanned", "selected"]) {
+      await action(
+        createActionArgs({
+          request: createPartialCheckinRequest({
+            bookingId: "booking-1",
+            assetIds: ["asset-1"],
+            method,
+          }),
+        })
+      );
+      expect(partialCheckinBooking).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provenance: { surface: "phone", method },
+        })
+      );
+    }
+  });
+
+  it("refuses a method the server does not know, so nothing wrong is ever recorded", async () => {
+    (makeShelfError as any).mockImplementation((cause: any) => ({
+      message: cause?.message ?? "Validation error",
+      status: 400,
+    }));
+
+    const response = await action(
+      createActionArgs({
+        request: createPartialCheckinRequest({
+          bookingId: "booking-1",
+          assetIds: ["asset-1"],
+          method: "quick",
+        }),
+      })
+    );
+
+    expect((response as unknown as Response).status).toBe(400);
+    expect(partialCheckinBooking).not.toHaveBeenCalled();
   });
 
   it("should return 403 when user lacks checkin permission", async () => {

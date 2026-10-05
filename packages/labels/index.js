@@ -339,3 +339,62 @@ export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
   ONE_WAY: "used up",
   TWO_WAY: "returnable",
 });
+
+/**
+ * How the explicit check-in and check-out requirement is explained, on the
+ * website's two settings cards and on the phone where the quick button is
+ * hidden by it.
+ *
+ * The two directions carry the same sentences with only the verb changed, so a
+ * reader who learned one card can read the other without re-reading it. The
+ * exemption is stated in full on every surface: the workspace owner is never
+ * restricted by either switch, and Base users hold no booking check-in or
+ * check-out permission at all, so neither switch applies to them.
+ *
+ * `TITLE` names the card, `EXEMPTION` is the sentence every card shows below
+ * its heading, `PHONE_HINT` is the one line the companion renders where the
+ * one-tap button is hidden. Per-role switch text comes from
+ * {@link explicitRequirementSwitchDescription}.
+ */
+export const EXPLICIT_REQUIREMENT_LABELS = Object.freeze({
+  CHECKIN: Object.freeze({
+    TITLE: "Check-in needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check in.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check in.",
+  }),
+  CHECKOUT: Object.freeze({
+    TITLE: "Check-out needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check out.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check out.",
+  }),
+});
+
+/**
+ * The two roles the explicit requirement can be switched on for, named as the
+ * settings cards show them. OWNER and BASE are absent on purpose: see the
+ * exemption sentence in {@link EXPLICIT_REQUIREMENT_LABELS}.
+ */
+export const EXPLICIT_REQUIREMENT_ROLE_LABELS = Object.freeze({
+  ADMIN: "Admins",
+  SELF_SERVICE: "Self Service users",
+});
+
+/**
+ * Describes what one switch on an explicit-requirement card does for its role.
+ *
+ * @param {"CHECKIN"|"CHECKOUT"} direction - which card the switch sits on
+ * @param {"ADMIN"|"SELF_SERVICE"} role - the role the switch covers
+ * @returns {string} e.g. "Removes the one-click check-in for Admins. They check
+ *   items in by scanning them or by selecting them from the list."
+ */
+export function explicitRequirementSwitchDescription(direction, role) {
+  const roleLabel = EXPLICIT_REQUIREMENT_ROLE_LABELS[role];
+  if (direction === "CHECKIN") {
+    return `Removes the one-click check-in for ${roleLabel}. They check items in by scanning them or by selecting them from the list.`;
+  }
+  return `Removes the one-click check-out for ${roleLabel}. They check items out by scanning them or by selecting them from the list.`;
+}

@@ -163,7 +163,55 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       checkouts: undefined,
       userId: "user-1",
       hints: { timeZone: "UTC", locale: "en-US" },
+      // Legacy clients omit `method` too; it is recorded as null, never guessed.
+      provenance: { surface: "phone", method: null },
     });
+  });
+
+  it("hands the service the method the app declared, on the phone", async () => {
+    (partialCheckoutBooking as any).mockResolvedValue({
+      checkedOutAssetCount: 1,
+      remainingAssetCount: 1,
+      isComplete: false,
+      booking: { id: "booking-1", name: "Test Booking", status: "ONGOING" },
+    });
+
+    for (const method of ["scanned", "selected"]) {
+      await action(
+        createActionArgs({
+          request: createPartialCheckoutRequest({
+            bookingId: "booking-1",
+            assetIds: [assetCuid1],
+            method,
+          }),
+        })
+      );
+      expect(partialCheckoutBooking).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provenance: { surface: "phone", method },
+        })
+      );
+    }
+  });
+
+  it("refuses a method the server does not know", async () => {
+    (makeShelfError as any).mockImplementation((cause: any) => ({
+      message: cause?.message ?? "Validation error",
+      status: 400,
+    }));
+
+    const response = await action(
+      createActionArgs({
+        request: createPartialCheckoutRequest({
+          bookingId: "booking-1",
+          assetIds: [assetCuid1],
+          method: "quick",
+        }),
+      })
+    );
+
+    expect((response as unknown as Response).status).toBe(400);
+    expect(partialCheckoutBooking).not.toHaveBeenCalled();
   });
 
   it("passes new { checkouts: [{ assetId, quantity }] } payload through to the service", async () => {
@@ -206,6 +254,7 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       userId: "user-1",
       // Body-supplied timeZone overrides the Accept-Language/cookie hints.
       hints: expect.objectContaining({ timeZone: "Europe/Berlin" }),
+      provenance: { surface: "phone", method: null },
     });
   });
 

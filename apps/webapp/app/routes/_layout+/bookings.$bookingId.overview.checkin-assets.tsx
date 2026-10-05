@@ -479,6 +479,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
+    // Everything on this page went through the scanner, except the rows the
+    // drawer names in `selectedAssetIds`: those were checked "without
+    // scanning" and are recorded as selected.
     return await checkinAssets({
       formData,
       request,
@@ -486,6 +489,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       userId,
       authSession,
+      provenance: { surface: "web", method: "scanned" },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

@@ -163,6 +163,38 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     expect(body.remainingCount).toBe(2);
   });
 
+  it("hands the service the phone surface and the method the app declared, or null", async () => {
+    await action(
+      createActionArgs({
+        request: createRequest({
+          bookingId: "booking-1",
+          assetIds: ["dell-1"],
+          method: "scanned",
+        }),
+      })
+    );
+    expect(fulfilAndCheckOut).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: "scanned" },
+      })
+    );
+
+    // An older bundle sends no method: recorded as null, never guessed.
+    await action(
+      createActionArgs({
+        request: createRequest({
+          bookingId: "booking-1",
+          assetIds: ["dell-1"],
+        }),
+      })
+    );
+    expect(fulfilAndCheckOut).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: null },
+      })
+    );
+  });
+
   it("judges the switch by the most privileged role of the membership", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue(
       mobileUserContext({

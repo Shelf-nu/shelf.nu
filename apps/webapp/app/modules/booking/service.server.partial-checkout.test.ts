@@ -646,6 +646,73 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
+  it("records the method the phone declared, and null when the bundle sent none", async () => {
+    expect.assertions(2);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+
+    // A current bundle on the Select to Check Out path.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+      provenance: { surface: "phone", method: "selected" },
+    });
+    // An older bundle: the route knows the surface but was told no method.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-2"],
+      provenance: { surface: "phone", method: null },
+    });
+
+    const metas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKOUT")
+      .map((event) => event.meta);
+
+    expect(metas[0]).toEqual(
+      expect.objectContaining({ method: "selected", surface: "phone" })
+    );
+    // Never guessed: the method is recorded as null, the surface still as phone.
+    expect(metas[1]).toEqual(
+      expect.objectContaining({ method: null, surface: "phone" })
+    );
+  });
+
+  it("keeps the scan's method on the events when the batch covers the whole booking and delegates to the full check-out", async () => {
+    expect.assertions(1);
+
+    // Every asset of the reserved booking scanned at once: the partial path
+    // hands the batch to `checkoutBooking`, whose events must still say the
+    // rows were scanned on the web rather than nothing at all.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    const checkedOutMetas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT")
+      .map((event) => event.meta);
+
+    expect(checkedOutMetas).toEqual([
+      { method: "scanned", surface: "web" },
+      { method: "scanned", surface: "web" },
+      { method: "scanned", surface: "web" },
+    ]);
+  });
+
   it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
     expect.assertions(1);
 
