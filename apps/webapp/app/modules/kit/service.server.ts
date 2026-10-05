@@ -33,6 +33,7 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
+import { lockAssetsForKitMembership } from "~/modules/custody/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { getClientHint } from "~/utils/client-hints";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -5593,6 +5594,13 @@ export async function updateKitAssets({
       // asset's full pool — matches the backfill so there's no
       // observable change until the picker is wired up.
       if (newlyAddedAssets.length > 0) {
+        // Same lock order as a custody assignment, so the two queue instead
+        // of deadlocking. See `lockAssetsForKitMembership`.
+        await lockAssetsForKitMembership(
+          tx,
+          newlyAddedAssets.map((asset) => asset.id),
+          organizationId
+        );
         await tx.assetKit.createMany({
           data: newlyAddedAssets.map((asset) => ({
             assetId: asset.id,

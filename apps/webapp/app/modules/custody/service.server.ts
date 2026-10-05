@@ -89,10 +89,12 @@ export async function assertNoKitDerivedCustody(
  *   `updateKitAssets` re-reads custody after its insert, so it sees the
  *   committed custody row and refuses.
  * Both halves are needed: drop either one and two operators acting at the
- * same moment can both pass. Rows are locked in id order so two assignments
- * over overlapping assets cannot deadlock each other. Outside a transaction
- * (the assign page's loader) the lock is released when the statement ends,
- * so the call is a plain read there.
+ * same moment can both pass. Rows are locked in id order, and
+ * `updateKitAssets` locks its new members in that same order first
+ * ({@link lockAssetsForKitMembership}), so neither two assignments nor an
+ * assignment and a kit add over overlapping assets can deadlock. Outside a
+ * transaction (the assign page's loader) the lock is released when the
+ * statement ends, so the call is a plain read there.
  *
  * @param tx - the active transaction the assignment runs in
  * @param assetIds - assets about to be put into custody (request input)
@@ -147,6 +149,46 @@ export async function assertNotKitMembers(
       shouldBeCaptured: false,
     });
   }
+}
+
+/**
+ * Takes the kit-membership lock on assets about to be added to a kit, in the
+ * same id order {@link assertNotKitMembers} uses.
+ *
+ * An `AssetKit` insert takes `FOR KEY SHARE` on each asset through its
+ * foreign-key check, in the order the rows are written. A custody assignment
+ * over the same assets takes `FOR UPDATE` in id order. Two transactions taking
+ * conflicting locks on the same rows in different orders deadlock, and
+ * Postgres aborts one of them. Taking `FOR KEY SHARE` here, in id order,
+ * before the insert makes both sides queue in one order instead. The insert's
+ * own checks then find the locks already held.
+ *
+ * `FOR KEY SHARE` is the weakest lock that conflicts with `FOR UPDATE`, so two
+ * kit edits, or a status change, on the same asset do not wait on each other.
+ *
+ * Call it inside the kit transaction, immediately before the `AssetKit`
+ * insert.
+ *
+ * @param tx - the active transaction that inserts the `AssetKit` rows
+ * @param assetIds - assets about to join the kit
+ * @param organizationId - the caller's workspace
+ */
+export async function lockAssetsForKitMembership(
+  tx: Pick<typeof db, "$queryRaw">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  if (assetIds.length === 0) return;
+
+  // Column names are literal: `Asset` declares no `@map`.
+  // @see .claude/rules/raw-sql-respects-prisma-map.md
+  const ids = Prisma.join(assetIds);
+  await tx.$queryRaw`
+    SELECT "id" FROM "Asset"
+    WHERE "id" IN (${ids}) AND "organizationId" = ${organizationId}
+    ORDER BY "id"
+    FOR KEY SHARE
+  `;
 }
 
 /**

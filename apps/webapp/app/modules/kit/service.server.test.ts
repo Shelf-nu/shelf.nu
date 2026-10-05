@@ -2584,6 +2584,63 @@ describe("updateKitAssets: custody committed while the asset is being added", ()
     );
   });
 
+  it("locks the new members in id order before inserting them", async () => {
+    // why this is asserted on the query and its order: a custody assignment
+    // locks the same rows FOR UPDATE in id order. The insert's own
+    // foreign-key locks follow row order, so without this explicit lock taken
+    // first the two can wait on each other in a cycle and one is aborted.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "tripod",
+        title: "Tripod",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+      {
+        id: "gimbal",
+        title: "Gimbal",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["tripod", "gimbal"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    const rawCalls = vitest.mocked(db.$queryRaw).mock;
+    const lockIndex = rawCalls.calls.findIndex((call) =>
+      (call[0] as unknown as TemplateStringsArray)
+        .join("?")
+        .includes("FOR KEY SHARE")
+    );
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    const sql = (
+      rawCalls.calls[lockIndex][0] as unknown as TemplateStringsArray
+    )
+      .join("?")
+      .replace(/\s+/g, " ");
+    expect(sql).toContain('FROM "Asset"');
+    expect(sql).toContain('ORDER BY "id" FOR KEY SHARE');
+    expect(rawCalls.calls[lockIndex]).toContain("org-1");
+    expect(rawCalls.invocationCallOrder[lockIndex]).toBeLessThan(
+      vitest.mocked(db.assetKit.createMany).mock.invocationCallOrder[0]
+    );
+  });
+
   it("does not re-check a quantity-tracked asset, whose free units can be held", async () => {
     //@ts-expect-error missing vitest type
     db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
