@@ -55,6 +55,7 @@ vi.mock("~/utils/sso.server", async () => ({
 // binding are covered by mobile-sso.server.test.ts).
 vi.mock("~/modules/auth/mobile-sso.server", () => ({
   createMobileAuthCode: vi.fn(),
+  deleteExpiredMobileAuthCodes: vi.fn().mockResolvedValue(0),
 }));
 
 const { action } = await import("~/routes/_auth+/oauth.callback_.mobile");
@@ -128,9 +129,9 @@ beforeEach(() => {
 
 describe("POST /oauth/callback/mobile", () => {
   it("binds the server-refreshed SSO session to the code and returns the deeplink", async () => {
-    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue(
-      {} as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>
-    );
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      user: { id: callbackSession.userId },
+    } as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>);
 
     const result = await postCallback();
 
@@ -144,6 +145,18 @@ describe("POST /oauth/callback/mobile", () => {
     expect(result.data).toMatchObject({
       deeplink: "shelf://auth-callback?code=plain-code",
     });
+  });
+
+  it("refuses to mint a code when the sign-in resolved to an account with another id", async () => {
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      user: { id: "other-shelf-user" },
+    } as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>);
+
+    const result = await postCallback();
+
+    expect(createMobileAuthCode).not.toHaveBeenCalled();
+    assertIsDataWithResponseInit(result);
+    expect(result.init?.status).toBe(409);
   });
 
   it("reports a linked account as a success notice and mints no code", async () => {

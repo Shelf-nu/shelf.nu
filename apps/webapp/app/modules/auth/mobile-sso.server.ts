@@ -25,9 +25,10 @@
  * no web session cookie, and the browser Supabase client neither persists nor
  * auto-refreshes it, so the app is the only holder of its token family.
  *
- * The refresh token is stored only for the code's lifetime, encrypted under a
- * key derived from the plaintext code. Only the code's hash is persisted, so a
- * database read alone cannot recover the token.
+ * The refresh token is stored only until the code is redeemed or cleaned up,
+ * encrypted under a key derived from the plaintext code and the server's
+ * session secret. Only the code's hash is persisted, so neither a database read
+ * nor an intercepted code, nor both together, recovers the token.
  *
  * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
@@ -43,6 +44,7 @@ import {
 import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
+import { SESSION_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { refreshAccessToken } from "./service.server";
@@ -69,6 +71,9 @@ const SESSION_KEY_INFO = "shelf-mobile-auth-code-session-v1";
 /** AES-GCM nonce length in bytes (the 96-bit size GCM is specified for). */
 const IV_BYTES = 12;
 
+/** AES-GCM authentication tag length in bytes. Shorter tags are refused. */
+const TAG_BYTES = 16;
+
 /**
  * SHA-256 hex digest. Auth codes are high-entropy (256-bit) single-use tokens,
  * so a fast hash is sufficient — we persist only the hash, never the plaintext.
@@ -81,16 +86,17 @@ function hashCode(plaintext: string): string {
 }
 
 /**
- * Derives the AES-256 key that protects a code's stored session. The code
- * already carries 256 bits of entropy, so HKDF only has to separate this use
- * from the code's hash; no salt is needed.
+ * Derives the AES-256 key that protects a code's stored session from the code
+ * and the server's session secret (the HKDF salt). The secret is what keeps an
+ * intercepted code from decrypting a leaked row: the code alone, which travels
+ * through a custom-scheme deeplink, must never be enough.
  *
  * @param code - The plaintext authorization code
  * @returns A 32-byte key
  */
 function sessionKeyFor(code: string): Buffer {
   return Buffer.from(
-    hkdfSync("sha256", code, Buffer.alloc(0), SESSION_KEY_INFO, 32)
+    hkdfSync("sha256", code, SESSION_SECRET, SESSION_KEY_INFO, 32)
   );
 }
 
@@ -126,9 +132,19 @@ function decryptSession(stored: string, code: string): string | null {
     const [iv, ciphertext, tag] = stored
       .split(".")
       .map((part) => Buffer.from(part, "base64url"));
-    if (!iv || !ciphertext || !tag || iv.length !== IV_BYTES) return null;
+    if (
+      !iv ||
+      !ciphertext ||
+      !tag ||
+      iv.length !== IV_BYTES ||
+      tag.length !== TAG_BYTES
+    ) {
+      return null;
+    }
 
-    const decipher = createDecipheriv("aes-256-gcm", sessionKeyFor(code), iv);
+    const decipher = createDecipheriv("aes-256-gcm", sessionKeyFor(code), iv, {
+      authTagLength: TAG_BYTES,
+    });
     decipher.setAuthTag(tag);
     return Buffer.concat([
       decipher.update(ciphertext),
@@ -271,25 +287,29 @@ export async function redeemMobileAuthCode(
 
     const codeHash = hashCode(code);
 
-    // Atomic single-use consume: succeeds only if unredeemed AND unexpired.
-    const { count } = await db.mobileAuthCode.updateMany({
-      where: { codeHash, consumedAt: null, expiresAt: { gt: new Date() } },
-      data: { consumedAt: new Date() },
-    });
+    // Consume, read and clear in one transaction, so a code that is spent
+    // never keeps its session, whatever fails after. The conditional update is
+    // the single-use guard: it succeeds only if unredeemed AND unexpired.
+    const row = await db.$transaction(async (tx) => {
+      const { count } = await tx.mobileAuthCode.updateMany({
+        where: { codeHash, consumedAt: null, expiresAt: { gt: new Date() } },
+        data: { consumedAt: new Date() },
+      });
+      if (count !== 1) return null;
 
-    if (count !== 1) throw invalidCodeError();
-
-    const { userId, codeChallenge, sessionCiphertext } =
-      await db.mobileAuthCode.findUniqueOrThrow({
+      const consumed = await tx.mobileAuthCode.findUniqueOrThrow({
         where: { codeHash },
         select: { userId: true, codeChallenge: true, sessionCiphertext: true },
       });
-
-    // The code is spent, so the session it carried is never needed again.
-    await db.mobileAuthCode.update({
-      where: { codeHash },
-      data: { sessionCiphertext: null },
+      await tx.mobileAuthCode.update({
+        where: { codeHash },
+        data: { sessionCiphertext: null },
+      });
+      return consumed;
     });
+
+    if (!row) throw invalidCodeError();
+    const { userId, codeChallenge, sessionCiphertext } = row;
 
     // PKCE is MANDATORY. A code minted without a challenge is a bearer token —
     // whoever holds the plaintext from the `shelf://` deeplink gets a session —
@@ -351,9 +371,10 @@ export async function redeemMobileAuthCode(
 }
 
 /**
- * Deletes expired, unredeemed mobile auth codes. Safe to call opportunistically
- * (e.g. from the exchange route) or from a scheduled job — there is no app-level
- * cron in this codebase.
+ * Deletes expired mobile auth codes, together with the session an unredeemed
+ * one still carries. Called opportunistically from both the mobile callback and
+ * the exchange, so an abandoned sign-in's session is dropped by the next mobile
+ * sign-in; there is no app-level cron in this codebase.
  *
  * @returns The number of rows deleted
  */

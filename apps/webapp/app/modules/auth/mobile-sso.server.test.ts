@@ -17,9 +17,17 @@ const dbMocks = vi.hoisted(() => ({
   update: vi.fn(),
   deleteMany: vi.fn(),
 }));
-vi.mock("~/database/db.server", () => ({
-  db: { mobileAuthCode: dbMocks },
-}));
+vi.mock("~/database/db.server", () => {
+  const db = { mobileAuthCode: dbMocks };
+  // The transaction client is the same mocked model, so assertions read one set
+  // of calls whichever client the code used.
+  return {
+    db: {
+      ...db,
+      $transaction: (fn: (tx: typeof db) => unknown) => fn(db),
+    },
+  };
+});
 
 // why: refreshing a session is a Supabase network call. The tests decide what
 // the stored session refreshes into, or how the refresh fails.
@@ -214,6 +222,24 @@ describe("redeemMobileAuthCode", () => {
     const { row: other } = await mintedCode();
     const { code } = await mintedCode({
       storedOverrides: { sessionCiphertext: other.sessionCiphertext },
+    });
+
+    await expect(
+      redeemMobileAuthCode(code, TEST_VERIFIER)
+    ).rejects.toMatchObject({ status: 400 });
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("refuses a stored session whose authentication tag was truncated", async () => {
+    const { code, row } = await mintedCode();
+    const [iv, ciphertext, tag] = row.sessionCiphertext.split(".");
+    const shortTag = Buffer.from(tag, "base64url")
+      .subarray(0, 4)
+      .toString("base64url");
+    dbMocks.findUniqueOrThrow.mockResolvedValue({
+      userId: USER_ID,
+      codeChallenge: TEST_CHALLENGE,
+      sessionCiphertext: [iv, ciphertext, shortTag].join("."),
     });
 
     await expect(
