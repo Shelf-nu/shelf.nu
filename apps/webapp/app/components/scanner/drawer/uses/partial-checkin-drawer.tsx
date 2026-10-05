@@ -231,11 +231,14 @@ export const partialCheckinAssetsSchema = z.object({
    */
   assetIds: z.array(z.string()).min(1).optional(),
   /**
-   * Rows the operator checked "without scanning" rather than scanning. The
-   * action records them as `"selected"` while the rest of the batch stays
-   * `"scanned"`; absent from the list dialogs, which never scan.
+   * Slices (`BookingAsset` ids) the operator checked "without scanning" rather
+   * than scanning. The action records them as `"selected"` while the rest of
+   * the batch stays `"scanned"`; absent from the list dialogs, which never
+   * scan. Keyed by slice because a quantity-tracked asset can sit on a
+   * standalone slice and a kit slice of the same booking, one scanned and the
+   * other ticked.
    */
-  selectedAssetIds: z.array(z.string()).optional(),
+  selectedBookingAssetIds: z.array(z.string()).optional(),
   /**
    * Modern per-asset disposition payload — JSON-encoded to sidestep the
    * limits of form-encoded arrays-of-objects (same pattern the
@@ -551,21 +554,18 @@ export default function PartialCheckinDrawer({
   );
 
   /**
-   * Assets the operator checked "without scanning": their entry sits under a
-   * synthetic quick-check-in key rather than a scanned QR id. The action
-   * records these rows as selected and every other row of the batch as
-   * scanned, so the activity line and the receipt can say which was which.
+   * Slices the operator checked "without scanning": their entry sits under a
+   * synthetic quick-check-in key, the prefix plus the slice's `BookingAsset`
+   * id, rather than a scanned QR id. The action records these slices as
+   * selected and every other row of the batch as scanned, so the activity line
+   * and the receipt can say which was which.
    */
-  const selectedAssetIds = useMemo(
+  const selectedBookingAssetIds = useMemo(
     () =>
-      Array.from(
-        new Set(
-          Object.entries(items).flatMap(([key, item]) =>
-            key.startsWith(QUICK_CHECKIN_QR_PREFIX) && item?.data?.id
-              ? [item.data.id]
-              : []
-          )
-        )
+      Object.entries(items).flatMap(([key, item]) =>
+        item && key.startsWith(QUICK_CHECKIN_QR_PREFIX)
+          ? [key.slice(QUICK_CHECKIN_QR_PREFIX.length)]
+          : []
       ),
     [items]
   );
@@ -1499,7 +1499,7 @@ export default function PartialCheckinDrawer({
         form={
           <CustomForm
             assetIdsForCheckin={assetIdsForCheckin}
-            selectedAssetIds={selectedAssetIds}
+            selectedBookingAssetIds={selectedBookingAssetIds}
             isEarlyCheckin={isEarlyCheckin}
             booking={booking}
             isLoading={isLoading}
@@ -2459,8 +2459,8 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 // Custom form component that handles early check-in dialog
 type CustomFormProps = {
   assetIdsForCheckin: string[];
-  /** Rows checked "without scanning"; posted so the action records them as selected. */
-  selectedAssetIds: string[];
+  /** Slices checked "without scanning"; posted so the action records them as selected. */
+  selectedBookingAssetIds: string[];
   isEarlyCheckin: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   isLoading?: boolean;
@@ -2476,7 +2476,7 @@ type CustomFormProps = {
 
 const CustomForm = ({
   assetIdsForCheckin,
-  selectedAssetIds,
+  selectedBookingAssetIds,
   isEarlyCheckin,
   booking,
   isLoading,
@@ -2510,12 +2510,12 @@ const CustomForm = ({
           <input type="hidden" name="checkins" value={checkinsJson} />
         ) : null}
 
-        {selectedAssetIds.map((assetId, index) => (
+        {selectedBookingAssetIds.map((bookingAssetId, index) => (
           <input
-            key={`selectedAssetIds-${assetId}`}
+            key={`selectedBookingAssetIds-${bookingAssetId}`}
             type="hidden"
-            name={`selectedAssetIds[${index}]`}
-            value={assetId}
+            name={`selectedBookingAssetIds[${index}]`}
+            value={bookingAssetId}
           />
         ))}
 

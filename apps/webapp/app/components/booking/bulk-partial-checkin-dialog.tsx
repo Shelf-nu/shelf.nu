@@ -211,6 +211,11 @@ export default function BulkPartialCheckinDialog({
         >
           <input type="hidden" name="returnJson" value="true" />
 
+          {/* Which flow this is. The overview's check-in branch records the
+              rows as selected because this dialog says so, never because the
+              post happened to name them. */}
+          <input type="hidden" name="method" value="selected" />
+
           {/* Deduped asset ids only (kits excluded); same list used for
               final-checkin detection above. */}
           {selectedAssetIds.map((assetId: string, index: number) => (

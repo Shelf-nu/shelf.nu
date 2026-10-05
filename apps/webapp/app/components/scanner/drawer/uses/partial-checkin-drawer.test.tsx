@@ -471,16 +471,18 @@ describe("PartialCheckinDrawer", () => {
 });
 
 describe("partialCheckinAssetsSchema: rows checked without scanning", () => {
-  it("accepts the ticked rows next to the scanned ones", () => {
+  it("accepts the ticked slices, by BookingAsset id, next to the scanned rows", () => {
+    // The same asset can be scanned on its kit slice and ticked on its
+    // standalone slice, so the form names the slice, never the asset.
     const parsed = partialCheckinAssetsSchema.parse({
       assetIds: ["asset-1", "asset-2"],
-      selectedAssetIds: ["asset-2"],
+      selectedBookingAssetIds: ["ba-standalone"],
     });
-    expect(parsed.selectedAssetIds).toEqual(["asset-2"]);
+    expect(parsed.selectedBookingAssetIds).toEqual(["ba-standalone"]);
   });
 
-  it("needs no ticked rows, so the list dialogs post as before", () => {
+  it("needs no ticked slices, so the list dialogs post as before", () => {
     const parsed = partialCheckinAssetsSchema.parse({ assetIds: ["asset-1"] });
-    expect(parsed.selectedAssetIds).toBeUndefined();
+    expect(parsed.selectedBookingAssetIds).toBeUndefined();
   });
 });

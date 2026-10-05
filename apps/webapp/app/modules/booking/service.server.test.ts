@@ -12199,6 +12199,108 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  /**
+   * Two slices of the pens on the one booking, both out: standalone `ba-pens`
+   * and kit-driven `ba-pens-kit`. The web scan page can scan one and tick the
+   * other "without scanning" in the same batch.
+   */
+  function setupTwoPensSlices() {
+    setupQtyMocks();
+    // why: the per-slice cap reads each slice's booked units by id; both
+    // slices book 10.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // why: the activity line links the booking by the name the status update
+    // returns.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...makeQtyBooking(),
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: ["ba-pens", "ba-pens-kit"].map((id) => ({
+        id,
+        assetId: mockQtyAssetId,
+        quantity: 10,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: {
+          id: mockQtyAssetId,
+          type: AssetType.QUANTITY_TRACKED,
+          assetKits: [],
+        },
+      })),
+    });
+  }
+
+  /** The `BOOKING_PARTIAL_CHECKIN` events this batch recorded. */
+  function partialCheckinEvents() {
+    return (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKIN")
+      .map((event) => [event.assetId, event.meta]);
+  }
+
+  it("records the asset as selected when every slice it returned on was ticked", async () => {
+    expect.assertions(1);
+
+    setupTwoPensSlices();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", returned: 5 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", returned: 5 },
+      ],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-pens", "ba-pens-kit"],
+      },
+    });
+
+    // One event per asset, however many slices the batch touched.
+    expect(partialCheckinEvents()).toEqual([
+      [mockQtyAssetId, { method: "selected", surface: "web" }],
+    ]);
+  });
+
+  it("says nothing for the asset, and both ways on the activity line, when one slice was ticked and the other scanned", async () => {
+    expect.assertions(2);
+
+    setupTwoPensSlices();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", returned: 5 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", returned: 5 },
+      ],
+      // The standalone slice was ticked "without scanning"; the kit slice went
+      // through the scanner.
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-pens"],
+      },
+    });
+
+    // The asset's one event covers both slices, so it must not claim either
+    // way: the method is recorded as not said, the surface still as web.
+    expect(partialCheckinEvents()).toEqual([
+      [mockQtyAssetId, { method: null, surface: "web" }],
+    ]);
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("(scanned and selected on the web)"),
+      })
+    );
+  });
+
   it("records the canonical BOOKING_STATUS_CHANGED → COMPLETE event when qty dispositions complete the booking", async () => {
     expect.assertions(1);
 
@@ -17289,7 +17391,7 @@ describe("check-in and check-out method on activity events", () => {
     ]);
   });
 
-  it("partialCheckinBooking records a ticked row as selected and the rest of the scan batch as scanned", async () => {
+  it("partialCheckinBooking keeps the batch's method on rows that name no slice, whatever slices were ticked", async () => {
     expect.assertions(1);
 
     const bookingWithAssets = {
@@ -17334,12 +17436,13 @@ describe("check-in and check-out method on activity events", () => {
       assetIds: ["asset-1", "asset-2"],
       userId: "user-1",
       hints: mockClientHints,
-      // The web scan page: asset-1 came through the scanner, asset-2 was
-      // ticked with "Check in without scanning".
+      // The web scan page. Both rows are INDIVIDUAL assets posted by asset id
+      // alone; a ticked slice in the provenance can only ever match a row
+      // that names that slice, so neither row reads as selected.
       provenance: {
         surface: "web",
         method: "scanned",
-        selectedAssetIds: ["asset-2"],
+        selectedBookingAssetIds: ["ba-m5"],
       },
     });
 
@@ -17350,7 +17453,7 @@ describe("check-in and check-out method on activity events", () => {
       ])
     ).toEqual([
       ["asset-1", { method: "scanned", surface: "web" }],
-      ["asset-2", { method: "selected", surface: "web" }],
+      ["asset-2", { method: "scanned", surface: "web" }],
     ]);
   });
 });

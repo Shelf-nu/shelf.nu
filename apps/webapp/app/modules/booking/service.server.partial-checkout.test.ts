@@ -1802,6 +1802,114 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
     );
   });
 
+  it("records a ticked slice as selected and a scanned slice of the same asset as scanned", async () => {
+    expect.assertions(1);
+
+    // The batteries sit on two slices of the booking: standalone (10) and
+    // kit-driven (20). The web scan page scanned the standalone slice and
+    // ticked the kit slice "without scanning", so each slice's event must
+    // carry its own method even though both name the same asset.
+    const multiSliceBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-standalone",
+          quantity: 10,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-kit",
+          quantity: 20,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(multiSliceBooking);
+    // why: the slice helper resolves each slice by id and pools the two
+    // same-asset claims; both pivot rows are needed for that.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-standalone",
+        assetId: "asset-battery",
+        quantity: 10,
+        assetKitId: null,
+      },
+      {
+        id: "ba-kit",
+        assetId: "asset-battery",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+    ]);
+    // why: the qty loop locks the asset per disposition; return the battery.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-battery",
+      title: "Batteries",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      quantity: 30,
+    });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [
+        {
+          assetId: "asset-battery",
+          bookingAssetId: "ba-standalone",
+          quantity: 3,
+        },
+        { assetId: "asset-battery", bookingAssetId: "ba-kit", quantity: 4 },
+      ],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-kit"],
+      },
+    });
+
+    const checkoutEvents = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKOUT")
+      .map((event) => [event.assetId, event.meta]);
+
+    // One event per disposition, in submit order; keying the tick by asset
+    // would have marked both slices the same way.
+    expect(checkoutEvents).toEqual([
+      [
+        "asset-battery",
+        expect.objectContaining({ method: "scanned", surface: "web" }),
+      ],
+      [
+        "asset-battery",
+        expect.objectContaining({ method: "selected", surface: "web" }),
+      ],
+    ]);
+  });
+
   /**
    * Layer 3 — per-slice checkout NOTES. A QUANTITY_TRACKED asset ("Gloves")
    * booked as TWO slices on the "Melones" booking: standalone (22) + kit-driven

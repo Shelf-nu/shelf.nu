@@ -107,7 +107,8 @@ describe("checkin-assets action", () => {
 
   it("records the page's batch as scanned on the web, leaving ticked rows to the form", async () => {
     // The page is the scanner: everything on it was scanned unless the drawer
-    // named the row in `selectedAssetIds[]`, which the sink reads off the form.
+    // named the slice in `selectedBookingAssetIds[]`, which the sink reads off
+    // the form.
     await postCheckin({ role: OrganizationRoles.ADMIN });
 
     expect(checkinAssetsMock).toHaveBeenCalledWith(

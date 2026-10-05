@@ -9,7 +9,8 @@
  *   for an item that went through a scanner, `"selected"` for an item ticked
  *   in a list, or `null` when the client did not say. The server never guesses
  *   a method: the phone's partial routes cannot tell a scan from a tick, so an
- *   app bundle that sends nothing is recorded as `null`.
+ *   app bundle that sends nothing is recorded as `null`. An event that covers
+ *   several slices of one asset handled in different ways is `null` too.
  * - `surface`: `"web"` or `"phone"`, set by the route that received the
  *   request.
  *
@@ -19,6 +20,7 @@
  * @see {@link file://./service.server.ts} - the four event writers
  * @see {@link file://./../../routes/api+/mobile+/bookings.partial-checkout.ts} - a client-declared method
  */
+import { z } from "zod";
 
 /** Every method a check-in or check-out row can record. */
 export const BOOKING_METHODS = ["quick", "scanned", "selected"] as const;
@@ -41,20 +43,59 @@ export type ClientDeclaredBookingMethod =
 export type BookingSurface = "web" | "phone";
 
 /**
+ * What a form posted to the booking overview may declare about its method.
+ *
+ * The header's one-click buttons post no `method`; the "Check in selected
+ * items" dialog posts `method=selected` next to its `intent`. Only
+ * `"selected"` is accepted here: the overview has no scanner, so a form
+ * claiming `"scanned"` is refused, and `"quick"` is asserted by the route
+ * itself rather than read off the form. Parse with this, then build the
+ * provenance with {@link webFormProvenance}.
+ */
+export const webFormMethodSchema = z.object({
+  method: z.literal("selected").optional(),
+});
+
+/**
+ * The provenance of a whole-booking action posted to the booking overview.
+ *
+ * @param method - What the form declared, parsed by {@link webFormMethodSchema}
+ * @returns `"quick"` on the web when the form declared nothing, otherwise the
+ *   declared method on the web
+ */
+export function webFormProvenance(
+  method: "selected" | undefined
+): BookingMethodProvenance {
+  return { surface: "web", method: method ?? "quick" };
+}
+
+/**
  * What a route knows about how a check-in or check-out batch was made.
  *
- * `method` applies to every row of the batch unless `selectedAssetIds` names
- * the row: the web scan pages let an operator tick a quantity-tracked row
- * "without scanning" in the same batch as real scans, and those rows are
- * recorded as `"selected"` while the rest keep the batch's `"scanned"`.
+ * `method` applies to every row of the batch unless `selectedBookingAssetIds`
+ * names the row's slice: the web scan pages let an operator tick a
+ * quantity-tracked row "without scanning" in the same batch as real scans, and
+ * those slices are recorded as `"selected"` while the rest keep the batch's
+ * `"scanned"`.
+ *
+ * Ticked rows are keyed by slice (`BookingAsset.id`), not by asset: a
+ * quantity-tracked asset can sit on a standalone slice and a kit slice of the
+ * same booking, and the operator may scan one and tick the other.
  */
 export type BookingMethodProvenance = {
   surface: BookingSurface;
   /** The batch's method, or `null` when the client did not say. */
   method: BookingMethod | null;
-  /** Rows of this batch that were ticked rather than scanned. */
-  selectedAssetIds?: readonly string[];
+  /** Slices of this batch that were ticked rather than scanned. */
+  selectedBookingAssetIds?: readonly string[];
 };
+
+/**
+ * A slice id as a batch row carries it: `BookingAsset.id`, or nothing for a
+ * row posted without one (an INDIVIDUAL asset, or an asset-id-only payload),
+ * which can never have been ticked.
+ */
+export type BatchSliceId = string | null | undefined;
 
 /** What an event's `meta` carries about the method. */
 export type BookingMethodMeta = {
@@ -63,40 +104,73 @@ export type BookingMethodMeta = {
 };
 
 /**
- * Resolves the method one row of a batch is recorded with.
+ * Resolves the method one slice of a batch is recorded with.
  *
  * @param provenance - What the route said about the batch
- * @param assetId - The row's asset
- * @returns The method for that row, or `null` when the client did not say
+ * @param bookingAssetId - The row's slice, if the row named one
+ * @returns `"selected"` for a ticked slice, else the batch's method
  */
 export function resolveBookingMethod(
   provenance: BookingMethodProvenance,
-  assetId: string
+  bookingAssetId?: BatchSliceId
 ): BookingMethod | null {
-  if (provenance.selectedAssetIds?.includes(assetId)) {
+  if (
+    bookingAssetId &&
+    provenance.selectedBookingAssetIds?.includes(bookingAssetId)
+  ) {
     return "selected";
   }
   return provenance.method;
 }
 
 /**
- * Keeps only the ticked rows that are part of the batch.
+ * Resolves the method for an event that covers several slices of one asset.
  *
- * The scan drawers post `selectedAssetIds[]` next to the rows they submit; an
- * id outside the batch would sit in the provenance unused, so it is dropped
- * here and the provenance names exactly the batch rows that were ticked.
+ * The partial check-in writes one event per asset, however many of its slices
+ * the batch touched. One method when every slice agrees; `null` when they do
+ * not, so a mixed asset-level event is recorded as "not said" rather than as
+ * whichever slice came first.
  *
- * @param selectedAssetIds - The ticked rows, as the form posted them
- * @param batchAssetIds - Every asset the batch submits
- * @returns The ticked rows that the batch contains, deduplicated
+ * @param provenance - What the route said about the batch
+ * @param bookingAssetIds - The slices the event covers; empty for a batch that
+ *   names no slices, which reads as the batch's method
+ * @returns The one method every slice shares, or `null`
  */
-export function narrowSelectedAssetIds(
-  selectedAssetIds: readonly string[] | undefined,
-  batchAssetIds: readonly string[]
+export function resolveBookingMethodForSlices(
+  provenance: BookingMethodProvenance,
+  bookingAssetIds: readonly BatchSliceId[]
+): BookingMethod | null {
+  const methods = new Set(
+    bookingAssetIds.map((bookingAssetId) =>
+      resolveBookingMethod(provenance, bookingAssetId)
+    )
+  );
+  if (methods.size === 0) return provenance.method;
+  if (methods.size === 1) return [...methods][0];
+  return null;
+}
+
+/**
+ * Keeps only the ticked slices that are part of the batch.
+ *
+ * The scan drawers post `selectedBookingAssetIds[]` next to the rows they
+ * submit; an id outside the batch would sit in the provenance unused, so it is
+ * dropped here and the provenance names exactly the batch slices that were
+ * ticked.
+ *
+ * @param selectedBookingAssetIds - The ticked slices, as the form posted them
+ * @param batchBookingAssetIds - The slice of every row the batch submits
+ * @returns The ticked slices that the batch contains, deduplicated
+ */
+export function narrowSelectedBookingAssetIds(
+  selectedBookingAssetIds: readonly string[] | undefined,
+  batchBookingAssetIds: readonly BatchSliceId[]
 ): string[] {
-  if (!selectedAssetIds || selectedAssetIds.length === 0) return [];
-  const inBatch = new Set(batchAssetIds);
-  return [...new Set(selectedAssetIds.filter((id) => inBatch.has(id)))];
+  if (!selectedBookingAssetIds || selectedBookingAssetIds.length === 0) {
+    return [];
+  }
+  const inBatch = new Set(batchBookingAssetIds.filter(Boolean));
+  return [...new Set(selectedBookingAssetIds.filter((id) => inBatch.has(id)))];
 }
 
 /**
@@ -107,16 +181,17 @@ export function narrowSelectedAssetIds(
  * with a guessed surface.
  *
  * @param provenance - What the route said about the batch, if anything
- * @param assetId - The row the event is for
+ * @param bookingAssetIds - The slices the event covers; the one-click actions
+ *   pass none and read as the batch's method
  * @returns `{ method, surface }`, or `{}` without provenance
  */
 export function bookingMethodMeta(
   provenance: BookingMethodProvenance | undefined,
-  assetId: string
+  bookingAssetIds: readonly BatchSliceId[] = []
 ): BookingMethodMeta | Record<string, never> {
   if (!provenance) return {};
   return {
-    method: resolveBookingMethod(provenance, assetId),
+    method: resolveBookingMethodForSlices(provenance, bookingAssetIds),
     surface: provenance.surface,
   };
 }
@@ -178,20 +253,22 @@ export function describeBookingMethod(meta: BookingMethodMeta): string {
 /**
  * Says how a whole batch was handled, for the booking's activity line.
  *
- * A batch whose rows share one method reads like one row. A web scan batch
+ * A batch whose slices share one method reads like one row. A web scan batch
  * that mixed real scans with ticked rows reads `"scanned and selected on the
  * web"`, naming both rather than picking one.
  *
  * @param provenance - What the route said about the batch
- * @param assetIds - The rows the batch touched
+ * @param bookingAssetIds - The slice of every row the batch touched
  * @returns The phrase, without a leading comma or a full stop
  */
 export function describeBatchMethod(
   provenance: BookingMethodProvenance,
-  assetIds: readonly string[]
+  bookingAssetIds: readonly BatchSliceId[]
 ): string {
   const methods = new Set(
-    assetIds.map((assetId) => resolveBookingMethod(provenance, assetId))
+    bookingAssetIds.map((bookingAssetId) =>
+      resolveBookingMethod(provenance, bookingAssetId)
+    )
   );
   if (methods.size === 2 && methods.has("scanned") && methods.has("selected")) {
     return `scanned and selected ${SURFACE_WORDS[provenance.surface]}`;
@@ -210,16 +287,17 @@ export function describeBatchMethod(
  * before.
  *
  * @param provenance - What the route said about the batch, if anything
- * @param assetIds - The rows the batch touched; without them the batch's own
- *   method is used, which is right for the one-click actions
+ * @param bookingAssetIds - The slice of every row the batch touched; without
+ *   them the batch's own method is used, which is right for the one-click
+ *   actions
  * @returns `" (<phrase>)"` or `""`
  */
 export function bookingMethodClause(
   provenance: BookingMethodProvenance | undefined,
-  assetIds: readonly string[] = []
+  bookingAssetIds: readonly BatchSliceId[] = []
 ): string {
   if (!provenance) return "";
-  return ` (${describeBatchMethod(provenance, assetIds)})`;
+  return ` (${describeBatchMethod(provenance, bookingAssetIds)})`;
 }
 
 /**
