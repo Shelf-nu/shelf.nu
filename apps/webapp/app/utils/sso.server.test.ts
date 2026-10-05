@@ -121,10 +121,15 @@ function seedUsers(...users: SeededUser[]) {
       users.find((u) => u.id === args.where.id) ?? null
     )) as unknown as typeof mockDb.db.user.findUnique);
   vi.mocked(mockDb.db.user.findMany).mockImplementation(((args: {
-    where: { email: { in: string[] } };
+    where: { email: { in: string[] }; deletedAt?: null };
   }) =>
     Promise.resolve(
-      users.filter((u) => args.where.email.in.includes(u.email.toLowerCase()))
+      users.filter(
+        (u) =>
+          args.where.email.in.includes(u.email.toLowerCase()) &&
+          // Mirrors a `deletedAt: null` filter in the query.
+          !(args.where.deletedAt === null && u.deletedAt)
+      )
     )) as unknown as typeof mockDb.db.user.findMany);
 }
 
@@ -346,6 +351,45 @@ describe("resolveUserAndOrgForSsoCallback", () => {
       });
       expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
       expect(mockDb.db.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("deleted accounts", () => {
+    it("refuses a login whose own account is soft-deleted", async () => {
+      seedUsers({ ...shelfUser, deletedAt: new Date() });
+
+      const error = await resolveUserAndOrgForSsoCallback(baseInput).catch(
+        (e: unknown) => e
+      );
+
+      expect(error).toBeInstanceOf(ShelfError);
+      expect(error).toMatchObject({ status: 403 });
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+      expect(mockUser.createUserFromSSO).not.toHaveBeenCalled();
+    });
+
+    it("never matches a soft-deleted account by email", async () => {
+      seedUsers({
+        ...shelfUser,
+        id: ORIGINAL_UUID,
+        sso: true,
+        deletedAt: new Date(),
+      });
+      // @ts-expect-error - vitest mock type
+      mockUser.createUserFromSSO.mockResolvedValue({
+        user: { id: SUPABASE_UUID },
+        org: null,
+      });
+
+      await resolveUserAndOrgForSsoCallback(baseInput).catch(() => undefined);
+
+      expect(mockConversion.reconcileDuplicateSsoLogin).not.toHaveBeenCalled();
+      expect(mockUser.updateUserFromSSO).not.toHaveBeenCalled();
+      expect(mockDb.db.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deletedAt: null }),
+        })
+      );
     });
   });
 

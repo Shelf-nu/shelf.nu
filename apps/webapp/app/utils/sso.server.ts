@@ -35,8 +35,10 @@ import { emailMatchesDomains, isValidDomain, parseDomains } from "./misc";
  * @throws {ShelfError} 409 when more than one account matches
  */
 async function findSsoCallbackUserByEmail(email: string) {
+  // A soft-deleted account is never a login target: it must not be matched,
+  // merged into, or brought back by an SSO sign-in.
   const matches = await db.user.findMany({
-    where: { email: caseInsensitiveEmailFilter(email) },
+    where: { email: caseInsensitiveEmailFilter(email), deletedAt: null },
     select: USER_WITH_SSO_DETAILS_SELECT,
     take: 2,
   });
@@ -538,8 +540,23 @@ export async function resolveUserAndOrgForSsoCallback({
     // the user differs from the one stored in Shelf.
     const ownAccount = await db.user.findUnique({
       where: { id: authSession.userId },
-      select: USER_WITH_SSO_DETAILS_SELECT,
+      select: { ...USER_WITH_SSO_DETAILS_SELECT, deletedAt: true },
     });
+
+    // Deleting an account removes its auth user only after the Shelf row is
+    // marked deleted, so a login can arrive in between. It must not update or
+    // restore the account.
+    if (ownAccount?.deletedAt) {
+      throw new ShelfError({
+        cause: null,
+        status: 403,
+        title: "Account deleted",
+        message: "This account has been deleted.",
+        additionalData: { userId: authSession.userId },
+        label: "Auth",
+        shouldBeCaptured: false,
+      });
+    }
 
     if (ownAccount) {
       // An account not approved for SSO whose auth user signs in by password
