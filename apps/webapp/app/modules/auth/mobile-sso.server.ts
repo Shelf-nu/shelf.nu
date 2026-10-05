@@ -41,7 +41,7 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
-import { isAuthRetryableFetchError } from "@supabase/supabase-js";
+import { isAuthApiError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { SESSION_SECRET } from "~/utils/env";
@@ -178,6 +178,25 @@ function verifyPkceChallenge(
 }
 
 /**
+ * Whether a failed refresh means the session itself is no longer valid, as
+ * opposed to Supabase failing to answer. `refreshAccessToken` wraps the
+ * supabase-js error as the ShelfError's `cause`.
+ *
+ * @param cause - What `refreshAccessToken` threw
+ * @returns true for a 4xx Auth API refusal other than a rate limit
+ */
+function isDeadSessionRefusal(cause: unknown): boolean {
+  if (!isLikeShelfError(cause)) return false;
+  const apiError = cause.cause;
+  return (
+    isAuthApiError(apiError) &&
+    apiError.status >= 400 &&
+    apiError.status < 500 &&
+    apiError.status !== 429
+  );
+}
+
+/**
  * The uniform refusal for every redemption that cannot succeed. One message
  * and status for all of them, so a caller learns nothing about which check
  * failed.
@@ -268,7 +287,7 @@ export async function createMobileAuthCode({
  *   refusal path stays reachable; a redemption without one always fails.
  * @returns The refreshed SSO session for the device
  * @throws {ShelfError} 400 when the code cannot be redeemed; 500 when the
- *   database or Supabase is unreachable
+ *   database or Supabase fails to answer
  */
 export async function redeemMobileAuthCode(
   code: string,
@@ -334,19 +353,20 @@ export async function redeemMobileAuthCode(
     try {
       session = await refreshAccessToken(refreshToken);
     } catch (cause) {
-      // An unreachable Supabase is an outage, reported as one.
-      if (isLikeShelfError(cause) && isAuthRetryableFetchError(cause.cause)) {
-        throw new ShelfError({
-          cause,
-          message: "Could not establish a mobile session. Please try again.",
-          label,
-          status: 500,
-        });
-      }
-      // Otherwise the session was signed out or expired between the callback
-      // and the exchange. Signing in again is the only remedy, as for an
-      // expired code.
-      throw invalidCodeError();
+      // A 4xx refusal from Supabase (other than a rate limit) means the session
+      // was signed out or expired between the callback and the exchange:
+      // signing in again is the only remedy, as for an expired code.
+      if (isDeadSessionRefusal(cause)) throw invalidCodeError();
+
+      // Anything else (unreachable, 5xx, rate limited, an empty response) is an
+      // outage, reported and captured as one. The code is already spent, so
+      // the app starts a new sign-in either way.
+      throw new ShelfError({
+        cause,
+        message: "Could not establish a mobile session. Please try again.",
+        label,
+        status: 500,
+      });
     }
 
     // The code was minted for the Shelf user the SSO sign-in resolved to, whose

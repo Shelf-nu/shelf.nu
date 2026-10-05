@@ -35,12 +35,26 @@ vi.mock("./service.server", () => ({
   refreshAccessToken: vi.fn(),
 }));
 
-// why: classify a refresh failure as an unreachable Supabase by tagging the
-// mock error, rather than constructing a real AuthRetryableFetchError.
+// why: classify refresh failures by tagging mock errors, rather than
+// constructing real supabase-js AuthApiError instances.
 vi.mock("@supabase/supabase-js", () => ({
-  isAuthRetryableFetchError: (err: unknown) =>
-    typeof err === "object" && err !== null && "__retryable" in err,
+  isAuthApiError: (err: unknown) =>
+    typeof err === "object" && err !== null && "__authApiError" in err,
 }));
+
+/** A refresh failure as `refreshAccessToken` throws it, wrapping `cause`. */
+function refreshFailure(cause: unknown) {
+  return new ShelfError({
+    cause,
+    message: "Unable to refresh access token.",
+    label: "Auth",
+  });
+}
+
+/** A Supabase Auth API error with an HTTP status. */
+function authApiError(status: number, code?: string) {
+  return { __authApiError: true, status, code, message: "auth error" };
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -258,14 +272,10 @@ describe("redeemMobileAuthCode", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
-  it("refuses with a 400 when the session was signed out before the exchange", async () => {
+  it("refuses with a 400 when Supabase says the session is gone", async () => {
     const { code } = await mintedCode();
     vi.mocked(refreshAccessToken).mockRejectedValue(
-      new ShelfError({
-        cause: { message: "Invalid Refresh Token" },
-        message: "Unable to refresh access token.",
-        label: "Auth",
-      })
+      refreshFailure(authApiError(400, "refresh_token_not_found"))
     );
 
     await expect(
@@ -276,15 +286,14 @@ describe("redeemMobileAuthCode", () => {
     });
   });
 
-  it("reports an unreachable Supabase as a 500", async () => {
+  it.each([
+    ["an unreachable Supabase", { message: "fetch failed" }],
+    ["a Supabase 5xx", authApiError(502)],
+    ["a Supabase rate limit", authApiError(429)],
+    ["a refresh that returned no session", null],
+  ])("reports %s as a 500", async (_label, cause) => {
     const { code } = await mintedCode();
-    vi.mocked(refreshAccessToken).mockRejectedValue(
-      new ShelfError({
-        cause: { __retryable: true },
-        message: "Unable to refresh access token.",
-        label: "Auth",
-      })
-    );
+    vi.mocked(refreshAccessToken).mockRejectedValue(refreshFailure(cause));
 
     await expect(
       redeemMobileAuthCode(code, TEST_VERIFIER)
