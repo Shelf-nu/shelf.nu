@@ -7,7 +7,7 @@
  * `resolveUserAndOrgForSsoCallback` — except that instead of establishing a web
  * session we mint a single-use authorization code and hand it back to the app
  * through the `shelf://auth-callback?code=…` deeplink. The app then redeems the
- * code at `POST /api/mobile/exchange` for a fresh, independent session.
+ * code at `POST /api/mobile/exchange` for this SSO session, refreshed.
  *
  * No tokens ever appear in the deeplink — only the short-lived, single-use code.
  *
@@ -134,11 +134,16 @@ export async function action({ request }: ActionFunctionArgs) {
           request.headers.get("Cookie")
         );
 
-        // Hand the device a single-use code via the deeplink — never tokens.
-        const code = await createMobileAuthCode(
-          authSession.userId,
-          typeof codeChallenge === "string" ? codeChallenge : undefined
-        );
+        // Hand the device a single-use code via the deeplink, never tokens. The
+        // code carries this SSO session, which the app receives at the exchange:
+        // nothing here uses the session after this point, so the app is its only
+        // holder.
+        const code = await createMobileAuthCode({
+          userId: authSession.userId,
+          refreshToken: authSession.refreshToken,
+          codeChallenge:
+            typeof codeChallenge === "string" ? codeChallenge : undefined,
+        });
 
         return data(
           payload({

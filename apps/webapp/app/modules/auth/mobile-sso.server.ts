@@ -7,30 +7,45 @@
  * single-use authorization code:
  *
  *   1. After SSO completes, `_auth+/oauth.callback.mobile.tsx` calls
- *      {@link createMobileAuthCode} and hands the plaintext to the app through
- *      the `shelf://auth-callback?code=…` deeplink (no tokens in the URL).
+ *      {@link createMobileAuthCode} with the SSO session's refresh token and
+ *      hands the plaintext code to the app through the
+ *      `shelf://auth-callback?code=…` deeplink (no tokens in the URL).
  *   2. The app redeems the code at `POST /api/mobile/exchange`
- *      (`api+/mobile+/exchange.ts`), which calls {@link redeemMobileAuthCode}.
+ *      (`api+/mobile+/exchange.ts`), which calls {@link redeemMobileAuthCode}
+ *      and receives that same session, freshly refreshed.
  *
- * Per CTO decision, redemption mints a FRESH, independent Supabase session for
- * the device (`admin.generateLink` → `verifyOtp`) rather than transferring the
- * web session's tokens. Web and mobile therefore have separate token families,
- * eliminating any refresh-token-rotation cascade between them.
+ * The app gets the session the identity provider actually produced, so it
+ * belongs to the SSO auth user and carries the `sso/saml` authentication
+ * method. Never mint a session for an SSO account by email instead: GoTrue's
+ * magic-link, OTP and recovery lookups skip `is_sso_user` accounts, so
+ * `admin.generateLink` creates and signs in a separate non-SSO auth user with
+ * the same address.
+ *
+ * The handed-over session is not shared with the web. The mobile callback sets
+ * no web session cookie, and the browser Supabase client neither persists nor
+ * auto-refreshes it, so the app is the only holder of its token family.
+ *
+ * The refresh token is stored only for the code's lifetime, encrypted under a
+ * key derived from the plaintext code. Only the code's hash is persisted, so a
+ * database read alone cannot recover the token.
  *
  * @see apps/webapp/app/routes/_auth+/oauth.callback.mobile.tsx
  * @see apps/webapp/app/routes/api+/mobile+/exchange.ts
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import {
-  isAuthApiError,
-  isAuthRetryableFetchError,
-} from "@supabase/supabase-js";
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  hkdfSync,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
-import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
-import { mapAuthSession } from "./mappers.server";
+import { refreshAccessToken } from "./service.server";
 
 const label: ErrorLabel = "Auth";
 
@@ -46,6 +61,15 @@ const label: ErrorLabel = "Auth";
 const MOBILE_AUTH_CODE_TTL_MS = 180_000;
 
 /**
+ * HKDF `info` for the session key. Binds the derived key to this one purpose,
+ * so the same code could never yield a key that decrypts anything else.
+ */
+const SESSION_KEY_INFO = "shelf-mobile-auth-code-session-v1";
+
+/** AES-GCM nonce length in bytes (the 96-bit size GCM is specified for). */
+const IV_BYTES = 12;
+
+/**
  * SHA-256 hex digest. Auth codes are high-entropy (256-bit) single-use tokens,
  * so a fast hash is sufficient — we persist only the hash, never the plaintext.
  *
@@ -54,6 +78,65 @@ const MOBILE_AUTH_CODE_TTL_MS = 180_000;
  */
 function hashCode(plaintext: string): string {
   return createHash("sha256").update(plaintext).digest("hex");
+}
+
+/**
+ * Derives the AES-256 key that protects a code's stored session. The code
+ * already carries 256 bits of entropy, so HKDF only has to separate this use
+ * from the code's hash; no salt is needed.
+ *
+ * @param code - The plaintext authorization code
+ * @returns A 32-byte key
+ */
+function sessionKeyFor(code: string): Buffer {
+  return Buffer.from(
+    hkdfSync("sha256", code, Buffer.alloc(0), SESSION_KEY_INFO, 32)
+  );
+}
+
+/**
+ * Encrypts a refresh token under the code's derived key.
+ *
+ * @param refreshToken - The SSO session's refresh token
+ * @param code - The plaintext authorization code
+ * @returns `iv.ciphertext.tag`, each part base64url
+ */
+function encryptSession(refreshToken: string, code: string): string {
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", sessionKeyFor(code), iv);
+  const ciphertext = Buffer.concat([
+    cipher.update(refreshToken, "utf8"),
+    cipher.final(),
+  ]);
+  return [iv, ciphertext, cipher.getAuthTag()]
+    .map((part) => part.toString("base64url"))
+    .join(".");
+}
+
+/**
+ * Decrypts a stored session with the presented code.
+ *
+ * @param stored - The `iv.ciphertext.tag` value written by {@link encryptSession}
+ * @param code - The plaintext authorization code
+ * @returns The refresh token, or null when the value is malformed or does not
+ *   authenticate under this code
+ */
+function decryptSession(stored: string, code: string): string | null {
+  try {
+    const [iv, ciphertext, tag] = stored
+      .split(".")
+      .map((part) => Buffer.from(part, "base64url"));
+    if (!iv || !ciphertext || !tag || iv.length !== IV_BYTES) return null;
+
+    const decipher = createDecipheriv("aes-256-gcm", sessionKeyFor(code), iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -79,215 +162,44 @@ function verifyPkceChallenge(
 }
 
 /**
- * How many times to attempt the session mint. The `generateLink → verifyOtp`
- * pair can fail transiently (Supabase 5xx, network blips), so we retry a few
- * times with a short backoff before giving up.
+ * The uniform refusal for every redemption that cannot succeed. One message
+ * and status for all of them, so a caller learns nothing about which check
+ * failed.
  */
-const MINT_MAX_ATTEMPTS = 3;
-
-/** Base backoff between mint retries, multiplied by the attempt number. */
-const MINT_RETRY_BASE_MS = 300;
-
-/** Resolves after `ms` milliseconds. */
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Whether a Supabase failure is a rate-limit. Mirrors `service.server.ts`: the
- * OTP-specific `over_email_send_rate_limit` code plus the generic HTTP 429
- * `AuthApiError` (which can carry a different code). Supabase throttles
- * magic-link generation per email, so retrying inside the window is pointless —
- * we surface a clear, user-retryable error instead.
- *
- * @param cause - The error thrown by a Supabase admin call
- * @returns true if the failure is a rate-limit
- */
-/**
- * Reads Supabase's machine-readable error code off a thrown value.
- *
- * @param cause - Anything caught from the auth client.
- * @returns The `code` when present, otherwise `undefined`.
- */
-function errorCode(cause: unknown): unknown {
-  return typeof cause === "object" && cause !== null && "code" in cause
-    ? (cause as { code: unknown }).code
-    : undefined;
-}
-
-function isRateLimitError(cause: unknown): boolean {
-  return (
-    errorCode(cause) === "over_email_send_rate_limit" ||
-    (isAuthApiError(cause) && cause.status === 429)
-  );
-}
-
-/**
- * Whether a just-minted magic-link token was rejected as no longer valid.
- *
- * `mintMobileSessionOnce` generates a link and verifies it microseconds later,
- * so "expired" never means elapsed time here. Supabase answers `otp_expired`
- * for an INVALID token too, and the way a token that new becomes invalid is
- * being superseded — generating another link for the same user voids the
- * previous one. Two overlapping sign-ins for one account do exactly that, and
- * the first one to verify loses.
- *
- * This is the one 4xx worth retrying: each attempt calls `generateLink` again
- * and gets a brand-new token, so the very thing that failed the attempt is what
- * the retry replaces. Treating it as deterministic — which the shape of the
- * error invites — turns a recoverable collision into a hard sign-in failure.
- *
- * @param cause - Anything caught from the mint.
- * @returns `true` when a fresh token would plausibly succeed.
- */
-function isSupersededTokenError(cause: unknown): boolean {
-  if (!isAuthApiError(cause)) return false;
-  if (errorCode(cause) === "otp_expired") return true;
-  // Not every response carries a `code`; the message is the only signal when
-  // it does not.
-  return /invalid or has expired/i.test(cause.message);
-}
-
-/**
- * Single attempt at minting a fresh Supabase session for `email` via the admin
- * `generateLink` (magiclink) → `verifyOtp` pattern. Throws the raw Supabase
- * error on failure so the caller can classify it (rate-limit vs transient).
- *
- * @param email - The already-authenticated user's email
- * @returns A mapped auth session (fresh access + refresh tokens)
- * @throws The raw Supabase error, or a {@link ShelfError} if Supabase returns
- *   success without a usable token/session
- */
-async function mintMobileSessionOnce(email: string): Promise<AuthSession> {
-  const { data: linkData, error: linkError } =
-    await getSupabaseAdmin().auth.admin.generateLink({
-      type: "magiclink",
-      email,
-    });
-
-  if (linkError) {
-    throw linkError;
-  }
-
-  const tokenHash = linkData.properties?.hashed_token;
-  if (!tokenHash) {
-    throw new ShelfError({
-      cause: null,
-      message: "Supabase did not return a verifiable token",
-      label,
-    });
-  }
-
-  const { data: otpData, error: otpError } =
-    await getSupabaseAdmin().auth.verifyOtp({
-      token_hash: tokenHash,
-      type: "magiclink",
-    });
-
-  if (otpError) {
-    throw otpError;
-  }
-
-  const { session } = otpData;
-  if (!session) {
-    throw new ShelfError({
-      cause: null,
-      message: "The session returned by Supabase is null",
-      label,
-    });
-  }
-
-  return mapAuthSession(session);
-}
-
-/**
- * Mints a fresh, independent Supabase session for an already-authenticated user
- * without a password, via the admin `generateLink` (magiclink) → `verifyOtp`
- * pattern. The resulting session is a brand-new token family, decoupled from
- * the user's web session.
- *
- * Resilience: retried up to {@link MINT_MAX_ATTEMPTS} times with a short
- * backoff, for the two failures a retry can actually fix — transient Supabase
- * errors (504s / network, surfaced as `AuthRetryableFetchError`) and a
- * superseded magic-link token (see {@link isSupersededTokenError}, which
- * explains why that 4xx is the exception). Rate-limits surface as a clear 429,
- * not retried, because the window will not clear in time. Everything else —
- * other 4xx, or our own no-token/no-session errors — fails fast, since
- * retrying cannot change the result.
- *
- * SECURITY: this hands out a full session for `email` with no further checks —
- * it must ONLY be called after the caller has independently authorized the
- * request (here: a valid single-use {@link redeemMobileAuthCode}). It is
- * intentionally NOT exported.
- *
- * @param email - The already-authenticated user's email
- * @returns A mapped auth session (fresh access + refresh tokens)
- * @throws {ShelfError} 429 when rate-limited; otherwise re-throws the underlying
- *   cause, which {@link redeemMobileAuthCode} maps to a captured 500
- */
-async function mintMobileSessionForUser(email: string): Promise<AuthSession> {
-  for (let attempt = 1; attempt <= MINT_MAX_ATTEMPTS; attempt++) {
-    try {
-      return await mintMobileSessionOnce(email);
-    } catch (cause) {
-      // Rate-limited: retrying inside the window won't help. Surface a clear,
-      // user-retryable 429 instead of a generic 500.
-      if (isRateLimitError(cause)) {
-        throw new ShelfError({
-          cause,
-          message:
-            "Too many sign-in attempts. Please wait a moment and try again.",
-          label,
-          status: 429,
-          shouldBeCaptured: false,
-        });
-      }
-
-      // A retry helps in exactly two cases: the failure was transient, or the
-      // token was superseded and a new one will be minted on the next attempt.
-      // Every other 4xx, and our own ShelfErrors, would fail identically.
-      const canRetry =
-        attempt < MINT_MAX_ATTEMPTS &&
-        (isAuthRetryableFetchError(cause) || isSupersededTokenError(cause));
-      if (canRetry) {
-        await sleep(attempt * MINT_RETRY_BASE_MS);
-        continue;
-      }
-
-      // Deterministic failure, or a transient one that exhausted its retries.
-      // redeemMobileAuthCode re-throws ShelfErrors as-is and wraps anything
-      // else (raw Supabase / DB errors) in a captured 500.
-      throw cause;
-    }
-  }
-
-  // Unreachable: every iteration returns or throws. Satisfies the compiler.
-  throw new ShelfError({
+function invalidCodeError(): ShelfError {
+  return new ShelfError({
     cause: null,
-    message: "Could not establish a mobile session. Please try again.",
+    message: "Invalid or expired authorization code",
     label,
-    status: 500,
+    status: 400,
+    shouldBeCaptured: false,
   });
 }
 
 /**
- * Mints a single-use authorization code bound to a user and returns the
- * PLAINTEXT code. The plaintext is only ever exposed in the `shelf://` deeplink
- * and the subsequent exchange request — only its hash is persisted.
+ * Mints a single-use authorization code bound to a user and the SSO session
+ * the app will receive, and returns the PLAINTEXT code. The plaintext is only
+ * ever exposed in the `shelf://` deeplink and the subsequent exchange request;
+ * only its hash is persisted.
  *
- * @param userId - The authenticated user the code authorizes a session for
- * @param codeChallenge - Optional PKCE (S256) challenge. When present, the code
- *   can only be redeemed with a matching verifier (see
- *   {@link redeemMobileAuthCode}). Always present in practice: `/sso-login`
- *   refuses to start a mobile flow without one, and a code carrying none is
- *   unredeemable — see the poison note on the guard below.
+ * @param args.userId - The Shelf user the SSO sign-in resolved to
+ * @param args.refreshToken - The SSO session's refresh token. The caller must
+ *   not use it afterwards: the app becomes its only holder.
+ * @param args.codeChallenge - PKCE (S256) challenge. Always present in
+ *   practice: `/sso-login` refuses to start a mobile flow without one, and a
+ *   code carrying none is unredeemable.
  * @returns The plaintext authorization code to embed in the deeplink
  * @throws {ShelfError} If the row cannot be created
  */
-export async function createMobileAuthCode(
-  userId: string,
-  codeChallenge?: string
-): Promise<string> {
+export async function createMobileAuthCode({
+  userId,
+  refreshToken,
+  codeChallenge,
+}: {
+  userId: string;
+  refreshToken: string;
+  codeChallenge?: string;
+}): Promise<string> {
   try {
     const code = randomBytes(32).toString("base64url"); // 256-bit entropy
 
@@ -296,6 +208,7 @@ export async function createMobileAuthCode(
         userId,
         codeHash: hashCode(code),
         codeChallenge: codeChallenge ?? null,
+        sessionCiphertext: encryptSession(refreshToken, code),
         expiresAt: new Date(Date.now() + MOBILE_AUTH_CODE_TTL_MS),
       },
     });
@@ -312,32 +225,34 @@ export async function createMobileAuthCode(
 }
 
 /**
- * Atomically redeems a mobile auth code and mints a fresh, independent Supabase
- * session for the bound user.
+ * Atomically redeems a mobile auth code and returns the SSO session it was
+ * minted with, refreshed so the app starts from a new token pair.
  *
  * Redemption is single-use: the row is consumed with a conditional update
  * (`consumedAt IS NULL AND expiresAt > now`), so concurrent or replayed
- * requests cannot double-spend the code. A non-existent, expired, or
- * already-consumed code yields a uniform 400 (no oracle about which check
- * failed).
+ * requests cannot double-spend the code. The stored session is then cleared
+ * from the row before any other check, so it never outlives one attempt.
  *
  * PKCE is mandatory and unconditional. The caller MUST present a
  * `codeVerifier` that hashes to the code's stored S256 `codeChallenge`;
- * anything else — a missing verifier, a wrong one, or a code carrying no
- * challenge at all — is rejected with the SAME uniform 400, so an intercepted
- * code is useless without the verifier. A NULL `codeChallenge` is treated as
- * poison rather than as a legacy opt-out: an unbound code is a bearer token,
- * which is precisely what PKCE exists to prevent on a custom-scheme callback
- * any app can claim. Verification runs AFTER the atomic consume, so a wrong
- * verifier burns the single-use code; acceptable, since the legitimate app
- * always presents the matching verifier.
+ * anything else (a missing verifier, a wrong one, or a code carrying no
+ * challenge at all) is rejected. A NULL `codeChallenge` is treated as poison
+ * rather than as a legacy opt-out: an unbound code is a bearer token, which is
+ * precisely what PKCE exists to prevent on a custom-scheme callback any app can
+ * claim. Verification runs AFTER the atomic consume, so a wrong verifier burns
+ * the single-use code; acceptable, since the legitimate app always presents the
+ * matching verifier.
+ *
+ * Every refusal (unknown, expired, used, unbound, wrong verifier, no stored
+ * session, a session that no longer refreshes or belongs to another user) is
+ * the same uniform 400, so redemption gives no oracle about why.
  *
  * @param code - The plaintext authorization code from the deeplink
  * @param codeVerifier - PKCE verifier. Optional in the signature only so the
  *   refusal path stays reachable; a redemption without one always fails.
- * @returns A freshly minted, mapped auth session for the device
- * @throws {ShelfError} 400 if the code is missing/invalid/expired/used, or if a
- *   PKCE-bound code is presented without a matching verifier
+ * @returns The refreshed SSO session for the device
+ * @throws {ShelfError} 400 when the code cannot be redeemed; 500 when the
+ *   database or Supabase is unreachable
  */
 export async function redeemMobileAuthCode(
   code: string,
@@ -362,19 +277,18 @@ export async function redeemMobileAuthCode(
       data: { consumedAt: new Date() },
     });
 
-    if (count !== 1) {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid or expired authorization code",
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
+    if (count !== 1) throw invalidCodeError();
 
-    const { user, codeChallenge } = await db.mobileAuthCode.findUniqueOrThrow({
+    const { userId, codeChallenge, sessionCiphertext } =
+      await db.mobileAuthCode.findUniqueOrThrow({
+        where: { codeHash },
+        select: { userId: true, codeChallenge: true, sessionCiphertext: true },
+      });
+
+    // The code is spent, so the session it carried is never needed again.
+    await db.mobileAuthCode.update({
       where: { codeHash },
-      select: { codeChallenge: true, user: { select: { email: true } } },
+      data: { sessionCiphertext: null },
     });
 
     // PKCE is MANDATORY. A code minted without a challenge is a bearer token —
@@ -383,30 +297,47 @@ export async function redeemMobileAuthCode(
     // protect (RFC 8252 §8.1). So a NULL challenge is unredeemable rather than
     // a check to skip: refusing here means a code that somehow reached the
     // database unbound can never be spent.
-    //
-    // Same uniform 400 as an invalid code, so redemption failures give no
-    // oracle about why. The code is already consumed above, so a wrong or
-    // absent verifier burns it.
     if (
       !codeChallenge ||
       !codeVerifier ||
       !verifyPkceChallenge(codeVerifier, codeChallenge)
     ) {
-      throw new ShelfError({
-        cause: null,
-        message: "Invalid or expired authorization code",
-        label,
-        status: 400,
-        shouldBeCaptured: false,
-      });
+      throw invalidCodeError();
     }
 
-    return await mintMobileSessionForUser(user.email);
+    const refreshToken = sessionCiphertext
+      ? decryptSession(sessionCiphertext, code)
+      : null;
+    if (!refreshToken) throw invalidCodeError();
+
+    let session: AuthSession;
+    try {
+      session = await refreshAccessToken(refreshToken);
+    } catch (cause) {
+      // An unreachable Supabase is an outage, reported as one.
+      if (isLikeShelfError(cause) && isAuthRetryableFetchError(cause.cause)) {
+        throw new ShelfError({
+          cause,
+          message: "Could not establish a mobile session. Please try again.",
+          label,
+          status: 500,
+        });
+      }
+      // Otherwise the session was signed out or expired between the callback
+      // and the exchange. Signing in again is the only remedy, as for an
+      // expired code.
+      throw invalidCodeError();
+    }
+
+    // The code was minted for the Shelf user the SSO sign-in resolved to, whose
+    // id is the SSO auth user's. A session for any other auth user is refused.
+    if (session.userId !== userId) throw invalidCodeError();
+
+    return session;
   } catch (cause) {
-    // Invalid / expired / already-used codes are thrown above with an explicit
-    // 400 and re-thrown here unchanged. Anything else (e.g. a Supabase outage
-    // while minting) is an INTERNAL failure and must surface as 500 — not a
-    // client 400 — so retry and monitoring behavior can tell the two apart.
+    // Refusals are thrown above with an explicit 400 and re-thrown here
+    // unchanged. Anything else (a database failure) is an INTERNAL failure and
+    // must surface as 500, so retry and monitoring can tell the two apart.
     if (isLikeShelfError(cause)) {
       throw cause;
     }

@@ -8,8 +8,9 @@
  * error.
  *
  * The action also refuses a session not obtained through SSO before anything
- * is resolved, and takes the IdP groups, names and contact info from the
- * server-side identity lookup, never from the posted form.
+ * is resolved, takes the IdP groups, names and contact info from the
+ * server-side identity lookup, never from the posted form, and binds the
+ * server-refreshed SSO session (never the posted token) to the code it mints.
  *
  * @see apps/webapp/app/routes/_auth+/oauth.callback_.mobile.tsx
  * @see apps/webapp/app/utils/sso.server.ts resolveUserAndOrgForSsoCallback
@@ -50,8 +51,8 @@ vi.mock("~/utils/sso.server", async () => ({
 }));
 
 // why: the code is persisted in the database; here only whether one is
-// minted matters (its hashing and PKCE binding are covered by
-// mobile-sso.server.test.ts).
+// minted, and with which session, matters (its hashing, encryption and PKCE
+// binding are covered by mobile-sso.server.test.ts).
 vi.mock("~/modules/auth/mobile-sso.server", () => ({
   createMobileAuthCode: vi.fn(),
 }));
@@ -126,6 +127,25 @@ beforeEach(() => {
 });
 
 describe("POST /oauth/callback/mobile", () => {
+  it("binds the server-refreshed SSO session to the code and returns the deeplink", async () => {
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue(
+      {} as Awaited<ReturnType<typeof resolveUserAndOrgForSsoCallback>>
+    );
+
+    const result = await postCallback();
+
+    // The session the server refreshed, not the token the browser posted.
+    expect(createMobileAuthCode).toHaveBeenCalledWith({
+      userId: callbackSession.userId,
+      refreshToken: callbackSession.refreshToken,
+      codeChallenge: undefined,
+    });
+    assertIsDataWithResponseInit(result);
+    expect(result.data).toMatchObject({
+      deeplink: "shelf://auth-callback?code=plain-code",
+    });
+  });
+
   it("reports a linked account as a success notice and mints no code", async () => {
     vi.mocked(resolveUserAndOrgForSsoCallback).mockRejectedValue(
       new ShelfError({

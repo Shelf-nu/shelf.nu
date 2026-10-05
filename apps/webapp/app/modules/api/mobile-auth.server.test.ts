@@ -19,11 +19,11 @@ import { recordMobileActivity } from "./mobile-usage.server";
 // instantiates a real Prisma client and tries to connect at module load — under
 // `pnpm test:run` (no DB available) that triggers an unhandled rejection that
 // fails the whole suite even though every test here is a pure unit test.
-// Mocking the db module short-circuits the connection; `user.findMany` is a
+// Mocking the db module short-circuits the connection; `user.findUnique` is a
 // spy so the `requireMobileAuth` test can assert the lookup and select shape.
 vi.mock("~/database/db.server", () => ({
   db: {
-    user: { findMany: vi.fn() },
+    user: { findUnique: vi.fn() },
     // why: `getMobileAssetForViewer` reads the asset row, and a re-signed photo
     // is written back with a guarded `updateMany`; both are asserted below.
     asset: { findUnique: vi.fn(), updateMany: vi.fn() },
@@ -368,7 +368,7 @@ describe("shapeMobileAssetResponse", () => {
  * @see {@link file://../../routes/api+/mobile+/me.ts} the consuming route
  */
 describe("requireMobileAuth", () => {
-  // Reset the module-scoped `findMany` spy before each test so this suite's
+  // Reset the module-scoped `findUnique` spy before each test so this suite's
   // assertions read only its own call, not calls accumulated by earlier suites.
   beforeEach(() => {
     vi.clearAllMocks();
@@ -377,20 +377,26 @@ describe("requireMobileAuth", () => {
     });
   });
 
-  /** Stubs a valid Bearer JWT and the user row it resolves to. */
+  /**
+   * Stubs a valid Bearer JWT for an auth user and the Shelf row its id
+   * resolves to (`null` when no Shelf account has that id).
+   */
   function signedInAs(
-    dbRow: Record<string, unknown>,
-    authEmail: unknown = dbRow.email
+    dbRow: Record<string, unknown> | null,
+    authUser: { id: unknown; email: unknown } = {
+      id: dbRow?.id,
+      email: dbRow?.email,
+    }
   ) {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
-      data: { user: { id: dbRow.id, email: authEmail } },
+      data: { user: authUser },
       error: null,
     });
     vi.mocked(getSupabaseAdmin).mockReturnValue({
       auth: { getUser },
     } as unknown as ReturnType<typeof getSupabaseAdmin>);
-    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
+    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
 
     return new Request("https://shelf.test/api/mobile/me", {
       headers: { Authorization: "Bearer valid-token" },
@@ -408,20 +414,38 @@ describe("requireMobileAuth", () => {
     lastMobileActiveAt: null,
   };
 
-  it("resolves the user by email whatever the stored email's case", async () => {
-    // The stored row keeps capitals; Supabase returns the address lowercased.
-    const request = signedInAs(
-      { ...BASE_ROW, email: "Jane@Acme.com" },
-      "jane@acme.com"
-    );
+  it("resolves the user by the session's auth user id, never by email", async () => {
+    const request = signedInAs({ ...BASE_ROW, sso: true });
 
     const { user } = await requireMobileAuth(request);
 
-    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
-    expect(lastCall?.[0].where).toEqual({
-      email: expect.objectContaining({ mode: "insensitive" }),
-    });
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({ id: BASE_ROW.id });
     expect(user.id).toBe(BASE_ROW.id);
+  });
+
+  it("refuses with 401 a session whose auth user has no Shelf account", async () => {
+    // A separate auth user holding a Shelf account's address: its id matches
+    // no Shelf row, so it must not act as that account.
+    const request = signedInAs(null, {
+      id: "twin-auth-user",
+      email: BASE_ROW.email,
+    });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 401,
+    });
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
+    expect(lastCall?.[0].where).toEqual({ id: "twin-auth-user" });
+    expect(recordMobileActivity).not.toHaveBeenCalled();
+  });
+
+  it("refuses a soft-deleted account with 404", async () => {
+    const request = signedInAs({ ...BASE_ROW, deletedAt: new Date() });
+
+    await expect(requireMobileAuth(request)).rejects.toMatchObject({
+      status: 404,
+    });
   });
 
   it("refuses a password session for an address that must use SSO", async () => {
@@ -472,7 +496,7 @@ describe("requireMobileAuth", () => {
   it("selects and returns the user's date/time format prefs, stripping internal-only fields", async () => {
     // why: stub the Supabase JWT validation to yield a valid auth user.
     const getUser = vi.fn().mockResolvedValue({
-      data: { user: { email: "ada@example.com" } },
+      data: { user: { id: "user-1", email: "ada@example.com" } },
       error: null,
     });
     vi.mocked(getSupabaseAdmin).mockReturnValue({
@@ -496,7 +520,7 @@ describe("requireMobileAuth", () => {
       lastMobileActiveAt: null,
       sso: false,
     };
-    (db.user.findMany as unknown as Mock).mockResolvedValue([dbRow]);
+    (db.user.findUnique as unknown as Mock).mockResolvedValue(dbRow);
 
     const request = new Request("https://shelf.test/api/mobile/me", {
       headers: { Authorization: "Bearer valid-token" },
@@ -507,7 +531,7 @@ describe("requireMobileAuth", () => {
     // The 4 format-pref columns are part of the select (regression guard). Read
     // the LATEST call so a future test that reaches requireMobileAuth first
     // can't shift the call this assertion inspects.
-    const lastCall = (db.user.findMany as unknown as Mock).mock.calls.at(-1);
+    const lastCall = (db.user.findUnique as unknown as Mock).mock.calls.at(-1);
     const select = lastCall?.[0].select;
     expect(select).toMatchObject({
       dateFormat: true,
