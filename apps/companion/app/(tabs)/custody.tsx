@@ -161,23 +161,27 @@ function MyCustodyContent() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsRefreshing(true);
     nextPage.current = 1;
-    await fetchAssets(1, true, latestRequest.begin());
-    // Unguarded on purpose: the operator pulled this spinner, so it stops
-    // whatever happened to the request behind it.
+    const signal = latestRequest.begin();
+    await fetchAssets(1, true, signal);
+    // The operator pulled this spinner, so it stops either way.
     setIsRefreshing(false);
-    // Clears the shared skeleton too: this is the newest request, and the one
-    // it superseded deliberately skipped its own clear. Every path that starts
-    // a request clears this on completion, so none can strand it.
-    setIsLoading(false);
-    announce("Content refreshed");
+    // The shared skeleton belongs to whichever request is still current. A
+    // newer one is mid-flight and will clear it when it answers; clearing it
+    // here would show the empty state until then. Nothing supersedes the
+    // newest request, so it is always the one that gets here unaborted.
+    if (!signal.aborted) {
+      setIsLoading(false);
+      announce("Content refreshed");
+    }
   };
 
   const onEndReached = async () => {
     if (isLoadingMore || nextPage.current > totalPages) return;
     setIsLoadingMore(true);
-    await fetchAssets(nextPage.current, false, latestRequest.begin());
+    const signal = latestRequest.begin();
+    await fetchAssets(nextPage.current, false, signal);
     setIsLoadingMore(false);
-    setIsLoading(false);
+    if (!signal.aborted) setIsLoading(false);
   };
 
   const renderAsset = useCallback(
