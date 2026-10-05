@@ -76,9 +76,13 @@ vi.mock("~/database/db.server", () => ({
       findFirst: dbMocks.custody.findFirst,
     },
     assetKit: { findFirst: dbMocks.assetKit.findFirst },
+    // why: the kit-member guard locks the asset row with a raw
+    // `SELECT ... FOR UPDATE` before reading its kit membership.
+    $queryRaw: vi.fn().mockResolvedValue([]),
     // why: action wraps custody cleanup + assignment in a transaction
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
+        $queryRaw: vi.fn().mockResolvedValue([]),
         assetKit: { findFirst: dbMocks.assetKit.findFirst },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,

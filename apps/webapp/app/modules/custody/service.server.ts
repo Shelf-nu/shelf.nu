@@ -1,5 +1,5 @@
 import type { Asset, User } from "@prisma/client";
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType, OrganizationRoles, Prisma } from "@prisma/client";
 import {
   KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
   kitMemberCustodyRefusal,
@@ -78,11 +78,21 @@ export async function assertNoKitDerivedCustody(
  * rule existed stay releasable.
  *
  * Call it inside the assign transaction, before the custody rows are written,
- * so the refusal rolls back anything the transaction already did. Like
- * {@link assertNoKitDerivedCustody}, it is a plain read under READ COMMITTED:
- * an asset added to a kit after this read is not seen. Adding an asset that is
- * already in custody to a kit is refused on the kit side, which covers the
- * other order.
+ * so the refusal rolls back anything the transaction already did.
+ *
+ * It serialises against adding the same asset to a kit. It first takes
+ * `FOR UPDATE` on the asset rows, which an `AssetKit` insert has to wait for
+ * (the insert's foreign-key check takes `FOR KEY SHARE` on the asset). So:
+ * - a kit insert that got there first makes this lock wait until it commits,
+ *   and the membership read after the lock then sees the new row;
+ * - an assignment that got there first makes the kit insert wait, and
+ *   `updateKitAssets` re-reads custody after its insert, so it sees the
+ *   committed custody row and refuses.
+ * Both halves are needed: drop either one and two operators acting at the
+ * same moment can both pass. Rows are locked in id order so two assignments
+ * over overlapping assets cannot deadlock each other. Outside a transaction
+ * (the assign page's loader) the lock is released when the statement ends,
+ * so the call is a plain read there.
  *
  * @param tx - the active transaction the assignment runs in
  * @param assetIds - assets about to be put into custody (request input)
@@ -91,11 +101,21 @@ export async function assertNoKitDerivedCustody(
  * @throws {ShelfError} 400 naming the first kit member found and its kit
  */
 export async function assertNotKitMembers(
-  tx: Pick<typeof db, "assetKit">,
+  tx: Pick<typeof db, "assetKit" | "$queryRaw">,
   assetIds: Asset["id"][],
   organizationId: Asset["organizationId"]
 ) {
   if (assetIds.length === 0) return;
+
+  // Column names are literal: `Asset` declares no `@map`.
+  // @see .claude/rules/raw-sql-respects-prisma-map.md
+  const ids = Prisma.join(assetIds);
+  await tx.$queryRaw`
+    SELECT "id" FROM "Asset"
+    WHERE "id" IN (${ids}) AND "organizationId" = ${organizationId}
+    ORDER BY "id"
+    FOR UPDATE
+  `;
 
   const membership = await tx.assetKit.findFirst({
     where: {

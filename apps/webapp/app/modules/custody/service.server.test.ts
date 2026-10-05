@@ -20,6 +20,9 @@ vitest.mock("~/database/db.server", () => ({
     assetKit: {
       findFirst: vitest.fn().mockResolvedValue(null),
     },
+    // why: `assertNotKitMembers` locks the asset rows with a raw
+    // `SELECT ... FOR UPDATE` before reading membership.
+    $queryRaw: vitest.fn().mockResolvedValue([]),
     asset: {
       update: vitest.fn().mockResolvedValue({}),
       // why: release now splits into custody.deleteMany -> guarded
@@ -343,6 +346,28 @@ describe("assertNotKitMembers", () => {
   it("reads nothing for an empty list", async () => {
     await assertNotKitMembers(db, [], "org-1");
 
+    expect(db.$queryRaw).not.toHaveBeenCalled();
     expect(db.assetKit.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("locks the asset rows in id order, in the caller's workspace, before reading membership", async () => {
+    // why this is asserted on the query and its order: the lock is what makes a
+    // concurrent kit insert wait (its foreign-key check takes FOR KEY SHARE on
+    // the asset), and it only helps if it is taken before the membership read.
+    await assertNotKitMembers(db, ["drill", "saw"], "org-1");
+
+    const lock = vitest.mocked(db.$queryRaw).mock;
+    expect(lock.calls).toHaveLength(1);
+    const [strings, ...values] = lock.calls[0] as unknown as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    const sql = strings.join("?").replace(/\s+/g, " ");
+    expect(sql).toContain('FROM "Asset"');
+    expect(sql).toContain('ORDER BY "id" FOR UPDATE');
+    expect(values).toContain("org-1");
+    expect(lock.invocationCallOrder[0]).toBeLessThan(
+      vitest.mocked(db.assetKit.findFirst).mock.invocationCallOrder[0]
+    );
   });
 });

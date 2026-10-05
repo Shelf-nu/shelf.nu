@@ -83,6 +83,8 @@ vi.mock("~/database/db.server", () => {
       createMany: dbMocks.custodyCreateMany,
     },
     note: { createMany: dbMocks.noteCreateMany },
+    // The guard's `SELECT ... FOR UPDATE` on the asset rows.
+    $queryRaw: vi.fn().mockResolvedValue([]),
     $transaction: vi.fn((callback: (tx: unknown) => unknown) => callback(db)),
   };
   return { db };

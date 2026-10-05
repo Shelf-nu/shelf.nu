@@ -5437,8 +5437,9 @@ export async function updateKitAssets({
         hasCustody(asset.custody) &&
         asset.assetKits[0]?.kitId !== kit.id
     );
-    if (isSomeAssetInCustody) {
-      throw new ShelfError({
+    /** The refusal for an INDIVIDUAL asset that is already in custody. */
+    const assetsInCustodyError = () =>
+      new ShelfError({
         cause: null,
         message:
           "Cannot add assets that are already in custody to a kit. Please release custody of assets to allow them to be added to a kit.",
@@ -5447,6 +5448,8 @@ export async function updateKitAssets({
         shouldBeCaptured: false,
         status: 400,
       });
+    if (isSomeAssetInCustody) {
+      throw assetsInCustodyError();
     }
 
     /**
@@ -5598,6 +5601,35 @@ export async function updateKitAssets({
             quantity: addedAssetKitQuantity(asset),
           })),
         });
+
+        /**
+         * Re-check custody for the INDIVIDUAL assets just added, now that the
+         * insert holds them.
+         *
+         * The in-custody check above read the assets before this transaction.
+         * A custody assignment can commit in between, so the insert's own
+         * foreign-key lock (`FOR KEY SHARE` on each asset) is what orders the
+         * two: it waits for an assignment's `FOR UPDATE` lock
+         * (`assertNotKitMembers`), and this read, a new statement under READ
+         * COMMITTED, then sees the custody row it committed. Kit-derived rows
+         * are excluded: those come from a kit and are refused above already.
+         */
+        const addedIndividualIds = newlyAddedAssets
+          .filter((asset) => asset.type !== AssetType.QUANTITY_TRACKED)
+          .map((asset) => asset.id);
+        if (addedIndividualIds.length > 0) {
+          const heldMember = await tx.custody.findFirst({
+            where: {
+              assetId: { in: addedIndividualIds },
+              asset: { organizationId },
+              kitCustodyId: null,
+            },
+            select: { id: true },
+          });
+          if (heldMember) {
+            throw assetsInCustodyError();
+          }
+        }
       }
 
       // Update: existing-in-kit assets whose submitted quantity differs

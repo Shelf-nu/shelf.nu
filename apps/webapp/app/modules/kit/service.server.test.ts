@@ -2508,6 +2508,123 @@ describe("updateKitAssets - Location Cascade", () => {
 });
 
 /**
+ * Adding an individually tracked asset to a kit re-reads custody after the
+ * `AssetKit` insert, inside the transaction.
+ *
+ * The in-custody check reads the assets before the transaction, so a custody
+ * assignment can commit in between. The insert's foreign-key lock waits for an
+ * assignment's `FOR UPDATE` lock (`assertNotKitMembers`), and this re-read then
+ * sees the committed custody row. Without it, two operators acting at the same
+ * moment leave a held asset inside an available kit.
+ */
+describe("updateKitAssets: custody committed while the asset is being added", () => {
+  const KIT = { id: "kit-1", location: null, assetKits: [], custody: null };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // `clearAllMocks` keeps implementations, so the held row these tests
+    // arrange would otherwise answer every custody read in the suites below.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue(null);
+  });
+
+  it("refuses an individual asset whose custody committed after the first check", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    // Read as free before the transaction...
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "gimbal",
+        title: "Gimbal",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+    ]);
+    // ...but held by the time the insert has it.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue({ id: "custody-1" });
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["gimbal"],
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining(
+        "Cannot add assets that are already in custody to a kit"
+      ),
+    });
+
+    // The re-read runs after the insert, against operator rows in this
+    // workspace only. The throw rolls the insert back in production.
+    expect(db.custody.findFirst).toHaveBeenCalledWith({
+      where: {
+        assetId: { in: ["gimbal"] },
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+      select: { id: true },
+    });
+    expect(
+      vitest.mocked(db.assetKit.createMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vitest.mocked(db.custody.findFirst).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("does not re-check a quantity-tracked asset, whose free units can be held", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "batteries",
+        title: "AA Batteries",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 10,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ]);
+    // A held slice of the pool must not refuse the add.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue({ id: "custody-1" });
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["batteries"],
+      assetQuantities: { batteries: 2 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.assetKit.createMany).toHaveBeenCalled();
+    expect(db.custody.findFirst).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kitCustodyId: null }),
+      })
+    );
+  });
+});
+
+/**
  * Track T2 — Kit ↔ Qty-Tracked Custody Correctness Fixes.
  *
  * These describes lock in the contract that kit-allocated Custody rows are:
