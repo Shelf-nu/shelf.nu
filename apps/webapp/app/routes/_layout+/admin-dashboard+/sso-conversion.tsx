@@ -888,7 +888,8 @@ function CandidateRow({
     <Tr>
       <Td>{candidate.email}</Td>
       <Td>{resolveUserDisplayName(candidate)}</Td>
-      <Td>
+      {/* The default cell truncates to one line; these two carry sentences. */}
+      <Td className="max-w-xs whitespace-normal">
         <div className="flex flex-col gap-1">
           <span>{status}</span>
           {!candidate.alreadySso && candidate.hasEarlierSsoLogin ? (
@@ -908,7 +909,7 @@ function CandidateRow({
           ) : null}
         </div>
       </Td>
-      <Td className="text-right">
+      <Td className="max-w-xs whitespace-normal text-right">
         {candidate.alreadySso ? (
           <RevertAction
             candidate={candidate}
