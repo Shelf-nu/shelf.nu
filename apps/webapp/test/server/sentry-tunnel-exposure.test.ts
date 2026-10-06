@@ -46,6 +46,13 @@ function buildApp() {
   return app;
 }
 
+/**
+ * Posts a minimal envelope as a given client address.
+ *
+ * @param app - The app under test
+ * @param ip - The address the Fly edge would have stamped
+ * @param path - Defaults to the tunnel; pass another to prove the scope
+ */
 function send(app: Hono, ip: string, path = SENTRY_TUNNEL_PATH) {
   return app.request(path, {
     method: "POST",
