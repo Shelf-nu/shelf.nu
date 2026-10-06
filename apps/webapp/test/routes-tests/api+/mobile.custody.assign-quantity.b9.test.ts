@@ -50,7 +50,17 @@ vi.mock("~/utils/rate-limit.server", () => ({
 // why: the quantity service writes custody rows; the test only needs to know
 // whether the route let the request reach it
 vi.mock("~/modules/asset/service.server", () => ({
-  checkOutQuantity: vi.fn(async () => ({ id: "asset-1" })),
+  // The service returns the checked-out asset and where its units came from;
+  // a pool at one location reports no explicit source.
+  checkOutQuantity: vi.fn(async () => ({
+    asset: { id: "asset-1" },
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  })),
 }));
 
 // why: the team member lookup is a database read; its result (a colleague) is the input

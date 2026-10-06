@@ -20,7 +20,15 @@ import ActionsDropdown from "./actions-dropdown";
 // no prop seam to inject it through.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
-  return { ...actual, useLoaderData: () => ({ asset: mockAsset }) };
+  return {
+    ...actual,
+    // `custodySources` is the layout loader's source summary for the Assign
+    // and Adjust dialogs; an asset at one location (or none) has a single pool.
+    useLoaderData: () => ({
+      asset: mockAsset,
+      custodySources: { multiSource: false, options: [], poolAvailable: 0 },
+    }),
+  };
 });
 
 // why: the default export renders a static placeholder until hydrated; the
