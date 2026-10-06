@@ -12,18 +12,35 @@ import fs from "node:fs";
 import path from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bodyLimit } from "hono/body-limit";
 import { sentryTunnelRateLimit } from "@server/rate-limit";
-import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import {
+  SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
 
 // @vitest-environment node
 
-/** The ceiling in `sentryTunnelRateLimit`. */
-const LIMIT = 60;
+/**
+ * A low, deterministic ceiling. The production default is far looser, for the
+ * reasons in `sentryTunnelRateLimit`; what is pinned here is the behaviour.
+ */
+const LIMIT = 5;
 
+/** Mirrors how `server/index.ts` mounts the tunnel's two bounds. */
 function buildApp() {
   const app = new Hono();
-  app.use(SENTRY_TUNNEL_PATH, sentryTunnelRateLimit());
+  app.on(
+    "POST",
+    SENTRY_TUNNEL_PATH,
+    bodyLimit({
+      maxSize: SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+      onError: (c) => c.json({ error: { message: "too large" } }, 413),
+    }),
+    sentryTunnelRateLimit(LIMIT)
+  );
   app.post(SENTRY_TUNNEL_PATH, (c) => c.json({ ok: true }));
+  app.get(SENTRY_TUNNEL_PATH, (c) => c.json({ ok: true }));
   // A route outside the limiter's scope, to prove it is scoped.
   app.post("/api/public-stats", (c) => c.json({ ok: true }));
   return app;
@@ -61,17 +78,19 @@ describe("sentryTunnelRateLimit", () => {
     expect(blocked.status).toBe(429);
   });
 
-  it("buckets per address, so one caller cannot silence another", async () => {
+  it("gives each trusted address its own bucket", async () => {
     const app = buildApp();
 
     for (let i = 0; i < LIMIT; i++) {
       await send(app, "10.0.0.1");
     }
 
-    // An error storm from one office must not stop reports from everywhere
-    // else, which is the whole point of reporting.
     const other = await send(app, "10.0.0.2");
     expect(other.status).toBe(200);
+    // Worth knowing what this does NOT promise: in production the trusted
+    // header is the Cloudflare edge address, so everyone arriving through one
+    // edge shares a bucket. Per-visitor isolation only holds where the trusted
+    // header is the visitor's, which is the self-hosted case.
   });
 
   it("lets a bucket recover once its window passes", async () => {
@@ -85,6 +104,47 @@ describe("sentryTunnelRateLimit", () => {
     vi.advanceTimersByTime(60_000);
 
     expect((await send(app, "1.2.3.4")).status).toBe(200);
+  });
+
+  it("does not spend the budget on methods that carry no envelope", async () => {
+    const app = buildApp();
+
+    // A GET, HEAD or CORS preflight must not be able to exhaust an address's
+    // budget and have its real reports refused.
+    for (let i = 0; i < LIMIT * 3; i++) {
+      const res = await app.request(SENTRY_TUNNEL_PATH, {
+        method: "GET",
+        headers: { "Fly-Client-IP": "1.2.3.4" },
+      });
+      expect(res.status).toBe(200);
+    }
+
+    const envelope = await send(app, "1.2.3.4");
+    expect(envelope.status).toBe(200);
+  });
+
+  it("refuses an envelope larger than the ceiling", async () => {
+    const app = buildApp();
+
+    const oversized = await app.request(SENTRY_TUNNEL_PATH, {
+      method: "POST",
+      headers: { "Fly-Client-IP": "1.2.3.4" },
+      body: "x".repeat(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES + 1),
+    });
+
+    expect(oversized.status).toBe(413);
+  });
+
+  it("accepts an envelope at the ceiling", async () => {
+    const app = buildApp();
+
+    const atLimit = await app.request(SENTRY_TUNNEL_PATH, {
+      method: "POST",
+      headers: { "Fly-Client-IP": "1.2.3.4" },
+      body: "x".repeat(SENTRY_TUNNEL_MAX_ENVELOPE_BYTES),
+    });
+
+    expect(atLimit.status).toBe(200);
   });
 
   it("leaves other routes alone", async () => {
@@ -111,6 +171,14 @@ describe("the tunnel path is named once", () => {
   const SERVER_ENTRY = path.resolve(__dirname, "../../server/index.ts");
   const CLIENT_ENTRY = path.resolve(__dirname, "../../app/entry.client.tsx");
 
+  /**
+   * Source with runs of whitespace collapsed, so these assertions pin the code
+   * rather than however prettier chose to wrap it.
+   */
+  function collapsed(file: string) {
+    return fs.readFileSync(file, "utf8").replace(/\s+/g, " ");
+  }
+
   /** The contents of the `publicPaths` array in the server entry. */
   function publicPathsBlock() {
     const src = fs.readFileSync(SERVER_ENTRY, "utf8");
@@ -126,11 +194,10 @@ describe("the tunnel path is named once", () => {
     expect(publicPathsBlock()).toContain("SENTRY_TUNNEL_PATH");
   });
 
-  it("rate limits the path it exposes", () => {
-    const src = fs.readFileSync(SERVER_ENTRY, "utf8");
-    expect(src).toContain(
-      "server.use(SENTRY_TUNNEL_PATH, sentryTunnelRateLimit())"
-    );
+  it("rate limits the path it exposes, for POST only", () => {
+    const src = collapsed(SERVER_ENTRY);
+    expect(src).toContain('server.on( "POST", SENTRY_TUNNEL_PATH');
+    expect(src).toContain("sentryTunnelRateLimit()");
   });
 
   it("has the client post to the same constant", () => {

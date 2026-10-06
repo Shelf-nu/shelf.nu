@@ -46,3 +46,17 @@ export const NOTE_MAX_CONTENT_LENGTH = 5000;
  * @see {@link file://./../routes/api+/sentry-tunnel.ts} the route itself
  */
 export const SENTRY_TUNNEL_PATH = "/api/sentry-tunnel";
+
+/**
+ * Largest envelope the tunnel will read, in bytes.
+ *
+ * The route buffers the whole body before forwarding it, and the path is
+ * reachable without a session, so an unbounded body is an unauthenticated way
+ * to make the server allocate. A request-per-minute limit does not help: one
+ * request can be arbitrarily large.
+ *
+ * 1 MiB is far above anything this app sends. The browser SDK is configured
+ * with tracing only, no Replay and no attachments, so an envelope here is an
+ * error event or a sampled transaction, measured in kilobytes.
+ */
+export const SENTRY_TUNNEL_MAX_ENVELOPE_BYTES = 1024 * 1024;

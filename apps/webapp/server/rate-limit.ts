@@ -373,15 +373,31 @@ export const appLoaderRateLimit = (limit = 60) =>
  * many addresses; a Cloudflare edge rule is the hard ceiling, as with
  * {@link mobileIpRateLimit}.
  *
- * The limit is deliberately well above normal use. One page sends a handful of
- * envelopes, and an error storm on a legitimate page is the moment the reports
- * matter most, so this must not be the thing that drops them. Counters are
- * per-machine, so the effective ceiling is this times the machine count.
+ * **The bucket is coarser than one caller.** `getClientIp` trusts the edge
+ * header, which behind Cloudflare is the Cloudflare address rather than the end
+ * user's, so in production one bucket covers everyone arriving through the same
+ * edge. `client-ip.ts` calls that acceptable because IP is only a fallback
+ * behind a signed-session key, and this limiter has no session to fall back
+ * from, so the coarseness is load-bearing here: a tight ceiling would throttle
+ * unrelated visitors. Self-hosted, where the proxy sets `X-Forwarded-For`, the
+ * bucket is per client.
+ *
+ * So the ceiling is set at "clearly abnormal for one edge address" rather than
+ * tight, and the body bound
+ * ({@link SENTRY_TUNNEL_MAX_ENVELOPE_BYTES}) is what protects memory. Clipping
+ * during a genuine error storm costs duplicates rather than the signal, since
+ * Sentry groups events by fingerprint. Counters are per-machine, so the
+ * effective ceiling is this times the machine count, and a Cloudflare rule
+ * remains the hard, cross-machine one.
+ *
+ * @param limit - Envelopes per bucket per 60s window. Defaults to 300. Exposed
+ *   so tests can drive a low, deterministic threshold; production callers
+ *   should rely on the default.
  */
-export const sentryTunnelRateLimit = () =>
+export const sentryTunnelRateLimit = (limit = 300) =>
   rateLimiter({
     windowMs: 60_000,
-    limit: 60,
+    limit,
     standardHeaders: "draft-7",
     keyGenerator: bucketKeys.sentryTunnel,
     handler: (c) => {

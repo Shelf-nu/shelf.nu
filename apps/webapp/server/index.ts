@@ -3,11 +3,15 @@
 import "./instrument.server.js";
 
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
-import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import {
+  SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+  SENTRY_TUNNEL_PATH,
+} from "~/utils/constants";
 import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
@@ -148,12 +152,29 @@ export default createHonoServer<ServerEnv>({
     server.use("/api/calendar/feed/*", calendarFeedRateLimit());
 
     /**
-     * Sentry tunnel rate limit. The tunnel is public (below), so it is an
-     * anonymous POST relay into our own Sentry project; bound it per IP before
-     * the handler runs, and before `session()` so an over-limit caller costs a
+     * Sentry tunnel bounds. The tunnel is public (below), so it is an anonymous
+     * POST relay into our own Sentry project, bounded two ways before the
+     * handler runs and before `session()` so an over-limit caller never costs a
      * session lookup it will not use.
+     *
+     * Scoped to POST, the only method that carries an envelope. On `use` these
+     * would also count a GET, HEAD or CORS preflight against the bucket, so
+     * cheap requests could spend an address's budget and get real reports from
+     * that address refused.
+     *
+     * The body bound comes first: the route buffers the whole envelope, so the
+     * size has to be refused before anything reads it, not after.
      */
-    server.use(SENTRY_TUNNEL_PATH, sentryTunnelRateLimit());
+    server.on(
+      "POST",
+      SENTRY_TUNNEL_PATH,
+      bodyLimit({
+        maxSize: SENTRY_TUNNEL_MAX_ENVELOPE_BYTES,
+        onError: (c) =>
+          c.json({ error: { message: "Envelope too large." } }, 413),
+      }),
+      sentryTunnelRateLimit()
+    );
 
     /**
      * Add session middleware
