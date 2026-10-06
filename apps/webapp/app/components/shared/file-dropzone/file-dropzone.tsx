@@ -20,12 +20,20 @@ export function FileDropzone({
   dropzoneOptions,
   fileInputName,
   className,
+  acceptLabel = "PNG, JPG, JPEG, or WebP",
 }: {
   fetcher: Fetcher;
   onDropAccepted: DropzoneOptions["onDropAccepted"];
   fileInputName: string;
   dropzoneOptions?: DropzoneOptions;
   className?: string;
+  /**
+   * Human-readable description of `dropzoneOptions.accept`, shown next to
+   * the max-size hint. Defaults to the original image-only copy so existing
+   * callers don't need to change; override when passing a non-image
+   * `accept`.
+   */
+  acceptLabel?: string;
 }) {
   const [fileInfo, updateAllFileInfo] = useAtom(derivedFileInfoAtom);
   const { filename, message, error } = fileInfo;
@@ -117,7 +125,7 @@ export function FileDropzone({
           drop
         </p>
         <p>
-          PNG, JPG, JPEG, or WebP (max.{" "}
+          {acceptLabel} (max.{" "}
           {formatBytes(mergedDropzoneOptions?.maxSize as number)})
         </p>
       </div>
