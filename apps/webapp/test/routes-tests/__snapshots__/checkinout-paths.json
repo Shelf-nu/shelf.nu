@@ -2704,7 +2704,7 @@
       "toggles-off|explicit-off": {
         "OWNER": {
           "custodianNotCreator": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2713,7 +2713,7 @@
             "CANCELLED": "denied"
           },
           "creatorNotCustodian": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2722,7 +2722,7 @@
             "CANCELLED": "denied"
           },
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2733,7 +2733,7 @@
         },
         "ADMIN": {
           "custodianNotCreator": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2742,7 +2742,7 @@
             "CANCELLED": "denied"
           },
           "creatorNotCustodian": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2751,7 +2751,7 @@
             "CANCELLED": "denied"
           },
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2762,19 +2762,19 @@
         },
         "SELF_SERVICE": {
           "custodianNotCreator": {
-            "DRAFT": "allowed",
-            "RESERVED": "denied",
-            "ONGOING": "denied",
-            "OVERDUE": "denied",
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
             "COMPLETE": "denied",
             "ARCHIVED": "denied",
             "CANCELLED": "denied"
           },
           "creatorNotCustodian": {
-            "DRAFT": "allowed",
-            "RESERVED": "denied",
-            "ONGOING": "denied",
-            "OVERDUE": "denied",
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
             "COMPLETE": "denied",
             "ARCHIVED": "denied",
             "CANCELLED": "denied"
@@ -2820,7 +2820,7 @@
         },
         "SELF_SERVICE+ADMIN": {
           "custodianNotCreator": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2829,7 +2829,7 @@
             "CANCELLED": "denied"
           },
           "creatorNotCustodian": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2838,7 +2838,7 @@
             "CANCELLED": "denied"
           },
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2849,7 +2849,7 @@
         },
         "ADMIN+SELF_SERVICE": {
           "custodianNotCreator": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2858,7 +2858,7 @@
             "CANCELLED": "denied"
           },
           "creatorNotCustodian": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2867,7 +2867,7 @@
             "CANCELLED": "denied"
           },
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2880,7 +2880,7 @@
       "toggles-on|explicit-off": {
         "OWNER": {
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2891,7 +2891,7 @@
         },
         "ADMIN": {
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2924,7 +2924,7 @@
         },
         "SELF_SERVICE+ADMIN": {
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",
@@ -2935,7 +2935,7 @@
         },
         "ADMIN+SELF_SERVICE": {
           "neither": {
-            "DRAFT": "allowed",
+            "DRAFT": "denied",
             "RESERVED": "allowed",
             "ONGOING": "allowed",
             "OVERDUE": "allowed",

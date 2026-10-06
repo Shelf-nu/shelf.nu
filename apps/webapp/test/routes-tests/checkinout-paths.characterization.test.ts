@@ -332,9 +332,10 @@ const SENTINEL_BOOKING_ID: Record<
  */
 const NON_403_REFUSALS: Partial<Record<CheckinoutPathKey, RegExp>> = {
   // The fulfil screen refuses a booking whose items the caller may not manage
-  // with a status-less ShelfError, which answers 500.
+  // with a status-less ShelfError, which answers 500, and a booking that is
+  // not in a status it can check out (a DRAFT) with a 400.
   "web:fulfil-and-checkout:loader":
-    /not allowed to add assets for this booking/,
+    /not allowed to add assets for this booking|cannot be checked out in its current status/,
 };
 
 /**
