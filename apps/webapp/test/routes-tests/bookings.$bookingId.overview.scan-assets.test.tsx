@@ -177,6 +177,11 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       // kit-driven BookingAsset row). Empty when only direct asset
       // scans were submitted.
       kitSlices: [],
+      // The caller's access, so the service re-checks the add rule
+      // against the booking status it reads under the row lock.
+      access: expect.objectContaining({
+        bookings: expect.objectContaining({ writeAll: true }),
+      }),
     });
     expect(vi.mocked(redirect)).toHaveBeenCalledWith("/bookings/booking-123");
   });
