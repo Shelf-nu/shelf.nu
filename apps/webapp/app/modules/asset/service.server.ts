@@ -49,7 +49,9 @@ import {
 } from "~/modules/asset/availability-primitives.server";
 import type { ReleaseLine } from "~/modules/asset/custody-source";
 import {
+  UNPLACED_SOURCE,
   custodyFromSource,
+  custodySourceKey,
   hasMultipleSources,
   isUnplacedSource,
   placedAtSource,
@@ -8948,6 +8950,7 @@ export async function checkOutQuantity({
           teamMemberId,
           kitCustodyId: null,
           locationId: source.locationId,
+          sourceUnknown: source.sourceUnknown,
         },
         select: { id: true },
       });
@@ -8963,6 +8966,7 @@ export async function checkOutQuantity({
             teamMemberId,
             quantity,
             locationId: source.locationId,
+            sourceUnknown: source.sourceUnknown,
           },
         });
       }
@@ -9089,7 +9093,10 @@ export async function checkOutQuantity({
 
 /** One source line of an explicit per-location release. */
 export type ReleaseSourceLine = {
-  /** The custody row's source: a location id, or null for unplaced / none. */
+  /**
+   * The custody row's source: a location id, null or `UNPLACED_SOURCE` for
+   * the unplaced units, or `UNRECORDED_SOURCE` for a source never recorded.
+   */
   locationId: string | null;
   /** Units leaving the holder from this source. */
   quantity: number;
@@ -9137,10 +9144,10 @@ type ReleaseQuantityArgs = {
    */
   consumed?: number;
   /**
-   * Release only the units taken from this source: a location id, or the
-   * unplaced units (`isUnplacedSource`). Undefined when the caller does not say
-   * (an older phone app, the bulk scanner): the holder's rows are then
-   * drawn in `orderRowsForDrain` order.
+   * Release only the units taken from this source: a location id, the
+   * unplaced units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Undefined
+   * when the caller does not say (an older phone app, the bulk scanner): the
+   * holder's rows are then drawn in `orderRowsForDrain` order.
    */
   locationId?: string | null;
   /**
@@ -9344,8 +9351,17 @@ export async function releaseQuantity({
       }
 
       const heldTotal = holderRows.reduce((sum, row) => sum + row.quantity, 0);
-      const rowForSource = (sourceId: string | null) => {
-        const row = holderRows.find((r) => r.locationId === sourceId);
+      /**
+       * The holder's row for a submitted source: a location id, the unplaced
+       * units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Rows are keyed by
+       * `custodySourceKey`, so the unplaced row and the never-recorded row of
+       * one holder stay apart although both have a NULL location.
+       */
+      const rowForSource = (submitted: string | null) => {
+        const sourceId = isUnplacedSource(submitted)
+          ? UNPLACED_SOURCE
+          : submitted;
+        const row = holderRows.find((r) => custodySourceKey(r) === sourceId);
         if (!row) {
           throw new ShelfError({
             cause: null,
@@ -9378,12 +9394,12 @@ export async function releaseQuantity({
       let lines: ReleaseLine[];
 
       if (sourceLines && sourceLines.length > 0) {
-        const seen = new Set<string | null>();
+        const seen = new Set<string>();
         lines = sourceLines
           .filter((line) => line.quantity > 0)
           .map((line) => {
             const sourceId = isUnplacedSource(line.locationId)
-              ? null
+              ? UNPLACED_SOURCE
               : line.locationId;
             if (seen.has(sourceId)) {
               throw new ShelfError({
@@ -9431,9 +9447,7 @@ export async function releaseQuantity({
         assertConsumedInRange(consumedUnits, quantity);
 
         if (locationId !== undefined) {
-          const row = rowForSource(
-            isUnplacedSource(locationId) ? null : locationId
-          );
+          const row = rowForSource(locationId);
           if (quantity > row.quantity) refuseOverRelease(row.quantity);
           lines = [
             {

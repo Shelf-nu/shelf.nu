@@ -931,14 +931,20 @@ model Custody {
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
   // The manual placement the units were taken from, for a quantity-tracked
-  // asset's operator custody. NULL means the unplaced units, or a source
-  // that was never recorded (custody older than this column on an asset
-  // placed at several locations). Always NULL for kit-inherited rows and for
-  // individual assets. Custody never changes a location's count: this only
-  // says which location loses the units when they are used up.
-  // `onDelete: SetNull` so deleting the location keeps the custody.
+  // asset's operator custody. NULL means the unplaced units, or a source that
+  // was never recorded: `sourceUnknown` tells the two apart. Always NULL for
+  // kit-inherited rows and for individual assets. Custody never changes a
+  // location's count: this only says which location loses the units when
+  // they are used up. `onDelete: SetNull` so deleting the location keeps the
+  // custody.
   location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   locationId String?
+
+  // True when the assignment did not say where the units came from and the
+  // pool had more than one place they could have come from. Only ever true
+  // with `locationId` NULL. Such units count against no location and never
+  // against the unplaced units; the pool-wide cap still bounds them.
+  sourceUnknown Boolean @default(false)
 
   // DateTime
   createdAt DateTime @default(now())
@@ -946,12 +952,14 @@ model Custody {
 
   // Two partial uniques live in raw SQL (Prisma can't express partial
   // uniques in the schema); see migrations
-  // 20260603100000_custody_partial_uniques_split_operator_kit and
-  // 20260925100000_custody_source_location:
-  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId)
-  //                                NULLS NOT DISTINCT
+  // 20260603100000_custody_partial_uniques_split_operator_kit,
+  // 20260925100000_custody_source_location and
+  // 20261006100000_custody_source_unknown:
+  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId,
+  //                                sourceUnknown) NULLS NOT DISTINCT
   //                                WHERE "kitCustodyId" IS NULL
-  //     One operator row per holder per source location, NULL included.
+  //     One operator row per holder per source: a location, the unplaced
+  //     units, or a source never recorded.
   //   - Custody_kit_unique      -> UNIQUE (assetId, kitCustodyId)
   //                                WHERE "kitCustodyId" IS NOT NULL
   // The total cap (sum <= Asset.quantity) is enforced at the application

@@ -36,6 +36,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherErrorSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import { defaultAssignSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
@@ -150,10 +151,7 @@ export function QuantityCustodyDialog({
    * Server-side refusal, shown above the form: the source may have fewer
    * units left than asked for, or custody moved while the dialog was open.
    */
-  const serverErrorMessage =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  const serverErrorMessage = useFetcherErrorSinceOpen(fetcher, open);
 
   /** Close the dialog and reset state after a successful submission */
   useEffect(() => {

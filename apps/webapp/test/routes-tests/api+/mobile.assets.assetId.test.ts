@@ -187,6 +187,7 @@ function buildAsset() {
         quantity: 5,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-alice",
           name: "Alice Holder",
@@ -204,6 +205,7 @@ function buildAsset() {
         quantity: 3,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-me",
           name: "Test User",
@@ -221,6 +223,7 @@ function buildAsset() {
         quantity: 1,
         kitCustodyId: null,
         location: null as { id: string; name: string } | null,
+        sourceUnknown: false,
         custodian: {
           id: "tm-nrm",
           name: "Bob NonRegistered",
@@ -427,7 +430,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       {
         custodian: { id: "tm-me", name: "Test User" },
         quantity: 3,
-        sources: [{ locationId: null, name: null, quantity: 3 }],
+        sources: [
+          { locationId: null, unrecorded: false, name: null, quantity: 3 },
+        ],
       },
     ]);
     // Two other holders were hidden
@@ -475,7 +480,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       {
         custodian: { id: "tm-me", name: "Test User" },
         quantity: 3,
-        sources: [{ locationId: null, name: null, quantity: 3 }],
+        sources: [
+          { locationId: null, unrecorded: false, name: null, quantity: 3 },
+        ],
       },
     ]);
     expect(body.asset.custodyListOthersCount).toBe(2);
@@ -501,7 +508,33 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
       (entry: { custodian: { id: string } }) => entry.custodian.id === "tm-me"
     );
     expect(mine.sources).toEqual([
-      { locationId: "loc-studio", name: "Studio", quantity: 3 },
+      {
+        locationId: "loc-studio",
+        unrecorded: false,
+        name: "Studio",
+        quantity: 3,
+      },
+    ]);
+  });
+
+  it("flags units whose source was never recorded apart from unplaced ones", async () => {
+    const asset = buildAsset();
+    asset.custody[1] = { ...asset.custody[1], sourceUnknown: true };
+    assetFindUniqueMock.mockResolvedValue(asset);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (result as unknown as Response).json();
+
+    const mine = body.asset.custodyList.find(
+      (entry: { custodian: { id: string } }) => entry.custodian.id === "tm-me"
+    );
+    expect(mine.sources).toEqual([
+      { locationId: null, unrecorded: true, name: null, quantity: 3 },
     ]);
   });
 

@@ -5,8 +5,9 @@
  * for custody), once, and only when a pool is placed at two or more locations.
  * A source is a manual placement (`AssetLocation` with `assetKitId` NULL) or,
  * when the pool has units no placement accounts for, "Unplaced". The chosen
- * source is stored on `Custody.locationId` (NULL = unplaced, or never
- * recorded).
+ * source is stored on `Custody.locationId`. NULL is the unplaced units, or,
+ * with `Custody.sourceUnknown`, a source that was never recorded: the
+ * assignment named none and the pool had more than one place to take from.
  *
  * Custody never changes a location's count. The source only decides which
  * location loses units that are used up, and caps how many can be taken from
@@ -29,6 +30,12 @@
 export const UNPLACED_SOURCE = "unplaced";
 
 /**
+ * Release-line value for custody whose source was never recorded. Like
+ * {@link UNPLACED_SOURCE} it can never be mistaken for a location id.
+ */
+export const UNRECORDED_SOURCE = "unrecorded";
+
+/**
  * Whether a submitted source names the unplaced units: `null`, `""` or
  * {@link UNPLACED_SOURCE}. `undefined` is NOT one of them: it means the
  * caller did not say.
@@ -48,8 +55,21 @@ export type SourcePlacement = {
 /** One operator custody row (kit-inherited rows never take part). */
 export type SourceCustodyRow = {
   locationId: string | null;
+  /** `Custody.sourceUnknown`: the source was never recorded. */
+  sourceUnknown: boolean;
   quantity: number;
 };
+
+/**
+ * The value a release line names a custody row's source by: its location id,
+ * {@link UNPLACED_SOURCE}, or {@link UNRECORDED_SOURCE}.
+ */
+export function custodySourceKey(
+  row: Pick<SourceCustodyRow, "locationId" | "sourceUnknown">
+): string {
+  if (row.locationId !== null) return row.locationId;
+  return row.sourceUnknown ? UNRECORDED_SOURCE : UNPLACED_SOURCE;
+}
 
 /** What the source rules need to know about a pool. */
 export type CustodySourceState = {
@@ -81,20 +101,25 @@ export function placedAtSource(
     .reduce((sum, p) => sum + p.quantity, 0);
 }
 
-/** Units in operator custody that were taken from `locationId` (NULL included). */
+/**
+ * Units in operator custody that were taken from `locationId`, or from the
+ * unplaced units for NULL. Custody whose source was never recorded counts
+ * against neither.
+ */
 export function custodyFromSource(
   state: CustodySourceState,
   locationId: string | null
 ): number {
   return state.operatorCustody
-    .filter((row) => row.locationId === locationId)
+    .filter((row) => row.locationId === locationId && !row.sourceUnknown)
     .reduce((sum, row) => sum + row.quantity, 0);
 }
 
 /**
  * How many units a source has left to hand out: placed there minus already in
  * custody from there. For NULL: the unplaced units minus custody recorded
- * against them. Never negative.
+ * against them. Custody whose source was never recorded is charged to no
+ * source; the pool-wide availability check still bounds it. Never negative.
  *
  * This is the one definition used by the Assign cap, the dropdown's
  * pre-selection and the loss cap. It deliberately ignores booking check-outs:
@@ -310,6 +335,11 @@ export type ResolvedCustodySource = {
   /** The location to record, NULL for unplaced / unknown. */
   locationId: string | null;
   /**
+   * True when nothing was named and the pool had more than one place the
+   * units could come from: recorded as `Custody.sourceUnknown`.
+   */
+  sourceUnknown: boolean;
+  /**
    * True when the caller named the source (a location, or "unplaced"). Only
    * an explicit source is validated and capped per location: an older phone
    * app that sends nothing must never be refused for it.
@@ -324,8 +354,10 @@ export type ResolvedCustodySource = {
  *    (see {@link isUnplacedSource}).
  * 2. Nothing submitted, and the pool has exactly one manual placement and no
  *    unplaced units: that location (there is nowhere else the units can be).
- * 3. Nothing submitted otherwise (no placements, or an ambiguous pool from an
- *    older client): NULL.
+ * 3. Nothing submitted and no manual placement: the unplaced units, the only
+ *    place the units can be.
+ * 4. Nothing submitted otherwise (one placement plus unplaced units, or two
+ *    or more placements, from an older client): NULL with `sourceUnknown`.
  *
  * @param submitted - `undefined` when the field was absent from the request
  */
@@ -339,16 +371,20 @@ export function resolveCustodySource({
   if (submitted !== undefined) {
     return {
       locationId: isUnplacedSource(submitted) ? null : submitted,
+      sourceUnknown: false,
       explicit: true,
     };
   }
 
   const locations = distinctPlacementLocationIds(state);
+  if (locations.length === 0) {
+    return { locationId: null, sourceUnknown: false, explicit: false };
+  }
   if (locations.length === 1 && unplacedUnits(state) === 0) {
-    return { locationId: locations[0], explicit: false };
+    return { locationId: locations[0], sourceUnknown: false, explicit: false };
   }
 
-  return { locationId: null, explicit: false };
+  return { locationId: null, sourceUnknown: true, explicit: false };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -360,6 +396,8 @@ export type CustodyRowForPlan = {
   id: string;
   teamMemberId: string;
   locationId: string | null;
+  /** `Custody.sourceUnknown`: the source was never recorded. */
+  sourceUnknown: boolean;
   quantity: number;
   createdAt: Date | string;
 };
@@ -512,8 +550,12 @@ export function planCustodyRehome({
     }
   ) => {
     let remaining = amount;
+    // Custody whose source was never recorded is not at any placement, so
+    // a placement change never moves it.
     const sourceRows = orderRowsForDrain(
-      rows.filter((row) => row.locationId === fromLocationId)
+      rows.filter(
+        (row) => row.locationId === fromLocationId && !row.sourceUnknown
+      )
     );
     for (const row of sourceRows) {
       let rowLeft = row.quantity;
@@ -583,8 +625,10 @@ export function planCustodyRehome({
 
 /** One source of a holder's units, as the mobile API reports it. */
 export type CustodySourceEntry = {
-  /** NULL: the unplaced units, or a source that was never recorded. */
+  /** NULL: the unplaced units, or (with `unrecorded`) a source never recorded. */
   locationId: string | null;
+  /** True when the source was never recorded; always false with a location. */
+  unrecorded: boolean;
   /** The location's name; null with `locationId`. */
   name: string | null;
   /** Units the holder took from this source. */
@@ -601,18 +645,24 @@ export type CustodySourceEntry = {
 export function buildCustodySourceEntries(
   rows: Array<{
     quantity: number;
+    sourceUnknown: boolean;
     location: { id: string; name: string } | null;
   }>
 ): CustodySourceEntry[] {
   const entries: CustodySourceEntry[] = [];
   for (const row of rows) {
     const locationId = row.location?.id ?? null;
-    const existing = entries.find((entry) => entry.locationId === locationId);
+    const unrecorded = locationId === null && row.sourceUnknown === true;
+    const existing = entries.find(
+      (entry) =>
+        entry.locationId === locationId && entry.unrecorded === unrecorded
+    );
     if (existing) {
       existing.quantity += row.quantity;
     } else {
       entries.push({
         locationId,
+        unrecorded,
         name: row.location?.name ?? null,
         quantity: row.quantity,
       });

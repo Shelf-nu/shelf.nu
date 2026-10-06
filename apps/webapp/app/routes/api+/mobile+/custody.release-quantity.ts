@@ -85,8 +85,10 @@ const ReleaseQuantityCustodySchema = z.object({
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
   /**
-   * Release only the units taken from this source: a location id, or
-   * `null` / `""` for the unplaced units. Optional and additive: an app
+   * Release only the units taken from this source: a location id,
+   * `null` / `""` for the unplaced units, or `"unrecorded"` for units whose
+   * source was never recorded (a `sources` entry with `unrecorded: true`).
+   * Optional and additive: an app
    * build that does not send it has the holder's rows drawn in the
    * service's fixed order.
    */

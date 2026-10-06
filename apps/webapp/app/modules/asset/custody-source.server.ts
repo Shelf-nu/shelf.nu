@@ -81,6 +81,7 @@ export async function loadCustodySources(
         id: true,
         teamMemberId: true,
         locationId: true,
+        sourceUnknown: true,
         quantity: true,
         createdAt: true,
       },
@@ -116,6 +117,7 @@ export async function loadCustodySourcesForAssets(
       assetId: true,
       teamMemberId: true,
       locationId: true,
+      sourceUnknown: true,
       quantity: true,
       createdAt: true,
     },
@@ -257,6 +259,9 @@ export async function applyCustodyRehome(
         assetId,
         teamMemberId: move.teamMemberId,
         locationId: move.toLocationId,
+        // A re-homed unit lands at a location or in the unplaced units, never
+        // in a row whose source was never recorded.
+        sourceUnknown: false,
         kitCustodyId: null,
       },
       select: { id: true },
@@ -268,7 +273,7 @@ export async function applyCustodyRehome(
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `move.rowId` comes from the operator custody rows this module read for `assetId`, inside the caller's locked transaction
       await tx.custody.update({
         where: { id: move.rowId },
-        data: { locationId: move.toLocationId },
+        data: { locationId: move.toLocationId, sourceUnknown: false },
       });
       quantityById.delete(move.rowId);
       continue;

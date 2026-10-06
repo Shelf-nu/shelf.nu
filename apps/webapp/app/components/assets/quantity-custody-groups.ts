@@ -12,12 +12,16 @@
  * @see {@link file://../../modules/asset/custody-source.ts}
  */
 
+import { custodySourceKey } from "~/modules/asset/custody-source";
+
 /** The fields of a custody record these helpers read. */
 export type GroupableCustodyRecord = {
   id?: string;
   quantity?: number;
   kitCustodyId?: string | null;
   location?: { id: string; name: string } | null;
+  /** `Custody.sourceUnknown`: with no location, the source was never recorded. */
+  sourceUnknown?: boolean;
   custodian: { id: string };
 };
 
@@ -84,12 +88,11 @@ export function groupCustodyRecords<T extends GroupableCustodyRecord>(
 }
 
 /**
- * What a NULL source means on this pool: the unplaced units when the pool
- * has any, otherwise a source that was never recorded (custody older than
- * source tracking on a pool placed at several locations).
+ * What a row without a location means: the unplaced units, or, when
+ * `sourceUnknown` is set, a source that was never recorded.
  */
-export function nullSourceLabel(poolHasUnplaced: boolean): string {
-  return poolHasUnplaced ? "unplaced" : "location not recorded";
+export function nullSourceLabel(sourceUnknown: boolean): string {
+  return sourceUnknown ? "location not recorded" : "unplaced";
 }
 
 /** One part of a person's source text. */
@@ -104,19 +107,17 @@ export type SourcePart = {
 /**
  * The source text after a person's quantity, for a pool with two or more
  * sources: "from Studio" for a single source, "2 from Camera Room, 1 from
- * Studio" for several, "unplaced" / "location not recorded" for NULL.
+ * Studio" for several, "unplaced" / "location not recorded" without a
+ * location.
  *
  * @param rows - The person's operator rows
- * @param poolHasUnplaced - Whether the pool currently has unplaced units
  */
 export function describeCustodySources(
-  rows: GroupableCustodyRecord[],
-  poolHasUnplaced: boolean
+  rows: GroupableCustodyRecord[]
 ): SourcePart[] {
-  const nullText = nullSourceLabel(poolHasUnplaced);
-
   if (rows.length === 1) {
     const [only] = rows;
+    const unknown = Boolean(only.sourceUnknown);
     return only.location
       ? [
           {
@@ -125,11 +126,18 @@ export function describeCustodySources(
             muted: false,
           },
         ]
-      : [{ key: "none", text: nullText, muted: !poolHasUnplaced }];
+      : [
+          {
+            key: unknown ? "unrecorded" : "unplaced",
+            text: nullSourceLabel(unknown),
+            muted: unknown,
+          },
+        ];
   }
 
   return rows.map((row) => {
     const quantity = row.quantity ?? 1;
+    const unknown = Boolean(row.sourceUnknown);
     return row.location
       ? {
           key: row.location.id,
@@ -137,9 +145,9 @@ export function describeCustodySources(
           muted: false,
         }
       : {
-          key: "none",
-          text: `${quantity} ${nullText}`,
-          muted: !poolHasUnplaced,
+          key: unknown ? "unrecorded" : "unplaced",
+          text: `${quantity} ${nullSourceLabel(unknown)}`,
+          muted: unknown,
         };
   });
 }
@@ -148,22 +156,18 @@ export function describeCustodySources(
  * Where one line of a per-location release comes from: "From Camera Room",
  * "Unplaced" or "Location not recorded".
  */
-export function releaseLineSource(
-  row: GroupableCustodyRecord,
-  poolHasUnplaced: boolean
-): string {
+export function releaseLineSource(row: GroupableCustodyRecord): string {
   if (row.location) return `From ${row.location.name}`;
-  return poolHasUnplaced ? "Unplaced" : "Location not recorded";
+  return row.sourceUnknown ? "Location not recorded" : "Unplaced";
 }
 
 /**
- * The label of one source line in a per-location release:
- * "From Camera Room: max 2", "Unplaced: max 1" or
- * "Location not recorded: max 1".
+ * The value a release posts to name a row's source: its location id,
+ * `"unplaced"`, or `"unrecorded"`. Same as `custodySourceKey` on the server.
  */
-export function releaseLineLabel(
-  row: GroupableCustodyRecord,
-  poolHasUnplaced: boolean
-): string {
-  return `${releaseLineSource(row, poolHasUnplaced)}: max ${row.quantity ?? 1}`;
+export function releaseSourceValue(row: GroupableCustodyRecord): string {
+  return custodySourceKey({
+    locationId: row.location?.id ?? null,
+    sourceUnknown: Boolean(row.sourceUnknown),
+  });
 }

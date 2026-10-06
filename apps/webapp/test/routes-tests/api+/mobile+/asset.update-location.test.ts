@@ -189,7 +189,7 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(status).toBe(200);
     expect(tx.custody.update).toHaveBeenCalledWith({
       where: { id: "custody-1" },
-      data: { locationId: "loc-van" },
+      data: { locationId: "loc-van", sourceUnknown: false },
     });
   });
 

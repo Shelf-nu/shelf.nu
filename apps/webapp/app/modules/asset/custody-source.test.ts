@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { CustodyRowForPlan, CustodySourceState } from "./custody-source";
 import {
   UNPLACED_SOURCE,
+  UNRECORDED_SOURCE,
+  buildCustodySourceEntries,
   buildCustodySourceOptions,
+  custodySourceKey,
   defaultAssignSourceOption,
   defaultSourceOption,
   hasMultipleSources,
@@ -18,10 +21,14 @@ const A = "loc-camera-room";
 const B = "loc-studio";
 const C = "loc-annex";
 
+/**
+ * A pool. Custody tuples are `[locationId, quantity]`, or
+ * `[null, quantity, true]` for custody whose source was never recorded.
+ */
 function state(
   total: number,
   placements: Array<[string, number]>,
-  custody: Array<[string | null, number]> = []
+  custody: Array<[string | null, number, boolean?]> = []
 ): CustodySourceState {
   return {
     total,
@@ -29,8 +36,9 @@ function state(
       locationId,
       quantity,
     })),
-    operatorCustody: custody.map(([locationId, quantity]) => ({
+    operatorCustody: custody.map(([locationId, quantity, unknown]) => ({
       locationId,
+      sourceUnknown: unknown ?? false,
       quantity,
     })),
   };
@@ -41,9 +49,10 @@ function row(
   locationId: string | null,
   quantity: number,
   createdAt = "2026-09-01T00:00:00.000Z",
-  teamMemberId = "tm-1"
+  teamMemberId = "tm-1",
+  sourceUnknown = false
 ): CustodyRowForPlan {
-  return { id, teamMemberId, locationId, quantity, createdAt };
+  return { id, teamMemberId, locationId, sourceUnknown, quantity, createdAt };
 }
 
 describe("unitsLeftAtSource", () => {
@@ -73,8 +82,26 @@ describe("unitsLeftAtSource", () => {
     expect(unitsLeftAtSource(s, null)).toBe(2);
   });
 
-  it("never goes negative for custody that was never recorded", () => {
-    // Fully placed pool with legacy NULL custody: nothing is unplaced.
+  it("charges custody whose source was never recorded to no source", () => {
+    // 3 unplaced, 1 taken from the unplaced units, 2 from nobody knows where.
+    const s = state(
+      7,
+      [
+        [A, 2],
+        [B, 2],
+      ],
+      [
+        [null, 1],
+        [null, 2, true],
+      ]
+    );
+    expect(unitsLeftAtSource(s, null)).toBe(2);
+    expect(unitsLeftAtSource(s, A)).toBe(2);
+    expect(unitsLeftAtSource(s, B)).toBe(2);
+  });
+
+  it("never goes negative for the unplaced units", () => {
+    // Fully placed pool: nothing is unplaced.
     const s = state(
       4,
       [
@@ -346,7 +373,7 @@ describe("resolveCustodySource", () => {
           [B, 2],
         ]),
       })
-    ).toEqual({ locationId: B, explicit: true });
+    ).toEqual({ locationId: B, sourceUnknown: false, explicit: true });
   });
 
   it("reads the unplaced word, an empty string or null as an explicit choice of the unplaced units", () => {
@@ -355,14 +382,17 @@ describe("resolveCustodySource", () => {
       resolveCustodySource({ submitted: UNPLACED_SOURCE, state: s })
     ).toEqual({
       locationId: null,
+      sourceUnknown: false,
       explicit: true,
     });
     expect(resolveCustodySource({ submitted: "", state: s })).toEqual({
       locationId: null,
+      sourceUnknown: false,
       explicit: true,
     });
     expect(resolveCustodySource({ submitted: null, state: s })).toEqual({
       locationId: null,
+      sourceUnknown: false,
       explicit: true,
     });
   });
@@ -370,22 +400,22 @@ describe("resolveCustodySource", () => {
   it("fills in the only placement when nothing is submitted and nothing is unplaced", () => {
     expect(
       resolveCustodySource({ submitted: undefined, state: state(4, [[A, 4]]) })
-    ).toEqual({ locationId: A, explicit: false });
+    ).toEqual({ locationId: A, sourceUnknown: false, explicit: false });
   });
 
-  it("records nothing for a pool with no placements", () => {
+  it("records the unplaced units for a pool with no placements", () => {
     expect(
       resolveCustodySource({ submitted: undefined, state: state(4, []) })
-    ).toEqual({ locationId: null, explicit: false });
+    ).toEqual({ locationId: null, sourceUnknown: false, explicit: false });
   });
 
-  it("records nothing for one placement plus unplaced units (older client)", () => {
+  it("records an unknown source for one placement plus unplaced units (older client)", () => {
     expect(
       resolveCustodySource({ submitted: undefined, state: state(7, [[A, 4]]) })
-    ).toEqual({ locationId: null, explicit: false });
+    ).toEqual({ locationId: null, sourceUnknown: true, explicit: false });
   });
 
-  it("records nothing for a pool at two locations (older client)", () => {
+  it("records an unknown source for a pool at two locations (older client)", () => {
     expect(
       resolveCustodySource({
         submitted: undefined,
@@ -394,7 +424,7 @@ describe("resolveCustodySource", () => {
           [B, 2],
         ]),
       })
-    ).toEqual({ locationId: null, explicit: false });
+    ).toEqual({ locationId: null, sourceUnknown: true, explicit: false });
   });
 });
 
@@ -613,5 +643,48 @@ describe("planCustodyRehome", () => {
       rows: [row("r1", A, 3)],
     });
     expect(moves).toEqual([]);
+  });
+});
+
+describe("custody whose source was never recorded", () => {
+  it("never moves when placements change", () => {
+    // Whole-pool move to C: the unplaced row follows, the unknown row stays.
+    const moves = planCustodyRehome({
+      before: state(10, [
+        [A, 4],
+        [B, 4],
+      ]),
+      after: state(10, [[C, 10]]),
+      rows: [
+        row("r-unplaced", null, 1),
+        row("r-unknown", null, 2, undefined, "tm-1", true),
+      ],
+      destinationLocationId: C,
+    });
+    expect(moves.map((m) => m.rowId)).toEqual(["r-unplaced"]);
+  });
+
+  it("has its own release key, apart from the unplaced units", () => {
+    expect(custodySourceKey({ locationId: A, sourceUnknown: false })).toBe(A);
+    expect(custodySourceKey({ locationId: null, sourceUnknown: false })).toBe(
+      UNPLACED_SOURCE
+    );
+    expect(custodySourceKey({ locationId: null, sourceUnknown: true })).toBe(
+      UNRECORDED_SOURCE
+    );
+  });
+
+  it("is its own entry in the mobile sources, flagged unrecorded", () => {
+    expect(
+      buildCustodySourceEntries([
+        { quantity: 2, sourceUnknown: false, location: { id: A, name: "Cam" } },
+        { quantity: 1, sourceUnknown: false, location: null },
+        { quantity: 3, sourceUnknown: true, location: null },
+      ])
+    ).toEqual([
+      { locationId: A, unrecorded: false, name: "Cam", quantity: 2 },
+      { locationId: null, unrecorded: false, name: null, quantity: 1 },
+      { locationId: null, unrecorded: true, name: null, quantity: 3 },
+    ]);
   });
 });

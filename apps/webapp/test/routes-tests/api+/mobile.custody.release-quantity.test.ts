@@ -335,8 +335,8 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       expect(noteContent()).toContain("**30** returned to stock");
     });
 
-    it("forwards the source location, and null for the unplaced units", async () => {
-      for (const locationId of ["loc-studio", null]) {
+    it("forwards the source: a location, null for the unplaced units, or unrecorded", async () => {
+      for (const locationId of ["loc-studio", null, "unrecorded"]) {
         const request = createReleaseQuantityRequest({
           assetId: "asset-1",
           teamMemberId: "tm-1",
@@ -383,6 +383,23 @@ describe("POST /api/mobile/custody/release-quantity", () => {
 
       expect(noteContent()).toContain(
         'as consumed (2 from {% link to="/locations/loc-camera" text="Camera Room" /%}, 1 unplaced)'
+      );
+    });
+
+    it("leaves the rows to the service's drain order when an older app names no source", async () => {
+      // An app build predating sources sends no `locationId`. Forwarding
+      // undefined (not null, which means the unplaced units) is what lets the
+      // service draw the holder's rows in its fixed order.
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+
+      await action(createActionArgs({ request }));
+
+      expect(releaseQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({ locationId: undefined })
       );
     });
 

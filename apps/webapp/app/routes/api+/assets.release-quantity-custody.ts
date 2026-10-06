@@ -44,7 +44,8 @@ import { requirePermission } from "~/utils/roles.server";
 
 /**
  * One source line of a per-location release, as the dialog posts it inside
- * the `sources` JSON field. `locationId` null is the unplaced units.
+ * the `sources` JSON field. `locationId` null is the unplaced units, and
+ * `"unrecorded"` the units whose source was never recorded.
  */
 const ReleaseSourceLineSchema = z.object({
   locationId: z.string().nullable(),
@@ -71,9 +72,10 @@ export const ReleaseQuantityCustodySchema = z.object({
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
   /**
-   * Release only the units taken from this source: a location id, or
-   * `"unplaced"` for the unplaced units. Absent: the holder's rows are drawn
-   * in the service's fixed order.
+   * Release only the units taken from this source: a location id,
+   * `"unplaced"` for the unplaced units, or `"unrecorded"` for units whose
+   * source was never recorded. Absent: the holder's rows are drawn in the
+   * service's fixed order.
    */
   locationId: z.string().optional(),
   /**

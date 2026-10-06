@@ -30,14 +30,24 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherErrorSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { isFormProcessing } from "~/utils/form";
 import type { GroupableCustodyRecord } from "./quantity-custody-groups";
-import { releaseLineLabel, releaseLineSource } from "./quantity-custody-groups";
+import {
+  releaseLineSource,
+  releaseSourceValue,
+} from "./quantity-custody-groups";
 
-/** One source line of the form. */
+/**
+ * One source line of the form. Snapshotted when the dialog opens, so a
+ * revalidation that changes the person's rows cannot pair a line's posted
+ * source with another row's label.
+ */
 type ReleaseLineState = {
-  /** Location id, or null for the unplaced / unrecorded row. */
-  locationId: string | null;
+  /** Posted source: a location id, `"unplaced"` or `"unrecorded"`. */
+  source: string;
+  /** "From Camera Room", "Unplaced" or "Location not recorded". */
+  label: string;
   /** Units this person holds from that source. */
   max: number;
   /** Units leaving the hold from that source. */
@@ -52,9 +62,15 @@ type ReleaseLinesAction =
   | { type: "set_quantity"; index: number; value: number }
   | { type: "set_consumed"; index: number; value: number };
 
+/** A typed value as whole units: decimals are cut, anything unreadable is 0. */
+function wholeUnits(value: number): number {
+  return Number.isFinite(value) ? Math.trunc(value) : 0;
+}
+
 /**
- * Keeps every line within its bounds: quantity between 0 and what the person
- * holds from that source, consumed between 0 and the line's quantity.
+ * Keeps every line within its bounds: whole units, quantity between 0 and
+ * what the person holds from that source, consumed between 0 and the line's
+ * quantity.
  */
 export function releaseLinesReducer(
   lines: ReleaseLineState[],
@@ -67,7 +83,8 @@ export function releaseLinesReducer(
       return action.rows.map((row) => {
         const max = row.quantity ?? 1;
         return {
-          locationId: row.location?.id ?? null,
+          source: releaseSourceValue(row),
+          label: releaseLineSource(row),
           max,
           quantity: max,
           consumed: action.isConsumable ? max : 0,
@@ -76,7 +93,10 @@ export function releaseLinesReducer(
     case "set_quantity":
       return lines.map((line, index) => {
         if (index !== action.index) return line;
-        const quantity = Math.min(Math.max(action.value, 0), line.max);
+        const quantity = Math.min(
+          Math.max(wholeUnits(action.value), 0),
+          line.max
+        );
         return {
           ...line,
           quantity,
@@ -88,7 +108,10 @@ export function releaseLinesReducer(
         index === action.index
           ? {
               ...line,
-              consumed: Math.min(Math.max(action.value, 0), line.quantity),
+              consumed: Math.min(
+                Math.max(wholeUnits(action.value), 0),
+                line.quantity
+              ),
             }
           : line
       );
@@ -106,8 +129,6 @@ export type ReleaseBySourceButtonProps = {
   unitLabel: string;
   /** Consumables are marked as consumed per line. */
   isConsumable?: boolean;
-  /** Whether a NULL source reads "Unplaced" rather than "not recorded". */
-  poolHasUnplaced?: boolean;
 };
 
 /**
@@ -122,7 +143,6 @@ export function ReleaseBySourceButton({
   rows,
   unitLabel,
   isConsumable = false,
-  poolHasUnplaced = false,
 }: ReleaseBySourceButtonProps) {
   const [open, setOpen] = useState(false);
   const fetcher = useFetcher({ key: fetcherKey });
@@ -154,10 +174,8 @@ export function ReleaseBySourceButton({
     }
   }, [fetcher.state, fetcher.data]);
 
-  const serverErrorMessage =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  /** A refusal from this opening only, never one left from an earlier try. */
+  const serverErrorMessage = useFetcherErrorSinceOpen(fetcher, open);
 
   const total = lines.reduce((sum, line) => sum + line.quantity, 0);
   const consumedTotal = lines.reduce((sum, line) => sum + line.consumed, 0);
@@ -166,7 +184,7 @@ export function ReleaseBySourceButton({
     lines
       .filter((line) => line.quantity > 0)
       .map((line) => ({
-        locationId: line.locationId,
+        locationId: line.source,
         quantity: line.quantity,
         ...(isConsumable ? { consumed: line.consumed } : {}),
       }))
@@ -223,20 +241,15 @@ export function ReleaseBySourceButton({
 
           <div className="flex flex-col gap-4">
             {lines.map((line, index) => {
-              const row = rows[index];
-              if (!row) return null;
               const setQuantity = (value: number) =>
                 dispatch({ type: "set_quantity", index, value });
 
               // A returnable asks one number per location; a consumable asks
               // two, grouped under the location so the fields line up.
               return isConsumable ? (
-                <fieldset
-                  key={line.locationId ?? "unplaced"}
-                  className="flex flex-col gap-2"
-                >
+                <fieldset key={line.source} className="flex flex-col gap-2">
                   <legend className="mb-1 text-sm font-medium text-gray-700">
-                    {releaseLineSource(row, poolHasUnplaced)}
+                    {line.label}
                   </legend>
                   <div className="grid grid-cols-2 gap-3">
                     <Input
@@ -271,13 +284,10 @@ export function ReleaseBySourceButton({
                 </fieldset>
               ) : (
                 <Input
-                  key={line.locationId ?? "unplaced"}
+                  key={line.source}
                   name={`sourceQuantity-${index}`}
                   type="number"
-                  label={`${releaseLineLabel(
-                    row,
-                    poolHasUnplaced
-                  )} ${unitLabel}`}
+                  label={`${line.label}: max ${line.max} ${unitLabel}`}
                   min={0}
                   max={line.max}
                   step={1}

@@ -18,6 +18,7 @@ import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import type { ShelfError } from "~/utils/error";
+import { UNPLACED_SOURCE, UNRECORDED_SOURCE } from "./custody-source";
 import {
   custodyFromLocationWhere,
   loadCustodySourcesForAssets,
@@ -210,16 +211,19 @@ const { tables, fakeDb, counter } = vi.hoisted(() => {
           id: newId("custody"),
           kitCustodyId: null,
           locationId: null,
+          sourceUnknown: false,
           createdAt: new Date(),
           ...data,
         } as Row;
-        // The operator unique index: one row per (asset, holder, source).
+        // The operator unique index: one row per (asset, holder, source),
+        // where a never-recorded source is a key of its own.
         const clash = tables.custody.find(
           (r) =>
             r.kitCustodyId === null &&
             r.assetId === row.assetId &&
             r.teamMemberId === row.teamMemberId &&
-            r.locationId === row.locationId
+            r.locationId === row.locationId &&
+            r.sourceUnknown === row.sourceUnknown
         );
         if (clash) throw new Error("Custody_operator_unique violated");
         tables.custody.push(row);
@@ -397,18 +401,25 @@ function seedPool({
   ];
 }
 
-/** Adds an operator custody row directly. */
+/**
+ * Adds an operator custody row directly. `sourceUnknown` marks custody whose
+ * source was never recorded (always with a NULL location).
+ */
 function seedCustody(
   teamMemberId: string,
   locationId: string | null,
   quantity: number,
-  createdAt = new Date("2026-09-01T00:00:00.000Z")
+  createdAt = new Date("2026-09-01T00:00:00.000Z"),
+  sourceUnknown = false
 ) {
   tables.custody.push({
-    id: `custody-${teamMemberId}-${locationId ?? "none"}`,
+    id: `custody-${teamMemberId}-${
+      locationId ?? (sourceUnknown ? "unrecorded" : "none")
+    }`,
     assetId: "pool-1",
     teamMemberId,
     locationId,
+    sourceUnknown,
     quantity,
     kitCustodyId: null,
     createdAt,
@@ -1056,5 +1067,72 @@ describe("custodyFromLocationWhere", () => {
         { kitCustodyId: { not: null } },
       ],
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                      A source that was never recorded                      */
+/* -------------------------------------------------------------------------- */
+
+describe("custody whose source was never recorded", () => {
+  /** Rows as [holder, location, unrecorded, quantity]. */
+  const sourceRows = () =>
+    tables.custody
+      .map((r) => [r.teamMemberId, r.locationId, r.sourceUnknown, r.quantity])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+
+  /** A pool at two locations with 3 unplaced units. */
+  const seedSpreadPool = () =>
+    seedPool({
+      total: 7,
+      placements: [
+        [CAMERA_ROOM, 2],
+        [STUDIO, 2],
+      ],
+    });
+
+  it("is what an older client records on a pool at two locations", async () => {
+    seedSpreadPool();
+
+    await assign({ quantity: 2 });
+
+    expect(sourceRows()).toEqual([[AHMED, null, true, 2]]);
+  });
+
+  it("stays apart from an explicit pick of the unplaced units", async () => {
+    seedSpreadPool();
+    seedCustody(AHMED, null, 2, undefined, true);
+
+    await assign({ quantity: 1, locationId: UNPLACED_SOURCE });
+
+    expect(sourceRows()).toEqual([
+      [AHMED, null, false, 1],
+      [AHMED, null, true, 2],
+    ]);
+  });
+
+  it("does not use up the unplaced units", async () => {
+    seedSpreadPool();
+    seedCustody(AHMED, null, 2, undefined, true);
+
+    // All 3 unplaced units are still there to take.
+    await assign({ quantity: 3, locationId: UNPLACED_SOURCE });
+
+    expect(sourceRows()).toEqual([
+      [AHMED, null, false, 3],
+      [AHMED, null, true, 2],
+    ]);
+  });
+
+  it("is released by its own key, leaving the unplaced row alone", async () => {
+    seedSpreadPool();
+    seedCustody(AHMED, null, 1);
+    seedCustody(AHMED, null, 2, undefined, true);
+
+    await release({ quantity: 2, locationId: UNRECORDED_SOURCE });
+    expect(sourceRows()).toEqual([[AHMED, null, false, 1]]);
+
+    await release({ quantity: 1, locationId: UNPLACED_SOURCE });
+    expect(sourceRows()).toEqual([]);
   });
 });
