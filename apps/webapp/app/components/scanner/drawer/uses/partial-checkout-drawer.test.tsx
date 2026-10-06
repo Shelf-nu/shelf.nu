@@ -478,7 +478,7 @@ describe("PartialCheckoutDrawer", () => {
     const select = screen.getByLabelText(
       "From location for Battery pack"
     ) as HTMLSelectElement;
-    expect(select.name).toBe("sourceLocation.ba-asset-qty-a");
+    expect(select.name).toBe("");
     expect(select.value).toBe("loc-studio");
     expect([...select.options].map((option) => option.text)).toEqual([
       "Store Room · 5 pcs",
@@ -487,6 +487,10 @@ describe("PartialCheckoutDrawer", () => {
     ]);
     // The row sits outside the footer form; `form=` joins it to the submit.
     expect(select.getAttribute("form")).toBe("partial-checkout-form");
+    // Unchanged, it posts nothing and the server records its own default;
+    // once the operator picks, the answer is posted under the slice's key.
+    fireEvent.change(select, { target: { value: "loc-store" } });
+    expect(select.name).toBe("sourceLocation.ba-asset-qty-a");
   });
 
   it("does NOT show a qty input for INDIVIDUAL scanned assets", () => {
