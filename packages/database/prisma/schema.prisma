@@ -474,6 +474,8 @@ model AssetModel {
 
   @@index([organizationId, name])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "AssetModel_name_trgm_idx")
 }
 
 /// Book-by-Model: intent row attached to a booking for a quantity of
@@ -1984,6 +1986,12 @@ model MobileAuthCode {
   // code that carries none, so an unbound row can never be spent. Nullable only
   // because rows predating that rule may still exist; treat NULL as poison.
   codeChallenge String?
+
+  // The web SSO session the code hands to the app, AES-256-GCM encrypted under
+  // a key derived from the plaintext code, which is never stored: the row alone
+  // cannot be decrypted. Cleared when the code is redeemed. NULL on rows minted
+  // before sessions were stored, which redemption refuses.
+  sessionCiphertext String?
 
   // Single-use guard: set when redeemed. A non-null value rejects reuse.
   consumedAt DateTime?
