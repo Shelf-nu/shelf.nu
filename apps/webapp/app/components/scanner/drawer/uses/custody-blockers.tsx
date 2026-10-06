@@ -23,6 +23,8 @@ import {
   assignableUnits,
   hasKitInheritedCustody,
   operatorHolderCount,
+  scannedSourceChoice,
+  sourceCappedMax,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
@@ -39,6 +41,12 @@ export type CustodyBlockerArgs = {
   removeAssetsFromList: (assetIds: string[]) => void;
   /** Drops rows by the CODE that scanned them, which is how kits are keyed. */
   removeItemsFromList: (qrIds: string[]) => void;
+};
+
+/** The assign drawer also needs the "From location" picks of its rows. */
+export type AssignCustodyBlockerArgs = CustodyBlockerArgs & {
+  /** `scannedAssetSourcesAtom`, keyed by asset id. */
+  pickedSources: Record<string, string>;
 };
 
 /** A built list, plus the resolve-all that clears every row it named. */
@@ -111,7 +119,8 @@ export function buildAssignCustodyBlockers({
   items,
   removeAssetsFromList,
   removeItemsFromList,
-}: CustodyBlockerArgs): CustodyBlockers {
+  pickedSources,
+}: AssignCustodyBlockerArgs): CustodyBlockers {
   const assets = assetsOf(items);
   const kits = kitsOf(items);
   const errorQrIds = errorQrIdsOf(items);
@@ -145,6 +154,22 @@ export function buildAssignCustodyBlockers({
       (asset) =>
         !!asset && isQuantityTracked(asset) && assignableUnits(asset) <= 0
     )
+    .map((asset) => asset.id);
+
+  /**
+   * Pools with free units whose "From location" in effect has none left. The
+   * row shows no quantity input, but the pool still has units to give, so it
+   * would be submitted and the bulk route's up-front check would refuse the
+   * whole scan. Picking another location clears it.
+   */
+  const qtyAssetsWithEmptySource = assets
+    .filter((asset) => {
+      if (!asset || !isQuantityTracked(asset)) return false;
+      const maxAllowed = assignableUnits(asset);
+      if (maxAllowed <= 0) return false;
+      const choice = scannedSourceChoice(asset, pickedSources);
+      return choice.value !== null && sourceCappedMax(maxAllowed, choice) <= 0;
+    })
     .map((asset) => asset.id);
 
   const assetsArePartOfKit = assets
@@ -194,6 +219,19 @@ export function buildAssignCustodyBlockers({
       description:
         "Every unit is already in custody, allocated to a kit, or out on a booking.",
       onResolve: () => removeAssetsFromList(qtyAssetsWithNothingFree),
+    },
+    {
+      id: "qty-source-empty",
+      condition: qtyAssetsWithEmptySource.length > 0,
+      count: qtyAssetsWithEmptySource.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
+          units left at the chosen location.
+        </>
+      ),
+      description: "Pick another location for them, or remove them.",
+      onResolve: () => removeAssetsFromList(qtyAssetsWithEmptySource),
     },
     {
       id: "assets-already-in-custody",
@@ -278,6 +316,7 @@ export function buildAssignCustodyBlockers({
     onResolveAll: () => {
       removeAssetsFromList([
         ...qtyAssetsWithNothingFree,
+        ...qtyAssetsWithEmptySource,
         ...assetsAlreadyInCustody,
         ...assetsAreCheckedOut,
         ...assetsArePartOfKit,

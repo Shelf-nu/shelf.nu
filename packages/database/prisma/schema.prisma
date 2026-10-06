@@ -197,6 +197,16 @@ model UserBusinessIntel {
   currentSolution      String? // How they currently track assets
   timeline             String? // When they need Shelf working
 
+  // Signup attribution: what the signup link asked for and where it came from.
+  // Read from `/join?plan=…&trial=…&utm_*=…`, written once when the user
+  // completes onboarding. Steers nothing after that; kept for reporting.
+  signupPlan  String? // Plan the link asked for: "team" | "plus"
+  signupTrial Boolean? // Whether the link asked to start with a trial
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+
   // Relationships
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   userId String @unique
@@ -210,6 +220,8 @@ model UserBusinessIntel {
   @@index([companyName]) // For company-based analytics
   @@index([jobTitle]) // For role-based analytics
   @@index([teamSize]) // For team size analytics
+  @@index([utmSource]) // For campaign attribution
+  @@index([utmCampaign]) // For campaign attribution
 }
 
 model Asset {
@@ -462,6 +474,8 @@ model AssetModel {
 
   @@index([organizationId, name])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "AssetModel_name_trgm_idx")
 }
 
 /// Book-by-Model: intent row attached to a booking for a quantity of
@@ -831,6 +845,12 @@ model Location {
   kits           Kit[]
   notes          LocationNote[] @relation("LocationNotes")
 
+  // Quantity custody taken from this location, and the stock movements
+  // recorded against it. Both point at the location itself, never at an
+  // `AssetLocation` row, so moving a kit or re-creating a placement keeps them.
+  custodies       Custody[]
+  consumptionLogs ConsumptionLog[]
+
   // Self-relation for nested locations
   parentId String?
   parent   Location?  @relation("LocationHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
@@ -912,25 +932,45 @@ model Custody {
 
   quantity Int @default(1) // How many units in custody (1 for individual assets)
 
+  // The manual placement the units were taken from, for a quantity-tracked
+  // asset's operator custody. NULL means the unplaced units, or a source that
+  // was never recorded: `sourceUnknown` tells the two apart. Always NULL for
+  // kit-inherited rows and for individual assets. Custody never changes a
+  // location's count: this only says which location loses the units when
+  // they are used up. `onDelete: SetNull` so deleting the location keeps the
+  // custody.
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  locationId String?
+
+  // True when the assignment did not say where the units came from and the
+  // pool had more than one place they could have come from. Only ever true
+  // with `locationId` NULL. Such units count against no location and never
+  // against the unplaced units; the pool-wide cap still bounds them.
+  sourceUnknown Boolean @default(false)
+
   // DateTime
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Two partial uniques split the old global @@unique([assetId, teamMemberId])
-  // so the same (asset, custodian) pair can hold BOTH an operator-allocated
-  // row AND one-or-more kit-allocated rows simultaneously. The partials live
-  // in raw SQL (Prisma can't express partial uniques in the schema) — see
-  // migration 20260603100000_custody_partial_uniques_split_operator_kit:
-  //   • Custody_operator_unique → UNIQUE (assetId, teamMemberId)
-  //                               WHERE "kitCustodyId" IS NULL
-  //   • Custody_kit_unique      → UNIQUE (assetId, kitCustodyId)
-  //                               WHERE "kitCustodyId" IS NOT NULL
-  // The total cap (sum ≤ Asset.quantity) is enforced at the application
+  // Two partial uniques live in raw SQL (Prisma can't express partial
+  // uniques in the schema); see migrations
+  // 20260603100000_custody_partial_uniques_split_operator_kit,
+  // 20260925100000_custody_source_location and
+  // 20261006100000_custody_source_unknown:
+  //   - Custody_operator_unique -> UNIQUE (assetId, teamMemberId, locationId,
+  //                                sourceUnknown) NULLS NOT DISTINCT
+  //                                WHERE "kitCustodyId" IS NULL
+  //     One operator row per holder per source: a location, the unplaced
+  //     units, or a source never recorded.
+  //   - Custody_kit_unique      -> UNIQUE (assetId, kitCustodyId)
+  //                                WHERE "kitCustodyId" IS NOT NULL
+  // The total cap (sum <= Asset.quantity) is enforced at the application
   // layer by buildKitCustodyInheritData / checkOutQuantity.
   @@index([assetId, teamMemberId], name: "Custody_assetId_teamMemberId_idx")
   // Index for foreign key
   @@index([teamMemberId])
   @@index([kitCustodyId])
+  @@index([locationId])
 }
 
 model Organization {
@@ -1111,6 +1151,12 @@ model SsoDetails {
   baseUserGroupId    String? // The group id for BASE users
   selfServiceGroupId String? // The group id for SELF_SERVICE users
   adminGroupId       String? // The group id for ADMIN users
+
+  // Whether legacy sign-in (password, email code, password reset) is refused
+  // for unconverted accounts on this setup's domain. Owners of a linked
+  // workspace keep legacy sign-in either way. Shelf staff turn it off only
+  // while setting up and testing SSO with a few users.
+  requireSsoLogin Boolean @default(true)
 
   // Datetime
   createdAt DateTime @default(now())
@@ -1539,6 +1585,13 @@ model ConsumptionLog {
   // render sensibly.
   bookingAssetId String?
 
+  // The location the units left or arrived at, when the movement had one:
+  // the custody source for CHECKOUT / RETURN / CONSUME, and the chosen
+  // location for a RESTOCK / LOSS / ADJUSTMENT made at a location. NULL for
+  // the unplaced units and for rows written before the column existed.
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  locationId String?
+
   // Datetime
   createdAt DateTime @default(now())
 
@@ -1547,6 +1600,7 @@ model ConsumptionLog {
   @@index([bookingId])
   @@index([custodianId])
   @@index([bookingAssetId])
+  @@index([locationId])
 }
 
 /**
@@ -1932,6 +1986,12 @@ model MobileAuthCode {
   // code that carries none, so an unbound row can never be spent. Nullable only
   // because rows predating that rule may still exist; treat NULL as poison.
   codeChallenge String?
+
+  // The web SSO session the code hands to the app, AES-256-GCM encrypted under
+  // a key derived from the plaintext code, which is never stored: the row alone
+  // cannot be decrypted. Cleared when the code is redeemed. NULL on rows minted
+  // before sessions were stored, which redemption refuses.
+  sessionCiphertext String?
 
   // Single-use guard: set when redeemed. A non-null value rejects reuse.
   consumedAt DateTime?

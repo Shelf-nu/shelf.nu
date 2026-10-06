@@ -7,7 +7,9 @@ import {
   bulkCheckOutAssets,
   checkOutQuantity,
 } from "~/modules/asset/service.server";
+import { QUANTITY_CUSTODIAN_SELECT } from "~/modules/custody/quantity-custody.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
+import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
 // why: mocking Remix's data() function to return Response objects for React Router v7 single fetch
@@ -72,7 +74,15 @@ vi.mock("~/modules/asset/service.server", () => ({
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
   // why: the per-unit path is what the scanner submits; the route's job is to
   // split the submission and forward role, which is what these assert.
-  checkOutQuantity: vi.fn().mockResolvedValue({}),
+  // It reports a source with nothing to name, as for a pool at one location.
+  checkOutQuantity: vi.fn().mockResolvedValue({
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
 }));
 
 // why: the availability pre-flight lives in the dependency-free leaf, so it is
@@ -95,6 +105,22 @@ vi.mock("~/modules/team-member/service.server", () => ({
   scopeCustodianFilterIds: vi.fn().mockResolvedValue([]),
 }));
 
+// why: the per-unit path writes an audit note and runs the low-stock check
+// after each assignment. Their content is pinned in the shared module's own
+// suite; here they only need to not reach a database.
+vi.mock("~/modules/note/service.server", () => ({ createNote: vi.fn() }));
+vi.mock("~/modules/user/service.server", () => ({
+  getUserByID: vi.fn().mockResolvedValue({
+    id: "user-123",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    displayName: null,
+  }),
+}));
+vi.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vi.fn(),
+}));
+
 // why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
@@ -114,7 +140,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
       // parse never yields `undefined` here. Mirror that: a mock that omits
       // the field tests a shape the route can't actually receive.
       const quantities = JSON.parse(formData.get("quantities") || "{}");
-      return { assetIds, custodian, currentSearchParams, quantities };
+      // Same for `AssetSourceLocationsSchema`: an absent field parses to {}.
+      const sourceLocations = JSON.parse(
+        formData.get("sourceLocations") || "{}"
+      );
+      return {
+        assetIds,
+        custodian,
+        currentSearchParams,
+        quantities,
+        sourceLocations,
+      };
     }),
   };
 });
@@ -161,6 +197,7 @@ beforeEach(() => {
   dbMocks.assetFindFirst.mockResolvedValue({
     title: "USB-C Cables",
     quantity: 100,
+    type: "QUANTITY_TRACKED",
   });
 });
 
@@ -203,7 +240,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "foreign-team-member-123",
       organizationId: "org-1",
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     });
   });
 
@@ -251,7 +288,7 @@ describe("api/assets/bulk-assign-custody", () => {
     expect(mockGetTeamMember).toHaveBeenCalledWith({
       id: "team-member-123",
       organizationId: "org-1",
-      select: { id: true },
+      select: QUANTITY_CUSTODIAN_SELECT,
     });
   });
 
@@ -370,10 +407,40 @@ describe("api/assets/bulk-assign-custody", () => {
         role: OrganizationRoles.SELF_SERVICE,
         canUseBarcodes: false,
       } as Awaited<ReturnType<typeof requirePermission>>);
+      // The caller's own team member: the shape QUANTITY_CUSTODIAN_SELECT reads.
       mockGetTeamMember.mockResolvedValue({
         id: "team-member-123",
-        userId: "user-123",
+        name: "Valid Team Member",
+        user: {
+          id: "user-123",
+          firstName: null,
+          lastName: null,
+          displayName: null,
+        },
       });
+    });
+
+    it("refuses a self-service hand-over to someone else before any write", async () => {
+      mockGetTeamMember.mockResolvedValue({
+        id: "team-member-123",
+        name: "Valid Team Member",
+        user: {
+          id: "someone-else",
+          firstName: null,
+          lastName: null,
+          displayName: null,
+        },
+      });
+
+      const response = (await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
+      )) as unknown as Response;
+
+      // Refused per asset by checkOutQuantity, this would come back as a 409
+      // saying everything else was assigned, when nothing was.
+      expect(response.status).toBe(403);
+      expect(mockCheckOutQuantity).not.toHaveBeenCalled();
+      expect(bulkCheckOutAssets).not.toHaveBeenCalled();
     });
 
     it("hands a named asset to checkOutQuantity and forwards the acting role", async () => {
@@ -479,6 +546,37 @@ describe("api/assets/bulk-assign-custody", () => {
       expect(response.status).toBe(400);
       expect(mockCheckOutQuantity).not.toHaveBeenCalled();
       expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+    });
+
+    it("runs the whole-asset call before any per-unit write", async () => {
+      await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 2 }) })
+      );
+
+      // The bulk call validates and writes in one transaction, so if it
+      // refuses, no units have been handed over yet.
+      expect(
+        vi.mocked(bulkCheckOutAssets).mock.invocationCallOrder[0]
+      ).toBeLessThan(mockCheckOutQuantity.mock.invocationCallOrder[0]);
+    });
+
+    it("says what landed when a per-unit write is refused after the check", async () => {
+      mockCheckOutQuantity.mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          label: "Assets",
+          status: 400,
+          message: "Only 1 units are available.",
+        })
+      );
+
+      const response = (await action(
+        createActionArgs({ request: quantityRequest({ "asset-qty": 2 }) })
+      )) as unknown as Response;
+
+      expect(response.status).toBe(409);
+      const body = await response.json();
+      expect(body.error.message).toMatch(/^Everything else was assigned\. /);
     });
   });
 });

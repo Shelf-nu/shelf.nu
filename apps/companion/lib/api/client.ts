@@ -6,6 +6,8 @@ import {
 import { getSupabase, getSupabaseClientUrl } from "../supabase";
 import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
+import { CLIENT_USER_AGENT } from "./user-agent";
+import { chainAbort } from "../latest-request";
 
 /**
  * Base URL of the Shelf server the app is currently connected to.
@@ -275,6 +277,16 @@ export async function apiFetch<T>(
   let timedOut = false;
 
   try {
+    // Abort controller for timeout. Tagged via `timedOut` so the catch can
+    // tell a timeout from a caller abandoning the request.
+    const controller = new AbortController();
+
+    // Chained before the first await. Resolving the target can refresh a
+    // token, and an abort arriving during that wait would be missed by a
+    // listener attached afterwards, leaving the request to finish and answer
+    // with data the caller has already moved past.
+    chainAbort(controller, options.signal);
+
     const target = await resolveRequestTarget();
     if (!target.ok) return target.result;
     const { accessToken } = target;
@@ -287,18 +299,10 @@ export async function apiFetch<T>(
         _retryCount > 0 ? `(retry ${_retryCount})` : ""
       );
 
-    // Abort controller for timeout — tag it so we can distinguish
-    // timeout aborts from user/navigation aborts
-    const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       timedOut = true;
       controller.abort();
     }, REQUEST_TIMEOUT_MS);
-
-    // If caller provided a signal (e.g. from useEffect cleanup), chain it
-    if (options.signal) {
-      options.signal.addEventListener("abort", () => controller.abort());
-    }
 
     const response = await fetch(url, {
       ...options,
@@ -306,6 +310,10 @@ export async function apiFetch<T>(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        // why: scan records and server logs attribute requests to the app
+        // ("Shelf app on iPhone") instead of an unparseable default UA.
+        // Null on web builds, where User-Agent is browser-controlled.
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
         ...options.headers,
       },
     });
@@ -423,6 +431,7 @@ export async function apiUpload<T>(
       headers: {
         Authorization: `Bearer ${accessToken}`,
         // Do NOT set Content-Type — fetch auto-sets it with the multipart boundary
+        ...(CLIENT_USER_AGENT ? { "User-Agent": CLIENT_USER_AGENT } : {}),
       },
       body: formData,
     });

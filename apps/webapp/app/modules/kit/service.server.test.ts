@@ -1848,13 +1848,27 @@ describe("updateKitsWithBookingCustodians", () => {
    */
   function mockHoldingSlices(
     memberships: { id: string; kitId: string }[],
-    slices: unknown[]
+    slices: Record<string, unknown>[]
   ) {
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue(memberships);
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue(slices);
+    db.bookingAsset.findMany.mockResolvedValue(
+      // Every slice carries its asset, as the lookup's `select` projects it. A
+      // kit-driven slice never reads it, so fixtures only spell it out for the
+      // standalone cases.
+      slices.map((slice) => ({
+        asset: { type: AssetType.INDIVIDUAL, assetKits: [] },
+        ...slice,
+      }))
+    );
   }
+
+  /** A booking custodian named by a team member, as the lookup projects it. */
+  const bookingHeldBy = (name: string) => ({
+    custodianTeamMember: { name },
+    custodianUser: null,
+  });
 
   it("should resolve custodian from booking for checked-out kit", async () => {
     expect.assertions(3);
@@ -1903,13 +1917,22 @@ describe("updateKitsWithBookingCustodians", () => {
         },
       },
     });
-    // Only slices booked under this kit are considered.
+    // Only slices that can hold this kit are considered: booked under it, or
+    // a standalone slice of one of its INDIVIDUAL members.
     expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           OR: [
             { sourceKitId: { in: ["kit-co"] } },
             { assetKitId: { in: ["ak-1"] } },
+            {
+              sourceKitId: null,
+              assetKitId: null,
+              asset: {
+                type: AssetType.INDIVIDUAL,
+                assetKits: { some: { kitId: { in: ["kit-co"] } } },
+              },
+            },
           ],
         }),
       })
@@ -2033,6 +2056,78 @@ describe("updateKitsWithBookingCustodians", () => {
     expect((result[0] as any).custody).toBeUndefined();
   });
 
+  it("names the booking holding an INDIVIDUAL member out on its own", async () => {
+    // One camera of the kit is out loose on a live booking. The kit is
+    // checked out because of it, so that booking's custodian holds the kit.
+    const errorSpy = vitest.spyOn(Logger, "error");
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    mockHoldingSlices(
+      [{ id: "ak-1", kitId: "kit-co" }],
+      [
+        {
+          assetKitId: null,
+          sourceKitId: null,
+          checkedOutAt: new Date("2026-09-01T09:00:00Z"),
+          checkedInAt: null,
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: [{ kitId: "kit-co" }],
+          },
+          booking: bookingHeldBy("Loose Holder"),
+        },
+      ]
+    );
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toEqual({
+      custodian: { name: "Loose Holder" },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("does not name a holder from a loose QUANTITY_TRACKED member", async () => {
+    // Free-pool units take none of the kit's own, so the kit is not held.
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    mockHoldingSlices(
+      [{ id: "ak-1", kitId: "kit-co" }],
+      [
+        {
+          assetKitId: null,
+          sourceKitId: null,
+          checkedOutAt: new Date("2026-09-01T09:00:00Z"),
+          checkedInAt: null,
+          asset: {
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [{ kitId: "kit-co" }],
+          },
+          booking: bookingHeldBy("Pool Borrower"),
+        },
+      ]
+    );
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toBeUndefined();
+  });
+
   it("should handle kit with no asset having active booking gracefully", async () => {
     expect.assertions(2);
     const kits = [
@@ -2084,11 +2179,13 @@ describe("getKitCurrentBooking", () => {
       checkedOutAt?: Date | null;
       checkedInAt?: Date | null;
       booking?: typeof ongoing;
-    }[]
+    }[],
+    assetType: AssetType = AssetType.INDIVIDUAL
   ) {
     return {
       id,
       asset: {
+        type: assetType,
         bookingAssets: slices.map((slice) => ({
           ...slice,
           checkedOutAt:
@@ -2134,8 +2231,25 @@ describe("getKitCurrentBooking", () => {
     expect(result).toBeUndefined();
   });
 
-  it("ignores a standalone slice of a kit member", () => {
+  it("ignores a standalone slice of a QUANTITY_TRACKED member", () => {
     // Free-pool units leave the kit's own slice untouched.
+    const result = getKitCurrentBooking({
+      id: "kit-1",
+      assetKits: [
+        membership(
+          "ak-1",
+          [{ assetKitId: null, sourceKitId: null }],
+          AssetType.QUANTITY_TRACKED
+        ),
+      ],
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns the booking holding an INDIVIDUAL member out on its own", () => {
+    // One physical unit of the kit is out loose, so the kit is incomplete and
+    // that booking is what holds it.
     const result = getKitCurrentBooking({
       id: "kit-1",
       assetKits: [
@@ -2143,7 +2257,7 @@ describe("getKitCurrentBooking", () => {
       ],
     });
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual(ongoing);
   });
 
   it("ignores a slice this kit already got back, on a still-ongoing booking", () => {

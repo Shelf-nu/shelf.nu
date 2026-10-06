@@ -8,15 +8,13 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
 import { db } from "~/database/db.server";
+import { serializeBackupPlacements } from "~/modules/asset/backup-placements";
 import {
   fetchAssetsForExport,
   getAdvancedPaginatedAndFilterableAssets,
@@ -58,6 +56,7 @@ import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
+import { isMaxFileSizeError } from "./form-data-parse-errors.server";
 import {
   buildImportReadyCsvFromAssets,
   type ColumnScope,
@@ -131,13 +130,6 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 /** Checks if a CSV row is empty (all cells are empty or whitespace-only) */
 function isEmptyRow(row: string[]): boolean {
   return row.every((cell) => cell.trim() === "");
-}
-
-/** Walks the cause chain to check if a MaxFileSizeExceededError is present */
-function isMaxFileSizeError(error: unknown): boolean {
-  if (error instanceof MaxFileSizeExceededError) return true;
-  const cause = (error as { cause?: unknown })?.cause;
-  return cause ? isMaxFileSizeError(cause) : false;
 }
 
 /** Takes a request object and extracts the file from it and parses it as csvData */
@@ -230,28 +222,37 @@ export const buildCsvBackupDataFromAssets = ({
        * This needs to be done for all one-to-one relations
        */
       if (value === null) {
-        if (["custody", "location", "category", "assetModel"].includes(key)) {
+        if (["custody", "category", "assetModel"].includes(key)) {
           return toExport.push(quoteCsvCell("{}"));
         }
         return toExport.push(quoteCsvCell(""));
       }
 
       /** Relations listed here travel as JSON rather than as an id, so a
-       * restore can resolve — or create — them by name; an id would only mean
+       * restore can resolve (or create) them by name. An id would only mean
        * anything in the workspace the backup came from.
        *
-       * The list is not the same as the relations the query loads. `location`
-       * is a leftover: placements arrive as `assetLocations`, which is not
-       * listed, so it falls to the default branch and stringifies to
-       * `[object Object]` — locations do not survive a backup round trip. Any
-       * relation added to the query needs a case here and a matching one in
-       * `extractCSVDataFromBackupImport`, or its column is silently junk. */
+       * Every relation `fetchAssetsForExport` loads needs a case here and a
+       * matching one in `extractCSVDataFromBackupImport`. One that falls to
+       * the default branch stringifies to `[object Object]`. */
       switch (key) {
-        case "location":
+        case "assetLocations":
+          // As `[{ location: <name>, quantity }]`; which rows go out depends
+          // on the asset's type, see `serializeBackupPlacements`.
+          toExport.push(
+            quoteCsvCell(
+              JSON.stringify(serializeBackupPlacements(value, asset.type))
+            )
+          );
+          break;
+        // Custody rows go out whole, ids included. Those ids are
+        // workspace-local: a restore resolves the custodian by name and must
+        // never read an id from the file. A location on custody has to travel
+        // by name, as `assetLocations` does, never as an id.
+        case "custody":
         case "category":
         case "notes":
         case "tags":
-        case "custody":
         case "organization":
         case "valuation":
         case "customFields":

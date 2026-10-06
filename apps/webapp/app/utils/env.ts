@@ -150,7 +150,12 @@ export const SUPABASE_SERVICE_ROLE = getEnv("SUPABASE_SERVICE_ROLE");
 export const INVITE_TOKEN_SECRET = getEnv("INVITE_TOKEN_SECRET", {
   isSecret: true,
 });
+/**
+ * Public: it is printed on every label and shipped to the browser through
+ * `getBrowserEnv`, where the scanner uses it to recognise Shelf QR codes.
+ */
 export const URL_SHORTENER = getEnv("URL_SHORTENER", {
+  isSecret: false,
   isRequired: false,
 });
 

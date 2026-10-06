@@ -10,7 +10,16 @@ import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { CustodyRehomeResult } from "~/modules/asset/custody-source.server";
+import {
+  createCustodyRehomeNote,
+  custodyFromLocationWhere,
+  getMultiSourcePoolIdsAtLocation,
+  loadCustodySourcesForAssets,
+  rehomeCustodyForPlacementChanges,
+} from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { lockAssetsForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -31,6 +40,7 @@ import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import {
   wrapDescriptionForNote,
@@ -39,8 +49,10 @@ import {
 } from "~/utils/markdoc-wrappers";
 import {
   getFileUploadPath,
+  MAX_PUBLIC_FILES_PER_REMOVE,
   parseFileFormData,
   removePublicFile,
+  removePublicFiles,
 } from "~/utils/storage.server";
 import {
   formatLocationLink,
@@ -196,15 +208,37 @@ export async function getLocation(
       };
     }
 
+    /**
+     * Custody that counts as "at this location": for a pool placed at two
+     * or more locations only custody taken from HERE, for every other asset
+     * all of it (see `custodyFromLocationWhere`). Used by the custody
+     * filters and the custodian column alike.
+     */
+    const custodyFromHere = custodyFromLocationWhere({
+      locationId: id,
+      multiSourcePoolIds: await getMultiSourcePoolIdsAtLocation({
+        locationId: id,
+        organizationIds: [organizationId, ...(otherOrganizationIds ?? [])],
+      }),
+    });
+
     if (teamMemberIds && teamMemberIds.length) {
       assetsWhere.OR = [
         ...(assetsWhere.OR ?? []),
         {
-          custody: { some: { teamMemberId: { in: teamMemberIds } } },
+          custody: {
+            some: {
+              teamMemberId: { in: teamMemberIds },
+              ...custodyFromHere,
+            },
+          },
         },
         {
           custody: {
-            some: { custodian: { userId: { in: teamMemberIds } } },
+            some: {
+              custodian: { userId: { in: teamMemberIds } },
+              ...custodyFromHere,
+            },
           },
         },
         {
@@ -232,7 +266,7 @@ export async function getLocation(
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: { none: {} } }]
+          ? [{ custody: { none: custodyFromHere } }]
           : []),
       ];
     }
@@ -348,11 +382,14 @@ export async function getLocation(
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {
-                // The list column shows ONE custodian, chosen as `custody[0]`
-                // by `getPrimaryCustody`. Without an order the database is
-                // free to return the rows differently between requests, so a
-                // multi-custodian asset would show a different holder on
-                // refresh. `id` breaks ties on identical timestamps.
+                // Only custody taken from this location (see
+                // `custodyFromHere`). The list column shows ONE custodian,
+                // chosen as `custody[0]` by `getPrimaryCustody`. Without an
+                // order the database is free to return the rows differently
+                // between requests, so a multi-custodian asset would show a
+                // different holder on refresh. `id` breaks ties on identical
+                // timestamps.
+                where: custodyFromHere,
                 orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 select: {
                   quantity: true,
@@ -884,20 +921,114 @@ export async function createLocation({
   }
 }
 
+/** A location's id and the public URLs of its stored image files. */
+type LocationImageFiles = Pick<Location, "id" | "imageUrl" | "thumbnailUrl">;
+
+/**
+ * Removes the image and thumbnail files of deleted locations from the public
+ * storage bucket.
+ *
+ * Call this only after the location rows are deleted. Files are removed in one
+ * storage request per chunk of locations, one request after another, so even a select-all delete makes only a handful of
+ * requests. Best effort: a failed request is logged and the next one still
+ * runs, because a stale storage object can be cleaned up later, while failing
+ * would report a delete that already happened as an error. Never rejects.
+ *
+ * @param locations - The deleted locations and their stored image URLs
+ */
+async function safeRemoveImageFilesOfLocations(
+  locations: LocationImageFiles[]
+): Promise<void> {
+  /**
+   * Each location has at most two files, so a chunk of this size stays within
+   * the storage API's per-request limit. Read at call time rather than module
+   * load, so tests that mock the storage module without it can still import
+   * this service.
+   */
+  const LOCATIONS_PER_STORAGE_REMOVE = MAX_PUBLIC_FILES_PER_REMOVE / 2;
+  const locationsWithFiles = locations.filter(
+    (location) => !!location.imageUrl || !!location.thumbnailUrl
+  );
+
+  for (
+    let i = 0;
+    i < locationsWithFiles.length;
+    i += LOCATIONS_PER_STORAGE_REMOVE
+  ) {
+    const chunk = locationsWithFiles.slice(i, i + LOCATIONS_PER_STORAGE_REMOVE);
+    const publicUrls = chunk.flatMap((location) =>
+      [location.imageUrl, location.thumbnailUrl].filter(
+        (url): url is string => !!url
+      )
+    );
+    // The raw URLs stay out of the logs: they contain the storage object
+    // keys. The location ids are enough to trace the files.
+    const locationIds = chunk.map((location) => location.id);
+
+    try {
+      const { invalidUrlCount } = await removePublicFiles({ publicUrls });
+
+      if (invalidUrlCount > 0) {
+        Logger.error(
+          new ShelfError({
+            cause: null,
+            message:
+              "Skipped location image files outside the public bucket during delete",
+            additionalData: { locationIds, invalidUrlCount },
+            label,
+          })
+        );
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Failed to remove location images from storage during delete",
+          additionalData: { locationIds },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
+ * Deletes a location, its legacy `Image` row, and its stored image files.
+ *
+ * The location and its `Image` row are deleted in one transaction. The image
+ * and thumbnail files are removed after it commits, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param id - ID of the location to delete
+ * @param organizationId - Organization the location must belong to
+ * @returns The deleted location
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function deleteLocation({
   id,
   organizationId,
 }: Pick<Location, "id" | "organizationId">) {
   try {
-    const location = await db.location.delete({
-      where: { id, organizationId },
+    /**
+     * Both deletes commit together, so the cleanup below always runs once the
+     * location is gone. Its URLs cannot be read back after the row is deleted.
+     */
+    const location = await db.$transaction(async (tx) => {
+      const deleted = await tx.location.delete({
+        where: { id, organizationId },
+      });
+
+      if (deleted.imageId) {
+        await tx.image.delete({
+          where: { id: deleted.imageId },
+        });
+      }
+
+      return deleted;
     });
 
-    if (location.imageId) {
-      await db.image.delete({
-        where: { id: location.imageId },
-      });
-    }
+    await safeRemoveImageFilesOfLocations([location]);
 
     return location;
   } catch (cause) {
@@ -1194,6 +1325,20 @@ export async function createLocationsIfNotExists({
   }
 }
 
+/**
+ * Deletes the selected locations of an organization, their legacy `Image`
+ * rows, and their stored image files.
+ *
+ * The locations and `Image` rows are deleted in one transaction. The image and
+ * thumbnail files are removed in the background after it commits, so this
+ * resolves without waiting on storage, see
+ * {@link safeRemoveImageFilesOfLocations}.
+ *
+ * @param locationIds - IDs to delete, or `ALL_SELECTED_KEY` for every location
+ *   in the organization
+ * @param organizationId - Organization the locations must belong to
+ * @throws {ShelfError} When the database delete fails
+ */
 export async function bulkDeleteLocations({
   locationIds,
   organizationId,
@@ -1202,18 +1347,21 @@ export async function bulkDeleteLocations({
   organizationId: Organization["id"];
 }) {
   try {
-    /** We have to delete the images of locations if any */
+    /**
+     * Read before the delete: the `Image` row ids and the storage URLs are
+     * gone once the location rows are deleted.
+     */
     const locations = await db.location.findMany({
       where: locationIds.includes(ALL_SELECTED_KEY)
         ? { organizationId }
         : { id: { in: locationIds }, organizationId },
-      select: { id: true, imageId: true },
+      select: { id: true, imageId: true, imageUrl: true, thumbnailUrl: true },
     });
 
-    return await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       /** Deleting all locations */
       await tx.location.deleteMany({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause (lines 1062-1067), so they are already org-proven before this delete
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: ids come from `locations` fetched above with `organizationId` in the where clause, so they are already org-proven before this delete
         where: { id: { in: locations.map((location) => location.id) } },
       });
 
@@ -1232,6 +1380,14 @@ export async function bulkDeleteLocations({
         },
       });
     });
+
+    /**
+     * Not awaited: the transaction has committed, so the response does not wait
+     * on storage. A select-all delete can mean thousands of files. Cleanup is
+     * best effort either way: a run cut short leaves an orphaned file, the same
+     * outcome as a storage failure.
+     */
+    void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -2207,9 +2363,40 @@ export async function updateLocationAssets({
       movedIndividualPriorLocations.keys()
     );
 
+    /** Custody re-homes per pool, for the notes after the commit. */
+    const rehomes: Array<{
+      assetId: string;
+      result: CustodyRehomeResult;
+    }> = [];
+
     await db.$transaction(async (tx) => {
+      /**
+       * Lock every quantity-tracked asset this call touches before any
+       * placement write, in one statement and in sorted id order: the same
+       * order the booking check-out and check-in paths lock assets in, so
+       * the two can never deadlock. The lock serializes these placement
+       * writes against custody and stock changes on the same pools, and the
+       * custody sources read right after it are what the re-home below
+       * compares against. Constant work however many pools are selected.
+       */
+      const poolIds = modifiedAssets
+        .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+        .map((asset) => asset.id);
+      const lockedPools = await lockAssetsForQuantityUpdate(
+        tx,
+        poolIds,
+        organizationId
+      );
+      const poolTotals = new Map(
+        lockedPools.map((pool) => [pool.id, pool.quantity ?? 0])
+      );
+      const custodyBefore = await loadCustodySourcesForAssets(
+        tx,
+        lockedPools.map((pool) => ({ id: pool.id, total: pool.quantity ?? 0 }))
+      );
+
       // Drop the prior manual row for each INDIVIDUAL being moved
-      // across locations — done BEFORE the createMany below so the
+      // across locations, done BEFORE the createMany below so the
       // INDIVIDUAL single-row trigger sees zero rows for these
       // assets when the new INSERT runs. Scoped to `assetKitId: null`
       // because INDIVIDUAL assets can't have kit-driven rows (the
@@ -2350,7 +2537,38 @@ export async function updateLocationAssets({
       if (locEvents.length > 0) {
         await recordEvents(locEvents, tx);
       }
+
+      /**
+       * Custody follows the units. A pool removed from this location, or
+       * lowered here below what is in custody from here, has that excess
+       * custody made unplaced. A pool added here or raised here took the
+       * units from its unplaced pile, so unplaced custody beyond what is
+       * left unplaced now belongs here. Never refused.
+       */
+      rehomes.push(
+        ...(await rehomeCustodyForPlacementChanges(tx, {
+          before: custodyBefore,
+          totals: poolTotals,
+          destinationFor: (assetId) =>
+            removedAssetIds.includes(assetId) ? null : locationId,
+        }))
+      );
     });
+
+    for (const { assetId, result } of rehomes) {
+      const asset = modifiedAssets.find((a) => a.id === assetId);
+      if (!asset) continue;
+      await createCustodyRehomeNote({
+        result,
+        asset: {
+          id: asset.id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
+    }
 
     /** Creates the relevant notes for all the changed assets (not critical for atomicity) */
     await createBulkLocationChangeNotes({
