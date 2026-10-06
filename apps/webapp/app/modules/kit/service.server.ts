@@ -98,6 +98,7 @@ import {
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
 import type { AllowedCustodianFilterIds } from "../asset/utils.server";
+import { recordCheckoutSourceLocations } from "../booking/checkout-source-location.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
 import {
@@ -1539,6 +1540,9 @@ export type DestroyedKitUnitsResult = {
  * trip `enforce_asset_kit_sum_within_total` at commit and roll back a check-in
  * that physically happened. That asset's kits are left as they are and the
  * drift is reported to Sentry, since only someone fixing the data can clear it.
+ * The same holds when the asset's hand-placed units exceed its stock and a kit
+ * of it has a location: writing the kit's location row would trip
+ * `enforce_asset_location_sum_within_total` the same way.
  *
  * Call it AFTER the stock decrement, in the same transaction, and after every
  * read the check-in makes of its own booking's slices: the collision merge can
@@ -1682,6 +1686,65 @@ export async function removeDestroyedUnitsFromKits(
             assetId: membership.assetId,
             bookingId,
             kitUnitsAfter,
+            stockAfter,
+          },
+          label,
+        })
+      );
+    }
+  }
+
+  // The kit's own location row is an `AssetLocation` row, and writing it (the
+  // update below, or the cascade when a membership is deleted) fires the
+  // deferred `enforce_asset_location_sum_within_total`, which re-checks the
+  // hand-placed total against the stock. The check-in's placement reconcile
+  // cannot always bring that total down (it writes nothing when it cannot tell
+  // which of several locations lost the units), so a kit-row write would fail
+  // the commit and roll back a check-in that physically happened. Such an
+  // asset's kits are left alone, like a drifted one.
+  const kitPlacedAssetIds = new Set<string>(
+    (
+      (await tx.assetLocation.findMany({
+        where: {
+          assetKitId: {
+            in: memberships
+              .filter((membership) => !driftedAssetIds.has(membership.assetId))
+              .map((membership) => membership.id),
+          },
+        },
+        select: { assetId: true },
+      })) as Array<{ assetId: string }>
+    ).map((row) => row.assetId)
+  );
+  if (kitPlacedAssetIds.size > 0) {
+    const manualSums: Array<{
+      assetId: string;
+      _sum: { quantity: number | null };
+    }> = await tx.assetLocation.groupBy({
+      by: ["assetId"],
+      where: { assetId: { in: [...kitPlacedAssetIds] }, assetKitId: null },
+      _sum: { quantity: true },
+    });
+    const stockByAssetId = new Map(
+      memberships.map((membership) => [
+        membership.assetId,
+        membership.asset.quantity ?? 0,
+      ])
+    );
+    for (const row of manualSums) {
+      const placedByHand = row._sum.quantity ?? 0;
+      const stockAfter = stockByAssetId.get(row.assetId) ?? 0;
+      if (placedByHand <= stockAfter) continue;
+      driftedAssetIds.add(row.assetId);
+      Logger.error(
+        new ShelfError({
+          cause: null,
+          message:
+            "Check-in destroyed units out of a kit, but the asset's hand-placed units exceed its stock, so the kit's location could not be updated. Its kits were not shrunk.",
+          additionalData: {
+            assetId: row.assetId,
+            bookingId,
+            placedByHand,
             stockAfter,
           },
           label,
@@ -7226,6 +7289,24 @@ export async function updateKitAssets({
                     assetKitIdsByQuantity.set(s.quantity, [s.assetKitId]);
                   }
                 }
+                /**
+                 * A pool member goes out with its kit, so it leaves from the
+                 * kit's location. Recorded before its counter is set, while
+                 * the counter still reads 0 (see
+                 * `recordCheckoutSourceLocations`).
+                 */
+                const departingKitSlices = await tx.bookingAsset.findMany({
+                  where: {
+                    bookingId: { in: eligibleBookingIds },
+                    assetKitId: { in: stampable.map((s) => s.assetKitId) },
+                  },
+                  select: { id: true },
+                });
+                await recordCheckoutSourceLocations(tx, {
+                  organizationId,
+                  sliceIds: departingKitSlices.map((slice) => slice.id),
+                });
+
                 for (const [quantity, assetKitIds] of assetKitIdsByQuantity) {
                   await tx.bookingAsset.updateMany({
                     // Same two keys as the marker write above, and tenancy comes

@@ -9,6 +9,10 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import {
+  mobileSourceLocationsSchema,
+  sourceSubmissionFromRecord,
+} from "~/modules/booking/checkout-source-location";
 import { checkoutBooking } from "~/modules/booking/service.server";
 import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -29,7 +33,12 @@ import {
  * Checks out a RESERVED booking, transitioning it to ONGOING.
  * All assets are set to CHECKED_OUT status.
  *
- * Body: { bookingId: string, timeZone?: string }
+ * Body: { bookingId: string, timeZone?: string,
+ *         sourceLocations?: { [bookingAssetId or assetId]: locationId | null } }
+ *
+ * `sourceLocations` says where each pool's units leave from (only pools at two
+ * or more placements need it; `null` = Unplaced). An app that does not send it
+ * gets the default: see `recordCheckoutSourceLocations`.
  *
  * For mobile, we always do "without-adjusted-date" to keep things simple.
  * The mobile user just taps "Check Out" and it happens.
@@ -51,10 +60,11 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, timeZone } = await parseMobileBody(
+    const { bookingId, timeZone, sourceLocations } = await parseMobileBody(
       z.object({
         bookingId: z.string().min(1),
         timeZone: z.string().optional(),
+        sourceLocations: mobileSourceLocationsSchema,
       }),
       request,
       "Booking"
@@ -141,6 +151,7 @@ export async function action({ request }: ActionFunctionArgs) {
       // never sends — so this stays a "without-adjusted-date" checkout).
       from: existingBooking.from,
       to: existingBooking.to,
+      sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
     return data({

@@ -104,6 +104,10 @@ vitest.mock("~/database/db.server", () => ({
       // one at a time — both need single-row `update` / `delete`.
       update: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
+      // why: `removeDestroyedUnitsFromKits` sums the hand-placed units of an
+      // asset whose kit has a location, to stay clear of the location-sum
+      // trigger. Defaults to no rows.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // why: createKit/updateKit now run a cross-org ownership guard that calls
     // db.location.findFirst before connecting a location.
@@ -7683,6 +7687,77 @@ describe("removeDestroyedUnitsFromKits", () => {
     expect(loggerError).toHaveBeenCalledWith(
       expect.objectContaining({ shouldBeCaptured: true })
     );
+  });
+
+  describe("when the kit has a location", () => {
+    const placementReads = () =>
+      db.assetLocation.findMany as unknown as ReturnType<typeof vitest.fn>;
+    const manualSums = () =>
+      db.assetLocation.groupBy as unknown as ReturnType<typeof vitest.fn>;
+
+    beforeEach(() => {
+      manualSums().mockReset().mockResolvedValue([]);
+    });
+
+    it("leaves the kits alone when the hand-placed units exceed the stock", async () => {
+      // why: 100 in stock, 60 + 40 placed by hand and a kit of 10 at another
+      // location. Using up the kit's 10 leaves 90 in stock, and the check-in's
+      // reconcile cannot tell which location lost them, so 100 stay placed.
+      // Writing the kit's location row would fire the deferred location-sum
+      // trigger and roll the whole check-in back.
+      expect.assertions(4);
+
+      const loggerError = vitest
+        .spyOn(Logger, "error")
+        .mockImplementation(() => undefined);
+      onTestFinished(() => loggerError.mockRestore());
+      membershipReads().mockResolvedValueOnce([
+        membership({ quantity: 10, stock: 90 }),
+      ]);
+      kitSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 10 } },
+      ]);
+      placementReads().mockResolvedValueOnce([{ assetId: "asset-pool" }]);
+      manualSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 100 } },
+      ]);
+
+      const { removeDestroyedUnitsFromKits } = await import("./service.server");
+      await removeDestroyedUnitsFromKits(db, args(10));
+
+      expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+      expect(db.assetKit.update).not.toHaveBeenCalled();
+      expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
+      expect(loggerError).toHaveBeenCalledWith(
+        expect.objectContaining({ shouldBeCaptured: true })
+      );
+    });
+
+    it("shrinks the kit and its location row when the hand-placed units fit the stock", async () => {
+      expect.assertions(2);
+
+      membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+      kitSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 5 } },
+      ]);
+      placementReads().mockResolvedValueOnce([{ assetId: "asset-pool" }]);
+      manualSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 4 } },
+      ]);
+
+      const { removeDestroyedUnitsFromKits } = await import("./service.server");
+      await removeDestroyedUnitsFromKits(db, args(3));
+
+      expect(manualSums()).toHaveBeenCalledWith({
+        by: ["assetId"],
+        where: { assetId: { in: ["asset-pool"] }, assetKitId: null },
+        _sum: { quantity: true },
+      });
+      expect(db.assetLocation.updateMany).toHaveBeenCalledWith({
+        where: { assetKitId: "ak-1" },
+        data: { quantity: 2 },
+      });
+    });
   });
 
   it("ignores a membership outside the organization", async () => {
