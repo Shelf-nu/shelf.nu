@@ -3,7 +3,8 @@
  *
  * Handles POST requests that end a team member's hold on a specific quantity of
  * a QUANTITY_TRACKED asset. Validates permissions, parses form data with Zod,
- * delegates to `releaseQuantity`, and sends a success notification.
+ * delegates to `releaseQuantityFromCustodian` (the release, its audit note
+ * and the low-stock check), and sends a success notification.
  *
  * **What happens to the units is decided server-side** from the asset's
  * `consumptionType` (see `releaseCategory` in `@shelf/quantity-control`), with
@@ -19,28 +20,21 @@
  * The audit note and the toast are worded from the split the service reports
  * back, so what the operator reads always matches what was persisted.
  *
- * @see {@link file://./../../modules/asset/service.server.ts} — releaseQuantity
+ * @see {@link file://./../../modules/custody/quantity-custody.server.ts} releaseQuantityFromCustodian
  * @see {@link file://./assets.assign-quantity-custody.ts} — Counterpart checkout route
  * @see {@link file://./mobile+/custody.release-quantity.ts} — the mirrored mobile route
  */
 
-import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
-import { releaseQuantity } from "~/modules/asset/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  QUANTITY_CUSTODIAN_SELECT,
+  releaseQuantityFromCustodian,
+} from "~/modules/custody/quantity-custody.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertIsPost, payload, error, parseData } from "~/utils/http.server";
-import { Logger } from "~/utils/logger";
-import {
-  appendUserTextToNote,
-  wrapCustodianForNote,
-  wrapUserLinkForNote,
-} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -92,7 +86,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const teamMember = await getTeamMember({
       id: teamMemberId,
       organizationId,
-      include: { user: true },
+      select: { ...QUANTITY_CUSTODIAN_SELECT, userId: true },
     });
 
     /** A caller whose custody scope is `self` may release only their own custody */
@@ -110,14 +104,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * The service resolves the split from `Asset.consumptionType` when the
-     * caller sends no `consumed`, and reports back what it persisted — so the
-     * audit note and the toast below describe reality instead of re-deriving
-     * the branch here.
+     * caller sends no `consumed`, and reports back what it persisted, so the
+     * toast below describes what was written.
      */
     const { consumed: consumedUnits, returned: returnedUnits } =
-      await releaseQuantity({
+      await releaseQuantityFromCustodian({
         assetId,
-        teamMemberId,
+        custodian: teamMember,
         quantity,
         consumed,
         userId,
@@ -125,51 +118,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
         custodyAssign: access.custody.assign,
         note,
       });
-
-    /** Best-effort audit note — don't fail the action if note creation fails */
-    try {
-      const user = await getUserByID(userId, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      });
-
-      const actor = wrapUserLinkForNote(user);
-      const custodianDisplay = wrapCustodianForNote({ teamMember });
-
-      /**
-       * Three shapes, worded from what was actually persisted. The
-       * return-only line is unchanged from before consumables were handled,
-       * so a returnable asset's audit trail reads exactly as it always has.
-       */
-      const baseLine =
-        consumedUnits > 0 && returnedUnits > 0
-          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
-          : consumedUnits > 0
-          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
-          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
-      const noteContent = appendUserTextToNote(baseLine, note);
-
-      await createNote({
-        content: noteContent,
-        type: "UPDATE",
-        userId,
-        assetId,
-        organizationId,
-      });
-    } catch (noteError) {
-      Logger.error(
-        new ShelfError({
-          cause: noteError,
-          message: "Failed to create audit note for quantity operation",
-          label: "Assets",
-          additionalData: { assetId, userId },
-        })
-      );
-    }
 
     sendNotification({
       title:
@@ -187,28 +135,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
-
-    // Available stock is `Asset.quantity - SUM(Custody.quantity)`. Ending a
-    // hold drops custody by the full release and total by the consumed part,
-    // so available rises by exactly the RETURNED units — and is unchanged when
-    // everything was consumed. Run the debounced notifier so a recovery clears
-    // the stale `lowStockNotifiedAt` marker (and sends the "back in stock"
-    // notice); without that, the next genuine low-stock alert is suppressed.
-    // Best-effort: `releaseQuantity` has already committed, so a notifier
-    // failure must NOT surface as an action error (the client could retry the
-    // non-idempotent release).
-    try {
-      await checkAndNotifyLowStock({ assetId, userId, organizationId });
-    } catch (lowStockError) {
-      Logger.error(
-        new ShelfError({
-          cause: lowStockError,
-          message: "Failed to run low-stock check after custody release",
-          label: "Assets",
-          additionalData: { assetId, organizationId },
-        })
-      );
-    }
 
     return data(payload({ success: true }));
   } catch (cause) {

@@ -899,8 +899,13 @@ export async function updateUserFromSSO(
   try {
     let user = existingUser;
 
-    // Update user profile if needed
-    if (user.firstName !== firstName || user.lastName !== lastName) {
+    // Update the profile only from real names: an empty value means the IdP
+    // sent none, and must never blank a stored name.
+    if (
+      firstName &&
+      lastName &&
+      (user.firstName !== firstName || user.lastName !== lastName)
+    ) {
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },

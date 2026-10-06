@@ -444,24 +444,30 @@ export type QrResponse = {
     assetId: string | null;
     kitId: string | null;
     organizationId: string | null;
-    asset: {
-      id: string;
-      title: string;
-      status: string;
-      mainImage: string | null;
-      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
-      kitId: string | null;
-      /** Drives the scan-to-booking "not available to book" blocker */
-      availableToBook: boolean;
-      /**
-       * Model this asset belongs to, or null. The fulfil-and-check-out scanner
-       * matches it against the booking's outstanding reservations so it can
-       * count only units that actually fulfil one. Absent on older servers.
-       */
-      assetModelId?: string | null;
-      category: { name: string } | null;
-      location: { name: string } | null;
-    } | null;
+    /**
+     * The linked asset. Its quantity fields and holders come from the same
+     * server shaper as the asset list; the scan tab's custody modes read them.
+     */
+    asset:
+      | ({
+          id: string;
+          title: string;
+          status: string;
+          mainImage: string | null;
+          /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+          kitId: string | null;
+          /** Drives the scan-to-booking "not available to book" blocker */
+          availableToBook: boolean;
+          /**
+           * Model this asset belongs to, or null. The fulfil-and-check-out scanner
+           * matches it against the booking's outstanding reservations so it can
+           * count only units that actually fulfil one. Absent on older servers.
+           */
+          assetModelId?: string | null;
+          category: { name: string } | null;
+          location: { name: string } | null;
+        } & AssetQuantityFields)
+      | null;
     /** Set when the QR is linked to a kit instead of an asset */
     kit: ScannedKit | null;
   };
@@ -506,24 +512,27 @@ export type BarcodeResponse = {
     assetId: string | null;
     kitId: string | null;
     organizationId: string;
-    asset: {
-      id: string;
-      title: string;
-      status: string;
-      mainImage: string | null;
-      /** Set when the asset belongs to a kit (drives scanner batch blockers) */
-      kitId: string | null;
-      /** Drives the scan-to-booking "not available to book" blocker */
-      availableToBook: boolean;
-      /**
-       * Model this asset belongs to, or null. Lets the fulfil scanner tell a
-       * unit that fulfils a reservation from one that does not. Absent on
-       * older servers.
-       */
-      assetModelId?: string | null;
-      category: { name: string } | null;
-      location: { name: string } | null;
-    } | null;
+    /** The linked asset, shaped like the QR resolve's. See {@link QrResponse}. */
+    asset:
+      | ({
+          id: string;
+          title: string;
+          status: string;
+          mainImage: string | null;
+          /** Set when the asset belongs to a kit (drives scanner batch blockers) */
+          kitId: string | null;
+          /** Drives the scan-to-booking "not available to book" blocker */
+          availableToBook: boolean;
+          /**
+           * Model this asset belongs to, or null. Lets the fulfil scanner tell a
+           * unit that fulfils a reservation from one that does not. Absent on
+           * older servers.
+           */
+          assetModelId?: string | null;
+          category: { name: string } | null;
+          location: { name: string } | null;
+        } & AssetQuantityFields)
+      | null;
     /** Set when the barcode is linked to a kit instead of an asset */
     kit: ScannedKit | null;
   };
@@ -730,6 +739,17 @@ export type BulkActionResponse = {
    * older servers). Always 0 for all-INDIVIDUAL batches.
    */
   skippedQuantityTracked?: number;
+  /**
+   * Bulk custody with `quantities` only: assets whose unit write the server
+   * refused after its checks passed (a concurrent change). Nothing was written
+   * for them; the rest of the request was. Absent when every write landed.
+   */
+  refusedQuantities?: { assetId: string; title: string; message: string }[];
+  /**
+   * Bulk custody: asset ids whose units the server moved. Present on every
+   * response from a server that takes `quantities`; absent from older ones.
+   */
+  movedQuantityAssetIds?: string[];
 };
 
 export type BookingStatus =

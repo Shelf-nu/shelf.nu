@@ -56,7 +56,7 @@ vi.mock("~/database/db.server", () => ({
 // why: exercising the route's split, not the custody writes themselves
 vi.mock("~/modules/asset/service.server", () => ({
   bulkCheckInAssets: vi.fn().mockResolvedValue({ skippedQuantityTracked: 0 }),
-  releaseQuantity: vi.fn().mockResolvedValue({}),
+  releaseQuantity: vi.fn().mockResolvedValue({ consumed: 0, returned: 4 }),
 }));
 
 // why: authorization is asserted at the service layer; here it only needs to resolve
@@ -77,6 +77,22 @@ vi.mock("~/modules/asset-index-settings/service.server", () => ({
 // db.user lookup.
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn().mockResolvedValue({ timeZone: "UTC" }),
+}));
+
+// why: each per-unit release writes an audit note and runs the low-stock
+// check. Their content is pinned in the shared module's own suite; here they
+// only need to not reach a database.
+vi.mock("~/modules/note/service.server", () => ({ createNote: vi.fn() }));
+vi.mock("~/modules/user/service.server", () => ({
+  getUserByID: vi.fn().mockResolvedValue({
+    id: "user-123",
+    firstName: "Ada",
+    lastName: "Lovelace",
+    displayName: null,
+  }),
+}));
+vi.mock("~/modules/consumption-log/low-stock.server", () => ({
+  checkAndNotifyLowStock: vi.fn(),
 }));
 
 // why: preventing actual notification sending during route tests
@@ -122,7 +138,7 @@ function makeRequest(assetIds: string[], quantities: Record<string, number>) {
   } as unknown as ActionFunctionArgs;
 }
 
-/** A resolved operator custody row as the route selects it. */
+/** An operator custody row as the shared holder lookup selects it. */
 function holder(
   assetId: string,
   teamMemberId: string,
@@ -131,7 +147,12 @@ function holder(
     quantity = 50,
   }: { title?: string; quantity?: number } = {}
 ) {
-  return { assetId, teamMemberId, quantity, asset: { title } };
+  return {
+    assetId,
+    quantity,
+    asset: { title, type: "QUANTITY_TRACKED" },
+    custodian: { id: teamMemberId, name: `Member ${teamMemberId}`, user: null },
+  };
 }
 
 beforeEach(() => {

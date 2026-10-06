@@ -39,3 +39,7 @@ that drawer can actually move.
 `custody-blockers.tsx` is the reference. The other scanner drawers still derive
 their lists inline. When you add or change a blocker in one, extract that
 drawer's derivation the same way rather than adding to the inline array.
+
+The companion's Scan tab follows the same contract in
+`apps/companion/lib/batch-blockers.ts`: `blockerKeysFor(action)` lists the ids,
+and `batch-blockers.test.ts` pins them for the custody actions.

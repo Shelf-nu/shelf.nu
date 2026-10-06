@@ -51,7 +51,11 @@ import {
   reconcileManualPlacementsForStockDecrease,
   reportAmbiguousPlacementReconcile,
 } from "~/modules/asset/placement-reconcile.server";
-import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import {
+  canDuplicateAsset,
+  getPrimaryLocation,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -1455,6 +1459,15 @@ export async function createAsset({
         });
       }
 
+      /**
+       * Orphaned barcodes being reused, grouped by the type the caller asked
+       * for. A reused row keeps whatever type it was created with, so it is
+       * retyped inside the create transaction before being connected:
+       * otherwise a `barcode_ExternalQR` import cell that matches a leftover
+       * Code128 row attaches as Code128.
+       */
+      const reusedBarcodeIdsByType = new Map<BarcodeType, string[]>();
+
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
       if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
@@ -1462,9 +1475,17 @@ export async function createAsset({
         );
 
         if (barcodesToAdd.length > 0) {
-          const barcodesToConnect = barcodesToAdd
-            .filter((b) => b.existingId)
-            .map((b) => ({ id: b.existingId! }));
+          const reusedBarcodes = barcodesToAdd.filter((b) => b.existingId);
+          reusedBarcodes.forEach(({ type, existingId }) => {
+            reusedBarcodeIdsByType.set(type, [
+              ...(reusedBarcodeIdsByType.get(type) ?? []),
+              existingId!,
+            ]);
+          });
+
+          const barcodesToConnect = reusedBarcodes.map((b) => ({
+            id: b.existingId!,
+          }));
 
           const barcodesToCreate = barcodesToAdd
             .filter((b) => !b.existingId)
@@ -1519,6 +1540,16 @@ export async function createAsset({
             { categoryId: categoryId!, organizationId },
             tx
           );
+        }
+
+        // The value already matches (that is how the orphan was found), so
+        // only the type needs to follow the import. Org-scoped: the ids come
+        // from an org-scoped lookup, and this keeps the write that way too.
+        for (const [type, ids] of reusedBarcodeIdsByType) {
+          await tx.barcode.updateMany({
+            where: { id: { in: ids }, organizationId },
+            data: { type },
+          });
         }
 
         const created = await tx.asset.create({
@@ -4080,11 +4111,63 @@ export function createCustomFieldsPayloadFromAsset(
 }
 
 /**
+ * Deletes the copies `duplicateAsset` created before a later copy failed, so a
+ * duplicate request never leaves part of its copies behind.
+ *
+ * Goes through `deleteAsset`, so each removal records `ASSET_DELETED` beside
+ * the `ASSET_CREATED` its create recorded. A copy that cannot be deleted is
+ * logged with its id and skipped: the original failure is what the caller
+ * reports, and a failed cleanup must not replace it.
+ *
+ * @param params.assetIds - The copies created so far
+ * @param params.organizationId - The organization the copies were created in
+ * @param params.userId - The acting user, recorded as the deletion's actor
+ * @param params.originalAssetId - The source asset, for the log
+ */
+async function deleteDuplicatesAfterFailure({
+  assetIds,
+  organizationId,
+  userId,
+  originalAssetId,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  originalAssetId: Asset["id"];
+}) {
+  for (const id of assetIds) {
+    try {
+      await deleteAsset({ id, organizationId, actorUserId: userId });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Could not delete a copy after duplicating an asset failed part-way",
+          additionalData: { assetId: id, originalAssetId, organizationId },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
  * Creates one or more copies of an existing asset within the same organization.
  *
- * Copies the source asset's title, description, category, location, tags,
- * valuation, custom field values and (best-effort) main image onto each
- * duplicate.
+ * Copies the source asset's title, description, category, tags, valuation,
+ * booking availability, custom field values, tracking method and (best-effort)
+ * main image onto each duplicate. An individual copy also keeps the source's
+ * asset model and primary location. A quantity-tracked copy carries the
+ * quantity, unit of measure, consumption type and low-stock threshold, and
+ * starts unplaced: the source pool can be split across several locations, so
+ * its units are placed from the copy's asset page.
+ *
+ * Every copy is created or none is: if one fails, the copies already created
+ * are deleted before the error is rethrown.
+ *
+ * Titles read "<title> (copy)" for a single duplicate and
+ * "<title> (copy 1)", "<title> (copy 2)", ... for several.
  *
  * @param params.asset - The org-scoped source asset (with tags, custody, custom fields)
  * @param params.userId - The acting user's ID
@@ -4092,8 +4175,9 @@ export function createCustomFieldsPayloadFromAsset(
  * @param params.organizationId - The caller's validated organization ID; all
  *   duplicates and copied tags are constrained to this org
  * @returns The list of created duplicate assets
- * @throws {ShelfError} If a copied tag does not belong to `organizationId`
- *   (cross-org guard) or if duplication otherwise fails
+ * @throws {ShelfError} 400 "No units to copy" for a quantity-tracked asset with
+ *   no units in stock (see `canDuplicateAsset`), 4xx from `createAsset` as
+ *   written, and a wrapped error if duplication otherwise fails
  */
 export async function duplicateAsset({
   asset,
@@ -4130,15 +4214,46 @@ export async function duplicateAsset({
       includeAllCategories: true,
     });
 
+    const isPool = isQuantityTracked(asset);
+
+    if (!canDuplicateAsset(asset)) {
+      throw new ShelfError({
+        cause: null,
+        title: "No units to copy",
+        message:
+          "This asset has no units in stock, and a quantity-tracked asset needs at least 1. Add stock with Adjust quantity, then duplicate it.",
+        additionalData: { assetId: asset.id, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     const payload = {
       title: `${asset.title}`,
       organizationId,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
-      locationId: getPrimaryLocation(asset)?.id ?? undefined,
+      // why: `createAsset` places the whole pool at `locationId`, which would
+      // collapse a pool split across locations into one. A pool copy starts
+      // unplaced instead; an individual copy keeps the primary location.
+      locationId: isPool
+        ? undefined
+        : getPrimaryLocation(asset)?.id ?? undefined,
       tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
+      availableToBook: asset.availableToBook,
+      type: asset.type,
+      // An asset model groups individual units only; `createAsset` refuses a
+      // model link on a quantity-tracked asset.
+      assetModelId: isPool ? undefined : asset.assetModelId ?? undefined,
+      ...(isPool && {
+        quantity: asset.quantity,
+        minQuantity: asset.minQuantity,
+        consumptionType: asset.consumptionType,
+        unitOfMeasure: asset.unitOfMeasure,
+      }),
     };
 
     const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
@@ -4148,14 +4263,38 @@ export async function duplicateAsset({
       customFieldDef: customFields,
       isDuplicate: true,
     });
-    for (const i of [...Array(amountOfDuplicates)].keys()) {
-      const duplicatedAsset = await createAsset({
-        ...payload,
-        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i + 1 : ""})`,
-        customFieldsValues: extractedCustomFieldValues,
-      });
 
-      if (asset.mainImage) {
+    // All copies are created or none are. Each `createAsset` commits its own
+    // transaction and retries on a sequential-id collision, which an
+    // enclosing transaction could not survive, so a failure part-way through
+    // deletes the copies already created instead.
+    try {
+      for (const i of [...Array(amountOfDuplicates)].keys()) {
+        duplicatedAssets.push(
+          await createAsset({
+            ...payload,
+            title: `${asset.title} (copy${
+              amountOfDuplicates > 1 ? ` ${i + 1}` : ""
+            })`,
+            customFieldsValues: extractedCustomFieldValues,
+          })
+        );
+      }
+    } catch (cause) {
+      await deleteDuplicatesAfterFailure({
+        assetIds: duplicatedAssets.map(({ id }) => id),
+        organizationId,
+        userId,
+        originalAssetId: asset.id,
+      });
+      throw cause;
+    }
+
+    // Images are uploaded once every copy exists, so a failed create never
+    // leaves an uploaded file behind. An image is best-effort: a copy without
+    // one is still a valid copy.
+    if (asset.mainImage) {
+      for (const duplicatedAsset of duplicatedAssets) {
         try {
           const imagePath = await uploadDuplicateAssetMainImage(
             asset.mainImage,
@@ -4165,7 +4304,7 @@ export async function duplicateAsset({
 
           if (typeof imagePath === "string") {
             await db.asset.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) on line ~2216; this only writes back its own mainImage
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) above; this only writes back its own mainImage
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -4174,7 +4313,7 @@ export async function duplicateAsset({
             });
           }
         } catch (cause) {
-          // Log the error so we are aware there is an issue anc can check if it is on our side
+          // Logged so an upload problem on our side is visible.
           Logger.error(
             new ShelfError({
               cause,
@@ -4190,12 +4329,11 @@ export async function duplicateAsset({
           );
         }
       }
-
-      duplicatedAssets.push(duplicatedAsset);
     }
 
     return duplicatedAssets;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while duplicating the asset",

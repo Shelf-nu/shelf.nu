@@ -62,6 +62,7 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
+import { buildUnavailableAssets } from "~/modules/booking/unavailable-assets";
 import {
   calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
@@ -1178,6 +1179,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
+        // Names what `bookingFlags.hasUnavailableAssets` refuses over. Built
+        // from rows already fetched above, so it adds no query.
+        unavailableAssets: buildUnavailableAssets(bookingAssets),
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           // Each `bookingAssets` row is built from a `BookingAsset` pivot

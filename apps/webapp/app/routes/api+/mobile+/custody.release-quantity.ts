@@ -2,9 +2,9 @@
  * POST /api/mobile/custody/release-quantity
  *
  * Ends a team member's hold on N units of a QUANTITY_TRACKED asset. Mobile twin
- * of the web's `/api/assets/release-quantity-custody` route — same Zod schema,
- * same custody-scope guard, same `releaseQuantity` service call, same
- * best-effort audit note.
+ * of the web's `/api/assets/release-quantity-custody` route: same Zod schema,
+ * same custody-scope guard, and the same `releaseQuantityFromCustodian` call
+ * (the release, its audit note and the low-stock check).
  *
  * **What happens to the units is decided server-side** from the asset's
  * `consumptionType` (see `releaseCategory` in `@shelf/quantity-control`), with
@@ -36,11 +36,10 @@
  * for the caller) so the app can update state without a second round trip.
  *
  * @see {@link file://./../assets.release-quantity-custody.ts} — the mirrored web route
- * @see {@link file://./../../../modules/asset/service.server.ts} — releaseQuantity
+ * @see {@link file://./../../../modules/custody/quantity-custody.server.ts} releaseQuantityFromCustodian
  * @see {@link file://./custody.assign-quantity.ts} — counterpart assign route
  */
 
-import type { Prisma } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -50,18 +49,13 @@ import {
   requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
-import { releaseQuantity } from "~/modules/asset/service.server";
-import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
-import { createNote } from "~/modules/note/service.server";
+import {
+  QUANTITY_CUSTODIAN_SELECT,
+  releaseQuantityFromCustodian,
+} from "~/modules/custody/quantity-custody.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
-import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import {
-  appendUserTextToNote,
-  wrapCustodianForNote,
-  wrapUserLinkForNote,
-} from "~/utils/markdoc-wrappers";
 import {
   PermissionAction,
   PermissionEntity,
@@ -146,7 +140,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const teamMember = await getTeamMember({
       id: teamMemberId,
       organizationId,
-      include: { user: true },
+      select: { ...QUANTITY_CUSTODIAN_SELECT, userId: true },
     }).catch((cause) => {
       throw new ShelfError({
         cause,
@@ -171,112 +165,26 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // All release validation (type gate, org mismatch, row-locked custody
-    // lookup, over-release check) lives inside the service. Kit-allocated
-    // custody rows are NOT releasable here by design — only the operator
-    // row (kitCustodyId: null) is targeted.
     /**
-     * The service resolves the split from `Asset.consumptionType` when the
-     * caller sends no `consumed`, and reports back what it persisted — so the
-     * audit note below describes reality instead of re-deriving the branch
-     * here. App builds predating the field simply omit it and keep the
-     * server-derived outcome they always had.
+     * `releaseQuantityFromCustodian` writes the release (validated under a row
+     * lock by `releaseQuantity`; kit-allocated custody rows are not releasable
+     * here, only the operator row), then the audit note worded from the split
+     * the service persisted, then the low-stock check. App builds that predate
+     * `consumed` omit it and keep the server-derived outcome.
      */
-    const { consumed: consumedUnits, returned: returnedUnits } =
-      await releaseQuantity({
-        assetId,
-        teamMemberId,
-        quantity,
-        consumed,
-        userId: user.id,
-        organizationId,
-        custodyAssign: access.custody.assign,
-        note,
-      });
-
-    /** Best-effort audit note — don't fail the action if note creation fails */
-    try {
-      const actorUser = await getUserByID(user.id, {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          displayName: true,
-        } satisfies Prisma.UserSelect,
-      });
-
-      const actor = wrapUserLinkForNote(actorUser);
-      const custodianDisplay = wrapCustodianForNote({
-        teamMember: {
-          name: teamMember.name,
-          user: teamMember.user
-            ? {
-                id: teamMember.user.id,
-                firstName: teamMember.user.firstName,
-                lastName: teamMember.user.lastName,
-                displayName: teamMember.user.displayName,
-              }
-            : null,
-        },
-      });
-
-      /**
-       * Same three shapes the web route writes, so an activity feed reads the
-       * same whichever client performed the release.
-       */
-      const baseLine =
-        consumedUnits > 0 && returnedUnits > 0
-          ? `${actor} ended ${custodianDisplay}'s hold on **${quantity}** unit(s): **${consumedUnits}** consumed and **${returnedUnits}** returned to stock.`
-          : consumedUnits > 0
-          ? `${actor} marked **${consumedUnits}** unit(s) held by ${custodianDisplay} as consumed. Stock reduced permanently.`
-          : `${actor} released **${returnedUnits}** unit(s) from ${custodianDisplay}'s custody.`;
-      const noteContent = appendUserTextToNote(baseLine, note);
-
-      await createNote({
-        content: noteContent,
-        type: "UPDATE",
-        userId: user.id,
-        assetId,
-        organizationId,
-      });
-    } catch (noteError) {
-      Logger.error(
-        new ShelfError({
-          cause: noteError,
-          message: "Failed to create audit note for quantity operation",
-          label: "Assets",
-          additionalData: { assetId, userId: user.id },
-        })
-      );
-    }
+    await releaseQuantityFromCustodian({
+      assetId,
+      custodian: teamMember,
+      quantity,
+      consumed,
+      userId: user.id,
+      organizationId,
+      custodyAssign: access.custody.assign,
+      note,
+    });
 
     // No route-level sendNotification success toast here: that's the web's
-    // SSE emitter and mobile has no listener (matches custody.assign.ts).
-
-    // Available stock is `Asset.quantity - SUM(Custody.quantity)`. Ending a
-    // hold drops custody by the full release and total by the consumed part,
-    // so available rises by exactly the RETURNED units — and is unchanged when
-    // everything was consumed. Run the notifier so a recovery clears the
-    // now-stale debounce marker and sends the recovery notice, or the next
-    // genuine alert is suppressed. Best-effort: releaseQuantity has already
-    // committed, so a notifier failure must NOT surface as an action error
-    // (the client could retry the non-idempotent release).
-    try {
-      await checkAndNotifyLowStock({
-        assetId,
-        userId: user.id,
-        organizationId,
-      });
-    } catch (lowStockError) {
-      Logger.error(
-        new ShelfError({
-          cause: lowStockError,
-          message: "Failed to run low-stock check after mobile custody release",
-          label: "Assets",
-          additionalData: { assetId, organizationId },
-        })
-      );
-    }
+    // SSE emitter and mobile has no listener (matches custody.release.ts).
 
     // Refreshed asset, shaped for mobile with the caller's custody
     // visibility already applied, so the app can update state directly.

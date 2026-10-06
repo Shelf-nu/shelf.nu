@@ -168,6 +168,12 @@ export default function KitRow({
     assets.some((asset) => hasAssetBookingConflicts(asset, bookingId)) ||
     hasKitBookingConflicts(thisKitSlices, bookingId);
 
+  // Derived from the members ON THIS BOOKING, which is what `assets` holds,
+  // rather than from the kit's whole current membership. The Reserve guard
+  // judges the booking's rows, so this is the set that agrees with it: the
+  // kit's other members are not on this booking and cannot block it.
+  const isBookable = !assets.some((asset) => !asset.availableToBook);
+
   // A kit "returned" as a unit only when EVERY one of its assets was actually
   // checked out — the same unanimity rule the lifecycle bar uses in unit mode
   // (a kit split across buckets counts as Booked). When the booking used
@@ -224,10 +230,25 @@ export default function KitRow({
                 {isFinished && kitWasCheckedOut ? (
                   <ReturnedBadge />
                 ) : (
-                  <KitStatusBadge
-                    status={contextAwareKitStatus}
-                    availableToBook={true}
-                  />
+                  <>
+                    {/*
+                      `availableToBook` is held true on purpose: it only
+                      controls this badge's icon-only marker, and this row
+                      spells the same fact out in words beside it. Showing
+                      both would say it twice on one line.
+                    */}
+                    <KitStatusBadge
+                      status={contextAwareKitStatus}
+                      availableToBook
+                    />
+                    <When truthy={!isBookable}>
+                      <AvailabilityBadge
+                        badgeText="Unavailable"
+                        tooltipTitle="Kit is unavailable for bookings"
+                        tooltipContent="An administrator has marked one of this kit's assets as unavailable for bookings. Remove it from the booking, or make it available again, before reserving."
+                      />
+                    </When>
+                  </>
                 )}
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>
