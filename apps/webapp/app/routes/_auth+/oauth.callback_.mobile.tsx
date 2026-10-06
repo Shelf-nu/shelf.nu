@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
 import { supabaseClient } from "~/integrations/supabase/client";
+import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -39,41 +40,27 @@ import {
   payload,
   readFormData,
 } from "~/utils/http.server";
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import {
+  assertSsoAuthenticatedSession,
+  getSsoClaimsForAuthUser,
+  isSsoAccountLinkedError,
+  resolveUserAndOrgForSsoCallback,
+} from "~/utils/sso.server";
 
 /** Custom-scheme deeplink the companion app registers and listens for. */
 const MOBILE_CALLBACK_URL = "shelf://auth-callback";
 
 /**
  * Mirrors the web callback's payload: the client reads the Supabase session
- * from the URL fragment and posts the refresh token + SAML claims. We re-derive
- * the session server-side and never trust the client-supplied tokens.
+ * from the URL fragment and posts only the refresh token. We re-derive the
+ * session server-side and never trust the client-supplied tokens. Every claim
+ * the action acts on (groups, names, contact info) is read server-side with
+ * `getSsoClaimsForAuthUser`, never from the form.
  */
 const MobileCallbackSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  groups: z
-    .union([
-      z.string().transform((str) => {
-        try {
-          const parsed = JSON.parse(str);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      }),
-      z.array(z.string()),
-    ])
-    .default([]),
   refreshToken: z.string().min(1),
   // `createSSOFormData` always includes a redirectTo; it is unused on mobile.
   redirectTo: z.string().optional(),
-  phone: z.string().optional(),
-  streetAddress: z.string().optional(),
-  city: z.string().optional(),
-  stateProvince: z.string().optional(),
-  postalCode: z.string().optional(),
-  country: z.string().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -104,35 +91,26 @@ export async function action({ request }: ActionFunctionArgs) {
         // why: readFormData (not request.formData()) so a malformed body / wrong
         // Content-Type is downgraded to a non-captured 400, rather than a
         // TypeError that logException would otherwise surface as a captured 5xx.
-        const {
-          refreshToken,
-          firstName,
-          lastName,
-          groups,
-          phone,
-          streetAddress,
-          city,
-          stateProvince,
-          postalCode,
-          country,
-        } = parseData(await readFormData(request), MobileCallbackSchema);
+        const { refreshToken } = parseData(
+          await readFormData(request),
+          MobileCallbackSchema
+        );
 
-        // Don't trust client tokens — re-derive the session from the refresh
+        // Don't trust client tokens: re-derive the session from the refresh
         // token server-side (same trust boundary as the web callback).
         const authSession = await refreshAccessToken(refreshToken);
-
-        const contactInfo = {
-          phone,
-          street: streetAddress,
-          city,
-          stateProvince,
-          zipPostalCode: postalCode,
-          countryRegion: country,
-        };
+        // Any Supabase refresh token refreshes, so refuse a session that was
+        // not obtained through SSO before anything is provisioned or synced.
+        await assertSsoAuthenticatedSession(authSession);
+        const { groups, firstName, lastName, contactInfo } =
+          await getSsoClaimsForAuthUser({
+            authUserId: authSession.userId,
+            email: authSession.email,
+          });
 
         // Provision the user/org exactly as the web flow does (creates the user
         // on first login, links SCIM groups). The app's bearer-auth API looks
-        // the user up by email, so this must run before we mint a code.
+        // the user up by auth id, so this must run before we mint a code.
         // Same detection as the web callback; timeZone is null when the mobile
         // Request lacks the CH-time-zone cookie (see
         // detectFormatPrefsForPersistence), so the lazy backfill fills the real
@@ -176,6 +154,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
+    // The account was moved onto SSO and the person must sign in once more:
+    // an outcome to report, not a failure.
+    if (isSsoAccountLinkedError(cause)) {
+      return data(
+        payload({ ssoAccountLinked: true as const, message: cause.message }),
+        { headers: { "Set-Cookie": clearChallengeCookie } }
+      );
+    }
     const reason = makeShelfError(cause);
     // why: the client renders `result.error` and never re-throws, so without an
     // explicit log a genuine 5xx (refresh-token exchange, user/org provisioning,
@@ -217,7 +203,7 @@ export default function MobileLoginCallback() {
         const refreshToken = supabaseSession?.refresh_token;
         if (!refreshToken) return;
 
-        const formData = createSSOFormData(supabaseSession, refreshToken, "");
+        const formData = createSSOFormData(refreshToken, "");
         void fetcher.submit(formData, { method: "post" });
       }
     });
@@ -236,12 +222,18 @@ export default function MobileLoginCallback() {
     }
   }, [result]);
 
+  const linkedNotice =
+    result && "ssoAccountLinked" in result && result.ssoAccountLinked
+      ? result.message
+      : null;
   const errorMessage =
     result && "error" in result ? result.error?.message : undefined;
 
   return (
     <div className="flex justify-center text-center">
-      {errorMessage ? (
+      {linkedNotice ? (
+        <SsoAccountLinkedNotice variant="mobile" />
+      ) : errorMessage ? (
         <div>
           <div className="text-sm text-error-500">{errorMessage}</div>
           <Button to="/" className="mt-4">

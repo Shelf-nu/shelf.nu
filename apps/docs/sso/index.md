@@ -10,7 +10,7 @@ SSO changes how accounts on your domain are created and managed, so a few things
 
 ### 1. You need one non-SSO account to own the workspace [#](#1-non-sso-owner-account)
 
-Shelf SSO requires **one non-SSO user to be the owner of the workspace**. This account's only job is to own the workspace and configure the SSO settings (the group-to-role mapping). It is not used for daily work — owners typically sign in only when doing the initial setup or adjusting the configuration later.
+Shelf SSO needs **one non-SSO user as the owner of the workspace** to set it up. This account's job is to own the workspace and configure the SSO settings (the group-to-role mapping). It is not used for daily work: owners typically sign in only when doing the initial setup or adjusting the configuration later. Because the owner keeps password login, it is also your administrative fallback if your identity provider is ever unavailable. If you prefer, Shelf can convert the owner to SSO as well once setup is complete (see [Existing standard accounts on your domain](#existing-standard-accounts-on-your-domain)).
 
 Most customers create a dedicated account for this purpose using an address such as `it@yourdomain.com` or `shelf_admin@yourdomain.com`.
 
@@ -21,9 +21,11 @@ Most customers create a dedicated account for this purpose using an address such
 
 If you already have a workspace that was used for testing or trials (for example one created with a few standard accounts), decide whether you want to **keep it together with all the assets inside it**, or start fresh. Let your Shelf contact know so the right workspace is connected to SSO.
 
-### 3. Existing standard accounts on the domain must be removed [#](#3-existing-standard-accounts)
+### 3. Existing standard accounts on the domain [#](#3-existing-standard-accounts)
 
-Any existing **standard (non-SSO) accounts** that use the SSO domain — for example `jane@yourdomain.com` and `joe@yourdomain.com` — must be removed so that new accounts can be created through SSO login. Once an email is linked to a standard account it cannot log in via SSO, and once the domain is an SSO domain no new standard accounts can be created on it. Share the list of these accounts with your Shelf contact, who will take care of removing them at the right point in the setup.
+Existing **standard (non-SSO) accounts** that use the SSO domain, for example `jane@yourdomain.com` and `joe@yourdomain.com`, do **not** need to be deleted or recreated. Shelf converts them to SSO, and each account keeps its identity, data and workspace memberships (see [Existing standard accounts on your domain](#existing-standard-accounts-on-your-domain)).
+
+Once the domain is an SSO domain, no new standard accounts can be created on it. Once SSO is also enabled for the workspace that uses your domain, existing standard accounts can no longer sign in with a password, an email code or a password reset (the owner of your SSO workspace excepted, and unless SSO-only login is temporarily relaxed during setup, see below). Let your Shelf contact know about these accounts: they are converted once your identity provider is configured, and **before** you announce SSO to your team.
 
 ### 4. Plan your group-to-role mapping [#](#4-plan-group-mapping)
 
@@ -44,14 +46,14 @@ Shelf supports most identity providers that support the SAML 2.0 SSO protocol. W
 - [Google Workspaces (formerly GSuite)](./providers/google-workspace.md)
 - [Microsoft Entra (formerly Azure Active Directory)](./providers/microsoft-entra.md)
 - [Shibboleth](./providers/shibboleth.md)
-- Okta
+- [Okta](./providers/okta.md)
 
 Accounts signing in with SSO have certain limitations. The following sections outline the limitations when SSO is enabled or disabled for your team.
 
 > [!IMPORTANT]
-> When setting up SSO for your organization, you **must ensure that at least one non-SSO user remains as the owner** of all workspaces. This user will serve as the administrative fallback and maintain ownership of organizational resources.
+> When setting up SSO for your organization, the workspace needs **a non-SSO owner** to create it and configure the SSO settings. We recommend keeping that owner on standard login afterwards: it is the administrative fallback if your identity provider is unavailable. Converting the owner to SSO is optional and done on request.
 >
-> This non-SSO user account is only needed for rare administrative tasks such as SSO configuration changes - your team members will not need to access this account during normal operations and can use their SSO credentials for daily work.
+> This non-SSO owner account is only needed for rare administrative tasks such as SSO configuration changes. Your team members do not need it during normal operations and use their SSO credentials for daily work.
 
 ### Enable SSO for your organization [#](#enable-sso-for-your-organization)
 
@@ -62,8 +64,23 @@ Accounts signing in with SSO have certain limitations. The following sections ou
 - An SSO user will not be able to update or reset their password since the company administrator manages their access via the identity provider.
 - An SSO user will not be able to buy their own subscription to Shelf.
 - If an SSO user with the following email of huis@zaans.com attempts to sign in with email, they will be refused access to shelf. Once a email is linked to an SSO account, they are not able to create a normal account with the same email
-- If a user with email huis@zaans.com already exists as a standard user, they will not be able to login via SSO. Please contact support to get this resolved.
 - An SSO user will see and be added only to organizations that are mapped to their groups inside the IDP
+
+### Existing standard accounts on your domain [#](#existing-standard-accounts-on-your-domain)
+
+If users on your domain already have standard (email/password) Shelf accounts, for example from earlier testing, they do **not** need to be deleted or recreated. Shelf converts them to SSO during onboarding. The account keeps the same identity, data and workspace memberships: only the login method changes to SSO.
+
+- Conversion is performed by Shelf staff from the admin dashboard once your SSO provider is configured for the domain. Staff can convert accounts one at a time, or convert every eligible account on the domain at once so nobody is missed.
+- Converting an account signs the user out of every existing session and removes their password. From then on they sign in only via SSO.
+- The first SSO sign-in after conversion lands the user directly in their existing account, with all their data and workspaces. No NameID change is needed in your identity provider.
+- If a user tries to sign in via SSO before their account is converted, the sign-in is refused and they are asked to contact support. Their first SSO sign-in after conversion then shows "Your account is now on single sign-on" with a button to sign in with SSO again. They sign in with SSO once more and land in their existing account. After that they sign in once, as usual. Convert accounts before announcing SSO to your team: it avoids both the refusal and this extra sign-in.
+- **Group mappings decide the role.** If the workspace's SSO settings map identity provider groups to roles (the Administrator, Self service and Base group fields), every SSO login sets the user's role from their groups. A converted user whose groups do not map to any role loses access to that workspace at their first SSO login. The workspace owner is the exception: their role stays Owner and they keep access whatever their groups say, because ownership only changes through a transfer. If no group mappings are configured, existing workspace memberships and roles are kept as they are. Set up the groups (or leave the mappings empty) before converting.
+- **The owner of your SSO workspace can keep standard login.** This means the owner of the workspace that uses SSO for the domain (the workspace whose SSO settings list it). An owner who is not converted keeps signing in with their password, which gives you an administrative fallback if your identity provider is unavailable. Converting this owner is optional and done individually, on request: converting all accounts on a domain always skips them. Owning any other workspace, such as one an employee created for themselves, does not exempt an account from SSO.
+- **Once SSO is live for your domain, legacy sign-in is refused on it.** SSO is live when your domain is configured with your identity provider **and** SSO is enabled for the workspace that uses the domain. From then on, password login, email codes (OTP) and password reset stop working for every account on the domain, in the web app and in the mobile app, except for owners of the workspace that uses SSO for the domain who have not been converted, and except while SSO-only login is relaxed (next point). A refused account that is still signed in from before is signed out on its next page load and asked to use SSO. Messages shown before sign-in never reveal whether a particular account exists. Configuring the domain alone changes nothing for existing accounts: they keep their password until SSO is enabled for the workspace. Convert accounts before or right when SSO is enabled, so your team is not locked out in between.
+- **SSO-only login is on by default.** If you want to set up and test SSO with a few users first, Shelf staff can temporarily relax it: while it is off for **every** workspace that uses SSO for your domain, accounts on the domain that are not converted yet can still sign in with their password (converted accounts always use SSO). If any of those workspaces keeps it on, it applies to the whole domain. Ask for it to be turned back on once everyone is converted.
+- **If your identity provider becomes unavailable**, Shelf support can revert a converted owner of the workspace that uses SSO for the domain to standard login. The owner then sets a new password with **Forgot password** on the login page and signs in with it. Other accounts can be reverted only while SSO-only login is relaxed for every workspace linked to the domain (during setup), or once the domain no longer uses SSO; otherwise they would still be refused a password login.
+
+Keeping SSO and standard (password) users side by side on the same domain for good, apart from the workspace owner described above, is not currently supported: the temporary relaxation described above is meant for setup and testing, and new accounts on the domain can only join through SSO. If you need a permanent mix, contact support.
 
 ### Disable SSO for your team [#](#disable-sso-for-your-team)
 

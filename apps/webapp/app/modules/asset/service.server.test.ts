@@ -46,6 +46,7 @@ import {
   buildAssetKitCreateData,
   checkOutQuantity,
   createAsset,
+  duplicateAsset,
   setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
@@ -89,6 +90,10 @@ vitest.mock("~/database/db.server", () => ({
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
       deleteMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: duplicateAsset deletes the copies it already created through
+      // deleteAsset when a later copy fails; deleteAsset reads the removed
+      // row's reminders to cancel their schedulers.
+      delete: vitest.fn().mockResolvedValue({ reminders: [] }),
       // why: checkOutQuantity returns the refreshed asset at the end of its tx
       findUniqueOrThrow: vitest.fn().mockResolvedValue({}),
     },
@@ -122,6 +127,11 @@ vitest.mock("~/database/db.server", () => ({
     },
     qr: {
       update: vitest.fn().mockResolvedValue({}),
+    },
+    // why: createAsset retypes the orphaned barcodes it reuses inside its
+    // create transaction, so the delegate has to exist for the tx body to run.
+    barcode: {
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: checkOutQuantity finds/creates/increments the operator-allocated
     // custody row; releaseQuantity finds it then deletes or decrements by
@@ -530,6 +540,271 @@ describe("relinkAssetQrCode (asset)", () => {
     });
     expect(db.asset.update).not.toHaveBeenCalled();
     expect(createNote).not.toHaveBeenCalled();
+  });
+});
+
+describe("duplicateAsset", () => {
+  type SourceAsset = Parameters<typeof duplicateAsset>[0]["asset"];
+
+  const mockAssetCreate = db.asset.create as ReturnType<typeof vitest.fn>;
+  const mockAssetLocationCreate = db.assetLocation.create as ReturnType<
+    typeof vitest.fn
+  >;
+  const mockAssetDelete = db.asset.delete as ReturnType<typeof vitest.fn>;
+
+  /** A source asset carrying only the fields `duplicateAsset` reads. */
+  function makeSource(overrides: Partial<SourceAsset> = {}): SourceAsset {
+    return {
+      id: "asset-src",
+      title: "Boxes",
+      description: "Cardboard boxes",
+      categoryId: null,
+      valuation: null,
+      mainImage: null,
+      tags: [],
+      customFields: [],
+      custody: [],
+      assetLocations: [],
+      type: AssetType.INDIVIDUAL,
+      quantity: null,
+      minQuantity: null,
+      consumptionType: null,
+      unitOfMeasure: null,
+      availableToBook: true,
+      assetModelId: null,
+      ...overrides,
+    } as SourceAsset;
+  }
+
+  /** The `data` passed to each `db.asset.create`, in call order. */
+  function createdRows() {
+    return mockAssetCreate.mock.calls.map(
+      ([args]) => (args as { data: Record<string, unknown> }).data
+    );
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // `mockReset` drops any `mockResolvedValueOnce` queued by earlier suites,
+    // which a plain clear would leave in place.
+    mockAssetCreate.mockReset();
+    mockAssetCreate.mockResolvedValue({ id: "asset-new" });
+    mockAssetLocationCreate.mockReset();
+    mockAssetLocationCreate.mockResolvedValue({});
+    mockAssetDelete.mockReset();
+    mockAssetDelete.mockResolvedValue({ reminders: [] });
+    vi.mocked(getActiveCustomFields).mockResolvedValue([]);
+  });
+
+  it.each(["ONE_WAY", "TWO_WAY"] as const)(
+    "copies the tracking method, quantity, unit and %s behaviour of a quantity-tracked asset",
+    async (consumptionType) => {
+      await duplicateAsset({
+        asset: makeSource({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 100,
+          minQuantity: 10,
+          consumptionType,
+          unitOfMeasure: "boxes",
+          assetLocations: [
+            { location: { id: "loc-a" } },
+            { location: { id: "loc-b" } },
+          ],
+        }),
+        userId: "user-1",
+        amountOfDuplicates: 1,
+        organizationId: "org-1",
+      });
+
+      expect(createdRows()).toEqual([
+        expect.objectContaining({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 100,
+          minQuantity: 10,
+          consumptionType,
+          unitOfMeasure: "boxes",
+        }),
+      ]);
+    }
+  );
+
+  it("leaves a quantity-tracked copy unplaced", async () => {
+    // A pool split across two locations must not be collapsed into one
+    // placement of the full quantity; its units are placed from the copy's
+    // asset page.
+    await duplicateAsset({
+      asset: makeSource({
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        consumptionType: "ONE_WAY",
+        unitOfMeasure: "boxes",
+        assetLocations: [
+          { location: { id: "loc-a" } },
+          { location: { id: "loc-b" } },
+        ],
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(mockAssetCreate).toHaveBeenCalledTimes(1);
+    expect(mockAssetLocationCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an individual copy at the source's primary location", async () => {
+    await duplicateAsset({
+      asset: makeSource({ assetLocations: [{ location: { id: "loc-a" } }] }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        type: AssetType.INDIVIDUAL,
+        quantity: undefined,
+        consumptionType: undefined,
+        unitOfMeasure: undefined,
+      }),
+    ]);
+    expect(mockAssetLocationCreate).toHaveBeenCalledWith({
+      data: {
+        assetId: "asset-new",
+        locationId: "loc-a",
+        organizationId: "org-1",
+        quantity: 1,
+      },
+    });
+  });
+
+  it("refuses to copy a quantity-tracked asset with no units in stock", async () => {
+    await expect(
+      duplicateAsset({
+        asset: makeSource({
+          type: AssetType.QUANTITY_TRACKED,
+          quantity: 0,
+          consumptionType: "ONE_WAY",
+          unitOfMeasure: "boxes",
+        }),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ status: 400, title: "No units to copy" });
+
+    expect(mockAssetCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an individual copy's asset model and booking availability", async () => {
+    // why: createAsset proves the model belongs to the org before linking it.
+    vi.mocked(db.assetModel.findFirst).mockResolvedValueOnce({
+      id: "model-1",
+    } as never);
+
+    await duplicateAsset({
+      asset: makeSource({ assetModelId: "model-1", availableToBook: false }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({
+        availableToBook: false,
+        assetModel: { connect: { id: "model-1" } },
+      }),
+    ]);
+  });
+
+  it("keeps a quantity-tracked copy's booking availability", async () => {
+    await duplicateAsset({
+      asset: makeSource({
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 100,
+        consumptionType: "TWO_WAY",
+        availableToBook: false,
+      }),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows()).toEqual([
+      expect.objectContaining({ availableToBook: false }),
+    ]);
+  });
+
+  it("deletes the copies already created when a later copy fails", async () => {
+    mockAssetCreate
+      .mockResolvedValueOnce({ id: "copy-1" })
+      .mockResolvedValueOnce({ id: "copy-2" })
+      .mockRejectedValueOnce(new Error("connection reset"));
+
+    await expect(
+      duplicateAsset({
+        asset: makeSource({ mainImage: "https://example.test/main.png" }),
+        userId: "user-1",
+        amountOfDuplicates: 3,
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow();
+
+    expect(mockAssetDelete.mock.calls.map(([args]) => args.where)).toEqual([
+      { id: "copy-1", organizationId: "org-1" },
+      { id: "copy-2", organizationId: "org-1" },
+    ]);
+    // Images are uploaded only once every copy exists.
+    expect(getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it("reports the original failure when deleting a copy also fails", async () => {
+    mockAssetCreate
+      .mockResolvedValueOnce({ id: "copy-1" })
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "Category not found",
+          label: "Assets",
+          status: 404,
+        })
+      );
+    mockAssetDelete.mockRejectedValueOnce(new Error("delete failed"));
+
+    await expect(
+      duplicateAsset({
+        asset: makeSource(),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('titles a single copy "<title> (copy)"', async () => {
+    await duplicateAsset({
+      asset: makeSource(),
+      userId: "user-1",
+      amountOfDuplicates: 1,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows().map((row) => row.title)).toEqual(["Boxes (copy)"]);
+  });
+
+  it("numbers the titles when creating several copies", async () => {
+    await duplicateAsset({
+      asset: makeSource(),
+      userId: "user-1",
+      amountOfDuplicates: 3,
+      organizationId: "org-1",
+    });
+
+    expect(createdRows().map((row) => row.title)).toEqual([
+      "Boxes (copy 1)",
+      "Boxes (copy 2)",
+      "Boxes (copy 3)",
+    ]);
   });
 });
 
@@ -2167,6 +2442,68 @@ describe("createAsset cross-org guards", () => {
     // "uncategorized" is the form's empty sentinel, not an id, so it must
     // never reach the org-scope lookup.
     expect(db.category.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("createAsset reused barcodes", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("gives a reused orphaned barcode the type the import asked for", async () => {
+    expect.assertions(3);
+
+    await createAsset({
+      title: "NGR Locomotive",
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [
+        // An orphan left behind by a deleted asset, stored as Code128, now
+        // claimed by a `barcode_ExternalQR` cell.
+        { type: "ExternalQR", value: "65LR002055MC", existingId: "bc-orphan" },
+        { type: "Code39", value: "ABC123", existingId: "bc-orphan-2" },
+        // A brand-new value: created with its type, no retype needed.
+        { type: "ExternalQR", value: "new-value" },
+      ],
+    } as any);
+
+    expect(db.barcode.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["bc-orphan"] }, organizationId: "org-A" },
+      data: { type: "ExternalQR" },
+    });
+    expect(db.barcode.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["bc-orphan-2"] }, organizationId: "org-A" },
+      data: { type: "Code39" },
+    });
+    expect(db.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          barcodes: {
+            connect: [{ id: "bc-orphan" }, { id: "bc-orphan-2" }],
+            create: [
+              {
+                type: "ExternalQR",
+                value: "new-value",
+                organizationId: "org-A",
+              },
+            ],
+          },
+        }),
+      })
+    );
+  });
+
+  it("does not touch existing barcodes when none are reused", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+      barcodes: [{ type: "Code128", value: "ABC123" }],
+    } as any);
+
+    expect(db.barcode.updateMany).not.toHaveBeenCalled();
   });
 });
 
