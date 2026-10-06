@@ -55,7 +55,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetIds, custodian, currentSearchParams, quantities } = parseData(
+    const {
+      assetIds,
+      custodian,
+      currentSearchParams,
+      quantities,
+      sourceLocations,
+    } = parseData(
       formData,
       BulkAssignCustodySchema.and(CurrentSearchParamsSchema)
     );
@@ -117,10 +123,12 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Every per-unit assignment is checked before anything is written,
-    // including the "assign only to yourself" rule.
+    // including the "assign only to yourself" rule and, for a pool placed at
+    // two or more locations, what the scanner's chosen location has left.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
+      sourceLocations,
       organizationId,
       custodian: custodianRecord,
       custodyAssign: access.custody.assign,
@@ -161,6 +169,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const refusals = await assignQuantities({
       quantityAssetIds,
       quantities,
+      sourceLocations,
       custodian: custodianRecord,
       userId,
       organizationId,

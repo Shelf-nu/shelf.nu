@@ -20,6 +20,7 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   deleteAsset,
@@ -277,6 +278,21 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : { teamMembers: [], totalTeamMembers: 0 };
 
+    /**
+     * Where a quantity-tracked asset's units can come from, for the Assign
+     * and Adjust dialogs. Built here, in the loader both entry points share
+     * (the header's actions menu and the overview's custody and quantity
+     * cards), so they always show the same numbers. Counts only, no names,
+     * so it needs no redaction.
+     */
+    const custodySources = isQuantityTracked(asset)
+      ? await getCustodySourceSummary({
+          assetId: asset.id,
+          organizationId,
+          total: asset.quantity ?? 0,
+        })
+      : { multiSource: false, options: [], poolAvailable: 0 };
+
     const header: HeaderData = {
       title: asset.title,
     };
@@ -298,6 +314,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       teamMembers,
       totalTeamMembers,
+      custodySources,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

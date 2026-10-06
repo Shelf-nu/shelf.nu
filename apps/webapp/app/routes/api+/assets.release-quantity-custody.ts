@@ -41,6 +41,17 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
+/**
+ * One source line of a per-location release, as the dialog posts it inside
+ * the `sources` JSON field. `locationId` null is the unplaced units, and
+ * `"unrecorded"` the units whose source was never recorded.
+ */
+const ReleaseSourceLineSchema = z.object({
+  locationId: z.string().nullable(),
+  quantity: z.number().int().nonnegative(),
+  consumed: z.number().int().nonnegative().optional(),
+});
+
 /** Zod schema for validating the release-quantity-custody form data */
 export const ReleaseQuantityCustodySchema = z.object({
   assetId: z.string().min(1, "Asset ID is required"),
@@ -59,6 +70,33 @@ export const ReleaseQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Release only the units taken from this source: a location id,
+   * `"unplaced"` for the unplaced units, or `"unrecorded"` for units whose
+   * source was never recorded. Absent: the holder's rows are drawn in the
+   * service's fixed order.
+   */
+  locationId: z.string().optional(),
+  /**
+   * Per-location lines, JSON-encoded, when the holder took units from
+   * several locations and releases them per location. `quantity` must
+   * equal their sum.
+   */
+  sources: z
+    .string()
+    .optional()
+    .transform((val, ctx) => {
+      if (!val) return undefined;
+      try {
+        return z.array(ReleaseSourceLineSchema).parse(JSON.parse(val));
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "The quantities per location could not be read.",
+        });
+        return z.NEVER;
+      }
+    }),
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
@@ -77,10 +115,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const formData = await request.formData();
 
-    const { assetId, teamMemberId, quantity, consumed, note } = parseData(
-      formData,
-      ReleaseQuantityCustodySchema
-    );
+    const {
+      assetId,
+      teamMemberId,
+      quantity,
+      consumed,
+      note,
+      locationId,
+      sources,
+    } = parseData(formData, ReleaseQuantityCustodySchema);
 
     /** Fetch team member with user info for the audit note */
     const teamMember = await getTeamMember({
@@ -117,6 +160,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         organizationId,
         custodyAssign: access.custody.assign,
         note,
+        locationId,
+        sources,
       });
 
     sendNotification({

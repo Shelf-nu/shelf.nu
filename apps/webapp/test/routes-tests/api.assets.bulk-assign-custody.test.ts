@@ -75,7 +75,15 @@ vi.mock("~/modules/asset/service.server", () => ({
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
   // why: the per-unit path is what the scanner submits; the route's job is to
   // split the submission and forward role, which is what these assert.
-  checkOutQuantity: vi.fn().mockResolvedValue({}),
+  // It reports a source with nothing to name, as for a pool at one location.
+  checkOutQuantity: vi.fn().mockResolvedValue({
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
 }));
 
 // why: the availability pre-flight lives in the dependency-free leaf, so it is
@@ -133,7 +141,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
       // parse never yields `undefined` here. Mirror that: a mock that omits
       // the field tests a shape the route can't actually receive.
       const quantities = JSON.parse(formData.get("quantities") || "{}");
-      return { assetIds, custodian, currentSearchParams, quantities };
+      // Same for `AssetSourceLocationsSchema`: an absent field parses to {}.
+      const sourceLocations = JSON.parse(
+        formData.get("sourceLocations") || "{}"
+      );
+      return {
+        assetIds,
+        custodian,
+        currentSearchParams,
+        quantities,
+        sourceLocations,
+      };
     }),
   };
 });

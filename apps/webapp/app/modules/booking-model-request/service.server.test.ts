@@ -1604,7 +1604,7 @@ describe("upsertBookingModelRequests", () => {
   });
 
   it("aborts the whole batch when one model does not fit", async () => {
-    expect.assertions(5);
+    expect.assertions(6);
     // All-or-nothing: a half-applied batch leaves the user to work out which
     // half landed, which is worse than a clear failure. Twelve units exist,
     // so the second model's 99 cannot fit — the pool guard refuses it after
@@ -1624,6 +1624,10 @@ describe("upsertBookingModelRequests", () => {
     expect(error).toBeInstanceOf(ShelfError);
     expect(error.status).toBe(400);
     expect(error.message).toContain(`Cannot reserve 99 × ${SECOND_MODEL_NAME}`);
+    // The title is what the dialog and the toast head the message with. Left
+    // off, both fall back to "Oops! Something went wrong", which blames Shelf
+    // for a fact about the pool the user is asking from.
+    expect(error.title).toBe("Not enough units");
 
     // The first model's write was already issued when the second was
     // refused — which is exactly why the batch has to be one transaction.

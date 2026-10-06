@@ -10,6 +10,7 @@
  */
 
 import type { Asset } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { ShelfError } from "~/utils/error";
 
 /**
@@ -54,4 +55,36 @@ export async function lockAssetForQuantityUpdate(
   }
 
   return result[0];
+}
+
+/**
+ * Row-locks several assets in one statement, in id order.
+ *
+ * The order is the one every multi-asset locker uses (the booking check-out
+ * and check-in paths lock asset by asset in sorted id order), so two
+ * transactions touching the same assets can never deadlock. `FOR UPDATE`
+ * locks rows as the sorted result is produced. Org-scoped like
+ * {@link lockAssetForQuantityUpdate}: foreign ids match nothing and are not
+ * locked. Missing ids are simply absent from the result.
+ *
+ * @param tx - Prisma interactive transaction client
+ * @param assetIds - Assets to lock; duplicates are ignored
+ * @param organizationId - The caller's organization
+ * @returns The locked rows' id, type and quantity
+ */
+export function lockAssetsForQuantityUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any, // Prisma interactive tx client (no clean type for extended clients)
+  assetIds: string[],
+  organizationId: string
+): Promise<Array<Pick<Asset, "id" | "type" | "quantity">>> {
+  const ids = Array.from(new Set(assetIds)).sort();
+  if (ids.length === 0) return Promise.resolve([]);
+
+  return tx.$queryRaw`
+    SELECT id, type, quantity FROM "Asset"
+    WHERE id IN (${Prisma.join(ids)}) AND "organizationId" = ${organizationId}
+    ORDER BY id
+    FOR UPDATE
+  `;
 }

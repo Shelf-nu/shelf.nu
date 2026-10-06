@@ -58,9 +58,13 @@ vitest.mock("~/modules/asset/service.server", () => ({
   getAdvancedPaginatedAndFilterableAssets: vitest.fn(),
 }));
 // why: isolates the org-scoping lookup so a cross-org model id can be
-// simulated without seeding two organizations.
+// simulated without seeding two organizations, and exposes the unfiltered
+// count as a seam whose WHERE clause is asserted below.
 vitest.mock("~/database/db.server", () => ({
-  db: { assetModel: { findFirst: vitest.fn() } },
+  db: {
+    assetModel: { findFirst: vitest.fn() },
+    asset: { count: vitest.fn() },
+  },
 }));
 
 import { db } from "~/database/db.server";
@@ -104,6 +108,22 @@ function caller(
   };
 }
 
+/**
+ * The WHERE clause the unfiltered count ran with, or `undefined` when it never
+ * ran.
+ *
+ * Read through a declared shape rather than off the Prisma delegate's own
+ * generic signature, so a renamed field in the clause is a failing assertion
+ * here instead of an `unknown` the compiler waves through.
+ */
+function unfilteredCountWhere(): Record<string, unknown> | undefined {
+  const calls = vitest.mocked(db.asset.count).mock.calls as unknown as Array<
+    [{ where?: Record<string, unknown> }]
+  >;
+
+  return calls[0]?.[0]?.where;
+}
+
 describe("asset model assets endpoint", () => {
   beforeEach(() => {
     // Call history, not just return values: every assertion below reads
@@ -129,6 +149,7 @@ describe("asset model assets endpoint", () => {
       id: "am-1",
       name: "MacBook Pro 16",
     } as never);
+    vitest.mocked(db.asset.count).mockResolvedValue(0 as never);
     vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
       assets: [],
       totalAssets: 0,
@@ -193,6 +214,58 @@ describe("asset model assets endpoint", () => {
     const [args] = vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mock
       .calls[0];
     expect(args.availableToBookOnly).toBe(true);
+    // The unfiltered count is narrowed the same way: counted over the wider
+    // set, it would report assets this viewer is shown nowhere else.
+    expect(unfilteredCountWhere()).toMatchObject({ availableToBook: true });
+  });
+
+  it("counts the model's own assets unfiltered when nothing matched, scoped to the caller's organization", async () => {
+    vitest.mocked(db.asset.count).mockResolvedValue(52 as never);
+
+    const response = (await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=status%3Dis%3AAVAILABLE"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never)) as unknown as Response;
+
+    expect(unfilteredCountWhere()).toEqual({
+      // From `requirePermission`, never from the request: a count widened past
+      // the caller's workspace reports another organization's inventory.
+      organizationId: "org-1",
+      // The rollup this sheet drills into counts INDIVIDUAL assets only, so a
+      // count including stock pools would not describe the same set.
+      type: "INDIVIDUAL",
+      assetModelId: "am-1",
+    });
+
+    const body = (await response.json()) as { unfilteredAssets: number | null };
+    // What separates "your filters exclude everything in this model" from "this
+    // model is empty" in the sheet's one empty-state sentence.
+    expect(body.unfilteredAssets).toBe(52);
+  });
+
+  it("skips the unfiltered count when the filtered set has rows", async () => {
+    vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
+      assets: [{ id: "asset-1" }],
+      totalAssets: 1,
+      page: 1,
+      perPage: 20,
+      totalPages: 1,
+    } as never);
+
+    const response = (await loader({
+      context,
+      request: request("https://x.test/api/asset-models/am-1/assets"),
+      params: { assetModelId: "am-1" },
+    } as never)) as unknown as Response;
+
+    // A sheet with rows states its own count, so paying for a second query on
+    // every open would buy a sentence that is never rendered.
+    expect(vitest.mocked(db.asset.count)).not.toHaveBeenCalled();
+    const body = (await response.json()) as { unfilteredAssets: number | null };
+    expect(body.unfilteredAssets).toBeNull();
   });
 
   it("redacts a foreign custodian's identity when the viewer cannot see all custody", async () => {

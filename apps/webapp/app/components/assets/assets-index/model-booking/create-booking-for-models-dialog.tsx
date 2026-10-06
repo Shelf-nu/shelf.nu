@@ -8,11 +8,18 @@
  *
  * **Nothing concrete is booked.** Each row becomes a `BookingModelRequest`: a
  * promise of N units of a model, fulfilled later by scanning or assigning
- * actual assets. That is why no availability figure is shown here — the
- * booking window is being chosen in this same form, and a number computed
- * before the dates are set would be a confident wrong answer. The reservation
- * transaction is the guard, and it refuses the whole batch if any model's pool
- * is short.
+ * actual assets.
+ *
+ * Each row states how many units are free once both dates are set, and says
+ * nothing before that. The window is chosen in this same form, and availability
+ * measured without one counts every active booking as competing: a worst-case
+ * figure rather than a neutral one, and a confident wrong answer if it were
+ * shown as "available".
+ *
+ * The figure is a HINT and never a gate. It is read outside the reservation
+ * transaction and can be stale by the time the booking is created, so the
+ * transaction stays the only guard: it refuses the whole batch if any model's
+ * pool is short.
  *
  * Selection handling is the shared `BulkUpdateDialogContent` default: no
  * `skipCloseOnSuccess`, no `keepSelectionOnSuccess`. The asset index's
@@ -22,8 +29,9 @@
  *
  * @see {@link file://./model-quantity-rows.tsx} — the per-model quantity list
  * @see {@link file://./../../../../routes/api+/bookings.create-for-models.ts} — the endpoint this posts to
+ * @see {@link file://./../../../../routes/api+/asset-models.availability.ts} the hint data
  */
-import { Fragment, useReducer, useRef, useState } from "react";
+import { Fragment, useMemo, useReducer, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
@@ -39,6 +47,7 @@ import { BulkUpdateDialogContent } from "~/components/bulk-update-dialog/bulk-up
 import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
+import useApiQuery from "~/hooks/use-api-query";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -48,6 +57,8 @@ import { useWorkingHours } from "~/hooks/use-working-hours";
 import type { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import type { AssetModelWindowAvailabilityResponse } from "~/routes/api+/asset-models.availability";
+import type { BookingModelAvailabilityRow } from "~/routes/api+/bookings.$bookingId.model-availability";
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
@@ -72,6 +83,17 @@ type SelectedModelItem = {
   id: string;
   assetModelId?: string | null;
   name?: string | null;
+};
+
+/**
+ * What `/api/asset-models/availability` answers with, as this dialog reads it.
+ *
+ * The success fields are optional because the same endpoint answers a refusal
+ * with `error` alone. Built from the route's own exported type so a renamed
+ * field is a build error here rather than a hint that silently stops rendering.
+ */
+type AvailabilityQueryData = Partial<AssetModelWindowAvailabilityResponse> & {
+  error: { message: string } | null;
 };
 
 /** The dialog's local state: what to reserve, and what the user dropped. */
@@ -168,7 +190,13 @@ export default function CreateBookingForModelsDialog() {
   }));
 
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
-  const selectedModelRows = toModelRows(selectedItems);
+  // Memoized so the derived lists below keep a stable identity across renders:
+  // the availability read is keyed on the list it asks about, and a fresh array
+  // every render would re-issue it on every keystroke elsewhere in the form.
+  const selectedModelRows = useMemo(
+    () => toModelRows(selectedItems),
+    [selectedItems]
+  );
 
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
@@ -255,9 +283,83 @@ export default function CreateBookingForModelsDialog() {
     }
   }
 
-  const removedModelIds = new Set(selectionState.removedModelIds);
-  const rows = selectedModelRows.filter(
-    (row) => !removedModelIds.has(row.assetModelId)
+  /** The models still on the list, before any availability is known. */
+  const visibleRows = useMemo(() => {
+    const removedModelIds = new Set(selectionState.removedModelIds);
+    return selectedModelRows.filter(
+      (row) => !removedModelIds.has(row.assetModelId)
+    );
+  }, [selectedModelRows, selectionState.removedModelIds]);
+
+  const availabilityParams = useMemo(() => {
+    const params = new URLSearchParams();
+    // The wall-clock strings the date fields emit, sent as typed. The endpoint
+    // reads them in the same preference zone the create action parses them in.
+    params.set("from", startDate);
+    params.set("to", endDate);
+    for (const row of visibleRows) {
+      params.append("assetModelId", row.assetModelId);
+    }
+    return params;
+  }, [visibleRows, startDate, endDate]);
+
+  /** Whether the form names a window the endpoint can measure against. */
+  const hasWindow = Boolean(startDate) && Boolean(endDate);
+
+  const { data: availabilityData } = useApiQuery<AvailabilityQueryData>({
+    api: "/api/asset-models/availability",
+    searchParams: availabilityParams,
+    // Both dates, because availability read without a window counts every
+    // active booking as competing and reports the worst case as if it were the
+    // answer. At least one model, because there is nothing to ask about
+    // otherwise.
+    enabled: isDialogOpen && hasWindow && visibleRows.length > 0,
+  });
+
+  /**
+   * The hint rows, but only while they describe the dates now in the form.
+   *
+   * The last answer survives in state while the next request is in flight, so
+   * editing a date would otherwise leave figures on screen that were measured
+   * against the window the user has already left. The response echoes the
+   * `from`/`to` it was asked about precisely so that can be checked; a mismatch
+   * leaves every row hintless, which says "not known yet" rather than something
+   * untrue.
+   */
+  const availabilityByModel = useMemo(() => {
+    const noAnswer = new Map<string, BookingModelAvailabilityRow>();
+
+    if (!hasWindow) return noAnswer;
+    if (availabilityData?.from !== startDate) return noAnswer;
+    if (availabilityData?.to !== endDate) return noAnswer;
+
+    return new Map(
+      (availabilityData.models ?? []).map((row) => [row.assetModelId, row])
+    );
+  }, [availabilityData, hasWindow, startDate, endDate]);
+
+  /**
+   * The rows as rendered and submitted, carrying the hint fields only for
+   * models the endpoint answered for.
+   *
+   * A model it has no row for keeps both fields undefined, the same state the
+   * rows show before a window exists: the quantity alone, with no availability
+   * claimed. An absent row means the figure is unknown, not that everything is
+   * free.
+   */
+  const rows: ModelQuantityRow[] = useMemo(
+    () =>
+      visibleRows.map((row) => {
+        const availability = availabilityByModel.get(row.assetModelId);
+        return {
+          ...row,
+          // Always zero from this endpoint: a booking that does not exist yet
+          // reserves nothing, so the projected total is what the user typed.
+          alreadyReserved: availability?.alreadyReserved,
+          available: availability?.available,
+        };
+      }),
+    [visibleRows, availabilityByModel]
   );
 
   return (

@@ -252,7 +252,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.asset.count({ where }),
       ]);
 
-    // Single query: the UNION already searches all 10 sources in one shot,
+    // Single query: the UNION already searches all 11 sources in one shot,
     // so there is no narrow/fallback two-query dance to run any more.
     const [storedAssets, totalCount] = await fetchPage({
       ...baseWhere,

@@ -487,7 +487,7 @@ describe("GET /api/mobile/assets — search", () => {
 
   it("id-shaped searches also resolve via the single UNION query (superset, pre-approved)", async () => {
     // Previously ID-shaped terms took a narrow indexed fast path with a
-    // full-clause fallback on zero rows. The UNION always searches all 10
+    // full-clause fallback on zero rows. The UNION always searches all 11
     // sources in one query, so an ID-shaped search now returns the full
     // (more correct) result set directly — no second query.
     queryRawMock.mockResolvedValueOnce([{ id: "asset-9" }]);

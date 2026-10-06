@@ -335,6 +335,74 @@ describe("POST /api/mobile/custody/release-quantity", () => {
       expect(noteContent()).toContain("**30** returned to stock");
     });
 
+    it("forwards the source: a location, null for the unplaced units, or unrecorded", async () => {
+      for (const locationId of ["loc-studio", null, "unrecorded"]) {
+        const request = createReleaseQuantityRequest({
+          assetId: "asset-1",
+          teamMemberId: "tm-1",
+          quantity: 1,
+          locationId,
+        });
+        await action(createActionArgs({ request }));
+        expect(releaseQuantity).toHaveBeenLastCalledWith(
+          expect.objectContaining({ locationId })
+        );
+      }
+    });
+
+    it("names where the units came from for a pool with several sources", async () => {
+      (releaseQuantity as any).mockResolvedValue({
+        asset: { id: "asset-1" },
+        consumed: 3,
+        returned: 0,
+        multiSource: true,
+        lines: [
+          {
+            locationId: "loc-camera",
+            locationName: "Camera Room",
+            quantity: 2,
+            consumed: 2,
+            returned: 0,
+          },
+          {
+            locationId: null,
+            locationName: null,
+            quantity: 1,
+            consumed: 1,
+            returned: 0,
+          },
+        ],
+      });
+
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+      await action(createActionArgs({ request }));
+
+      expect(noteContent()).toContain(
+        'as consumed (2 from {% link to="/locations/loc-camera" text="Camera Room" /%}, 1 unplaced)'
+      );
+    });
+
+    it("leaves the rows to the service's drain order when an older app names no source", async () => {
+      // An app build predating sources sends no `locationId`. Forwarding
+      // undefined (not null, which means the unplaced units) is what lets the
+      // service draw the holder's rows in its fixed order.
+      const request = createReleaseQuantityRequest({
+        assetId: "asset-1",
+        teamMemberId: "tm-1",
+        quantity: 3,
+      });
+
+      await action(createActionArgs({ request }));
+
+      expect(releaseQuantity).toHaveBeenCalledWith(
+        expect.objectContaining({ locationId: undefined })
+      );
+    });
+
     it("forwards an absent consumed field as undefined so the server derives the split", async () => {
       // An app build predating the split sends no `consumed`; the service must
       // still be free to pick the outcome from the asset row.

@@ -68,7 +68,12 @@ vitest.mock("~/modules/asset/service.server", () => ({
   bulkCheckInAssets: vitest
     .fn()
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
-  releaseQuantity: vitest.fn().mockResolvedValue({ consumed: 0, returned: 3 }),
+  releaseQuantity: vitest.fn().mockResolvedValue({
+    consumed: 0,
+    returned: 3,
+    lines: [],
+    multiSource: false,
+  }),
 }));
 
 // why: the holder lookup reads operator custody rows straight off the table

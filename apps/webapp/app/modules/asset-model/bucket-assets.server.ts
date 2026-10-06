@@ -1,14 +1,14 @@
 /**
  * Asset Model Bucket Assets
  *
- * The one query behind the model view's drill-down sheet, shared by both
- * endpoints that expose it: `/api/asset-models/:assetModelId/assets` for a real
- * model, and `/api/asset-models/unassigned-assets` for the "No model" bucket.
- * Only the predicate differs between them, so only the predicate is passed in.
+ * The read behind the model view's drill-down sheet, shared by both endpoints
+ * that expose it: `/api/asset-models/:assetModelId/assets` for a real model,
+ * and `/api/asset-models/unassigned-assets` for the "No model" bucket. Only
+ * the predicate differs between them, so only the predicate is passed in.
  *
  * It lives here rather than in either route because almost everything around
  * that predicate is a guard: the permission gate, the organization scope, the
- * `availableToBookOnly` narrowing a SELF_SERVICE viewer gets, and the custodian
+ * `availableToBookOnly` narrowing a viewer limited to bookable assets gets, and the custodian
  * redaction applied before the payload leaves. Two routes each carrying their
  * own copy of that stack is how one of them ends up missing a guard, which on
  * this endpoint exposes data rather than merely looking wrong.
@@ -24,6 +24,7 @@
  * @see {@link file://./../../routes/api+/asset-models.unassigned-assets.ts}
  * @see {@link file://./../../components/assets/assets-index/asset-model-assets-sheet.tsx}
  */
+import { AssetType } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
@@ -72,6 +73,47 @@ function stringifyFilters(params: URLSearchParams): string {
 }
 
 /**
+ * Counts the assets behind one bucket with the caller's filters ignored.
+ *
+ * This is what lets an empty sheet say WHY it is empty: a bucket whose assets
+ * are all filtered out reads identically to one that holds nothing, and only
+ * this figure separates them.
+ *
+ * Scoped the way the rollup the sheet drills into is scoped, so the two cannot
+ * describe different sets: the caller's own organization, `INDIVIDUAL` assets
+ * only (a model describes distinguishable units, so a stock pool never carries
+ * one), and, for a viewer restricted to bookable assets, that same narrowing.
+ * A count taken over the wider set would report assets the viewer is not shown
+ * anywhere else.
+ *
+ * @param bucket - The rollup row to count. The "No model" bucket counts assets
+ *   with no model at all.
+ * @param organizationId - The caller's workspace, from `requirePermission` and
+ *   never from the request
+ * @param availableToBookOnly - Restricts the count to assets the viewer may
+ *   reserve, matching the asset query beside it
+ * @returns How many assets the bucket holds, filters aside
+ */
+async function countBucketAssetsIgnoringFilters({
+  bucket,
+  organizationId,
+  availableToBookOnly,
+}: {
+  bucket: AssetModelBucket;
+  organizationId: string;
+  availableToBookOnly: boolean;
+}): Promise<number> {
+  return db.asset.count({
+    where: {
+      organizationId,
+      type: AssetType.INDIVIDUAL,
+      assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
+      ...(availableToBookOnly ? { availableToBook: true } : {}),
+    },
+  });
+}
+
+/**
  * Lists the assets behind one model-view row, narrowed by the filters the
  * asset index is currently showing.
  *
@@ -87,7 +129,8 @@ function stringifyFilters(params: URLSearchParams): string {
  * @param request - The incoming request, read for the forwarded `filters`
  *   param, the per-page cookie and the client's timezone hint
  * @returns A single-fetch `data()` response: the assets and their totals on
- *   success, or a `ShelfError` payload with its own status on failure
+ *   success, or a `ShelfError` payload with its own status on failure.
+ *   `unfilteredAssets` accompanies an empty result set and is `null` otherwise
  */
 export async function loadAssetModelBucketAssets({
   bucket,
@@ -162,6 +205,12 @@ export async function loadAssetModelBucketAssets({
       getClientHint(request)
     );
 
+    // Matches the index loader (data.server.ts) so a viewer whose list is
+    // limited to bookable assets sees the same set here as on the page that
+    // opened the sheet. Both endpoints are reachable directly, not only
+    // through it.
+    const availableToBookOnly = access.policy.assets.listScope === "bookable";
+
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
         request,
@@ -170,11 +219,20 @@ export async function loadAssetModelBucketAssets({
         filters: stringifyFilters(forwarded),
         canUseBarcodes,
         timeZone,
-        // Matches the index loader (data.server.ts) so a viewer whose list is
-        // limited to bookable assets sees the same set here as on the page
-        // that opened the sheet. Both endpoints are reachable directly.
-        availableToBookOnly: access.policy.assets.listScope === "bookable",
+        availableToBookOnly,
       });
+
+    // Only an empty sheet has a use for this, and only an empty sheet pays for
+    // it: a bucket with rows states its own count, and this second query on
+    // every open would be a query per sheet for a sentence nobody reads.
+    const unfilteredAssets =
+      assets.length === 0
+        ? await countBucketAssetsIgnoringFilters({
+            bucket,
+            organizationId,
+            availableToBookOnly,
+          })
+        : null;
 
     // Empties custodian identities the viewer isn't allowed to see, same as
     // the index loader. Prisma's `select` can't vary per row, so every row
@@ -191,6 +249,7 @@ export async function loadAssetModelBucketAssets({
       payload({
         assets: redactedAssets,
         totalAssets,
+        unfilteredAssets,
         page,
         perPage,
         totalPages,
