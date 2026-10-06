@@ -137,6 +137,20 @@ vitest.mock("~/database/db.server", () => {
       },
       kit: {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: a kit slice going out records its kit's location as its
+        // source. No fixture here places a kit, so none has a location.
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      // why: a pool slice going out for the first time records which manual
+      // placement its units leave from. No fixture here places a pool, so
+      // every slice records none, as before sources existed.
+      assetLocation: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      // why: a location's units left to give subtract the custody taken from
+      // it. No fixture here places a pool, so custody is never read for one.
+      custody: {
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // why: post-pivot the bookingAsset pivot is read by both
       // checkoutBooking's delegate-path enumeration AND
@@ -203,6 +217,9 @@ vitest.mock("~/database/db.server", () => {
       // "Something went wrong while partially checking out booking" error.
       consumptionLog: {
         aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+        // why: units out on other bookings from a location are read with
+        // their check-in logs; nothing has come back in these fixtures.
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // Escape hatch for `beforeEach` to clear the in-memory PBC session log
       // between tests so a prior test's writes can't leak into the next one's

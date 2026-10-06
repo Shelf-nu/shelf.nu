@@ -36,19 +36,19 @@ import { tw } from "~/utils/tw";
 
 /**
  * The text of one option: "Camera Room · 2 pcs", "Camera Room · 2 pcs · 1 in
- * custody", or "Unplaced · 3 pcs". Plain counts only: the dialog's Max is
- * the lower of the pool-wide availability (which also subtracts booking
- * check-outs) and the chosen option's units left, so these numbers never
- * contradict it.
+ * custody · 1 on a booking", or "Unplaced · 3 pcs". The same words as the
+ * location page's row. Plain counts only: the dialog's Max is the lower of
+ * the pool-wide availability and the chosen option's units left, so these
+ * numbers never contradict it.
  */
 export function formatCustodySourceOption(
   option: CustodySourceOption,
   unitLabel: string
 ): string {
-  const base = `${option.label} · ${option.placed} ${unitLabel}`;
-  return option.inCustody > 0
-    ? `${base} · ${option.inCustody} in custody`
-    : base;
+  let text = `${option.label} · ${option.placed} ${unitLabel}`;
+  if (option.inCustody > 0) text += ` · ${option.inCustody} in custody`;
+  if (option.onBooking > 0) text += ` · ${option.onBooking} on a booking`;
+  return text;
 }
 
 /** Props for {@link CustodySourceSelect}. */

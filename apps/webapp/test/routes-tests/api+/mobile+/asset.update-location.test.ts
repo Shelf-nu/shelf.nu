@@ -102,6 +102,9 @@ const tx = {
     create: vi.fn(),
     delete: vi.fn(),
   },
+  // The custody source read also counts units out on bookings per location;
+  // none are out in these tests.
+  bookingAsset: { findMany: vi.fn() },
 };
 
 /**
@@ -155,6 +158,7 @@ beforeEach(() => {
   tx.assetLocation.findMany.mockResolvedValue(qtyAsset().assetLocations);
   // No custody out by default, so the re-home has nothing to move.
   tx.custody.findMany.mockResolvedValue([]);
+  tx.bookingAsset.findMany.mockResolvedValue([]);
   tx.custody.findFirst.mockResolvedValue(null);
   tx.asset.findUniqueOrThrow.mockResolvedValue({
     id: "asset-1",
