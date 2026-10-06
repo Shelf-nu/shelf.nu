@@ -299,6 +299,8 @@ export async function action({ request }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId: user.id,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
     });
 
     /**

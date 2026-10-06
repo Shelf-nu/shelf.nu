@@ -321,6 +321,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       userId,
       quantities,
       kitSlices,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
     });
 
     /**

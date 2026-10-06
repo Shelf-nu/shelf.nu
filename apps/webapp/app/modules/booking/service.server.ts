@@ -15175,6 +15175,7 @@ async function addScannedAssetsToBookingWithinTx(
     userId,
     quantities = {},
     kitSlices = [],
+    callerAccess,
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
@@ -15205,6 +15206,13 @@ async function addScannedAssetsToBookingWithinTx(
      * `AssetKit.quantity` when omitted.
      */
     kitSlices?: ScannedKitSliceSpec[];
+    /**
+     * The adding caller's access. When given, its add-items rule is checked
+     * against the status read under the row lock, so a booking that leaves
+     * the caller's add statuses after the route's check still refuses. The
+     * fulfil-and-checkout flow omits it: it runs the check-out rule instead.
+     */
+    callerAccess?: RoleAccess;
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -15253,6 +15261,12 @@ async function addScannedAssetsToBookingWithinTx(
     operation: "add scanned items to",
     bookingId,
   });
+  if (callerAccess) {
+    assertCanAddBookingItems({
+      access: callerAccess,
+      bookingStatus: scanTargetStatus,
+    });
+  }
 
   /**
    * The window every overlap guard below measures against, read once through
@@ -15885,12 +15899,21 @@ export async function addScannedAssetsToBooking({
   userId,
   quantities = {},
   kitSlices = [],
+  access,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * The caller's access. Its add-items rule is enforced inside the write
+   * transaction against the locked booking status. `null` only for a flow
+   * that has already authorized the add under a different rule: fulfil and
+   * check out, which runs the check-out rule. Required so no caller skips the
+   * check by forgetting it.
+   */
+  access: RoleAccess | null;
   /**
    * Per-asset quantity for standalone QUANTITY_TRACKED scans. Missing
    * entries default `BookingAsset.quantity` to 1.
@@ -15933,6 +15956,7 @@ export async function addScannedAssetsToBooking({
         userId,
         quantities,
         kitSlices,
+        callerAccess: access ?? undefined,
       })
     );
 

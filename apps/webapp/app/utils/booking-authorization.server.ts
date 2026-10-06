@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { bookingCustodianIsSelf } from "./bookings";
 import { ShelfError } from "./error";
 import { canManageBookingItems } from "./permissions/role-access";
 import type { BookingStatusName, RoleAccess } from "./permissions/role-access";
@@ -213,6 +214,39 @@ export function validateBookingOwnership({
       cause: null,
       label: "Booking",
       message: `You are not authorized to ${action} this booking.`,
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Refuses duplicating a booking the caller may not copy.
+ *
+ * `booking:create` is the only matrix gate on duplication and every role holds
+ * it, so this is what keeps a copy inside the caller's reach. The source must
+ * be one the caller may write ({@link validateBookingOwnership}). The copy also
+ * keeps the source's custodian, so a caller who may only book for themself must
+ * be that custodian: otherwise, as the creator alone, they would mint a booking
+ * in someone else's custody. Both the web and mobile duplicate routes run it.
+ *
+ * @param params.booking - The source booking's creator and user custody link
+ * @param params.userId - The caller
+ * @param params.access - The caller's access
+ * @throws {ShelfError} 403 when the caller may not duplicate this booking
+ */
+export function assertCanDuplicateBooking({
+  booking,
+  userId,
+  access,
+}: Omit<ValidateBookingOwnershipParams, "action">): void {
+  validateBookingOwnership({ booking, userId, access, action: "duplicate" });
+
+  if (bookingCustodianIsSelf(access) && booking.custodianUserId !== userId) {
+    throw new ShelfError({
+      cause: null,
+      label: "Booking",
+      message: "You can only duplicate bookings assigned to you.",
       status: 403,
       shouldBeCaptured: false,
     });

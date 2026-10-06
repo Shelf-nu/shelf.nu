@@ -15,6 +15,10 @@ import {
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import {
+  redactCustodianForViewer,
+  type RowWithCustody,
+} from "~/utils/custody-visibility.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -417,7 +421,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         query,
-        assets: assetResults.assets.map((asset) => {
+        // A caller who cannot see all custody must not learn who holds an
+        // asset they found by search, so custodians are redacted exactly as
+        // on the asset index before any name is read below.
+        assets: redactCustodianForViewer(
+          // `getAssets` widens its include, so its type shows `custody` as
+          // bare columns while the rows carry the index's custodian select.
+          // Restate that shape at this boundary, as the mapping below does.
+          assetResults.assets as unknown as Array<
+            Omit<(typeof assetResults.assets)[number], "custody"> &
+              RowWithCustody
+          >,
+          { canSeeAllCustody: access.custody.seeAll, userId }
+        ).map((asset) => {
           /** Custody records from getAssets may include custodian if the query includes it */
           const primaryCustody = getPrimaryCustody(
             asset.custody as Array<

@@ -13,6 +13,7 @@ import {
 } from "./helpers.server";
 import {
   createAuditSession,
+  updateAuditSession,
   addAssetsToAudit,
   removeAssetFromAudit,
   removeAssetsFromAudit,
@@ -136,6 +137,14 @@ vi.mock("~/database/db.server", () => {
     },
     auditAssignment: {
       createMany: vi.fn(),
+      // why: updateAuditSession swaps the assignee with a delete + create.
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    // why: an assignee from the form must be a workspace member before it is
+    // written; members are found by default, and a test makes one missing.
+    userOrganization: {
+      findFirst: vi.fn().mockResolvedValue({ id: "user-org-1" }),
     },
     auditImage: {
       findMany: vi.fn(),
@@ -198,6 +207,11 @@ const mockDb = db as unknown as {
   };
   auditAssignment: {
     createMany: ReturnType<typeof vi.fn>;
+    create: ReturnType<typeof vi.fn>;
+    deleteMany: ReturnType<typeof vi.fn>;
+  };
+  userOrganization: {
+    findFirst: ReturnType<typeof vi.fn>;
   };
   auditImage: {
     findMany: ReturnType<typeof vi.fn>;
@@ -347,6 +361,20 @@ describe("audit service", () => {
       { id: "asset-2", name: "Camera B", auditAssetId: "audit-asset-2" },
     ]);
     expect(result.session.assignments).toHaveLength(1);
+  });
+
+  it("refuses an assignee who is not a member of the workspace", async () => {
+    mockDb.userOrganization.findFirst.mockResolvedValueOnce(null);
+
+    await expect(createAuditSession(defaultInput)).rejects.toMatchObject({
+      status: 400,
+    });
+    expect(mockDb.userOrganization.findFirst).toHaveBeenCalledWith({
+      where: { userId: "user-2", organizationId: "org-1" },
+      select: { id: true },
+    });
+    expect(mockDb.auditSession.create).not.toHaveBeenCalled();
+    expect(mockDb.auditAssignment.createMany).not.toHaveBeenCalled();
   });
 
   it("throws when no assets are provided", async () => {
@@ -3146,5 +3174,37 @@ describe("getAuditSessionDetails photo re-sign", () => {
     );
     // One call, for the expected row's photo; the unexpected row is not signed.
     expect(createSignedUrl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("updateAuditSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDb.auditSession.findUnique.mockResolvedValue({
+      name: "Warehouse audit",
+      description: null,
+      status: "PENDING",
+      dueDate: null,
+      assignments: [{ userId: "user-2" }],
+    });
+    mockDb.auditSession.update.mockResolvedValue({ id: "audit-1" });
+  });
+
+  it("refuses a new assignee who is not a member of the workspace", async () => {
+    mockDb.userOrganization.findFirst.mockResolvedValueOnce(null);
+
+    await expect(
+      updateAuditSession({
+        id: "audit-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        data: { assigneeUserId: "foreign-user" },
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(mockDb.userOrganization.findFirst).toHaveBeenCalledWith({
+      where: { userId: "foreign-user", organizationId: "org-1" },
+      select: { id: true },
+    });
+    expect(mockDb.auditAssignment.create).not.toHaveBeenCalled();
   });
 });

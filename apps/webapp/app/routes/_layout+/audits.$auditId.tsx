@@ -81,6 +81,22 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     });
 
     if (intent === "edit-audit") {
+      // `audit:update` is held by every role that runs audits, so it does not
+      // decide who may change an audit's details. Editing (and reassigning)
+      // belongs to callers who manage others' audits, the same rule the
+      // actions menu applies before it offers Edit.
+      if (!access.policy.audits.manageOthers) {
+        throw new ShelfError({
+          cause: null,
+          title: "Not allowed",
+          message: "You are not allowed to edit this audit.",
+          additionalData: { userId, auditId },
+          label: "Audit",
+          status: 403,
+          shouldBeCaptured: false,
+        });
+      }
+
       const parsedData = parseData(formData, EditAuditSchema);
       const hints = getClientHint(request);
 

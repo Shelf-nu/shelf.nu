@@ -14449,12 +14449,39 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       })
     ).rejects.toThrow(/closed records/);
 
     // The booking must be untouched — the guard runs before any write.
     expect(db.booking.update).not.toHaveBeenCalled();
   });
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the locked status no longer takes its additions",
+    async (role) => {
+      // The route checked the add rule on an unlocked read; by the time the
+      // write locks the row the booking has been reserved. The rule is judged
+      // again against the locked status, so the add still refuses.
+      // why: the lock is a raw SQL read; answer it once with the new status.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      // Refused before any write.
+      expect(db.booking.update).not.toHaveBeenCalled();
+    }
+  );
 
   it("guards every loose scan against kit membership, with no kit exempt", async () => {
     // A client that sends a scanned kit's members as plain asset ids, with no
@@ -14479,6 +14506,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await expect(refused).rejects.toMatchObject({
@@ -14584,6 +14612,7 @@ describe("addScannedAssetsToBooking", () => {
           bookingId: "booking-1",
           organizationId: "org-1",
           userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
           quantities: { [QT_ID]: 5 },
         })
       ).rejects.toThrow(ShelfError);
@@ -14598,6 +14627,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         quantities: { [QT_ID]: 1 },
       }).catch(() => undefined);
 
@@ -14623,6 +14653,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       }).catch(() => undefined);
 
       // An INDIVIDUAL asset has no pool to draw on — locking it here would
@@ -14669,6 +14700,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       })
     ).rejects.toThrow(/already booked or checked out/i);
 
@@ -14691,6 +14723,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-cables",
@@ -14828,6 +14861,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -14895,6 +14929,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-kit-member",
@@ -14997,6 +15032,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-kit-member",
@@ -16873,6 +16909,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // The scanned kit's INDIVIDUAL member is measured too: it can discharge
@@ -16913,6 +16950,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       expect(fulfilmentCandidateIds()).toEqual(["asset-kit"]);
@@ -16950,6 +16988,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // One INDIVIDUAL asset is one physical unit. The two partial uniques let
@@ -16999,6 +17038,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // Operators scan what is in front of them, which routinely includes
@@ -17051,6 +17091,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // A quantity-tracked asset is a pool, not a unit: units committed to a
@@ -17078,6 +17119,7 @@ describe("model reservation guard — write paths", () => {
           bookingId: "booking-1",
           organizationId: "org-1",
           userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
         })
       ).rejects.toThrow(/reserved by model/);
 

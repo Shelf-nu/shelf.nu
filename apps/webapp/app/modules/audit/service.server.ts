@@ -35,7 +35,10 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
+import {
+  assertAssetsBelongToOrg,
+  assertUserBelongsToOrg,
+} from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
 import type { UserNameFields } from "~/utils/user";
@@ -403,6 +406,12 @@ export async function createAuditSession(
   const uniqueAssigneeIds = assignee ? [assignee] : [];
 
   const result = await db.$transaction(async (tx) => {
+    // The assignee arrives from the form: prove they are a workspace member
+    // before the assignment gives them access to the audit.
+    for (const assigneeId of uniqueAssigneeIds) {
+      await assertUserBelongsToOrg({ userId: assigneeId, organizationId }, tx);
+    }
+
     const session = await tx.auditSession.create({
       data: {
         name,
@@ -651,8 +660,13 @@ export async function updateAuditSession({
           where: { auditSessionId: id, userId: currentAssignee },
         });
       }
-      // Add new assignee if provided
+      // Add new assignee if provided. It arrives from the form, so prove
+      // they are a workspace member before the assignment grants access.
       if (newAssignee) {
+        await assertUserBelongsToOrg(
+          { userId: newAssignee, organizationId },
+          tx
+        );
         await tx.auditAssignment.create({
           data: { auditSessionId: id, userId: newAssignee },
         });

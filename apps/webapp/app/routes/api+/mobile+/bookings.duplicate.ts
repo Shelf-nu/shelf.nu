@@ -10,9 +10,8 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { duplicateBooking } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { bookingCustodianIsSelf } from "~/utils/bookings";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { assertCanDuplicateBooking } from "~/utils/booking-authorization.server";
+import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -28,13 +27,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * new from/to defaulted) the user can then edit. Returns the new booking so the
  * app can navigate straight into its edit screen.
  *
- * PARITY: the web duplicate route (bookings.$bookingId.overview.duplicate.tsx)
- * is gated by `PermissionAction.create` and relies on the page loader's
- * read-filter for ownership — which a direct mobile POST bypasses. We add the
- * shared `validateBookingOwnership` guard on the SOURCE booking: a caller who
- * does not write every booking may only duplicate their own. A caller who may
- * only book for themself must also be the source's custodian, because the copy
- * keeps the source custodian. Mobile must never be more permissive than web.
+ * Gated by `PermissionAction.create` plus `assertCanDuplicateBooking` on the
+ * SOURCE booking, the same guard the web route runs: a caller who does not
+ * write every booking may only duplicate their own, and a caller who may only
+ * book for themself must also be the source's custodian, because the copy
+ * keeps the source custodian.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -86,28 +83,9 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // A caller who does not write every booking may only duplicate their own
-    // (creator OR custodian).
-    validateBookingOwnership({
-      booking: source,
-      userId: user.id,
-      access,
-      action: "duplicate",
-    });
-
-    // duplicateBooking clones the SOURCE custodian, so the creator-or-custodian
-    // guard above isn't enough for a caller who may only book for themself: as
-    // the creator alone they would mint a new draft in someone else's custody.
-    // Require them to be the custodian so the clone is owned by themselves.
-    if (bookingCustodianIsSelf(access) && source.custodianUserId !== user.id) {
-      throw new ShelfError({
-        cause: null,
-        message: "You can only duplicate bookings assigned to you.",
-        label: "Booking",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
+    // The source must be the caller's to write, and a caller who may only
+    // book for themself must hold it (the copy keeps the source custodian).
+    assertCanDuplicateBooking({ booking: source, userId: user.id, access });
 
     const newBooking = await duplicateBooking({
       bookingId,

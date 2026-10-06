@@ -249,6 +249,8 @@ describe("fulfilAndCheckOut", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      // Fulfil is authorized by the check-out rule, so it skips the add rule.
+      access: null,
     });
     expect(partialCheckoutBooking).toHaveBeenCalledWith({
       id: "booking-1",

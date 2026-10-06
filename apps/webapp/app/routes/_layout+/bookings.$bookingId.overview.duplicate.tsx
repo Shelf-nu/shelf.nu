@@ -36,6 +36,7 @@ import {
   type DuplicateBookingSchemaType,
 } from "~/components/booking/forms/forms-schema";
 import { Button } from "~/components/shared/button";
+import { db } from "~/database/db.server";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
@@ -50,10 +51,11 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assertCanDuplicateBooking } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
-import { makeShelfError } from "~/utils/error";
+import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
 import {
   payload,
@@ -127,7 +129,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
  *
  * @returns A redirect to the new booking on success, or a `DataOrErrorResponse`
  *   carrying validation/field errors on failure.
- * @throws {ShelfError} If the user lacks booking-create permission.
+ * @throws {ShelfError} If the user lacks booking-create permission, or may not
+ *   duplicate this booking (see `assertCanDuplicateBooking`).
  */
 export async function action({ request, context, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -141,6 +144,25 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       entity: PermissionEntity.booking,
       action: PermissionAction.create,
     });
+
+    // The source is request-supplied: it must be in this workspace and be one
+    // the caller may duplicate (the same guard as the mobile endpoint).
+    const source = await db.booking.findFirst({
+      where: { id: bookingId, organizationId },
+      select: { creatorId: true, custodianUserId: true },
+    });
+    if (!source) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not found",
+        message: "Booking not found.",
+        additionalData: { userId, bookingId },
+        label: "Booking",
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+    assertCanDuplicateBooking({ booking: source, userId, access });
 
     const formData = await request.formData();
     // TIMEZONE FIX: parse the submitted wall-clock dates in the acting user's

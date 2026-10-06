@@ -22,6 +22,7 @@ import { accessFor } from "@helpers/role-access";
 import {
   assertCanAddBookingItems,
   assertCanDeleteBooking,
+  assertCanDuplicateBooking,
   assertCanDownloadBookingDocuments,
   bookingAddableStatusClause,
   bookingWriteScopeClause,
@@ -403,6 +404,67 @@ describe("assertCanDeleteBooking", () => {
       })
     ).not.toThrow();
   });
+});
+
+/**
+ * Duplicating a booking.
+ *
+ * `booking:create` is every role's, so this guard is all that keeps a copy in
+ * reach. The copy keeps the source custodian, which is why a self-only role
+ * must hold the source, not merely have created it.
+ */
+describe("assertCanDuplicateBooking", () => {
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "lets %s duplicate a booking it holds",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: ME },
+          userId: ME,
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s on a booking it created for someone else",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: ME, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s on another member's booking",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lets %s duplicate any booking",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).not.toThrow();
+    }
+  );
 });
 
 /**

@@ -2,7 +2,8 @@
  * Command-palette search returns each entity type to members whose matrix
  * grant covers reading it: kits to anyone with kit:read, locations and team
  * members to OWNER and ADMIN only, and audits limited to assigned ones for
- * members who cannot see every audit.
+ * members who cannot see every audit. Asset results never name a custodian
+ * the caller may not see.
  *
  * @see {@link file://../../../app/routes/api+/command-palette.search.ts}
  */
@@ -153,4 +154,84 @@ describe("command-palette search", () => {
       });
     }
   );
+
+  /** An asset found by search, held by the given custodian user. */
+  function assetHeldBy(holderUserId: string) {
+    return {
+      id: "asset-1",
+      title: "Camera",
+      sequentialId: null,
+      mainImage: null,
+      thumbnailImage: null,
+      assetModel: null,
+      assetLocations: [],
+      qrCodes: [],
+      tags: [],
+      barcodes: [],
+      customFields: [],
+      category: null,
+      description: null,
+      custody: [
+        {
+          quantity: 1,
+          custodian: {
+            name: "Holder Name",
+            userId: holderUserId,
+            user: {
+              id: holderUserId,
+              firstName: "Holder",
+              lastName: "Name",
+              displayName: "Holder Name",
+              email: "holder@example.com",
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  /** The asset rows the search answered with. */
+  async function assetsFound(roles: string[]) {
+    const response = (await search(roles)) as unknown as {
+      data: {
+        assets: {
+          custodianName: string | null;
+          custodianUserName: string | null;
+        }[];
+      };
+    };
+    return response.data.assets;
+  }
+
+  it("withholds another member's name from a caller who cannot see all custody", async () => {
+    vi.mocked(getAssets).mockResolvedValueOnce({
+      assets: [assetHeldBy("someone-else")],
+    } as never);
+
+    const [asset] = await assetsFound(["BASE"]);
+
+    expect(asset.custodianName).toBeFalsy();
+    expect(asset.custodianUserName).toBeFalsy();
+  });
+
+  it("still names the caller's own custody to a restricted caller", async () => {
+    vi.mocked(getAssets).mockResolvedValueOnce({
+      assets: [assetHeldBy("caller")],
+    } as never);
+
+    const [asset] = await assetsFound(["BASE"]);
+
+    expect(asset.custodianName).toBe("Holder Name");
+  });
+
+  it("names any custodian to ADMIN", async () => {
+    vi.mocked(getAssets).mockResolvedValueOnce({
+      assets: [assetHeldBy("someone-else")],
+    } as never);
+
+    const [asset] = await assetsFound(["ADMIN"]);
+
+    expect(asset.custodianName).toBe("Holder Name");
+    expect(asset.custodianUserName).toBe("Holder Name");
+  });
 });
