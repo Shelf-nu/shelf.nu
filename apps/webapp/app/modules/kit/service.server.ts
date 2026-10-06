@@ -1133,10 +1133,10 @@ export async function mergeStandaloneCollisionsForKitDetachment(
 
   // Sessions name slices positionally. Re-point the merged-away ids, so a
   // tagged claim keeps counting against the slice that now holds its units.
-  const sentOutIds = kitDrivenRows
-    .filter((row) => survivorIdByMergedId.has(row.id) && row.checkedOutAt)
-    .map((row) => row.id);
-  if (sentOutIds.length > 0) {
+  // Every merged-away id, not only those with a check-out marker: a row from
+  // before the marker existed can carry session claims without one.
+  const mergedAwayIds = [...survivorIdByMergedId.keys()];
+  if (mergedAwayIds.length > 0) {
     const sessions: Array<{ id: string; bookingAssetIds: string[] }> =
       await tx.partialBookingCheckout.findMany({
         where: {
@@ -1144,12 +1144,12 @@ export async function mergeStandaloneCollisionsForKitDetachment(
             in: [
               ...new Set(
                 kitDrivenRows
-                  .filter((row) => sentOutIds.includes(row.id))
+                  .filter((row) => survivorIdByMergedId.has(row.id))
                   .map((row) => row.bookingId)
               ),
             ],
           },
-          bookingAssetIds: { hasSome: sentOutIds },
+          bookingAssetIds: { hasSome: mergedAwayIds },
         },
         select: { id: true, bookingAssetIds: true },
       });

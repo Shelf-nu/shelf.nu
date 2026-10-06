@@ -7528,6 +7528,24 @@ export async function partialCheckinBooking({
         await lockAssetForQuantityUpdate(tx, assetId, organizationId);
       }
 
+      /**
+       * What each bare-scanned asset's slices that went out can still check
+       * out, to size the units they sent. A bare scan of a consumable is
+       * defaulted below to the units still out, never to units that stayed on
+       * the shelf. Read once for the session, under the locks above.
+       */
+      const bareScanRemainingToCheckOutBySlice =
+        await computeBookingAssetsSliceRemainingToCheckOut(
+          tx,
+          id,
+          bookingFound.bookingAssets
+            .filter(
+              (slice) =>
+                bareCheckinAssetIds.has(slice.assetId) && slice.checkedOutAt
+            )
+            .map((slice) => slice.id)
+        );
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;
@@ -7611,7 +7629,39 @@ export async function partialCheckinBooking({
             });
           }
           if (lockedAsset.consumptionType === "ONE_WAY") {
-            disp.consumed = cap;
+            /**
+             * Units of the asset that left and are not accounted for yet. Only
+             * these can have been used up: consuming units that never left
+             * the shelf would destroy stock, and on a kit slice leave the kit
+             * holding units the stock no longer has. Mirrors the ONE_WAY
+             * auto-default in `checkinBooking`.
+             */
+            const slices = bookingFound.bookingAssets.filter(
+              (slice) => slice.assetId === disp.assetId
+            );
+            const sentOut = slices.reduce(
+              (sum, slice) =>
+                sum +
+                unitsSentOutOnSlice(
+                  slice,
+                  bareScanRemainingToCheckOutBySlice.get(slice.id) ?? 0
+                ),
+              0
+            );
+            const logged =
+              slices.reduce((sum, slice) => sum + slice.quantity, 0) -
+              remaining;
+            const unitsStillOut = Math.max(0, sentOut - logged);
+            if (unitsStillOut === 0) {
+              throw new ShelfError({
+                cause: null,
+                status: 400,
+                label,
+                message: `Cannot check in "${lockedAsset.title}": none of its units are out on this booking.`,
+                shouldBeCaptured: false,
+              });
+            }
+            disp.consumed = Math.min(cap, unitsStillOut);
           } else {
             disp.returned = cap;
           }

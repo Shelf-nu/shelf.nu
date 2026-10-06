@@ -6100,7 +6100,9 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       });
     });
 
-    it("leaves sessions alone when the merged-away slice never went out", async () => {
+    it("re-points session entries even when the merged-away slice has no check-out marker", async () => {
+      // why: a slice from before the marker existed can carry session claims
+      // without `checkedOutAt`. Its entries must follow its units too.
       expect.assertions(1);
 
       sliceReads()
@@ -6108,13 +6110,23 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
           { ...settledKitSlice, checkedOutAt: null, checkedInAt: null },
         ])
         .mockResolvedValueOnce([startedStandalone]);
+      (
+        db.partialBookingCheckout.findMany as unknown as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockResolvedValueOnce([
+        { id: "pco-legacy", bookingAssetIds: ["ba-kit"] },
+      ]);
 
       const { mergeStandaloneCollisionsForKitDetachment } = await import(
         "./service.server"
       );
       await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
 
-      expect(db.partialBookingCheckout.findMany).not.toHaveBeenCalled();
+      expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
+        where: { id: "pco-legacy" },
+        data: { bookingAssetIds: ["ba-standalone"] },
+      });
     });
   });
 });

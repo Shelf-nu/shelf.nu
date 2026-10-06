@@ -17965,6 +17965,58 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
     );
   });
 
+  it("consumes only the units still out on a bare scan of a consumable", async () => {
+    // why: a bare scan names no amount, so it defaults to "all of it". The
+    // kit slice never left, so its 5 units are still on the shelf: consuming
+    // them would drop the stock below what the kit holds, and the kit would
+    // not shrink because no unit of it went out.
+    expect.assertions(2);
+
+    arrange([
+      poolSlice("ba-loose", null, 3),
+      poolSlice("ba-kit", "kit-a", 5, null),
+      fillerSlice,
+    ]);
+
+    await partialCheckinBooking({
+      ...params([]),
+      checkins: undefined,
+      assetIds: ["asset-pool"],
+    });
+
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: "asset-pool" },
+      data: { quantity: { decrement: 3 } },
+    });
+    expect(removeDestroyedUnitsFromKits).not.toHaveBeenCalled();
+  });
+
+  it("refuses a bare scan of a consumable once every unit that left is accounted for", async () => {
+    // why: the loose slice's 3 units already came back in an earlier session,
+    // and the kit slice never left. Units remain booked, but none are out, so
+    // there is nothing the scan could have used up.
+    expect.assertions(2);
+
+    arrange([
+      poolSlice("ba-loose", null, 3),
+      poolSlice("ba-kit", "kit-a", 5, null),
+      fillerSlice,
+    ]);
+    // why: 3 units already dispositioned on this booking.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 3 } });
+
+    await expect(
+      partialCheckinBooking({
+        ...params([]),
+        checkins: undefined,
+        assetIds: ["asset-pool"],
+      })
+    ).rejects.toThrow("none of its units are out on this booking");
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
   it("leaves the kit alone when the units come back", async () => {
     expect.assertions(1);
 
