@@ -95,7 +95,7 @@ export function generateWhereClause(
 
     if (terms.length > 0) {
       // Search = "asset id is in the org-scoped UNION of matching ids". Each
-      // of the 10 sources is its own index-driven, org-scoped branch inside
+      // of the 11 sources is its own index-driven, org-scoped branch inside
       // the UNION (see buildAssetSearchUnion), replacing the old multi-table
       // OR that forced cross-org seq scans.
       whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(

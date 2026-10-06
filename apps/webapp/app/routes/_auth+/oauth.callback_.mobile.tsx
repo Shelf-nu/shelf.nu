@@ -7,7 +7,7 @@
  * `resolveUserAndOrgForSsoCallback` — except that instead of establishing a web
  * session we mint a single-use authorization code and hand it back to the app
  * through the `shelf://auth-callback?code=…` deeplink. The app then redeems the
- * code at `POST /api/mobile/exchange` for a fresh, independent session.
+ * code at `POST /api/mobile/exchange` for this SSO session, refreshed.
  *
  * No tokens ever appear in the deeplink — only the short-lived, single-use code.
  *
@@ -26,7 +26,10 @@ import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
 import { supabaseClient } from "~/integrations/supabase/client";
 import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
-import { createMobileAuthCode } from "~/modules/auth/mobile-sso.server";
+import {
+  createMobileAuthCode,
+  deleteExpiredMobileAuthCodes,
+} from "~/modules/auth/mobile-sso.server";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
@@ -116,7 +119,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // detectFormatPrefsForPersistence), so the lazy backfill fills the real
         // zone later rather than sticking on the "UTC" fallback.
         const formatPrefs = detectFormatPrefsForPersistence(request);
-        await resolveUserAndOrgForSsoCallback({
+        const { user } = await resolveUserAndOrgForSsoCallback({
           authSession,
           firstName,
           lastName,
@@ -124,6 +127,24 @@ export async function action({ request }: ActionFunctionArgs) {
           contactInfo,
           formatPrefs,
         });
+
+        // The app's API resolves the Shelf user by the session's auth user id.
+        // A sign-in that resolved to an account with another id would hand the
+        // app a session no request could use, so refuse it here, plainly.
+        if (user.id !== authSession.userId) {
+          throw new ShelfError({
+            cause: null,
+            status: 409,
+            title: "Account needs attention",
+            message:
+              "Your Shelf account is not linked to this single sign-on login yet. Please contact support.",
+            additionalData: {
+              authUserId: authSession.userId,
+              userId: user.id,
+            },
+            label: "Auth",
+          });
+        }
 
         // PKCE: `/sso-login` stashes the S256 challenge in a short-lived cookie
         // at the start of the flow. Bind it to the auth code so the exchange
@@ -134,11 +155,20 @@ export async function action({ request }: ActionFunctionArgs) {
           request.headers.get("Cookie")
         );
 
-        // Hand the device a single-use code via the deeplink — never tokens.
-        const code = await createMobileAuthCode(
-          authSession.userId,
-          typeof codeChallenge === "string" ? codeChallenge : undefined
-        );
+        // Hand the device a single-use code via the deeplink, never tokens. The
+        // code carries this SSO session, which the app receives at the exchange:
+        // nothing here uses the session after this point, so the app is its only
+        // holder.
+        const code = await createMobileAuthCode({
+          userId: authSession.userId,
+          refreshToken: authSession.refreshToken,
+          codeChallenge:
+            typeof codeChallenge === "string" ? codeChallenge : undefined,
+        });
+
+        // Drop expired codes, and the sessions abandoned ones still carry.
+        // Fire-and-forget: a cleanup failure must never affect the sign-in.
+        void deleteExpiredMobileAuthCodes().catch(() => undefined);
 
         return data(
           payload({
