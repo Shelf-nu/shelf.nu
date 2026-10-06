@@ -146,14 +146,35 @@ function describeType(value: unknown): string {
  * Only sub-attributes actually present are reported, so an operation naming
  * just `givenName` does not clear the family name.
  *
- * @param value - The complex name value
+ * The shape is checked here rather than by the caller. A caller that guards on
+ * the shape and does nothing when it fails is the silent drop this module
+ * exists to stop: `name` holding a string matches no branch, writes nothing and
+ * answers 200. `name` is a complex attribute, so a value that is not an object
+ * is `invalidValue` and has to say so.
+ *
+ * A null value clears both halves, which is the same reading as a null
+ * sub-attribute clearing one.
+ *
+ * @param value - The complex name value, unchecked
  * @returns The sub-attributes present, each already validated as text
- * @throws {ScimError} 400 `invalidValue` when a sub-attribute is not text
+ * @throws {ScimError} 400 `invalidValue` when the value is not an object, or a
+ *   sub-attribute is not text
  */
-export function readScimNameObject(value: Record<string, unknown>): {
+export function readScimNameObject(value: unknown): {
   firstName?: string;
   lastName?: string;
 } {
+  if (value === undefined || value === null) {
+    return { firstName: "", lastName: "" };
+  }
+  if (!isScimValueObject(value)) {
+    throw new ScimError(
+      `Attribute "name" must be an object, received ${describeType(value)}`,
+      400,
+      "invalidValue"
+    );
+  }
+
   const result: { firstName?: string; lastName?: string } = {};
 
   const givenName = readScimAttribute(value, "givenName");

@@ -192,4 +192,30 @@ describe("readScimNameObject", () => {
       ScimError
     );
   });
+
+  // A caller that guarded on the shape and did nothing when it failed produced
+  // the silent drop this module exists to stop, so the shape is checked here.
+  it.each([["Jane"], [42], [true], [["Jane"]]])(
+    "refuses %j, which is not a complex value",
+    (value) => {
+      expect(() => readScimNameObject(value)).toThrow(ScimError);
+
+      try {
+        readScimNameObject(value);
+      } catch (error) {
+        const scimError = error as ScimError;
+        expect(scimError.status).toBe(400);
+        expect(scimError.scimType).toBe("invalidValue");
+        expect(scimError.message).toContain("name");
+      }
+    }
+  );
+
+  it("reads a null name as clearing both halves", () => {
+    // The same reading as a null sub-attribute clearing one.
+    expect(readScimNameObject(null)).toEqual({
+      firstName: "",
+      lastName: "",
+    });
+  });
 });

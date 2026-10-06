@@ -741,7 +741,7 @@ export async function patchScimUser(
       newFirstName = readScimStringValue(op.value, "name.givenName");
     } else if (path === "name.familyname") {
       newLastName = readScimStringValue(op.value, "name.familyName");
-    } else if (path === "name" && isScimValueObject(op.value)) {
+    } else if (path === "name") {
       // A complex attribute path carrying its sub-attributes as an object:
       // { op: "Replace", path: "name", value: { givenName: "Jane" } }
       const name = readScimNameObject(op.value);
@@ -759,7 +759,7 @@ export async function patchScimUser(
       }
       // Nested name object: { name: { givenName, familyName } }
       const nested = readScimAttribute(val, "name");
-      if (nested.present && isScimValueObject(nested.value)) {
+      if (nested.present) {
         const name = readScimNameObject(nested.value);
         if (name.firstName !== undefined) newFirstName = name.firstName;
         if (name.lastName !== undefined) newLastName = name.lastName;
