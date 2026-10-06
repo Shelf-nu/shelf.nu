@@ -25,7 +25,7 @@ import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvents } from "~/modules/activity-event/service.server";
-import { assertKitsCustodyAssignable } from "~/modules/booking/service.server";
+import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   buildKitCustodyInheritData,

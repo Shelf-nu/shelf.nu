@@ -32,6 +32,7 @@ import {
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { getClientHint } from "~/utils/client-hints";
@@ -3377,6 +3378,14 @@ export async function bulkAssignKitCustody({
         { teamMemberId: custodianId, organizationId },
         tx
       );
+
+      // A kit a booking has out is with its borrower. `Kit.status` above
+      // cannot tell when only some of its units are out, so re-check the
+      // booking slices here, under the kit row lock, on the resolved ids.
+      await assertKitsCustodyAssignable(tx, {
+        kitIds: kits.map((kit) => kit.id),
+        organizationId,
+      });
 
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
