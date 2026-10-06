@@ -202,19 +202,33 @@ export default function AssetDetailScreen() {
   const defaultAssignValue = sourceSummary
     ? defaultAssignSource(sourceSummary.options)?.value ?? null
     : null;
+  // A pick counts only while its row still exists: a refetch can drop the
+  // row it named (a location cleared, a source released in full).
   const assignSource =
-    assignQtyMember && multiSource
-      ? assignPick?.memberId === assignQtyMember.id
+    assignQtyMember && multiSource && sourceSummary
+      ? assignPick?.memberId === assignQtyMember.id &&
+        sourceSummary.options.some(
+          (option) => option.value === assignPick.value
+        )
         ? assignPick.value
         : defaultAssignValue
       : null;
-  const releaseDefaultValue =
+  // Release goes by the HOLDER's sources, not the pool's current placements:
+  // custody recorded from two locations stays releasable per source even
+  // after the pool was moved to one location.
+  const releaseSources =
     releaseQtyEntry?.sources && releaseQtyEntry.sources.length > 0
-      ? releaseSourceValue(releaseQtyEntry.sources[0])
+      ? releaseQtyEntry.sources
       : null;
+  const releaseDefaultValue = releaseSources
+    ? releaseSourceValue(releaseSources[0])
+    : null;
   const releaseSource =
-    releaseQtyEntry && multiSource
-      ? releasePick?.custodianId === releaseQtyEntry.custodian.id
+    releaseQtyEntry && releaseSources
+      ? releasePick?.custodianId === releaseQtyEntry.custodian.id &&
+        releaseSources.some(
+          (entry) => releaseSourceValue(entry) === releasePick.value
+        )
         ? releasePick.value
         : releaseDefaultValue
       : null;
@@ -538,12 +552,6 @@ export default function AssetDetailScreen() {
   // The release sheet's picker and cap: one row per source the holder took
   // units from, shown only when there are two or more. The cap is what that
   // source holds.
-  const releaseSources =
-    multiSource &&
-    releaseQtyEntry?.sources &&
-    releaseQtyEntry.sources.length > 0
-      ? releaseQtyEntry.sources
-      : null;
   const selectedReleaseEntry =
     releaseSources && releaseSource != null
       ? releaseSources.find(
@@ -848,7 +856,7 @@ export default function AssetDetailScreen() {
                     // 1 from Studio · 1 unplaced". Only a pool kept at two or
                     // more locations says it.
                     hint={
-                      (multiSource
+                      (multiSource || (entry.sources?.length ?? 0) > 1
                         ? describeHolderSources(entry.sources)
                         : null) ?? undefined
                     }
