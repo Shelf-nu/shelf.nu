@@ -7508,6 +7508,26 @@ export async function partialCheckinBooking({
         }>
       >();
 
+      /**
+       * Lock every QUANTITY_TRACKED asset this session touches up front, in
+       * sorted id order, the order every other booking flow locks in. The
+       * loop below walks `dispositions` in payload order, so locking as it goes
+       * would let two sessions that share assets take the locks in reverse and
+       * deadlock. Its own lock call then re-acquires a row this transaction
+       * already holds, which only re-reads it.
+       */
+      for (const assetId of [
+        ...new Set(
+          dispositions
+            .filter(
+              (d) => assetTypeById.get(d.assetId) === AssetType.QUANTITY_TRACKED
+            )
+            .map((d) => d.assetId)
+        ),
+      ].sort()) {
+        await lockAssetForQuantityUpdate(tx, assetId, organizationId);
+      }
+
       for (const disp of dispositions) {
         if (assetTypeById.get(disp.assetId) !== AssetType.QUANTITY_TRACKED) {
           continue;

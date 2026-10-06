@@ -12115,6 +12115,50 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     });
   }
 
+  it("locks the session's assets in sorted id order before handling any of them", async () => {
+    // why: two sessions on different bookings that share pools would deadlock
+    // if each locked them in its own payload order. Every booking flow locks
+    // in sorted id order, so this one must too, whatever order the phone sends.
+    expect.assertions(2);
+
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const sliceFor = (assetId: string) => ({
+      ...booking.bookingAssets[0],
+      assetId,
+      asset: { ...booking.bookingAssets[0].asset, id: assetId },
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [sliceFor("asset-zeta"), sliceFor("asset-alpha")],
+    });
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: "asset-zeta", returned: 10 },
+        { assetId: "asset-alpha", returned: 10 },
+      ],
+    });
+
+    const lockedIds = (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mock.calls.map(([, assetId]) => assetId);
+    expect(lockedIds.slice(0, 2)).toEqual(["asset-alpha", "asset-zeta"]);
+    // No log is written until both locks are held.
+    expect(
+      (quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>)
+        .mock.invocationCallOrder[1]
+    ).toBeLessThan(
+      (
+        consumptionLogService.createConsumptionLog as ReturnType<
+          typeof vitest.fn
+        >
+      ).mock.invocationCallOrder[0]
+    );
+  });
+
   it("writes a single RETURN log for TWO_WAY when returned equals remaining", async () => {
     expect.assertions(3);
 
