@@ -3,6 +3,7 @@ import type { CustodyRowForPlan, CustodySourceState } from "./custody-source";
 import {
   UNPLACED_SOURCE,
   buildCustodySourceOptions,
+  defaultAssignSourceOption,
   defaultSourceOption,
   hasMultipleSources,
   orderRowsForDrain,
@@ -271,6 +272,67 @@ describe("defaultSourceOption", () => {
         },
       ])
     ).toBeNull();
+  });
+});
+
+describe("defaultAssignSourceOption", () => {
+  const names = [
+    { id: A, name: "Camera Room" },
+    { id: B, name: "Studio" },
+  ];
+
+  it("pre-selects the location with the most left while one has units left", () => {
+    const options = buildCustodySourceOptions(
+      state(
+        20,
+        [
+          [A, 2],
+          [B, 3],
+        ],
+        [[B, 3]]
+      ),
+      names
+    );
+    // Camera Room 2 left, Studio 0 left, Unplaced 15 left.
+    expect(defaultAssignSourceOption(options)?.locationId).toBe(A);
+  });
+
+  it("pre-selects Unplaced when every location is fully in custody", () => {
+    const options = buildCustodySourceOptions(
+      state(
+        10,
+        [
+          [A, 3],
+          [B, 3],
+        ],
+        [
+          [A, 3],
+          [B, 3],
+        ]
+      ),
+      names
+    );
+    // Camera Room 0 left, Studio 0 left, Unplaced 4 left.
+    expect(options.map((o) => o.left)).toEqual([0, 0, 4]);
+    expect(defaultAssignSourceOption(options)?.value).toBe(UNPLACED_SOURCE);
+  });
+
+  it("keeps the location default when nothing has units left anywhere", () => {
+    const options = buildCustodySourceOptions(
+      state(
+        6,
+        [
+          [A, 3],
+          [B, 3],
+        ],
+        [
+          [A, 3],
+          [B, 3],
+        ]
+      ),
+      names
+    );
+    expect(defaultAssignSourceOption(options)?.locationId).toBe(A);
   });
 });
 

@@ -279,6 +279,28 @@ export function defaultSourceOption(
   return best;
 }
 
+/**
+ * The option an ASSIGN opens with. Same as {@link defaultSourceOption} while
+ * some location has units left. When none does, it is "Unplaced" if the
+ * unplaced units have some left: pre-selecting a location with nothing left
+ * would refuse an assignment the pool can give. Falls back to the location
+ * default when nothing has units left anywhere.
+ *
+ * Adjust keeps {@link defaultSourceOption}: a restock lands at a location,
+ * and units left says nothing about where stock arrives.
+ *
+ * @param options - The pool's {@link buildCustodySourceOptions}
+ * @returns The option to pre-select, NULL when there is no location option
+ */
+export function defaultAssignSourceOption(
+  options: CustodySourceOption[]
+): CustodySourceOption | null {
+  const location = defaultSourceOption(options);
+  if (location && location.left > 0) return location;
+  const unplaced = options.find((option) => option.locationId === null);
+  return unplaced && unplaced.left > 0 ? unplaced : location;
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                 Resolution                                 */
 /* -------------------------------------------------------------------------- */

@@ -37,7 +37,7 @@ import {
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
-import { defaultSourceOption } from "~/modules/asset/custody-source";
+import { defaultAssignSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
 import { resolveTeamMemberName } from "~/utils/user";
 import { CustodySourceSelect } from "./custody-source-select";
@@ -121,7 +121,8 @@ export function QuantityCustodyDialog({
   /**
    * The "From location" choice. Held as the operator's pick; until they
    * pick (or when their pick no longer exists after a revalidation) the
-   * field shows the source with the most units left.
+   * field shows the source with the most units left, or Unplaced when no
+   * location has any left.
    */
   const sourceOptions = sources?.multiSource ? sources.options : [];
   const showSource = sourceOptions.length > 0;
@@ -130,7 +131,20 @@ export function QuantityCustodyDialog({
     pickedSource !== null &&
     sourceOptions.some((option) => option.value === pickedSource)
       ? pickedSource
-      : defaultSourceOption(sourceOptions)?.value ?? "";
+      : defaultAssignSourceOption(sourceOptions)?.value ?? "";
+
+  /**
+   * The quantity's Max: the pool-wide availability, lowered to what the
+   * chosen source has left, which is the cap the server enforces for a named
+   * source. Without a source field it is the pool-wide availability alone.
+   */
+  const sourceLeft = sourceOptions.find(
+    (option) => option.value === sourceValue
+  )?.left;
+  const maxQuantity =
+    sourceLeft === undefined
+      ? availableQuantity
+      : Math.min(availableQuantity ?? sourceLeft, sourceLeft);
 
   /**
    * Server-side refusal, shown above the form: the source may have fewer
@@ -266,12 +280,10 @@ export function QuantityCustodyDialog({
               type="number"
               label={`Quantity (${unitLabel})`}
               placeholder={
-                availableQuantity != null
-                  ? `Max: ${availableQuantity}`
-                  : "Enter quantity"
+                maxQuantity != null ? `Max: ${maxQuantity}` : "Enter quantity"
               }
               min={1}
-              max={availableQuantity ?? undefined}
+              max={maxQuantity ?? undefined}
               step={1}
               required
             />

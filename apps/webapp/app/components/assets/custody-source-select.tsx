@@ -36,9 +36,10 @@ import { tw } from "~/utils/tw";
 
 /**
  * The text of one option: "Camera Room · 2 pcs", "Camera Room · 2 pcs · 1 in
- * custody", or "Unplaced · 3 pcs". Plain counts only: the pool-wide
- * availability (which also subtracts booking check-outs) stays the dialog's
- * Max, so these numbers never contradict it.
+ * custody", or "Unplaced · 3 pcs". Plain counts only: the dialog's Max is
+ * the lower of the pool-wide availability (which also subtracts booking
+ * check-outs) and the chosen option's units left, so these numbers never
+ * contradict it.
  */
 export function formatCustodySourceOption(
   option: CustodySourceOption,
