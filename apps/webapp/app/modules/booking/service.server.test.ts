@@ -27,6 +27,10 @@ import { onTestFinished } from "vitest";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import {
+  assertKitsCheckoutable,
+  assertKitsCustodyAssignable,
+} from "~/modules/booking/kit-holds.server";
 import { assertScannedUnitsAreNotKitMembers } from "~/modules/booking/kit-member-scan-guard.server";
 import {
   assertModelUnitsNotReservedElsewhere,
@@ -63,6 +67,7 @@ import {
   buildKitSlicesForBooking,
   reserveBooking,
   checkoutBooking,
+  getBookingFlags,
   fulfilModelRequestsAndCheckout,
   checkinBooking,
   archiveBooking,
@@ -204,12 +209,17 @@ vitest.mock("~/database/db.server", () => ({
     },
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: `getBookingFlags` counts the booking's kits in custody; none by default.
+      count: vitest.fn().mockResolvedValue(0),
       // why: assertKitsBelongToOrg (kit cross-org guard) calls
       // db.kit.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
       // Echo the requested ids so the guard passes for happy-path tests;
       // tests asserting kit re-resolution (duplicateBooking) override per-case.
+      // A `custody` filter is the check-out guard asking which kits have a
+      // custodian: none do unless a test says so.
       findMany: vitest.fn().mockImplementation((args?: any) => {
         const ids = args?.where?.id?.in;
+        if (args?.where?.custody) return Promise.resolve([]);
         return Promise.resolve(
           Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
         );
@@ -3638,17 +3648,37 @@ function mockHeldKitElsewhere(
   // THIS booking, not "other bookings") falls through to the caller instead.
   bookingAsset.fn.mockImplementation(
     (args?: {
-      where?: { assetKitId?: { in?: string[] } | null; bookingId?: string };
+      where?: {
+        assetKitId?: { in?: string[] } | null;
+        bookingId?: string | { notIn?: string[] };
+        checkedInAt?: null;
+      };
       select?: Record<string, unknown>;
-    }) =>
-      Promise.resolve(
-        args?.where?.assetKitId?.in && !args?.where?.bookingId
+    }) => {
+      const where = args?.where;
+      // The kit guard's "still out on another live booking" read: only
+      // slices that left and have not come back answer it.
+      if (typeof where?.bookingId === "object" && where.checkedInAt === null) {
+        return Promise.resolve(
+          otherSlices
+            .filter((slice) => slice.checkedOutAt && !slice.checkedInAt)
+            .map((slice) => ({
+              id: `ba-${slice.booking.id}`,
+              assetKitId: HELD_KIT.membershipId,
+              sourceKitId: HELD_KIT.id,
+              asset: { type: AssetType.QUANTITY_TRACKED, assetKits: [] },
+            }))
+        );
+      }
+      return Promise.resolve(
+        where?.assetKitId?.in && !where?.bookingId
           ? otherSlices.map((slice) => ({
               assetKitId: HELD_KIT.membershipId,
               ...slice,
             }))
           : answerOtherSliceReads(args)
-      )
+      );
+    }
   );
 }
 
@@ -5108,6 +5138,28 @@ describe("checkoutBooking", () => {
           data: expect.objectContaining({ status: BookingStatus.ONGOING }),
         })
       );
+    });
+
+    it("refuses to check out a kit that is in custody, though every member is quantity-tracked", async () => {
+      expect.assertions(2);
+
+      mockHeldKitElsewhere([]);
+      const kits = restoreMockImplementationAfterTest(db.kit.findMany);
+      // why: the kit's custodian is a KitCustody row in the database; the
+      // guard asks for kits carrying one.
+      kits.fn.mockImplementation((args?: { where?: { custody?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.custody ? [{ id: HELD_KIT.id, name: HELD_KIT.name }] : []
+        )
+      );
+      // why: the pre-checkout load; nothing is written once the guard refuses.
+      //@ts-expect-error missing vitest type
+      db.booking.findUniqueOrThrow.mockResolvedValue(reservedHoldingKit);
+
+      await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+        "Cannot check out booking. Some kits are in custody: Camera case. Release their custody first or remove them from the booking."
+      );
+      expect(db.booking.update).not.toHaveBeenCalled();
     });
   });
 
@@ -18536,5 +18588,290 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
         where: expect.objectContaining({ assetId: "asset-pool" }),
       })
     );
+  });
+});
+
+/**
+ * A kit is one physical unit with one holder at a time: a custodian or a
+ * booking that has it out, never both
+ * (`.claude/rules/custody-and-bookings-never-overlap.md`).
+ *
+ * The guards take their client as an argument, so these cases hand them an
+ * in-memory one that applies the filters they send.
+ */
+describe("kit holder guards", () => {
+  type FakeKit = {
+    id: string;
+    name: string;
+    status: KitStatus;
+    hasCustody: boolean;
+  };
+  /** A slice of some booking, as the "still out" read sees it. */
+  type FakeSlice = {
+    id: string;
+    bookingId: string;
+    sourceKitId: string;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  };
+  type KitWhere = {
+    id?: { in?: string[] };
+    custody?: { isNot?: null };
+    OR?: Array<{ status?: KitStatus; id?: { in?: string[] } }>;
+  };
+  type SliceWhere = {
+    bookingId?: { notIn?: string[] };
+    OR?: Array<{ sourceKitId?: { in?: string[] } }>;
+  };
+
+  /**
+   * A client holding `kits` and the live bookings' `slices`. Every slice is on
+   * a live booking; the read keeps those that left and have not come back.
+   */
+  function fakeClient(
+    kits: FakeKit[],
+    slices: FakeSlice[] = [],
+    calls: string[] = []
+  ) {
+    const kitMatches = (kit: FakeKit, where: KitWhere = {}) =>
+      (!where.id?.in || where.id.in.includes(kit.id)) &&
+      (where.custody === undefined || kit.hasCustody) &&
+      (!where.OR ||
+        where.OR.some(
+          (or) =>
+            (or.status !== undefined && kit.status === or.status) ||
+            (or.id?.in !== undefined && or.id.in.includes(kit.id))
+        ));
+    return {
+      // The kit row lock: records the ids it was asked to lock, in order.
+      $queryRaw: (_sql: TemplateStringsArray, ...values: unknown[]) => {
+        calls.push(`lock:${JSON.stringify(values)}`);
+        return Promise.resolve([]);
+      },
+      kit: {
+        findMany: ({ where }: { where?: KitWhere }) => {
+          calls.push("kit.findMany");
+          return Promise.resolve(
+            kits
+              .filter((kit) => kitMatches(kit, where))
+              .map(({ id, name }) => ({ id, name }))
+          );
+        },
+      },
+      // No membership rows: every slice names its kit through `sourceKitId`.
+      assetKit: { findMany: () => Promise.resolve([]) },
+      bookingAsset: {
+        findMany: ({ where }: { where?: SliceWhere }) => {
+          const kitIds = where?.OR?.find((or) => or.sourceKitId)?.sourceKitId
+            ?.in;
+          return Promise.resolve(
+            slices
+              .filter(
+                (slice) =>
+                  !where?.bookingId?.notIn?.includes(slice.bookingId) &&
+                  slice.checkedOutAt !== null &&
+                  slice.checkedInAt === null &&
+                  (kitIds ?? []).includes(slice.sourceKitId)
+              )
+              .map((slice) => ({
+                id: slice.id,
+                assetKitId: null,
+                sourceKitId: slice.sourceKitId,
+                asset: { type: AssetType.QUANTITY_TRACKED, assetKits: [] },
+              }))
+          );
+        },
+      },
+    } as unknown as Parameters<typeof assertKitsCheckoutable>[0];
+  }
+
+  const caseKit: FakeKit = {
+    id: "kit-case",
+    name: "Camera case",
+    status: KitStatus.AVAILABLE,
+    hasCustody: false,
+  };
+  const OUT = new Date("2026-10-01T09:00:00.000Z");
+  const BACK = new Date("2026-10-02T09:00:00.000Z");
+  const args = {
+    kitIds: ["kit-case"],
+    bookingId: "booking-1",
+    organizationId: "org-1",
+  };
+
+  describe("assertKitsCheckoutable", () => {
+    it("lets a free kit go out", async () => {
+      await expect(
+        assertKitsCheckoutable(fakeClient([caseKit]), args)
+      ).resolves.toBeUndefined();
+    });
+
+    it("locks the kits before it reads who holds them", async () => {
+      const calls: string[] = [];
+
+      await assertKitsCheckoutable(
+        fakeClient(
+          [caseKit, { ...caseKit, id: "kit-bag", name: "Bag" }],
+          [],
+          calls
+        ),
+        { ...args, kitIds: ["kit-case", "kit-bag"] }
+      );
+
+      expect(calls[0]).toMatch(/^lock:/);
+      // One lock order for every caller, so two of them cannot deadlock.
+      expect(calls[0]).toContain('"kit-bag"');
+      expect(calls[0].indexOf("kit-bag")).toBeLessThan(
+        calls[0].indexOf("kit-case")
+      );
+    });
+
+    it("refuses a kit in custody", async () => {
+      const inCustody = {
+        ...caseKit,
+        status: KitStatus.IN_CUSTODY,
+        hasCustody: true,
+      };
+
+      await expect(
+        assertKitsCheckoutable(fakeClient([inCustody]), args)
+      ).rejects.toThrow(
+        "Cannot check out booking. Some kits are in custody: Camera case."
+      );
+    });
+
+    it("refuses a kit another live booking still has out", async () => {
+      const outElsewhere: FakeSlice = {
+        id: "ba-other",
+        bookingId: "booking-2",
+        sourceKitId: "kit-case",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+      };
+
+      await expect(
+        assertKitsCheckoutable(fakeClient([caseKit], [outElsewhere]), args)
+      ).rejects.toThrow(
+        "Cannot check out booking. Some kits are still checked out on another booking: Camera case."
+      );
+    });
+
+    it("lets a kit go out once the other booking has brought it back", async () => {
+      const returned: FakeSlice = {
+        id: "ba-other",
+        bookingId: "booking-2",
+        sourceKitId: "kit-case",
+        checkedOutAt: OUT,
+        checkedInAt: BACK,
+      };
+
+      await expect(
+        assertKitsCheckoutable(fakeClient([caseKit], [returned]), args)
+      ).resolves.toBeUndefined();
+    });
+
+    it("never counts this booking's own slices against it", async () => {
+      const ownSliceOut: FakeSlice = {
+        id: "ba-own",
+        bookingId: "booking-1",
+        sourceKitId: "kit-case",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+      };
+
+      await expect(
+        assertKitsCheckoutable(fakeClient([caseKit], [ownSliceOut]), args)
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe("assertKitsCustodyAssignable", () => {
+    const assignArgs = { kitIds: ["kit-case"], organizationId: "org-1" };
+
+    it("lets a free kit go to a custodian", async () => {
+      await expect(
+        assertKitsCustodyAssignable(fakeClient([caseKit]), assignArgs)
+      ).resolves.toBeUndefined();
+    });
+
+    it("refuses a kit marked CHECKED_OUT", async () => {
+      const checkedOut = { ...caseKit, status: KitStatus.CHECKED_OUT };
+
+      await expect(
+        assertKitsCustodyAssignable(fakeClient([checkedOut]), assignArgs)
+      ).rejects.toThrow(
+        "Cannot assign custody. Some kits are checked out on a booking: Camera case."
+      );
+    });
+
+    it("refuses a kit a live booking has out, whatever its status says", async () => {
+      const outOnBooking: FakeSlice = {
+        id: "ba-other",
+        bookingId: "booking-2",
+        sourceKitId: "kit-case",
+        checkedOutAt: OUT,
+        checkedInAt: null,
+      };
+
+      await expect(
+        assertKitsCustodyAssignable(
+          fakeClient([caseKit], [outOnBooking]),
+          assignArgs
+        )
+      ).rejects.toThrow("Cannot assign custody.");
+    });
+  });
+});
+
+describe("getBookingFlags - kits in custody", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("flags a kit in custody reached only through a slice that kept its provenance", async () => {
+    // The tripod left the kit while the booking was live: no membership, but
+    // its slice still names the kit through `sourceKitId`.
+    const assets = restoreMockImplementationAfterTest(db.asset.findMany);
+    // why: the booking's assets are database rows.
+    assets.fn.mockResolvedValue([
+      {
+        id: "asset-tripod",
+        type: AssetType.QUANTITY_TRACKED,
+        status: AssetStatus.AVAILABLE,
+        availableToBook: true,
+        assetKits: [],
+        bookingAssets: [],
+      },
+    ]);
+    const slices = restoreMockImplementationAfterTest(db.bookingAsset.findMany);
+    // why: the booking's slices are database rows.
+    slices.fn.mockResolvedValue([
+      {
+        id: "ba-tripod",
+        assetKitId: null,
+        sourceKitId: "kit-case",
+        asset: { type: AssetType.QUANTITY_TRACKED, assetKits: [] },
+      },
+    ]);
+    const kitCount = restoreMockImplementationAfterTest(db.kit.count);
+    // why: the kit's custodian is a KitCustody row in the database.
+    kitCount.fn.mockImplementation(
+      (args?: { where?: { id?: { in?: string[] }; custody?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.custody && args.where.id?.in?.includes("kit-case")
+            ? 1
+            : 0
+        )
+    );
+
+    const flags = await getBookingFlags({
+      id: "booking-1",
+      from: new Date("2026-10-06T09:00:00.000Z"),
+      to: new Date("2026-10-07T09:00:00.000Z"),
+      assetIds: ["asset-tripod"],
+      organizationId: "org-1",
+    });
+
+    expect(flags.hasKitsInCustody).toBe(true);
   });
 });

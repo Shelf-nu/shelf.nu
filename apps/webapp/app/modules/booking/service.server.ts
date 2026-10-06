@@ -76,6 +76,10 @@ import {
 } from "~/modules/asset/utils";
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
+  assertKitsCheckoutable,
+  getKitIdsHeldByOtherLiveBookings,
+} from "~/modules/booking/kit-holds.server";
+import {
   assertModelUnitsNotReservedElsewhere,
   assertOutstandingModelRequestsFit,
   assertReservationBatchWithinLimit,
@@ -873,15 +877,14 @@ async function reconcileAssetStatusForBookingExit({
  *    back;
  *  - a kit any OTHER live booking still has out is dropped outright. That one
  *    the status filter cannot catch, because such a kit is legitimately
- *    CHECKED_OUT — and releasing it would let it be booked again while it is
+ *    CHECKED_OUT, and releasing it would let it be booked again while it is
  *    physically away (`assertKitsAddableToActiveBooking` gates on this column).
  *
  * A released kit goes back to whatever still holds it once the booking lets
- * go: IN_CUSTODY when it carries a `KitCustody` row, AVAILABLE otherwise. A
- * kit in custody can go out on a booking (check-out refuses only INDIVIDUAL
- * members in custody, and a quantity-only kit has none), so skipping such a
- * kit here would leave it CHECKED_OUT with no booking holding it, and nothing
- * in the UI could release it.
+ * go: IN_CUSTODY when it carries a `KitCustody` row, AVAILABLE otherwise.
+ * Check-out refuses a kit in custody (`assertKitsCheckoutable`), so a kit
+ * that is CHECKED_OUT with a custodian predates that guard; it goes back to
+ * its custodian rather than staying CHECKED_OUT with nothing holding it.
  *
  * @param client Pass the active `tx` when called inside a transaction.
  * @param args.excludeBookingIds The exiting bookings, so their own slices
@@ -901,86 +904,11 @@ async function releaseCheckedOutKits(
 ) {
   if (kitIds.length === 0) return;
 
-  // `sourceKitId` names the kit directly; the `assetKitId` leg needs the pivot
-  // ids to compare against, for slices written before that column existed.
-  const membershipRows = await client.assetKit.findMany({
-    where: { kitId: { in: kitIds }, organizationId },
-    select: { id: true, kitId: true },
-  });
-  const kitIdByAssetKitId = new Map(
-    membershipRows.map((row) => [row.id, row.kitId])
-  );
-
-  const slicesStillOut = await client.bookingAsset.findMany({
-    where: {
-      bookingId: { notIn: excludeBookingIds },
-      booking: {
-        status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-        organizationId,
-      },
-      // A live booking is not by itself evidence that it holds the kit — only
-      // the slice's own markers say that. A partially returned
-      // QUANTITY_TRACKED slice keeps a null `checkedInAt` and still counts,
-      // which is correct: some of its units are still out.
-      checkedOutAt: { not: null },
-      checkedInAt: null,
-      // The three shapes a slice can hold a kit through — the same three
-      // `getKitIdsToAcquire` stamps one from. Drop the last leg and a kit whose
-      // INDIVIDUAL member is out on a standalone slice reads as unheld, because
-      // that slice carries no provenance by design.
-      OR: [
-        { sourceKitId: { in: kitIds } },
-        { assetKitId: { in: [...kitIdByAssetKitId.keys()] } },
-        {
-          sourceKitId: null,
-          assetKitId: null,
-          asset: {
-            type: AssetType.INDIVIDUAL,
-            assetKits: { some: { kitId: { in: kitIds }, organizationId } },
-          },
-        },
-      ],
-    },
-    select: {
-      id: true,
-      assetKitId: true,
-      sourceKitId: true,
-      asset: {
-        select: { type: true, assetKits: { select: { kitId: true } } },
-      },
-    },
-  });
-
-  // Attributed by the shared resolver rather than by hand: one implementation
-  // of "which kit does this slice hold" is what keeps acquire and release from
-  // drifting apart again.
-  const kitIdsBySliceId = await getKitIdsBySlice({
-    slices: slicesStillOut.map((slice) => ({
-      id: slice.id,
-      assetKitId: slice.assetKitId,
-      sourceKitId: slice.sourceKitId,
-      // Defensive `?.` for fixtures and narrower selects, NOT because the
-      // fallback is harmless here: a slice that fails to pin its kit makes the
-      // kit MORE releasable, which is the direction this guard exists to
-      // prevent. The `select` above always projects `asset`, so the fallback is
-      // unreachable in production — keep it that way if this query is edited.
-      assetKits: slice.asset?.assetKits ?? [],
-      assetType: slice.asset?.type,
-    })),
+  const heldByAnotherBooking = await getKitIdsHeldByOtherLiveBookings(client, {
+    kitIds,
     organizationId,
-    client,
+    excludeBookingIds,
   });
-
-  // Intersected with the kits actually being released: a standalone slice's
-  // asset can belong to kits this exit knows nothing about, and those are not
-  // ours to pin.
-  const requestedKitIds = new Set(kitIds);
-  const heldByAnotherBooking = new Set<string>();
-  for (const sliceKitIds of kitIdsBySliceId.values()) {
-    for (const kitId of sliceKitIds) {
-      if (requestedKitIds.has(kitId)) heldByAnotherBooking.add(kitId);
-    }
-  }
 
   const releasableKitIds = kitIds.filter(
     (kitId) => !heldByAnotherBooking.has(kitId)
@@ -3007,6 +2935,12 @@ async function checkoutBookingWritesWithinTx(
         "There's nothing to check out yet. Add or scan at least one item to this booking first.",
       additionalData: { bookingId },
     });
+  }
+
+  // In the transaction that stamps the kits, so a kit put in custody or taken
+  // out elsewhere since the caller's read is still refused.
+  if (hasKits) {
+    await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
   }
 
   /**
@@ -10209,14 +10143,24 @@ export async function partialCheckoutBooking({
           movedThisBatch(sliceId);
 
         const completeKitIds: string[] = [];
+        const movedKitIds: string[] = [];
         for (const [kitId, sliceIds] of sliceIdsByKitId) {
           const ids = [...sliceIds];
           // A kit none of whose slices moved keeps the status it had.
           if (!ids.some((sliceId) => movedThisBatch(sliceId) > 0)) continue;
+          movedKitIds.push(kitId);
           if (ids.every((sliceId) => remainingAfterBatch(sliceId) <= 0)) {
             completeKitIds.push(kitId);
           }
         }
+
+        // Any unit of a kit leaving is a check-out of that kit, complete or
+        // not. Refusing here rolls back the whole batch with it.
+        await assertKitsCheckoutable(tx, {
+          kitIds: movedKitIds,
+          bookingId: id,
+          organizationId,
+        });
 
         if (completeKitIds.length > 0) {
           await tx.kit.updateMany({
@@ -14862,12 +14806,49 @@ export async function getBookingFlags(
   const hasKits = assets.some((asset) => (asset.assetKits ?? []).length > 0);
   const hasModelRequests = (booking.modelRequestCount ?? 0) > 0;
 
+  // A kit in custody cannot be checked out whatever its members are, which the
+  // asset-level flag above cannot see for a quantity-only kit. Resolved from
+  // the booking's own slices, as the check-out resolves the kits it takes, so
+  // the button and `assertKitsCheckoutable` agree. Not gated on `hasKits`: a
+  // slice keeps naming its kit through `sourceKitId` after its asset leaves it.
+  let hasKitsInCustody = false;
+  if (hasAssets) {
+    const slices = await db.bookingAsset.findMany({
+      where: {
+        bookingId: booking.id,
+        booking: { organizationId: booking.organizationId },
+      },
+      select: {
+        id: true,
+        assetKitId: true,
+        sourceKitId: true,
+        asset: {
+          select: { type: true, assetKits: { select: { kitId: true } } },
+        },
+      },
+    });
+    const kitIds = await getKitIdsToAcquire({
+      slices,
+      organizationId: booking.organizationId,
+    });
+    hasKitsInCustody =
+      kitIds.length > 0 &&
+      (await db.kit.count({
+        where: {
+          id: { in: kitIds },
+          organizationId: booking.organizationId,
+          custody: { isNot: null },
+        },
+      })) > 0;
+  }
+
   return {
     hasAssets,
     hasUnavailableAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
+    hasKitsInCustody,
     hasKits,
     hasModelRequests,
   };
