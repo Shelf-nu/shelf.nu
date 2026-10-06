@@ -816,14 +816,22 @@ export default function AssetDetailScreen() {
                     key={entry.custodian.id}
                     icon="person-outline"
                     label={entry.custodian.name}
-                    value={withSourceLine(
+                    value={
                       kitHeldQty > 0
                         ? `${
                             qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                           } • ${kitHeldQty} via kit`
-                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY,
-                      multiSource ? describeHolderSources(entry.sources) : null
-                    )}
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                    }
+                    // Where the holder's units came from, under the quantity
+                    // so it never truncates the count: "1 from Camera Room ·
+                    // 1 from Studio · 1 unplaced". Only a pool kept at two or
+                    // more locations says it.
+                    hint={
+                      (multiSource
+                        ? describeHolderSources(entry.sources)
+                        : null) ?? undefined
+                    }
                     onPress={
                       canReleaseRow
                         ? () => setReleaseQtyEntry(entry)
@@ -1217,14 +1225,6 @@ export default function AssetDetailScreen() {
  * @param member - The selected team member.
  * @returns The display name.
  */
-/**
- * A holder's quantity with where it came from appended, for a pool placed at
- * two or more locations: "2 pcs · 1 from Camera Room · 1 from Studio".
- */
-function withSourceLine(value: string, line: string | null): string {
-  return line ? `${value} · ${line}` : value;
-}
-
 function memberDisplayName(member: TeamMember): string {
   if (member.user) {
     const fullName = [member.user.firstName, member.user.lastName]
