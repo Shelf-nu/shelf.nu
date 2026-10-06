@@ -361,8 +361,33 @@ export type CheckinSourceSlice = {
   id: string;
   assetId: string;
   assetKitId: string | null;
+  /** Kit provenance: survives the member being detached mid-booking. */
+  sourceKitId: string | null;
   sourceLocationId: string | null;
 };
+
+/**
+ * Whether a slice's recorded source is a manual placement its units really
+ * left from. Only a slice that never came with a kit qualifies: a kit slice
+ * records the kit's location, and so does detached kit residue (`assetKitId`
+ * cleared when the member left the kit, `sourceKitId` kept). Those units
+ * belonged to the kit, never to a manual placement at the kit's location, so
+ * no reader may charge them to one.
+ *
+ * Every reader of `BookingAsset.sourceLocationId` that means "units taken
+ * from a manual placement" goes through this: units out on a booking per
+ * location, the check-in reconcile, and the "from <Location>" line.
+ */
+export function isManualSourceSlice(
+  slice: Pick<
+    CheckinSourceSlice,
+    "assetKitId" | "sourceKitId" | "sourceLocationId"
+  >
+): slice is typeof slice & { sourceLocationId: string } {
+  return (
+    !slice.assetKitId && !slice.sourceKitId && Boolean(slice.sourceLocationId)
+  );
+}
 
 /**
  * Which manual placement loses the units a check-in reports consumed, lost or
@@ -370,8 +395,8 @@ export type CheckinSourceSlice = {
  * change a placement, so they are not counted.
  *
  * Nothing is returned (the unplaced units absorb the drop) for a slice with
- * no recorded source, and for a kit slice: its units belong to the kit, whose
- * own placement shrinks with it, never a manual one.
+ * no recorded source, and for a kit slice or detached kit residue: its units
+ * belong to the kit, never a manual placement (see {@link isManualSourceSlice}).
  *
  * @param args.slice - The slice being checked in, or `null` when unknown
  * @param args.consumed - Units used up
@@ -385,12 +410,15 @@ export function checkinPlacementSources({
   lost = 0,
   damaged = 0,
 }: {
-  slice: Pick<CheckinSourceSlice, "assetKitId" | "sourceLocationId"> | null;
+  slice: Pick<
+    CheckinSourceSlice,
+    "assetKitId" | "sourceKitId" | "sourceLocationId"
+  > | null;
   consumed?: number;
   lost?: number;
   damaged?: number;
 }): Array<{ locationId: string; quantity: number }> {
-  if (!slice || slice.assetKitId || !slice.sourceLocationId) return [];
+  if (!slice || !isManualSourceSlice(slice)) return [];
   const quantity = consumed + lost + damaged;
   return quantity > 0 ? [{ locationId: slice.sourceLocationId, quantity }] : [];
 }

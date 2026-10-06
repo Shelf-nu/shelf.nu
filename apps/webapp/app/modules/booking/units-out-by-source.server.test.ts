@@ -181,4 +181,23 @@ describe("loadBookedOutBySource", () => {
       { locationId: "loc-a", quantity: 11 },
     ]);
   });
+
+  it("reads only slices that never came with a kit, so kit residue charges no location", async () => {
+    // A kit slice, and a slice whose member left the kit while it was out,
+    // both record the kit's location. Neither took units from a manual
+    // placement there.
+    const findMany = vi.fn(() => Promise.resolve([]));
+    const client = {
+      bookingAsset: { findMany },
+      consumptionLog: { findMany: vi.fn(() => Promise.resolve([])) },
+    };
+
+    await loadBookedOutBySource(client as never, { assetIds: ["pool-1"] });
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ assetKitId: null, sourceKitId: null }),
+      })
+    );
+  });
 });

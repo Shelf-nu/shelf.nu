@@ -45,6 +45,7 @@ import {
   combineDispatchedWithStoredUnits,
   computeDispatchedUnitsByAsset,
 } from "~/modules/booking/checkout-attribution";
+import { isManualSourceSlice } from "~/modules/booking/checkout-source-location";
 import {
   getCheckoutSourceQuestions,
   loadMultiPlacedPoolIds,
@@ -177,6 +178,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             id: true,
             quantity: true,
             assetKitId: true,
+            // why: kit provenance that survives a member leaving the kit
+            // mid-booking; such residue has no manual source to show.
+            sourceKitId: true,
             // Where a pool slice's units left from, recorded at check-out.
             // Resolved to `{ id, name }` per slice below.
             sourceLocationId: true,
@@ -312,9 +316,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     };
     const sourcedPoolSlices = booking.bookingAssets.filter(
       (ba) =>
-        ba.asset.type === AssetType.QUANTITY_TRACKED &&
-        !ba.assetKitId &&
-        ba.sourceLocationId
+        ba.asset.type === AssetType.QUANTITY_TRACKED && isManualSourceSlice(ba)
     );
     const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
       loadSliceSourceLocations({
@@ -350,8 +352,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         kit: sliceKit,
         sourceLocation:
           ba.asset.type === AssetType.QUANTITY_TRACKED &&
-          !ba.assetKitId &&
-          ba.sourceLocationId &&
+          isManualSourceSlice(ba) &&
           multiPlacedPoolIds.has(ba.asset.id)
             ? sourceLocationsById.get(ba.sourceLocationId) ?? null
             : null,

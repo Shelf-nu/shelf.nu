@@ -6,6 +6,7 @@ import type {
 } from "./checkout-source-location";
 import {
   checkinPlacementSources,
+  isManualSourceSlice,
   checkoutSourceOptions,
   defaultSourceLocationId,
   parseSourceLocationsFromFormData,
@@ -271,7 +272,11 @@ describe("submissions", () => {
 });
 
 describe("checkinPlacementSources", () => {
-  const standalone = { assetKitId: null, sourceLocationId: "loc-studio" };
+  const standalone = {
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
 
   it("takes consumed, lost and damaged off the recorded location", () => {
     expect(
@@ -291,30 +296,78 @@ describe("checkinPlacementSources", () => {
   it("names no placement for a slice with no source, a kit slice, or an unknown slice", () => {
     expect(
       checkinPlacementSources({
-        slice: { assetKitId: null, sourceLocationId: null },
+        slice: { assetKitId: null, sourceKitId: null, sourceLocationId: null },
         consumed: 3,
       })
     ).toEqual([]);
     expect(
       checkinPlacementSources({
-        slice: { assetKitId: "ak-1", sourceLocationId: "loc-kit-shelf" },
+        slice: {
+          assetKitId: "ak-1",
+          sourceKitId: "kit-1",
+          sourceLocationId: "loc-kit-shelf",
+        },
         consumed: 3,
       })
     ).toEqual([]);
     expect(checkinPlacementSources({ slice: null, consumed: 3 })).toEqual([]);
   });
+
+  it("names no placement for detached kit residue, which keeps the kit's location", () => {
+    // The member left the kit while the kit was out: `assetKitId` was cleared,
+    // `sourceKitId` and the kit's location stay. Those units were the kit's,
+    // never the manual placement that happens to sit at the kit's location.
+    expect(
+      checkinPlacementSources({
+        slice: {
+          assetKitId: null,
+          sourceKitId: "kit-1",
+          sourceLocationId: "loc-kit-shelf",
+        },
+        consumed: 3,
+      })
+    ).toEqual([]);
+  });
+});
+
+describe("isManualSourceSlice", () => {
+  it("is true only for a slice that never came with a kit and has a source", () => {
+    const base = { assetKitId: null, sourceKitId: null, sourceLocationId: "a" };
+    expect(isManualSourceSlice(base)).toBe(true);
+    expect(isManualSourceSlice({ ...base, sourceLocationId: null })).toBe(
+      false
+    );
+    expect(
+      isManualSourceSlice({ ...base, assetKitId: "ak-1", sourceKitId: "k" })
+    ).toBe(false);
+    // Detached kit residue.
+    expect(isManualSourceSlice({ ...base, sourceKitId: "kit-1" })).toBe(false);
+  });
 });
 
 describe("sliceForDisposition", () => {
   const slices = [
-    { id: "ba-1", assetId: "pool-1", assetKitId: null, sourceLocationId: "a" },
+    {
+      id: "ba-1",
+      assetId: "pool-1",
+      assetKitId: null,
+      sourceKitId: null,
+      sourceLocationId: "a",
+    },
     {
       id: "ba-2",
       assetId: "pool-1",
       assetKitId: "ak-1",
+      sourceKitId: "kit-1",
       sourceLocationId: "k",
     },
-    { id: "ba-3", assetId: "pool-2", assetKitId: null, sourceLocationId: "b" },
+    {
+      id: "ba-3",
+      assetId: "pool-2",
+      assetKitId: null,
+      sourceKitId: null,
+      sourceLocationId: "b",
+    },
   ];
 
   it("returns the slice a disposition names", () => {

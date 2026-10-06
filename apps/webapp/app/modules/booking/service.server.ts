@@ -5506,6 +5506,7 @@ export async function checkinBooking({
         id: ba.id,
         assetId: ba.assetId,
         assetKitId: ba.assetKitId,
+        sourceKitId: ba.sourceKitId,
         sourceLocationId: ba.sourceLocationId,
         consumptionType: ba.asset.consumptionType,
         title: ba.asset.title,

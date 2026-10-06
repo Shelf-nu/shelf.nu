@@ -42,7 +42,10 @@ import {
   BOOKING_DISPOSITION_CATEGORIES,
   computeBookingSliceUnitCounts,
 } from "~/modules/booking/booking-slice-unit-counts.server";
-import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
+import {
+  isManualSourceSlice,
+  parseSourceLocationsFromFormData,
+} from "~/modules/booking/checkout-source-location";
 import {
   getCheckoutSourceQuestions,
   loadMultiPlacedPoolIds,
@@ -638,8 +641,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       .filter(
         (ba) =>
           ba.asset.type === AssetType.QUANTITY_TRACKED &&
-          !ba.assetKitId &&
-          ba.sourceLocationId
+          isManualSourceSlice(ba)
       )
       .map((ba) => ba.assetId);
     const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
@@ -752,9 +754,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * carry `sourceLocationId`.
          */
         sourceLocation:
-          !ba.assetKitId &&
-          ba.sourceLocationId &&
-          multiPlacedPoolIds.has(ba.assetId)
+          isManualSourceSlice(ba) && multiPlacedPoolIds.has(ba.assetId)
             ? sourceLocationsById.get(ba.sourceLocationId) ?? null
             : null,
       };
