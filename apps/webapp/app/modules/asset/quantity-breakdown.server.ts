@@ -203,8 +203,8 @@ type ListAssetWithBookingRows = {
  * all of them, in a fixed number of queries whatever the page size.
  *
  * @param db - Prisma client to read through.
- * @param args.assets - The page's asset rows; only QUANTITY_TRACKED ones with
- *   an active booking row are read.
+ * @param args.assets - The page's asset rows. QUANTITY_TRACKED ones are read
+ *   when they carry an active booking slice, or no `bookingAssets` at all.
  * @param args.organizationId - Caller's organization. Scopes every read.
  * @returns assetId → its active booking rows (empty when nothing is still out).
  *   Assets that were not read are absent.
@@ -225,10 +225,14 @@ export async function getStillOutBookingRowsByAsset(
     .filter(
       (asset) =>
         isQuantityTracked(asset) &&
-        asset.bookingAssets?.some((row) => {
-          const status = row.booking?.status;
-          return status === "ONGOING" || status === "OVERDUE";
-        })
+        // Rows that carry booking slices say up front whether the asset is on
+        // an active booking. Rows without any (the advanced index) cannot, so
+        // they are read and the batch keeps only active bookings.
+        (!asset.bookingAssets ||
+          asset.bookingAssets.some((row) => {
+            const status = row.booking?.status;
+            return status === "ONGOING" || status === "OVERDUE";
+          }))
     )
     .map((asset) => asset.id);
   if (assetIds.length === 0) return byAsset;

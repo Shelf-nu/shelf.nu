@@ -1211,6 +1211,26 @@ describe("the asset index badge agrees with the asset page", () => {
     expect(breakdown?.checkedOut).toBe(9);
   });
 
+  it("reads assets whose rows carry no booking slices at all (advanced mode)", async () => {
+    // The advanced index ships no `bookingAssets`, so it cannot say up front
+    // which assets are on an active booking: every quantity-tracked one is read.
+    const { client } = indexFixture();
+
+    const byAsset = await getStillOutBookingRowsByAsset(
+      client as unknown as ExtendedPrismaClient,
+      {
+        assets: [
+          { id: "a1", type: "QUANTITY_TRACKED" },
+          { id: "a3", type: "INDIVIDUAL" },
+        ],
+        organizationId: ORG_ID,
+      }
+    );
+
+    expect(byAsset.get("a1")?.map((row) => row.quantity)).toEqual([6, 3]);
+    expect(byAsset.has("a3")).toBe(false);
+  });
+
   it("reads nothing when no quantity-tracked asset is on an active booking", async () => {
     const { client, indexAssets } = indexFixture();
 
