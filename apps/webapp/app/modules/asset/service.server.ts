@@ -47,12 +47,36 @@ import {
   assertAssetQuantityNotBelowReservations,
   computeCustodyAvailability,
 } from "~/modules/asset/availability-primitives.server";
+import type { ReleaseLine } from "~/modules/asset/custody-source";
+import {
+  UNPLACED_SOURCE,
+  custodyFromSource,
+  custodySourceKey,
+  hasMultipleSources,
+  isUnplacedSource,
+  placedAtSource,
+  planDrainRelease,
+  resolveCustodySource,
+  sourceShortfall,
+  unitsLeftAtSource,
+  unplacedUnits,
+} from "~/modules/asset/custody-source";
+import {
+  createCustodyRehomeNote,
+  createCustodySourceLocationNote,
+  loadCustodySources,
+  rehomeCustodyForPlacementChange,
+} from "~/modules/asset/custody-source.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
   reportAmbiguousPlacementReconcile,
 } from "~/modules/asset/placement-reconcile.server";
-import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
+import {
+  canDuplicateAsset,
+  getPrimaryLocation,
+  isQuantityTracked,
+} from "~/modules/asset/utils";
 import {
   updateBarcodes,
   validateBarcodeUniqueness,
@@ -683,7 +707,7 @@ export async function getAssets(params: {
         // filters below — preserves the historical OR-entanglement: those
         // filters append to where.OR, so search OR-combines with them exactly
         // as the previous Prisma OR clause did. The UNION always
-        // searches all 10 sources (the old id-shaped fast path searched a
+        // searches all 11 sources (the old id-shaped fast path searched a
         // subset and fell back on zero rows); id-shaped searches therefore now
         // return the full result set — a superset of before, the more-correct
         // answer.
@@ -1405,7 +1429,13 @@ export async function createAsset({
       }
 
       /** If a custodian is passed, create a Custody relation with that asset
-       * `custodian` represents the id of a {@link TeamMember}. */
+       * `custodian` represents the id of a {@link TeamMember}.
+       *
+       * A quantity-tracked asset created at a location is placed there in
+       * full (see the placement below), so that location is where the
+       * custody's units come from, the same source `checkOutQuantity` fills
+       * in for a pool at one location. `locationId` is org-verified in the
+       * create transaction below, before this nested create runs. */
       if (custodian) {
         Object.assign(data, {
           custody: {
@@ -1415,6 +1445,9 @@ export async function createAsset({
                   id: custodian,
                 },
               },
+              ...(type === AssetType.QUANTITY_TRACKED && locationId
+                ? { location: { connect: { id: locationId } } }
+                : {}),
             },
           },
           status: AssetStatus.IN_CUSTODY,
@@ -1455,6 +1488,15 @@ export async function createAsset({
         });
       }
 
+      /**
+       * Orphaned barcodes being reused, grouped by the type the caller asked
+       * for. A reused row keeps whatever type it was created with, so it is
+       * retyped inside the create transaction before being connected:
+       * otherwise a `barcode_ExternalQR` import cell that matches a leftover
+       * Code128 row attaches as Code128.
+       */
+      const reusedBarcodeIdsByType = new Map<BarcodeType, string[]>();
+
       /** If barcodes are passed, handle reusing orphaned barcodes or creating new ones */
       if (barcodes && barcodes.length > 0) {
         const barcodesToAdd = barcodes.filter(
@@ -1462,9 +1504,17 @@ export async function createAsset({
         );
 
         if (barcodesToAdd.length > 0) {
-          const barcodesToConnect = barcodesToAdd
-            .filter((b) => b.existingId)
-            .map((b) => ({ id: b.existingId! }));
+          const reusedBarcodes = barcodesToAdd.filter((b) => b.existingId);
+          reusedBarcodes.forEach(({ type, existingId }) => {
+            reusedBarcodeIdsByType.set(type, [
+              ...(reusedBarcodeIdsByType.get(type) ?? []),
+              existingId!,
+            ]);
+          });
+
+          const barcodesToConnect = reusedBarcodes.map((b) => ({
+            id: b.existingId!,
+          }));
 
           const barcodesToCreate = barcodesToAdd
             .filter((b) => !b.existingId)
@@ -1519,6 +1569,24 @@ export async function createAsset({
             { categoryId: categoryId!, organizationId },
             tx
           );
+        }
+
+        // SECURITY (cross-org IDOR): the locationId is written into the
+        // placement below and, for a quantity-tracked asset with a
+        // custodian, connected as the custody's source. Prove it belongs to
+        // this org before either write.
+        if (locationId) {
+          await assertLocationBelongsToOrg({ locationId, organizationId }, tx);
+        }
+
+        // The value already matches (that is how the orphan was found), so
+        // only the type needs to follow the import. Org-scoped: the ids come
+        // from an org-scoped lookup, and this keeps the write that way too.
+        for (const [type, ids] of reusedBarcodeIdsByType) {
+          await tx.barcode.updateMany({
+            where: { id: { in: ids }, organizationId },
+            data: { type },
+          });
         }
 
         const created = await tx.asset.create({
@@ -2458,7 +2526,15 @@ export async function updateAsset({
     // actually part of this patch.
     let quantityBeforeUpdate: number | null = null;
     let lockedAssetType: AssetType | null = null;
+    /** Where custody went when this patch collapsed the placements. */
+    let placementRehome: Awaited<
+      ReturnType<typeof rehomeCustodyForPlacementChange>
+    > | null = null;
     const asset = await db.$transaction(async (tx) => {
+      /** Custody sources before a placement rewrite, for the re-home. */
+      let custodyBefore: Awaited<ReturnType<typeof loadCustodySources>> | null =
+        null;
+
       // Block lowering a QUANTITY_TRACKED asset's total below the units
       // already committed to custody, kits, or overlapping bookings. Lock the
       // asset row first so the read-then-write is race-safe (mirrors
@@ -2477,6 +2553,15 @@ export async function updateAsset({
         if (quantity != null) {
           quantityBeforeUpdate = locked.quantity ?? 0;
           lockedAssetType = locked.type;
+        }
+        if (
+          shouldUpdatePlacement &&
+          locked.type === AssetType.QUANTITY_TRACKED
+        ) {
+          custodyBefore = await loadCustodySources(tx, {
+            assetId: id,
+            total: locked.quantity ?? 0,
+          });
         }
 
         /**
@@ -2645,6 +2730,21 @@ export async function updateAsset({
             },
           });
         }
+
+        /**
+         * The rewrite collapses every manual placement into at most one.
+         * Custody from a dropped location follows the units to the new
+         * location (as far as it holds them), and becomes unplaced when the
+         * location is cleared. Never refused.
+         */
+        if (custodyBefore) {
+          placementRehome = await rehomeCustodyForPlacementChange(tx, {
+            assetId: id,
+            total: updated.quantity ?? 0,
+            before: custodyBefore,
+            destinationLocationId: newLocationId ?? null,
+          });
+        }
       }
 
       // Re-read so the returned `assetLocations` reflects the pivot ops.
@@ -2764,6 +2864,19 @@ export async function updateAsset({
         // earlier `db.asset.update` snapshot.
         asset.preferredBarcodeId = targetPreferred;
       }
+    }
+
+    if (placementRehome) {
+      await createCustodyRehomeNote({
+        result: placementRehome,
+        asset: {
+          id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
     }
 
     /** If the location id was passed, we create a note for the move */
@@ -3505,6 +3618,10 @@ export async function replaceAssetPlacements({
     let toUpdate: Array<{ locationId: string; quantity: number }> = [];
     let toDelete: ManualRow[] = [];
     let manualByLocation = new Map<string, ManualRow>();
+    /** What happened to custody sources, for the note after the commit. */
+    let rehome: Awaited<
+      ReturnType<typeof rehomeCustodyForPlacementChange>
+    > | null = null;
 
     // 8. Apply the diff in one tx. The DEFERRED sum-within-total
     //    trigger re-checks at COMMIT — covers any race where another
@@ -3526,15 +3643,10 @@ export async function replaceAssetPlacements({
        * first actually committed.
        *
        * Mirrors `moveAssetLocationUnits` step 2, which locks for the same
-       * reason. `updateAsset`'s placement path and the mobile
-       * `asset.update-location` route now lock too.
-       *
-       * KNOWN GAP: `updateLocationAssets` (the location page's "manage
-       * assets" flow) writes manual rows for many assets at once and does NOT
-       * lock, so the race above survives through it. Adding a per-asset lock
-       * there needs a deterministic acquisition order to avoid deadlocking
-       * against the multi-asset lockers in the booking check-in paths, which
-       * is why it is not done here.
+       * reason. `updateAsset`'s placement path, the mobile
+       * `asset.update-location` route and `updateLocationAssets` lock too
+       * (the last one several assets at once, in sorted id order like the
+       * booking paths, so they cannot deadlock).
        */
       const locked = await lockAssetForQuantityUpdate(
         tx,
@@ -3590,6 +3702,15 @@ export async function replaceAssetPlacements({
           location: { select: { id: true, name: true } },
         },
       });
+
+      /** Custody sources before the diff, for the re-home below. */
+      const custodyBefore =
+        locked.type === AssetType.QUANTITY_TRACKED
+          ? await loadCustodySources(tx, {
+              assetId,
+              total: locked.quantity ?? 0,
+            })
+          : null;
 
       const currentByLocation = new Map(
         lockedManual.map((al) => [al.locationId, al])
@@ -3680,7 +3801,33 @@ export async function replaceAssetPlacements({
       if (events.length > 0) {
         await recordEvents(events, tx);
       }
+
+      /**
+       * A location shrunk or removed below what is in custody from it: that
+       * excess custody becomes unplaced (the editor names no single
+       * destination). Never refused.
+       */
+      if (custodyBefore) {
+        rehome = await rehomeCustodyForPlacementChange(tx, {
+          assetId,
+          total: locked.quantity ?? 0,
+          before: custodyBefore,
+        });
+      }
     });
+
+    if (rehome) {
+      await createCustodyRehomeNote({
+        result: rehome,
+        asset: {
+          id: assetId,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
+    }
 
     // Per-row notes emitted AFTER the tx commits. Following the same
     // pattern as `updateLocationAssets`: notes capture intent and don't
@@ -4080,11 +4227,63 @@ export function createCustomFieldsPayloadFromAsset(
 }
 
 /**
+ * Deletes the copies `duplicateAsset` created before a later copy failed, so a
+ * duplicate request never leaves part of its copies behind.
+ *
+ * Goes through `deleteAsset`, so each removal records `ASSET_DELETED` beside
+ * the `ASSET_CREATED` its create recorded. A copy that cannot be deleted is
+ * logged with its id and skipped: the original failure is what the caller
+ * reports, and a failed cleanup must not replace it.
+ *
+ * @param params.assetIds - The copies created so far
+ * @param params.organizationId - The organization the copies were created in
+ * @param params.userId - The acting user, recorded as the deletion's actor
+ * @param params.originalAssetId - The source asset, for the log
+ */
+async function deleteDuplicatesAfterFailure({
+  assetIds,
+  organizationId,
+  userId,
+  originalAssetId,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Organization["id"];
+  userId: User["id"];
+  originalAssetId: Asset["id"];
+}) {
+  for (const id of assetIds) {
+    try {
+      await deleteAsset({ id, organizationId, actorUserId: userId });
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message:
+            "Could not delete a copy after duplicating an asset failed part-way",
+          additionalData: { assetId: id, originalAssetId, organizationId },
+          label,
+        })
+      );
+    }
+  }
+}
+
+/**
  * Creates one or more copies of an existing asset within the same organization.
  *
- * Copies the source asset's title, description, category, location, tags,
- * valuation, custom field values and (best-effort) main image onto each
- * duplicate.
+ * Copies the source asset's title, description, category, tags, valuation,
+ * booking availability, custom field values, tracking method and (best-effort)
+ * main image onto each duplicate. An individual copy also keeps the source's
+ * asset model and primary location. A quantity-tracked copy carries the
+ * quantity, unit of measure, consumption type and low-stock threshold, and
+ * starts unplaced: the source pool can be split across several locations, so
+ * its units are placed from the copy's asset page.
+ *
+ * Every copy is created or none is: if one fails, the copies already created
+ * are deleted before the error is rethrown.
+ *
+ * Titles read "<title> (copy)" for a single duplicate and
+ * "<title> (copy 1)", "<title> (copy 2)", ... for several.
  *
  * @param params.asset - The org-scoped source asset (with tags, custody, custom fields)
  * @param params.userId - The acting user's ID
@@ -4092,8 +4291,9 @@ export function createCustomFieldsPayloadFromAsset(
  * @param params.organizationId - The caller's validated organization ID; all
  *   duplicates and copied tags are constrained to this org
  * @returns The list of created duplicate assets
- * @throws {ShelfError} If a copied tag does not belong to `organizationId`
- *   (cross-org guard) or if duplication otherwise fails
+ * @throws {ShelfError} 400 "No units to copy" for a quantity-tracked asset with
+ *   no units in stock (see `canDuplicateAsset`), 4xx from `createAsset` as
+ *   written, and a wrapped error if duplication otherwise fails
  */
 export async function duplicateAsset({
   asset,
@@ -4130,15 +4330,46 @@ export async function duplicateAsset({
       includeAllCategories: true,
     });
 
+    const isPool = isQuantityTracked(asset);
+
+    if (!canDuplicateAsset(asset)) {
+      throw new ShelfError({
+        cause: null,
+        title: "No units to copy",
+        message:
+          "This asset has no units in stock, and a quantity-tracked asset needs at least 1. Add stock with Adjust quantity, then duplicate it.",
+        additionalData: { assetId: asset.id, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     const payload = {
       title: `${asset.title}`,
       organizationId,
       description: asset.description,
       userId,
       categoryId: asset.categoryId,
-      locationId: getPrimaryLocation(asset)?.id ?? undefined,
+      // why: `createAsset` places the whole pool at `locationId`, which would
+      // collapse a pool split across locations into one. A pool copy starts
+      // unplaced instead; an individual copy keeps the primary location.
+      locationId: isPool
+        ? undefined
+        : getPrimaryLocation(asset)?.id ?? undefined,
       tags: { set: copiedTagIds.map((id) => ({ id })) },
       valuation: asset.valuation,
+      availableToBook: asset.availableToBook,
+      type: asset.type,
+      // An asset model groups individual units only; `createAsset` refuses a
+      // model link on a quantity-tracked asset.
+      assetModelId: isPool ? undefined : asset.assetModelId ?? undefined,
+      ...(isPool && {
+        quantity: asset.quantity,
+        minQuantity: asset.minQuantity,
+        consumptionType: asset.consumptionType,
+        unitOfMeasure: asset.unitOfMeasure,
+      }),
     };
 
     const customFieldValues = createCustomFieldsPayloadFromAsset(asset);
@@ -4148,14 +4379,38 @@ export async function duplicateAsset({
       customFieldDef: customFields,
       isDuplicate: true,
     });
-    for (const i of [...Array(amountOfDuplicates)].keys()) {
-      const duplicatedAsset = await createAsset({
-        ...payload,
-        title: `${asset.title} (copy ${amountOfDuplicates > 1 ? i + 1 : ""})`,
-        customFieldsValues: extractedCustomFieldValues,
-      });
 
-      if (asset.mainImage) {
+    // All copies are created or none are. Each `createAsset` commits its own
+    // transaction and retries on a sequential-id collision, which an
+    // enclosing transaction could not survive, so a failure part-way through
+    // deletes the copies already created instead.
+    try {
+      for (const i of [...Array(amountOfDuplicates)].keys()) {
+        duplicatedAssets.push(
+          await createAsset({
+            ...payload,
+            title: `${asset.title} (copy${
+              amountOfDuplicates > 1 ? ` ${i + 1}` : ""
+            })`,
+            customFieldsValues: extractedCustomFieldValues,
+          })
+        );
+      }
+    } catch (cause) {
+      await deleteDuplicatesAfterFailure({
+        assetIds: duplicatedAssets.map(({ id }) => id),
+        organizationId,
+        userId,
+        originalAssetId: asset.id,
+      });
+      throw cause;
+    }
+
+    // Images are uploaded once every copy exists, so a failed create never
+    // leaves an uploaded file behind. An image is best-effort: a copy without
+    // one is still a valid copy.
+    if (asset.mainImage) {
+      for (const duplicatedAsset of duplicatedAssets) {
         try {
           const imagePath = await uploadDuplicateAssetMainImage(
             asset.mainImage,
@@ -4165,7 +4420,7 @@ export async function duplicateAsset({
 
           if (typeof imagePath === "string") {
             await db.asset.update({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) on line ~2216; this only writes back its own mainImage
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: duplicatedAsset was just created by createAsset({ organizationId }) above; this only writes back its own mainImage
               where: { id: duplicatedAsset.id },
               data: {
                 mainImage: imagePath,
@@ -4174,7 +4429,7 @@ export async function duplicateAsset({
             });
           }
         } catch (cause) {
-          // Log the error so we are aware there is an issue anc can check if it is on our side
+          // Logged so an upload problem on our side is visible.
           Logger.error(
             new ShelfError({
               cause,
@@ -4190,12 +4445,11 @@ export async function duplicateAsset({
           );
         }
       }
-
-      duplicatedAssets.push(duplicatedAsset);
     }
 
     return duplicatedAssets;
   } catch (cause) {
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Something went wrong while duplicating the asset",
@@ -4541,14 +4795,20 @@ export async function createCustomFieldChangeNote({
   }
 }
 
-/** Fetches assets with the data needed for exporting to CSV */
+/**
+ * Fetches assets with the data needed for exporting to CSV.
+ *
+ * Each custody row's source location travels by NAME, as `sourceLocation`
+ * (empty when none was recorded): its id only means something in the
+ * workspace the backup came from, so `locationId` is left out.
+ */
 export async function fetchAssetsForExport({
   organizationId,
 }: {
   organizationId: Organization["id"];
 }) {
   try {
-    return await db.asset.findMany({
+    const assets = await db.asset.findMany({
       where: {
         organizationId,
       },
@@ -4561,11 +4821,12 @@ export async function fetchAssetsForExport({
         assetModel: { select: { name: true } },
         notes: true,
         custody: {
-          // Ordered so `getPrimaryCustody` picks the same row every time — the
+          // Ordered so `getPrimaryCustody` picks the same row every time: the
           // custodian it returns is written into the exported file.
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           include: {
             custodian: true,
+            location: { select: { name: true } },
           },
         },
         tags: true,
@@ -4576,6 +4837,16 @@ export async function fetchAssetsForExport({
         },
       },
     });
+
+    return assets.map((asset) => ({
+      ...asset,
+      custody: asset.custody.map(
+        ({ locationId: _locationId, location, ...custody }) => ({
+          ...custody,
+          sourceLocation: location?.name ?? "",
+        })
+      ),
+    }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -5119,6 +5390,13 @@ export async function createAssetsFromContentImport({
  * ones that are missing. Names match regardless of case, the same way the
  * database's unique index on location names compares them.
  *
+ * The lower-cased key only groups the file's spellings and matches the batch
+ * lookup. A name the batch missed is looked up once more on its own before it
+ * is created, so the database decides what counts as the same name:
+ * JavaScript and Postgres can lower-case a letter differently (`İ`, or a
+ * word-final `Σ`), and a create the unique index sees as a repeat would fail
+ * the restore.
+ *
  * @param args.names - Location names from the backup file, repeats allowed.
  * @returns Location ids keyed by lower-cased name.
  */
@@ -5147,24 +5425,28 @@ async function findOrCreateLocationsByName({
   // `in` + insensitive compiles to LOWER(name) IN (LOWER($1), …): an exact
   // match. `equals` + insensitive would be an ILIKE, where `_` and `%` in a
   // location name act as wildcards.
-  const existing = await db.location.findMany({
-    where: {
-      organizationId,
-      name: { in: [...spellings.values()], mode: "insensitive" },
-    },
-    select: { id: true, name: true },
-  });
-  for (const location of existing) {
+  const findByNames = (locationNames: string[]) =>
+    db.location.findMany({
+      where: {
+        organizationId,
+        name: { in: locationNames, mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+  for (const location of await findByNames([...spellings.values()])) {
     locationIds.set(location.name.toLowerCase(), location.id);
   }
 
   for (const [key, name] of spellings) {
     if (locationIds.has(key)) continue;
-    const created = await db.location.create({
-      data: { ...details.get(key), name, organizationId, userId },
-      select: { id: true },
-    });
-    locationIds.set(key, created.id);
+    const [existing] = await findByNames([name]);
+    const location =
+      existing ??
+      (await db.location.create({
+        data: { ...details.get(key), name, organizationId, userId },
+        select: { id: true },
+      }));
+    locationIds.set(key, location.id);
   }
 
   return locationIds;
@@ -5315,14 +5597,14 @@ export async function createAssetsFromBackupImport({
         backupType !== AssetType.QUANTITY_TRACKED
       ) {
         const modelPayload = asset.assetModel as { name: string };
+        // `in` keeps it an exact match: see `findOrCreateLocationsByName`.
+        // Asset model names are not unique, so the oldest match wins.
         const existingModel = await db.assetModel.findFirst({
           where: {
             organizationId,
-            name: {
-              equals: modelPayload.name.trim(),
-              mode: "insensitive",
-            },
+            name: { in: [modelPayload.name.trim()], mode: "insensitive" },
           },
+          orderBy: { createdAt: "asc" },
         });
         if (existingModel) {
           Object.assign(d.data, { assetModelId: existingModel.id });
@@ -5396,6 +5678,27 @@ export async function createAssetsFromBackupImport({
             quantity,
           }));
         Object.assign(d.data, { assetLocations: { create: placements } });
+      }
+
+      /** A pool's placements can hold more units than its stock: when a
+       * consume cannot tell which of several locations lost the units, the
+       * app lowers the stock and leaves the placements as they were (see
+       * `reconcileManualPlacementsForStockDecrease`). The restore takes the
+       * same two steps: it creates the pool with stock for its placements,
+       * then lowers the stock to the backup's quantity. Trimming a placement
+       * instead would record a location's count that was never true. */
+      const placedUnits = [...unitsByLocationId.values()].reduce(
+        (sum, units) => sum + units,
+        0
+      );
+      const stockBelowPlacements =
+        backupType === AssetType.QUANTITY_TRACKED &&
+        backupQuantity !== undefined &&
+        placedUnits > backupQuantity
+          ? backupQuantity
+          : undefined;
+      if (stockBelowPlacements !== undefined) {
+        Object.assign(d.data, { quantity: placedUnits });
       }
 
       /** Custody. Custodians travel by name, matched regardless of case like
@@ -5524,6 +5827,15 @@ export async function createAssetsFromBackupImport({
 
       /** Create the Asset */
       const { id: assetId } = await db.asset.create(d);
+      if (stockBelowPlacements !== undefined) {
+        // A write of its own, after the create has committed: the placement
+        // check is deferred to commit, and lowering the stock writes no
+        // placement, so nothing checks the sum again.
+        await db.asset.update({
+          where: { id: assetId, organizationId },
+          data: { quantity: stockBelowPlacements },
+        });
+      }
 
       // Activity event: ASSET_CREATED at the moment of creation.
       // The per-note createMany below restores HISTORICAL notes with
@@ -8377,6 +8689,34 @@ type CheckOutQuantityArgs = {
   role: OrganizationRoles;
   /** Optional note explaining the checkout */
   note?: string;
+  /**
+   * Where the units come from. A location id names one of the asset's manual
+   * placements; `null`, `""` or `"unplaced"` names the unplaced units (see
+   * `isUnplacedSource`). Leave it undefined
+   * when the caller did not ask (an older phone app): the service fills in
+   * the only placement of a pool at one location and otherwise records no
+   * source. See `resolveCustodySource`.
+   */
+  locationId?: string | null;
+};
+
+/** Where an assignment's units were recorded as coming from. */
+export type CustodySourceOutcome = {
+  /** The recorded source, NULL for the unplaced units or none recorded. */
+  locationId: string | null;
+  /**
+   * Whether the caller named the source. A NULL source the caller did not
+   * name (an older phone app on a pool with several sources) is "not
+   * recorded", not "unplaced".
+   */
+  explicit: boolean;
+  /** Name of that location, for the audit note. */
+  locationName: string | null;
+  /**
+   * Whether the pool was placed at two or more locations. Notes only mention the source
+   * then, so a pool at one location reads exactly as it always has.
+   */
+  multiSource: boolean;
 };
 
 /**
@@ -8386,13 +8726,22 @@ type CheckOutQuantityArgs = {
  * concurrent modifications. Validates that the asset is QUANTITY_TRACKED,
  * belongs to the given organization, and that enough units are available.
  *
- * Creates or increments a Custody record for the asset-teamMember pair
- * and logs an immutable CHECKOUT consumption log entry.
+ * Records where the units come from on the custody row (`locationId`), see
+ * {@link CheckOutQuantityArgs.locationId}. A named source must be a manual
+ * placement of this asset in this workspace (or the unplaced units, when
+ * there are any), and the quantity is capped by what that source has left:
+ * placed there minus already in custody from there. The pool-level cap
+ * applies too. Custody never changes a placement's count.
+ *
+ * Creates or increments the operator Custody row for the
+ * (asset, team member, source) triple and logs an immutable CHECKOUT
+ * consumption log entry.
  *
  * @param args - The checkout details
- * @returns The updated Asset record
+ * @returns The updated Asset record and the recorded source
  * @throws {ShelfError} If the asset is not QUANTITY_TRACKED, does not belong
- *   to the organization, or there are insufficient available units
+ *   to the organization, the source is not one of its placements, or there
+ *   are insufficient available units (pool-wide or at the source)
  */
 export async function checkOutQuantity({
   assetId,
@@ -8402,7 +8751,11 @@ export async function checkOutQuantity({
   organizationId,
   role,
   note,
-}: CheckOutQuantityArgs) {
+  locationId,
+}: CheckOutQuantityArgs): Promise<{
+  asset: Asset;
+  source: CustodySourceOutcome;
+}> {
   try {
     if (quantity <= 0) {
       throw new ShelfError({
@@ -8413,7 +8766,7 @@ export async function checkOutQuantity({
       });
     }
 
-    return await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
       const asset = await lockAssetForQuantityUpdate(
         tx,
@@ -8535,16 +8888,111 @@ export async function checkOutQuantity({
       }
 
       /**
+       * Step 6a: Decide where the units come from, read under the lock.
+       *
+       * A named source is validated here, inside the locked transaction:
+       * a location must be a MANUAL placement of this asset in this
+       * workspace (the org-scoped lookup doubles as the cross-org guard),
+       * and "unplaced" only exists while the pool has unplaced units.
+       *
+       * The per-source cap (placed there minus already in custody from
+       * there) applies to a named source only. A caller that names nothing
+       * is an older client that cannot ask, and it must never be refused for
+       * that: the pool-level check above still bounds it.
+       */
+      const sources = await loadCustodySources(tx, {
+        assetId,
+        total: totalQuantity,
+      });
+      const source = resolveCustodySource({
+        submitted: locationId,
+        state: sources.state,
+      });
+      const multiSource = hasMultipleSources(sources.state);
+      let sourceName: string | null = null;
+
+      if (source.locationId !== null) {
+        const placement = await tx.assetLocation.findFirst({
+          where: {
+            assetId,
+            locationId: source.locationId,
+            assetKitId: null,
+            organizationId,
+          },
+          select: { location: { select: { name: true } } },
+        });
+
+        if (!placement) {
+          throw new ShelfError({
+            cause: null,
+            title: "Location not found",
+            message:
+              "The selected location has no units of this asset. Choose one of the locations it is placed at.",
+            label,
+            status: 400,
+            additionalData: { assetId, locationId: source.locationId },
+            shouldBeCaptured: false,
+          });
+        }
+
+        sourceName = placement.location.name;
+      } else if (source.explicit && unplacedUnits(sources.state) <= 0) {
+        throw new ShelfError({
+          cause: null,
+          message:
+            "This asset has no unplaced units. Choose one of the locations it is placed at.",
+          label,
+          status: 400,
+          additionalData: { assetId },
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (source.explicit) {
+        const left = unitsLeftAtSource(sources.state, source.locationId);
+        if (quantity > left) {
+          const placedCount =
+            formatUnitCount(
+              asset,
+              placedAtSource(sources.state, source.locationId)
+            ) ?? "0 units";
+          throw new ShelfError({
+            cause: null,
+            ...sourceShortfall({
+              sourceName,
+              placedCount,
+              inCustody: custodyFromSource(sources.state, source.locationId),
+            }),
+            label,
+            status: 400,
+            additionalData: {
+              assetId,
+              locationId: source.locationId,
+              quantity,
+              left,
+            },
+            shouldBeCaptured: false,
+          });
+        }
+      }
+
+      /**
        * Step 7: Upsert the OPERATOR-allocated custody row (kitCustodyId
-       * IS NULL). Find-then-branch instead of `prisma.upsert` because
-       * the composite (assetId, teamMemberId) uniqueness is now split
-       * into two partial uniques (operator + kit-allocated) — Prisma's
-       * `upsert` needs a single declared unique. The operator partial
-       * still guarantees at most one matching row, so the find +
+       * IS NULL) for this (asset, team member, source). Find-then-branch
+       * instead of `prisma.upsert` because the uniqueness is a partial
+       * index in raw SQL, which Prisma cannot target.
+       * `Custody_operator_unique` (NULLS NOT DISTINCT) still guarantees at
+       * most one matching row, NULL source included, so the find +
        * create/update sequence is safe inside this tx.
        */
       const existingOperatorCustody = await tx.custody.findFirst({
-        where: { assetId, teamMemberId, kitCustodyId: null },
+        where: {
+          assetId,
+          teamMemberId,
+          kitCustodyId: null,
+          locationId: source.locationId,
+          sourceUnknown: source.sourceUnknown,
+        },
         select: { id: true },
       });
       if (existingOperatorCustody) {
@@ -8554,7 +9002,13 @@ export async function checkOutQuantity({
         });
       } else {
         await tx.custody.create({
-          data: { assetId, teamMemberId, quantity },
+          data: {
+            assetId,
+            teamMemberId,
+            quantity,
+            locationId: source.locationId,
+            sourceUnknown: source.sourceUnknown,
+          },
         });
       }
 
@@ -8601,6 +9055,7 @@ export async function checkOutQuantity({
         quantity,
         userId,
         custodianId: teamMemberId,
+        locationId: source.locationId,
         note,
         tx,
       });
@@ -8609,7 +9064,7 @@ export async function checkOutQuantity({
        * Step 9: Activity event. Emit `CUSTODY_ASSIGNED` inside the tx so
        * it commits atomically with the custody upsert. The `viaQuantity`
        * meta flag distinguishes qty-tracked custody slices from
-       * INDIVIDUAL-asset custody assignments.
+       * INDIVIDUAL-asset custody assignments; `locationId` is the source.
        */
       await recordEvent(
         {
@@ -8621,17 +9076,47 @@ export async function checkOutQuantity({
           assetId,
           teamMemberId,
           targetUserId: custodianTeamMember.user?.id ?? undefined,
+          locationId: source.locationId ?? undefined,
           meta: { quantity, viaQuantity: true },
         },
         tx
       );
 
-      /** Step 10: Return the refreshed asset */
-      return tx.asset.findUniqueOrThrow({
+      /** Step 10: Return the refreshed asset and the recorded source */
+      const refreshed = await tx.asset.findUniqueOrThrow({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
         where: { id: assetId },
       });
+
+      return {
+        asset: refreshed,
+        source: {
+          locationId: source.locationId,
+          explicit: source.explicit,
+          locationName: sourceName,
+          multiSource,
+        },
+      };
     });
+
+    /**
+     * Step 11: The source location's timeline says units went out from it,
+     * for pools placed at two or more locations only. Written after the commit
+     * (the location-note helper uses the global client), like the move
+     * notes. The holder's name stays out of it.
+     */
+    if (result.source.multiSource && result.source.locationId) {
+      await createCustodySourceLocationNote({
+        userId,
+        asset: result.asset,
+        locationId: result.source.locationId,
+        locationName: result.source.locationName,
+        quantity,
+        verb: "assigned",
+      });
+    }
+
+    return result;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -8647,13 +9132,32 @@ export async function checkOutQuantity({
   }
 }
 
+/** One source line of an explicit per-location release. */
+export type ReleaseSourceLine = {
+  /**
+   * The custody row's source: a location id, null or `UNPLACED_SOURCE` for
+   * the unplaced units, or `UNRECORDED_SOURCE` for a source never recorded.
+   */
+  locationId: string | null;
+  /** Units leaving the holder from this source. */
+  quantity: number;
+  /**
+   * How many of those were used up. Omit to derive it from the asset's
+   * `consumptionType`, like the single-line form.
+   */
+  consumed?: number;
+};
+
 /** Arguments for ending a custodian's hold on N units of a QT asset. */
 type ReleaseQuantityArgs = {
   /** The asset to release units for */
   assetId: string;
   /** The team member releasing custody */
   teamMemberId: string;
-  /** Number of units to release (must be positive integer) */
+  /**
+   * Number of units to release (must be positive integer). With `sources`,
+   * it must equal the sum of the lines.
+   */
   quantity: number;
   /** The user performing the release */
   userId: string;
@@ -8676,32 +9180,56 @@ type ReleaseQuantityArgs = {
    * How many of the released units were used up rather than handed back.
    * Omit to let the server derive it from the asset's `consumptionType`
    * (consume everything for a one-way consumable, nothing for a returnable).
-   * Only a consumable accepts a non-zero value.
+   * Only a consumable accepts a non-zero value. Ignored when `sources` is
+   * given (each line carries its own).
    */
   consumed?: number;
+  /**
+   * Release only the units taken from this source: a location id, the
+   * unplaced units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Undefined
+   * when the caller does not say (an older phone app, the bulk scanner): the
+   * holder's rows are then drawn in `orderRowsForDrain` order.
+   */
+  locationId?: string | null;
+  /**
+   * One line per source when the holder took units from several locations
+   * and the operator released them per location.
+   */
+  sources?: ReleaseSourceLine[];
+};
+
+/** One source line of a release, as applied. */
+export type AppliedReleaseLine = {
+  locationId: string | null;
+  /** Location name for the audit note; null for the unplaced units. */
+  locationName: string | null;
+  quantity: number;
+  consumed: number;
+  returned: number;
 };
 
 /**
  * Ends a custodian's hold on N units of a QUANTITY_TRACKED asset.
  *
  * Runs inside an interactive transaction with a row-level lock to prevent
- * concurrent modifications. Validates that a custody record exists for the
- * asset-teamMember pair and that the release quantity does not exceed what
- * the custodian currently holds.
- *
- * If releasing the full custodied amount, the Custody record is deleted.
- * Otherwise, the quantity is decremented.
+ * concurrent modifications. The holder's operator custody may sit in several
+ * rows, one per source location; which rows are drawn from is decided by
+ * `sources`, `locationId`, or (when neither is given) the drain order.
+ * Each row is deleted when fully released and decremented otherwise.
  *
  * **What happens to the units depends on `Asset.consumptionType`, and on an
  * optional explicit split:**
  *
- * - `TWO_WAY` / legacy `null` — the units return to the available pool. A
+ * - `TWO_WAY` / legacy `null`: the units return to the available pool. A
  *   `RETURN` consumption log is written and `Asset.quantity` is untouched.
- *   These assets reject a non-zero `consumed`.
- * - `ONE_WAY` — the units default to consumed and are gone for good: a
+ *   These assets reject a non-zero `consumed`. Placements never change: the
+ *   units were never taken off their location.
+ * - `ONE_WAY`: the units default to consumed and are gone for good: a
  *   `CONSUME` log is written and `Asset.quantity` decremented, matching what
  *   booking check-in already does for a consumable. An explicit `consumed`
- *   splits the release, so unused units can still be handed back.
+ *   splits the release, so unused units can still be handed back. Consumed
+ *   units come off the row's recorded source location; units with no
+ *   recorded source are absorbed by the unplaced remainder first.
  *
  * The default is taken here rather than in a sibling `consumeQuantity` service
  * so it is always derived from the asset row itself: both the web and mobile
@@ -8709,10 +9237,11 @@ type ReleaseQuantityArgs = {
  * wrong outcome for a consumable.
  *
  * @param args - The release details
- * @returns The updated Asset record plus the `consumed` / `returned` split
- * @throws {ShelfError} If no custody record exists, the release quantity
- *   exceeds the custodied amount, `consumed` is out of range, or a returnable
- *   asset was asked to consume
+ * @returns The updated Asset record, the `consumed` / `returned` split, the
+ *   per-source lines and whether the pool is placed at two or more locations
+ * @throws {ShelfError} If no custody record exists (for that source), the
+ *   release quantity exceeds what is held, `consumed` is out of range, or a
+ *   returnable asset was asked to consume
  */
 export async function releaseQuantity({
   assetId,
@@ -8723,6 +9252,8 @@ export async function releaseQuantity({
   role,
   note,
   consumed,
+  locationId,
+  sources: sourceLines,
 }: ReleaseQuantityArgs) {
   try {
     if (quantity <= 0) {
@@ -8734,7 +9265,7 @@ export async function releaseQuantity({
       });
     }
 
-    return await db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       /** Step 1: Acquire row-level lock to prevent concurrent modifications */
       const asset = await lockAssetForQuantityUpdate(
         tx,
@@ -8795,69 +9326,62 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 3b: Resolve how many units were used up vs. handed back.
-       *
-       * The DEFAULT comes from the LOCKED asset row — never from the caller
-       * alone — so a stale client can't return a consumable's units to the
-       * pool. `lockAssetForQuantityUpdate` does `SELECT *`, so
-       * `consumptionType` is already on hand.
+       * Step 3b: The default split comes from the LOCKED asset row, never
+       * from the caller alone, so a stale client can't return a
+       * consumable's units to the pool. `lockAssetForQuantityUpdate` does
+       * `SELECT *`, so `consumptionType` is already on hand.
        *
        * An explicit `consumed` lets an operator record a partial use: 40
-       * gloves come back, 10 of them actually used. Without it the only
-       * available action would destroy all 40, which is the same split
-       * booking check-in already offers for consumables. It can only ever
-       * narrow a consumable's outcome — a returnable asset rejects it below.
+       * gloves come back, 10 of them actually used. It can only ever narrow
+       * a consumable's outcome; a returnable asset rejects it below.
        */
       const canConsume = releaseCategory(asset.consumptionType) === "CONSUME";
-      const consumedUnits = consumed ?? (canConsume ? quantity : 0);
-      const returnedUnits = quantity - consumedUnits;
 
-      if (
-        !Number.isInteger(consumedUnits) ||
-        consumedUnits < 0 ||
-        consumedUnits > quantity
-      ) {
-        throw new ShelfError({
-          cause: null,
-          message: `Cannot mark ${consumedUnits} of ${quantity} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: { assetId, teamMemberId, quantity, consumed },
-        });
-      }
-
-      if (consumedUnits > 0 && !canConsume) {
-        throw new ShelfError({
-          cause: null,
-          message:
-            "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
-          label,
-          status: 400,
-          shouldBeCaptured: false,
-          additionalData: {
-            assetId,
-            consumptionType: asset.consumptionType,
-          },
-        });
-      }
+      const assertConsumedInRange = (lineConsumed: number, lineQty: number) => {
+        if (
+          !Number.isInteger(lineConsumed) ||
+          lineConsumed < 0 ||
+          lineConsumed > lineQty
+        ) {
+          throw new ShelfError({
+            cause: null,
+            message: `Cannot mark ${lineConsumed} of ${lineQty} unit(s) as consumed. The consumed amount must be a whole number between 0 and the quantity being released.`,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: { assetId, teamMemberId, quantity, consumed },
+          });
+        }
+        if (lineConsumed > 0 && !canConsume) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "Only consumable (one-way) assets can be marked as consumed. This asset's units return to the available pool when released.",
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            additionalData: {
+              assetId,
+              consumptionType: asset.consumptionType,
+            },
+          });
+        }
+      };
 
       /**
-       * Step 4: Find the OPERATOR-allocated custody row for this
-       * (asset, teamMember) pair. `findFirst` filtered to
-       * `kitCustodyId: null` because the composite (assetId, teamMemberId)
-       * uniqueness was split into two partial uniques — a custodian can
-       * legitimately hold both an operator-allocated row AND one-or-more
-       * kit-allocated rows on the same asset, and only the operator row
-       * is releasable from this endpoint. The kit-allocated rows are
-       * released by releasing the kit's custody (which cascade-deletes
-       * them via `KitCustody.id` → `Custody.kitCustodyId`).
+       * Step 4: The holder's OPERATOR-allocated rows (`kitCustodyId` NULL),
+       * one per source location. Kit-allocated rows are released by
+       * releasing the kit's custody, which cascade-deletes them.
        */
-      const custody = await tx.custody.findFirst({
-        where: { assetId, teamMemberId, kitCustodyId: null },
+      const sourceState = await loadCustodySources(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
       });
+      const holderRows = sourceState.rows.filter(
+        (row) => row.teamMemberId === teamMemberId
+      );
 
-      if (!custody) {
+      if (holderRows.length === 0) {
         throw new ShelfError({
           cause: null,
           message: "No custody record found for this team member and asset.",
@@ -8867,43 +9391,148 @@ export async function releaseQuantity({
         });
       }
 
-      /** Step 5: Validate the release quantity does not exceed custodied amount */
-      if (quantity > custody.quantity) {
+      const heldTotal = holderRows.reduce((sum, row) => sum + row.quantity, 0);
+      /**
+       * The holder's row for a submitted source: a location id, the unplaced
+       * units (`isUnplacedSource`), or `UNRECORDED_SOURCE`. Rows are keyed by
+       * `custodySourceKey`, so the unplaced row and the never-recorded row of
+       * one holder stay apart although both have a NULL location.
+       */
+      const rowForSource = (submitted: string | null) => {
+        const sourceId = isUnplacedSource(submitted)
+          ? UNPLACED_SOURCE
+          : submitted;
+        const row = holderRows.find((r) => custodySourceKey(r) === sourceId);
+        if (!row) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "This person holds no units of this asset from the selected location.",
+            label,
+            status: 404,
+            additionalData: { assetId, teamMemberId, locationId: sourceId },
+            shouldBeCaptured: false,
+          });
+        }
+        return row;
+      };
+      const refuseOverRelease = (held: number) => {
         throw new ShelfError({
           cause: null,
-          message: `Cannot release ${quantity} units. The custodian only holds ${custody.quantity} units.`,
+          message: `Cannot release ${quantity} units. The custodian only holds ${held} units.`,
           label,
           status: 400,
           additionalData: {
             assetId,
             teamMemberId,
             quantity,
-            custodied: custody.quantity,
+            custodied: held,
           },
         });
+      };
+
+      /** Step 5: Decide which rows lose how many units. */
+      let lines: ReleaseLine[];
+
+      if (sourceLines && sourceLines.length > 0) {
+        const seen = new Set<string>();
+        lines = sourceLines
+          .filter((line) => line.quantity > 0)
+          .map((line) => {
+            const sourceId = isUnplacedSource(line.locationId)
+              ? UNPLACED_SOURCE
+              : line.locationId;
+            if (seen.has(sourceId)) {
+              throw new ShelfError({
+                cause: null,
+                message: "Each location can appear only once in a release.",
+                label,
+                status: 400,
+                additionalData: { assetId, teamMemberId },
+                shouldBeCaptured: false,
+              });
+            }
+            seen.add(sourceId);
+            const row = rowForSource(sourceId);
+            if (
+              !Number.isInteger(line.quantity) ||
+              line.quantity > row.quantity
+            ) {
+              refuseOverRelease(row.quantity);
+            }
+            const lineConsumed =
+              line.consumed ?? (canConsume ? line.quantity : 0);
+            assertConsumedInRange(lineConsumed, line.quantity);
+            return {
+              rowId: row.id,
+              locationId: row.locationId,
+              quantity: line.quantity,
+              consumed: lineConsumed,
+            };
+          });
+
+        const linesTotal = lines.reduce((sum, line) => sum + line.quantity, 0);
+        if (linesTotal !== quantity) {
+          throw new ShelfError({
+            cause: null,
+            message:
+              "The quantities per location do not add up to the quantity being released.",
+            label,
+            status: 400,
+            additionalData: { assetId, teamMemberId, quantity, linesTotal },
+            shouldBeCaptured: false,
+          });
+        }
+      } else {
+        const consumedUnits = consumed ?? (canConsume ? quantity : 0);
+        assertConsumedInRange(consumedUnits, quantity);
+
+        if (locationId !== undefined) {
+          const row = rowForSource(locationId);
+          if (quantity > row.quantity) refuseOverRelease(row.quantity);
+          lines = [
+            {
+              rowId: row.id,
+              locationId: row.locationId,
+              quantity,
+              consumed: consumedUnits,
+            },
+          ];
+        } else {
+          if (quantity > heldTotal) refuseOverRelease(heldTotal);
+          lines = planDrainRelease({
+            rows: holderRows,
+            quantity,
+            consumed: consumedUnits,
+          });
+        }
       }
 
+      const consumedTotal = lines.reduce((sum, line) => sum + line.consumed, 0);
+      const returnedTotal = quantity - consumedTotal;
+
       /**
-       * Step 6: Delete the custody record if releasing full amount, else
-       * decrement. Target by `Custody.id` (primary key) since the global
-       * composite unique is gone — the row we already loaded via
-       * `findFirst` above is the authoritative reference.
+       * Step 6: Delete each drawn row when fully released, else decrement.
+       * Targets by `Custody.id`: the rows were read above under the lock.
        */
-      if (quantity === custody.quantity) {
-        await tx.custody.delete({
-          where: { id: custody.id },
-        });
-      } else {
-        await tx.custody.update({
-          where: { id: custody.id },
-          data: { quantity: { decrement: quantity } },
-        });
+      for (const line of lines) {
+        const row = holderRows.find((r) => r.id === line.rowId);
+        if (row && line.quantity === row.quantity) {
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `line.rowId` is one of the holder's operator rows read above for this org-verified, locked asset
+          await tx.custody.delete({ where: { id: line.rowId } });
+        } else {
+          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: same provenance as the delete above
+          await tx.custody.update({
+            where: { id: line.rowId },
+            data: { quantity: { decrement: line.quantity } },
+          });
+        }
       }
 
       /**
        * Step 6b: If this release removed the last Custody row on the asset,
        * flip Asset.status back to AVAILABLE. Without this, the asset stays
-       * stuck at IN_CUSTODY even after every unit has been returned —
+       * stuck at IN_CUSTODY even after every unit has been returned,
        * matching the conditional-flip pattern used by the kit-custody
        * flows (`releaseCustody` / `bulkRemoveAssetsFromKits` /
        * `updateKitAssets` removal). We only flip when zero rows remain so
@@ -8915,7 +9544,7 @@ export async function releaseQuantity({
        * are still out on an ONGOING booking would advertise the asset as
        * `AVAILABLE` on every picker and index while it is physically gone.
        * Same precedence as the sibling guard in `checkOutQuantity` Step 6b
-       * and as `reconcileAssetStatusForBookingExit` — the booking flows own
+       * and as `reconcileAssetStatusForBookingExit`; the booking flows own
        * the transition out of `CHECKED_OUT`.
        */
       const remainingCustodyCount = await tx.custody.count({
@@ -8933,7 +9562,7 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 6c: Consumed units did not come back — they were used up.
+       * Step 6c: Consumed units did not come back: they were used up.
        * Permanently remove exactly those from stock, mirroring the `CONSUME`
        * branch in booking check-in. Returned units are untouched here: they
        * are already back in the pool the moment custody dropped.
@@ -8941,34 +9570,28 @@ export async function releaseQuantity({
        * No pool-drain guard is needed (unlike booking check-in, which
        * decrements the pool WITHOUT touching custody). With
        * `available = Asset.quantity - SUM(Custody.quantity)`, this step
-       * changes the total by `-consumedUnits` while step 6 changed custody by
-       * `-quantity`, so available moves by exactly `returnedUnits` and never
-       * goes negative: `consumedUnits <= quantity <= custody.quantity <= C <= Q`.
-       * The same cancellation holds for `bookable` and `physicalAvailable`,
-       * both of which subtract `inCustody` from `total` — which is why no
-       * reservation guard is required either.
+       * changes the total by `-consumedTotal` while step 6 changed custody by
+       * `-quantity`, so available moves by exactly `returnedTotal` and never
+       * goes negative.
        *
        * Lowering the total can push the location axis out of bounds, so the
-       * placement sum is reconciled below — nothing else catches it.
+       * placement sum is reconciled below: nothing else catches it.
        * `asset_location_sum_within_total` is `AFTER INSERT OR UPDATE OR
-       * DELETE ON "AssetLocation"` (see
-       * `20260519143054_add_asset_location_pivot`), so it never fires on an
-       * `Asset` write, and `assertAssetQuantityNotBelowReservations` queries
-       * custody / assetKit / bookingAsset / consumptionLog, not assetLocation.
+       * DELETE ON "AssetLocation"`, so it never fires on an `Asset` write.
        */
-      if (consumedUnits > 0) {
+      if (consumedTotal > 0) {
         const beforeQuantity = asset.quantity ?? 0;
         await tx.asset.update({
           // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
           where: { id: assetId },
-          data: { quantity: { decrement: consumedUnits } },
+          data: { quantity: { decrement: consumedTotal } },
         });
 
         /**
          * Audit the stock drop as its own event. Consuming changes TWO
-         * things — who holds the units (CUSTODY_RELEASED, below) and how
-         * many exist (this one) — and per the one-event-per-field rule each
-         * gets its own row so reports can aggregate stock movement without
+         * things (who holds the units, CUSTODY_RELEASED below, and how many
+         * exist, this one) and per the one-event-per-field rule each gets
+         * its own row so reports can aggregate stock movement without
          * parsing custody meta.
          */
         await recordEvent(
@@ -8981,36 +9604,38 @@ export async function releaseQuantity({
             assetId,
             field: "quantity",
             fromValue: beforeQuantity,
-            toValue: beforeQuantity - consumedUnits,
+            toValue: beforeQuantity - consumedTotal,
           },
           tx
         );
 
         /**
-         * Restore the PRD's location-axis invariant
-         * (`SUM(AssetLocation.quantity WHERE assetKitId IS NULL) <=
-         * Asset.quantity`). Destroying units lowers the total every claim is
-         * measured against, so a placement sum that was valid a moment ago can
-         * now exceed it. Nothing else catches that:
-         * `asset_location_sum_within_total` only fires on an `AssetLocation`
-         * write, so an `Asset` write slips past it silently until a later,
-         * legitimate placement edit is refused.
-         *
-         * Runs inside this tx so the reconcile commits with the decrement it
-         * corrects — a half-applied pair would leave exactly the drift this is
-         * here to prevent.
+         * Restore the location-axis invariant (`SUM(AssetLocation.quantity
+         * WHERE assetKitId IS NULL) <= Asset.quantity`). Consumed units come
+         * off the location their custody row recorded; units with no
+         * recorded source fall to the generic rules (unplaced remainder
+         * first, then a single placement). Runs inside this tx so the
+         * reconcile commits with the decrement it corrects.
          */
         const reconcile = await reconcileManualPlacementsForStockDecrease({
           assetId,
-          newTotal: beforeQuantity - consumedUnits,
+          newTotal: beforeQuantity - consumedTotal,
           tx,
+          sources: lines
+            .filter(
+              (line): line is ReleaseLine & { locationId: string } =>
+                line.locationId !== null && line.consumed > 0
+            )
+            .map((line) => ({
+              locationId: line.locationId,
+              quantity: line.consumed,
+            })),
         });
 
         /**
-         * Surface an unresolvable case rather than fabricating provenance.
-         * With several placements and no unplaced residual left, nothing
-         * records which location the consumed units came off, so the drift
-         * persists and is reported instead of being papered over with a guess.
+         * Surface an unresolvable case rather than fabricating provenance:
+         * units with no recorded source on a pool whose placements already
+         * exceed its total.
          */
         reportAmbiguousPlacementReconcile({
           result: reconcile,
@@ -9020,51 +9645,50 @@ export async function releaseQuantity({
       }
 
       /**
-       * Step 7: Immutable audit log — one entry per non-zero leg. `CONSUME`
-       * records units that were used up (the decrement above); `RETURN`
-       * records units that went back into the available pool. Same category
-       * discriminator booking check-in uses, so consumption reporting sees
-       * every path identically.
+       * Step 7: Immutable audit log, one entry per non-zero leg per source.
+       * `CONSUME` records units that were used up; `RETURN` records units
+       * that went back into the available pool. Both carry the source
+       * location. Same category discriminator booking check-in uses, so
+       * consumption reporting sees every path identically.
        *
-       * Both calls are conditional because `createConsumptionLog` rejects a
-       * non-positive quantity. A pure return therefore writes exactly the one
-       * RETURN row it always did.
-       *
-       * A split attaches the operator's note to both rows: it explains the
-       * single action the operator took, and there is no per-leg note field.
+       * `createConsumptionLog` rejects a non-positive quantity, hence the
+       * guards. A split attaches the operator's note to both rows: it
+       * explains the single action the operator took.
        */
-      if (consumedUnits > 0) {
-        await createConsumptionLog({
-          assetId,
-          category: "CONSUME",
-          quantity: consumedUnits,
-          userId,
-          custodianId: teamMemberId,
-          note,
-          tx,
-        });
-      }
-
-      if (returnedUnits > 0) {
-        await createConsumptionLog({
-          assetId,
-          category: "RETURN",
-          quantity: returnedUnits,
-          userId,
-          custodianId: teamMemberId,
-          note,
-          tx,
-        });
+      for (const line of lines) {
+        const lineReturned = line.quantity - line.consumed;
+        if (line.consumed > 0) {
+          await createConsumptionLog({
+            assetId,
+            category: "CONSUME",
+            quantity: line.consumed,
+            userId,
+            custodianId: teamMemberId,
+            locationId: line.locationId,
+            note,
+            tx,
+          });
+        }
+        if (lineReturned > 0) {
+          await createConsumptionLog({
+            assetId,
+            category: "RETURN",
+            quantity: lineReturned,
+            userId,
+            custodianId: teamMemberId,
+            locationId: line.locationId,
+            note,
+            tx,
+          });
+        }
       }
 
       /**
-       * Step 8: Activity event — emit `CUSTODY_RELEASED` inside the tx so
-       * it commits atomically with the custody decrement/delete. Mirrors
-       * `checkOutQuantity` — the `viaQuantity` meta flag distinguishes
-       * qty-tracked releases from INDIVIDUAL-asset custody releases. The
-       * custodian stops holding the units either way, so this event is
-       * emitted for both outcomes; `meta.consumed` / `meta.returned` record
-       * the split.
+       * Step 8: Activity event: one `CUSTODY_RELEASED` per source line,
+       * inside the tx so it commits atomically with the custody change.
+       * The `viaQuantity` meta flag distinguishes qty-tracked releases from
+       * INDIVIDUAL-asset custody releases; `meta.consumed` /
+       * `meta.returned` record the split and `locationId` the source.
        */
       const custodianTeamMember = await tx.teamMember.findFirst({
         // org-scoped: teamMemberId is request input, so scope the lookup to
@@ -9072,25 +9696,40 @@ export async function releaseQuantity({
         where: { id: teamMemberId, organizationId },
         select: { user: { select: { id: true } } },
       });
-      await recordEvent(
-        {
-          organizationId,
-          actorUserId: userId,
-          action: "CUSTODY_RELEASED",
-          entityType: "ASSET",
-          entityId: assetId,
-          assetId,
-          teamMemberId,
-          targetUserId: custodianTeamMember?.user?.id ?? undefined,
-          meta: {
-            quantity,
-            viaQuantity: true,
-            consumed: consumedUnits,
-            returned: returnedUnits,
+      for (const line of lines) {
+        await recordEvent(
+          {
+            organizationId,
+            actorUserId: userId,
+            action: "CUSTODY_RELEASED",
+            entityType: "ASSET",
+            entityId: assetId,
+            assetId,
+            teamMemberId,
+            targetUserId: custodianTeamMember?.user?.id ?? undefined,
+            locationId: line.locationId ?? undefined,
+            meta: {
+              quantity: line.quantity,
+              viaQuantity: true,
+              consumed: line.consumed,
+              returned: line.quantity - line.consumed,
+            },
           },
-        },
-        tx
-      );
+          tx
+        );
+      }
+
+      /** Location names for the audit note, org-scoped. */
+      const lineLocationIds = lines
+        .map((line) => line.locationId)
+        .filter((id): id is string => id !== null);
+      const lineLocations = lineLocationIds.length
+        ? await tx.location.findMany({
+            where: { id: { in: lineLocationIds }, organizationId },
+            select: { id: true, name: true },
+          })
+        : [];
+      const nameById = new Map(lineLocations.map((l) => [l.id, l.name]));
 
       /** Step 9: Return the refreshed asset plus the split that was applied */
       const updatedAsset = await tx.asset.findUniqueOrThrow({
@@ -9098,12 +9737,45 @@ export async function releaseQuantity({
         where: { id: assetId },
       });
 
+      const appliedLines: AppliedReleaseLine[] = lines.map((line) => ({
+        locationId: line.locationId,
+        locationName: line.locationId
+          ? nameById.get(line.locationId) ?? null
+          : null,
+        quantity: line.quantity,
+        consumed: line.consumed,
+        returned: line.quantity - line.consumed,
+      }));
+
       return {
         asset: updatedAsset,
-        consumed: consumedUnits,
-        returned: returnedUnits,
+        consumed: consumedTotal,
+        returned: returnedTotal,
+        lines: appliedLines,
+        multiSource: hasMultipleSources(sourceState.state),
       };
     });
+
+    /**
+     * Step 10: Used-up units taken off a location are written on that
+     * location's timeline, for pools placed at two or more locations only.
+     */
+    if (result.multiSource) {
+      for (const line of result.lines) {
+        if (line.locationId && line.consumed > 0) {
+          await createCustodySourceLocationNote({
+            userId,
+            asset: result.asset,
+            locationId: line.locationId,
+            locationName: line.locationName,
+            quantity: line.consumed,
+            verb: "consumed",
+          });
+        }
+      }
+    }
+
+    return result;
   } catch (cause) {
     if (cause instanceof ShelfError) {
       throw cause;
@@ -9303,9 +9975,15 @@ export async function moveAssetLocationUnits(
         });
       }
 
+      /** Custody sources as they stand before the move, for the re-home. */
+      const custodyBefore = await loadCustodySources(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
+      });
+
       /**
        * Step 8: Decrement (or delete) the source manual row. Deleting
-       * at zero keeps the manual-placement reads clean — an empty
+       * at zero keeps the manual-placement reads clean: an empty
        * `AssetLocation` row would otherwise show up in placement lists
        * as "0 units here", which the existing UI doesn't expect.
        */
@@ -9405,11 +10083,25 @@ export async function moveAssetLocationUnits(
         tx
       );
 
+      /**
+       * Step 10b: Custody follows the units. Units not in custody leave the
+       * source first; only when the source ends up holding fewer units than
+       * are in custody from it does that excess custody move to the
+       * destination. Never refused.
+       */
+      const rehome = await rehomeCustodyForPlacementChange(tx, {
+        assetId,
+        total: asset.quantity ?? 0,
+        before: custodyBefore,
+        destinationLocationId: toLocationId,
+      });
+
       /** Returned to the caller so we can write notes outside the tx. */
       return {
         fromQuantity: sourceRowDeleted ? 0 : source.quantity - quantity,
         toQuantity: destNewQuantity,
         sourceRowDeleted,
+        rehome,
         assetSnapshot: {
           type: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
@@ -9516,6 +10208,17 @@ export async function moveAssetLocationUnits(
         }),
       ]);
     }
+
+    await createCustodyRehomeNote({
+      result: txResult.rehome,
+      asset: {
+        id: assetId,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+      },
+      userId,
+      organizationId,
+    });
 
     return {
       fromQuantity: txResult.fromQuantity,
@@ -9663,10 +10366,16 @@ export async function placeUnplacedUnits(
         });
       }
 
+      /** Custody sources as they stand before placing, for the re-home. */
+      const custodyBefore = await loadCustodySources(tx, {
+        assetId,
+        total: totalQuantity,
+      });
+
       /**
        * Upsert the manual destination row, scoped by the
        * `assetKitId IS NULL` partial-unique. A kit-driven row may coexist
-       * at the same `(assetId, locationId)` — we must not collide with it.
+       * at the same `(assetId, locationId)`, so we must not collide with it.
        */
       const existingDest = await tx.assetLocation.findFirst({
         where: { assetId, locationId: toLocationId, assetKitId: null },
@@ -9725,8 +10434,22 @@ export async function placeUnplacedUnits(
         tx
       );
 
+      /**
+       * Unplaced units not in custody are placed first. Once the unplaced
+       * pile holds fewer units than are in custody from it, that excess
+       * custody now belongs at the destination: it is the only place the
+       * unplaced units went.
+       */
+      const rehome = await rehomeCustodyForPlacementChange(tx, {
+        assetId,
+        total: totalQuantity,
+        before: custodyBefore,
+        destinationLocationId: toLocationId,
+      });
+
       return {
         toQuantity: destNewQuantity,
+        rehome,
         assetSnapshot: {
           type: asset.type,
           unitOfMeasure: asset.unitOfMeasure,
@@ -9794,6 +10517,17 @@ export async function placeUnplacedUnits(
         userId,
       });
     }
+
+    await createCustodyRehomeNote({
+      result: txResult.rehome,
+      asset: {
+        id: assetId,
+        type: txResult.assetSnapshot.type,
+        unitOfMeasure: txResult.assetSnapshot.unitOfMeasure,
+      },
+      userId,
+      organizationId,
+    });
 
     return {
       toQuantity: txResult.toQuantity,

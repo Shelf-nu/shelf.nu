@@ -35,6 +35,7 @@ import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
 import { InventorySegment } from "@/components/kits/inventory-segment";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
+import { createLatestRequest } from "@/lib/latest-request";
 
 const PAGE_SIZE = 20;
 const keyExtractor = (item: AssetListItem) => item.id;
@@ -96,6 +97,7 @@ function AssetsListContent() {
   );
   const [totalPages, setTotalPages] = useState(0);
   const nextPage = useRef(1);
+  const latestRequest = useRef(createLatestRequest()).current;
   const listRef = useRef<FlatList>(null);
   useScrollToTop(listRef);
 
@@ -126,17 +128,24 @@ function AssetsListContent() {
   }, [searchInput]);
 
   const fetchAssets = useCallback(
-    async (pageNum: number, reset: boolean) => {
+    async (pageNum: number, reset: boolean, signal: AbortSignal) => {
       if (!currentOrg) return;
       const filter = FILTERS[activeFilter];
-      const { data, error: fetchErr } = await api.assets(currentOrg.id, {
-        search: debouncedSearch || undefined,
-        page: pageNum,
-        perPage: PAGE_SIZE,
-        status: filter.status || undefined,
-        myCustody: filter.myCustody || undefined,
-      });
-      if (!data && !fetchErr) return; // Request cancelled (navigation) — ignore
+      const { data, error: fetchErr } = await api.assets(
+        currentOrg.id,
+        {
+          search: debouncedSearch || undefined,
+          page: pageNum,
+          perPage: PAGE_SIZE,
+          status: filter.status || undefined,
+          myCustody: filter.myCustody || undefined,
+        },
+        { signal }
+      );
+      // Refused two ways. An abort answers with neither data nor error, and a
+      // response that landed before the abort but after this request was
+      // superseded still carries rows for a query the operator has moved past.
+      if (signal.aborted || (!data && !fetchErr)) return;
       if (fetchErr || !data) {
         setError(fetchErr || "Failed to load assets");
         return;
@@ -162,12 +171,15 @@ function AssetsListContent() {
 
   // Reset cache when org changes so useFocusEffect refetches
   useEffect(() => {
+    // An answer about the workspace being left must not land afterwards and
+    // refill the list with another workspace's assets.
+    latestRequest.cancel();
     lastFetchedAt.current = 0;
     hasFetchedAssets.current = false;
     setAssets([]);
     setError(null);
     nextPage.current = 1;
-  }, [currentOrg?.id]);
+  }, [currentOrg?.id, latestRequest]);
 
   // Refresh on search/filter change — resets the stale timer so useFocusEffect picks it up
   const isFirstRender = useRef(true);
@@ -180,7 +192,13 @@ function AssetsListContent() {
     setIsLoading(true);
     nextPage.current = 1;
     lastFetchedAt.current = 0; // force fresh fetch
-    fetchAssets(1, true).finally(() => {
+    const signal = latestRequest.beginReset();
+    fetchAssets(1, true, signal).finally(() => {
+      latestRequest.endReset(signal);
+      // The signal identifies this request. An abandoned one must not stamp
+      // freshness or clear the spinner: the request that replaced it is still
+      // running and will do both when it answers.
+      if (signal.aborted) return;
       setIsLoading(false);
       lastFetchedAt.current = Date.now();
     });
@@ -204,7 +222,13 @@ function AssetsListContent() {
       }
       nextPage.current = 1;
       const isFirstLoad = !hasFetchedAssets.current;
-      fetchAssets(1, true).finally(() => {
+      const signal = latestRequest.beginReset();
+      fetchAssets(1, true, signal).finally(() => {
+        latestRequest.endReset(signal);
+        // The signal identifies this request. An abandoned one must not stamp
+        // freshness or clear the spinner: the request that replaced it is still
+        // running and will do both when it answers.
+        if (signal.aborted) return;
         setIsLoading(false);
         lastFetchedAt.current = Date.now();
         if (isFirstLoad) {
@@ -221,23 +245,39 @@ function AssetsListContent() {
       });
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentOrg?.id, fetchAssets])
+    }, [currentOrg?.id, fetchAssets, latestRequest])
   );
 
   const onRefresh = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setIsRefreshing(true);
     nextPage.current = 1;
-    await fetchAssets(1, true);
+    const signal = latestRequest.beginReset();
+    await fetchAssets(1, true, signal);
+    latestRequest.endReset(signal);
+    // The operator pulled this spinner, so it stops either way.
     setIsRefreshing(false);
-    announce("Content refreshed");
+    // The shared skeleton belongs to whichever request is still current. A
+    // newer one is mid-flight and will clear it when it answers; clearing it
+    // here would show the empty state until then. Nothing supersedes the
+    // newest request, so it is always the one that gets here unaborted.
+    if (!signal.aborted) {
+      setIsLoading(false);
+      announce("Content refreshed");
+    }
   };
 
   const onEndReached = async () => {
     if (isLoadingMore || nextPage.current > totalPages) return;
+    // The rows on screen are about to be replaced, so there is nothing
+    // meaningful to add a page to. Claiming the slot here would also abandon
+    // that reset and leave both queries' rows on screen together.
+    if (latestRequest.isResetPending()) return;
     setIsLoadingMore(true);
-    await fetchAssets(nextPage.current, false);
+    const signal = latestRequest.begin();
+    await fetchAssets(nextPage.current, false, signal);
     setIsLoadingMore(false);
+    if (!signal.aborted) setIsLoading(false);
   };
 
   const renderAsset = useCallback(

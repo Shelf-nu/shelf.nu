@@ -24,6 +24,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -157,6 +158,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: discriminates operator rows (null) from kit-allocated rows
             // so the shaper can compute `releasableQuantity` per holder.
             kitCustodyId: true,
+            // why: the location each operator row's units were taken from,
+            // for the additive `custodyList[].sources` below.
+            location: { select: { id: true, name: true } },
+            // why: tells unplaced units apart from a source never recorded
+            // in those `sources` (both have a null location).
+            sourceUnknown: true,
             custodian: {
               select: {
                 id: true,
@@ -423,13 +430,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's `QuantityCustodyList` filter and hidden
     // count (its `canViewAllCustody` prop).
-    const { custodyList, custodyListOthersCount } =
+    const { custodyList: visibleCustodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
         canSeeAllCustody,
       });
+
+    /**
+     * Additive: where each holder's operator units were taken from, one entry
+     * per source (`locationId` null: the unplaced units, or with
+     * `unrecorded: true` a source never recorded). Kit-inherited units are not
+     * listed: they follow the kit. The app shows these only for a pool placed
+     * at two or more distinct locations (count distinct manual `placements`),
+     * and releases per source with the entry's `locationId`, or
+     * `"unrecorded"` for an unrecorded entry.
+     */
+    const custodyList = visibleCustodyList.map((entry) => ({
+      ...entry,
+      sources: buildCustodySourceEntries(
+        detailCustody.filter(
+          (row) => !row.kitCustodyId && row.custodian.id === entry.custodian.id
+        )
+      ),
+    }));
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
     // viewers without custody-view permission unless they ARE the custodian —
