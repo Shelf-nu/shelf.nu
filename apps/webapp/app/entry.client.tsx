@@ -6,6 +6,7 @@ import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
 import { isUnsupportedBrowser } from "~/utils/browser-support";
+import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
 import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
 import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
@@ -21,7 +22,7 @@ if (window.env?.SENTRY_DSN) {
     // FLY_RELEASE_VERSION aren't set (local dev).
     release: window.env.SENTRY_RELEASE || undefined,
     environment: window.env.NODE_ENV,
-    tunnel: "/api/sentry-tunnel",
+    tunnel: SENTRY_TUNNEL_PATH,
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
     beforeSendTransaction(event) {

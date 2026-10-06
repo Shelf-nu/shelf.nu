@@ -7,6 +7,7 @@ import type { AppLoadContext } from "react-router";
 import type { HonoServerOptions } from "react-router-hono-server/node";
 import { createHonoServer } from "react-router-hono-server/node";
 import { getSession, session } from "remix-hono/session";
+import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
 import { initEnv } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { runWithTabId } from "~/utils/tab-id.server";
@@ -22,6 +23,7 @@ import {
   appLoaderRateLimit,
   calendarFeedRateLimit,
   mobileIpRateLimit,
+  sentryTunnelRateLimit,
 } from "./rate-limit";
 import { runWithRequestCache } from "./request-cache.server";
 import { securityHeaders } from "./security-headers";
@@ -146,6 +148,14 @@ export default createHonoServer<ServerEnv>({
     server.use("/api/calendar/feed/*", calendarFeedRateLimit());
 
     /**
+     * Sentry tunnel rate limit. The tunnel is public (below), so it is an
+     * anonymous POST relay into our own Sentry project; bound it per IP before
+     * the handler runs, and before `session()` so an over-limit caller costs a
+     * session lookup it will not use.
+     */
+    server.use(SENTRY_TUNNEL_PATH, sentryTunnelRateLimit());
+
+    /**
      * Add session middleware
      */
     server.use(
@@ -245,6 +255,14 @@ export default createHonoServer<ServerEnv>({
           // route only — cookie-authed routes like /api/calendar-subscription
           // stay OUT of this prefix.
           "/api/calendar/feed/*path",
+          // why: auth-bypassed. An error worth reporting often happens before
+          // anyone has signed in, and the auth redirect answers those reports
+          // with a 302 to /login that the browser silently discards, so they
+          // are lost rather than delayed. Safe to expose because the tunnel
+          // chooses nothing: its destination is pinned to the server's own
+          // configured Sentry project and it never follows redirects. Bounded
+          // per IP by `sentryTunnelRateLimit` above.
+          SENTRY_TUNNEL_PATH,
         ],
       })
     );

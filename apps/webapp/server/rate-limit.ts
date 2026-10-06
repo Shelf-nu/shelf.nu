@@ -218,6 +218,7 @@ const bucketKeys = {
   appLoader: (c: Context) =>
     `app:${resolveAppLoaderIdentity(c).identity}:${c.req.path}`,
   calendarFeed: (c: Context) => `calendar:${c.req.path}`,
+  sentryTunnel: (c: Context) => `sentry-tunnel:ip:${getClientIp(c)}`,
 };
 
 /**
@@ -355,6 +356,55 @@ export const appLoaderRateLimit = (limit = 60) =>
  * Same in-memory MemoryStore caveat as `mobileIpRateLimit`. Generic floods of
  * random (invalid-token) paths are cheap indexed 404s, best absorbed at the edge.
  */
+/**
+ * Sentry tunnel rate limit, keyed on client IP.
+ *
+ * The tunnel is reachable without a session, because an error that happens
+ * before anyone signs in is exactly the kind worth reporting. That makes it an
+ * anonymous POST relay into our own Sentry project, so it is bounded per IP to
+ * stop one caller burning the org's event quota or burying real incidents in
+ * noise.
+ *
+ * This is a speed bump, not the control that contains the endpoint. What makes
+ * the tunnel safe to expose is that its destination is pinned to the server's
+ * configured Sentry project and redirects are never followed, so the caller
+ * chooses nothing about where the request goes
+ * (see `~/utils/sentry-tunnel.server`). A limiter cannot stop a caller with
+ * many addresses; a Cloudflare edge rule is the hard ceiling, as with
+ * {@link mobileIpRateLimit}.
+ *
+ * The limit is deliberately well above normal use. One page sends a handful of
+ * envelopes, and an error storm on a legitimate page is the moment the reports
+ * matter most, so this must not be the thing that drops them. Counters are
+ * per-machine, so the effective ceiling is this times the machine count.
+ */
+export const sentryTunnelRateLimit = () =>
+  rateLimiter({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: "draft-7",
+    keyGenerator: bucketKeys.sentryTunnel,
+    handler: (c) => {
+      // Anonymous by design, so the IP bucket is all there is to attribute
+      // this to. The envelope body is never logged: it is caller-supplied and
+      // can carry the reporting page's own data.
+      logRateLimitHit({
+        scope: "sentry-tunnel",
+        bucket: bucketKeys.sentryTunnel(c),
+        detail: c.req.path,
+      });
+
+      return c.json(
+        {
+          error: {
+            message: "Too many requests. Please try again later.",
+          },
+        },
+        429
+      );
+    },
+  });
+
 export const calendarFeedRateLimit = () =>
   rateLimiter({
     windowMs: 60_000,
