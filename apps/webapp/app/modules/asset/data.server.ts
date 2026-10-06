@@ -34,6 +34,7 @@ import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
@@ -360,6 +361,35 @@ export async function simpleModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // List view only: the status badge of a quantity-tracked asset counts the
+  // units still out on each active booking. `bookingAssets` stays raw: it
+  // carries booked units, only the first active booking, and the calendar and
+  // booking custodian read it per slice. The netted rows ride alongside as
+  // `stillOutBookingAssets`, which `getQuantityData` reads first. The calendar
+  // badge never takes the quantity path, so the availability view skips this.
+  if (view !== "availability") {
+    try {
+      const stillOutByAsset = await getStillOutBookingRowsByAsset(db, {
+        assets,
+        organizationId,
+      });
+      for (const asset of assets) {
+        const rows = stillOutByAsset.get(asset.id);
+        if (rows) Object.assign(asset, { stillOutBookingAssets: rows });
+      }
+    } catch (cause) {
+      Logger.error(
+        new ShelfError({
+          cause,
+          message: "Failed to compute checked-out units for the asset index",
+          label: "Assets",
+          additionalData: { organizationId, assetCount: assets.length },
+          shouldBeCaptured: true,
+        })
+      );
+    }
   }
 
   // Availability view only: resolve kit names for kit-driven booking slices so

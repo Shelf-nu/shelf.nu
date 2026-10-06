@@ -21,6 +21,11 @@
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { computeCheckedOutByBookingForAsset } from "~/modules/booking/checked-out.server";
 import { ShelfError } from "~/utils/error";
+import {
+  computeCheckedOutByBookingBatch,
+  type AvailabilityBatchClient,
+} from "./availability.server";
+import { isQuantityTracked } from "./utils";
 
 /** Arguments for {@link getAssetQuantityRows}. */
 type GetAssetQuantityRowsArgs = {
@@ -116,6 +121,16 @@ type QuantityTooltipBookingRow = {
 };
 
 /**
+ * One line per active booking, as {@link toStillOutBookingRows} emits it. It
+ * stands for the whole booking, so it carries no field of any single slice.
+ */
+type StillOutBookingRow<Row extends QuantityTooltipBookingRow> = {
+  quantity: number;
+  assetKitId: null;
+  booking: NonNullable<Row["booking"]>;
+};
+
+/**
  * Rewrites an asset's booking slices into the rows the quantity tooltip
  * (`getQuantityData`) expects.
  *
@@ -123,7 +138,9 @@ type QuantityTooltipBookingRow = {
  * booking carrying the units of the asset still off the shelf on it, from
  * {@link computeCheckedOutByBookingForAsset}: what went out minus what came back
  * or was used up. Their `assetKitId` is `null`, because the tooltip lists one
- * line per booking. Active bookings with nothing still out are dropped.
+ * line per booking. Each active line is built from the booking alone, so no
+ * per-slice field (`id`, `checkedOutAt`, ...) of whichever slice came first can
+ * ride along on it. Active bookings with nothing still out are dropped.
  *
  * Every loader that feeds the tooltip goes through this, so the tooltip and
  * the asset overview's "Checked out" figure cannot disagree.
@@ -135,27 +152,118 @@ type QuantityTooltipBookingRow = {
 export function toStillOutBookingRows<Row extends QuantityTooltipBookingRow>(
   rows: Row[],
   stillOutByBooking: Map<string, { total: number }>
-): Row[] {
+): Array<Row | StillOutBookingRow<Row>> {
   const reservedRows: Row[] = [];
-  const firstActiveRowByBooking = new Map<string, Row>();
+  const activeBookings = new Map<string, NonNullable<Row["booking"]>>();
   for (const row of rows) {
     const status = row.booking?.status;
     if (status === "ONGOING" || status === "OVERDUE") {
-      if (row.booking && !firstActiveRowByBooking.has(row.booking.id)) {
-        firstActiveRowByBooking.set(row.booking.id, row);
+      if (row.booking && !activeBookings.has(row.booking.id)) {
+        activeBookings.set(row.booking.id, row.booking);
       }
     } else {
       reservedRows.push(row);
     }
   }
 
-  const activeRows: Row[] = [];
-  for (const [bookingId, row] of firstActiveRowByBooking) {
+  const activeRows: StillOutBookingRow<Row>[] = [];
+  for (const [bookingId, booking] of activeBookings) {
     const stillOut = stillOutByBooking.get(bookingId)?.total ?? 0;
     // Nothing went out yet, or everything that did has come back.
     if (stillOut <= 0) continue;
-    activeRows.push({ ...row, quantity: stillOut, assetKitId: null });
+    activeRows.push({ quantity: stillOut, assetKitId: null, booking });
   }
 
   return [...reservedRows, ...activeRows];
+}
+
+/** One asset row as a list loader ships it: its type and raw booking slices. */
+type ListAssetWithBookingRows = {
+  id: string;
+  type?: string | null;
+  // The index include adds `booking` at runtime, but its static row type is
+  // the bare pivot, so other fields are allowed through.
+  bookingAssets?: Array<{
+    booking?: { id: string; status?: string | null } | null;
+    [key: string]: unknown;
+  }> | null;
+};
+
+/**
+ * The batched {@link getAssetQuantityRows} for a list surface: for every
+ * QUANTITY_TRACKED asset on an ONGOING / OVERDUE booking, one row per active
+ * booking carrying the units of it still off the shelf there, in the shape
+ * {@link toStillOutBookingRows} emits. A list loader ships these as the asset's
+ * `stillOutBookingAssets`, which `getQuantityData` reads in place of
+ * `bookingAssets`.
+ *
+ * List loaders cannot net `bookingAssets` in place: the same rows feed the
+ * booking custodian and the availability calendar, which need them per slice,
+ * and they hold only the first active booking. So the bookings are read here,
+ * all of them, in a fixed number of queries whatever the page size.
+ *
+ * @param db - Prisma client to read through.
+ * @param args.assets - The page's asset rows; only QUANTITY_TRACKED ones with
+ *   an active booking row are read.
+ * @param args.organizationId - Caller's organization. Scopes every read.
+ * @returns assetId → its active booking rows (empty when nothing is still out).
+ *   Assets that were not read are absent.
+ */
+export async function getStillOutBookingRowsByAsset(
+  db: ExtendedPrismaClient,
+  {
+    assets,
+    organizationId,
+  }: { assets: ListAssetWithBookingRows[]; organizationId: string }
+): Promise<Map<string, StillOutBookingRow<QuantityTooltipBookingRow>[]>> {
+  const byAsset = new Map<
+    string,
+    StillOutBookingRow<QuantityTooltipBookingRow>[]
+  >();
+
+  const assetIds = assets
+    .filter(
+      (asset) =>
+        isQuantityTracked(asset) &&
+        asset.bookingAssets?.some((row) => {
+          const status = row.booking?.status;
+          return status === "ONGOING" || status === "OVERDUE";
+        })
+    )
+    .map((asset) => asset.id);
+  if (assetIds.length === 0) return byAsset;
+
+  const stillOutByAsset = await computeCheckedOutByBookingBatch(
+    db as unknown as AvailabilityBatchClient,
+    assetIds,
+    organizationId
+  );
+
+  const bookingIds = new Set<string>();
+  for (const byBooking of stillOutByAsset.values()) {
+    for (const [bookingId, { total }] of byBooking) {
+      if (total > 0) bookingIds.add(bookingId);
+    }
+  }
+  const bookings =
+    bookingIds.size > 0
+      ? await db.booking.findMany({
+          where: { id: { in: [...bookingIds] }, organizationId },
+          select: { id: true, name: true, status: true },
+        })
+      : [];
+  const bookingById = new Map(bookings.map((b) => [b.id, b]));
+
+  for (const assetId of assetIds) {
+    const rows: StillOutBookingRow<QuantityTooltipBookingRow>[] = [];
+    for (const [bookingId, { total }] of stillOutByAsset.get(assetId) ?? []) {
+      const booking = bookingById.get(bookingId);
+      // Nothing went out yet, or everything that did has come back.
+      if (total <= 0 || !booking) continue;
+      rows.push({ quantity: total, assetKitId: null, booking });
+    }
+    byAsset.set(assetId, rows);
+  }
+
+  return byAsset;
 }

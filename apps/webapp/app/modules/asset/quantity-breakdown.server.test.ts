@@ -1,11 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-// why: importing the module pulls in `~/database/db.server`, which opens a
-// Prisma client at import time; the function under test is pure and never
-// touches it.
-vi.mock("~/database/db.server", () => ({ db: {} }));
-
-const { toStillOutBookingRows } = await import("./quantity-breakdown.server");
+import { toStillOutBookingRows } from "./quantity-breakdown.server";
 
 /** One booking slice as the loaders select it. */
 function slice(
@@ -58,5 +53,25 @@ describe("toStillOutBookingRows", () => {
     );
 
     expect(rows.map((row) => row.booking.id)).toEqual(["r1"]);
+  });
+
+  it("builds an active booking's line from the booking alone, not from one of its slices", () => {
+    // The kit slice is listed first, so a row copied from it would carry that
+    // slice's id and departure stamp onto a line that stands for the booking.
+    const kitSlice = {
+      ...slice("b1", "ONGOING", 5, "ak1"),
+      id: "slice-kit",
+      checkedOutAt: new Date("2026-10-01T09:00:00Z"),
+    };
+    const looseSlice = { ...slice("b1", "ONGOING", 5), id: "slice-loose" };
+
+    const rows = toStillOutBookingRows(
+      [kitSlice, looseSlice],
+      new Map([["b1", { total: 7 }]])
+    );
+
+    expect(rows).toEqual([
+      { quantity: 7, assetKitId: null, booking: kitSlice.booking },
+    ]);
   });
 });

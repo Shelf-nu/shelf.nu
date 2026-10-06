@@ -167,50 +167,58 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     /**
-     * The header `AssetStatusBadge` tooltip reads `asset.bookingAssets`, so
-     * ONGOING / OVERDUE rows carry the units still off the shelf, through the
-     * same `toStillOutBookingRows` the lazy-fetch endpoint uses. The tooltip
-     * and the overview's "Checked out" figure therefore agree.
+     * Three reads only a QUANTITY_TRACKED asset needs, run together since none
+     * depends on another. An INDIVIDUAL asset's badge asks
+     * `/api/assets/:id/ongoing-booking` instead of reading `bookingAssets`,
+     * and it has no quantity custody dialogs, so it pays for none of them.
+     *
+     *  - Units still out per active booking. The header `AssetStatusBadge`
+     *    tooltip reads `asset.bookingAssets`, so ONGOING / OVERDUE rows carry
+     *    these units through the same `toStillOutBookingRows` the lazy-fetch
+     *    endpoint uses, and agree with the overview's "Checked out" figure.
+     *  - Team members, so the QuantityCustodyDialog in the actions dropdown
+     *    has initial data.
+     *  - Where the asset's units can come from, for the Assign and Adjust
+     *    dialogs. Built here, in the loader both entry points share (the
+     *    header's actions menu and the overview's custody and quantity cards),
+     *    so they always show the same numbers. Counts only, no names, so it
+     *    needs no redaction.
      */
-    const assetWithEffectiveBookingAssets = {
-      ...asset,
-      bookingAssets: toStillOutBookingRows(
-        asset.bookingAssets ?? [],
-        await computeCheckedOutByBookingForAsset(db, asset.id, organizationId)
-      ),
-    };
+    const qtyTracked = isQuantityTracked(asset);
+    const [stillOutByBooking, { teamMembers, totalTeamMembers }, custodySources] =
+      qtyTracked
+        ? await Promise.all([
+            computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
+            getTeamMembersForQuantityCustody({
+              organizationId,
+              request,
+              userId,
+              // The rule, not a role check: BASE cannot assign custody, so it
+              // must not receive the roster (emails, Stripe ids) either.
+              role,
+              canSeeAllCustody,
+            }),
+            getCustodySourceSummary({
+              assetId: asset.id,
+              organizationId,
+              total: asset.quantity ?? 0,
+            }),
+          ])
+        : [
+            null,
+            { teamMembers: [], totalTeamMembers: 0 },
+            { multiSource: false, options: [], poolAvailable: 0 },
+          ];
 
-    /**
-     * For QUANTITY_TRACKED assets, fetch team members so the
-     * QuantityCustodyDialog in the actions dropdown has initial data.
-     */
-    const { teamMembers, totalTeamMembers } = isQuantityTracked(asset)
-      ? await getTeamMembersForQuantityCustody({
-          organizationId,
-          request,
-          userId,
-          // The rule, not a role check: `isSelfService` was false for BASE, so
-          // the seed shipped the whole roster — with every user's email and
-          // Stripe id — to a role that cannot assign custody at all.
-          role,
-          canSeeAllCustody,
-        })
-      : { teamMembers: [], totalTeamMembers: 0 };
-
-    /**
-     * Where a quantity-tracked asset's units can come from, for the Assign
-     * and Adjust dialogs. Built here, in the loader both entry points share
-     * (the header's actions menu and the overview's custody and quantity
-     * cards), so they always show the same numbers. Counts only, no names,
-     * so it needs no redaction.
-     */
-    const custodySources = isQuantityTracked(asset)
-      ? await getCustodySourceSummary({
-          assetId: asset.id,
-          organizationId,
-          total: asset.quantity ?? 0,
-        })
-      : { multiSource: false, options: [], poolAvailable: 0 };
+    const assetWithEffectiveBookingAssets = stillOutByBooking
+      ? {
+          ...asset,
+          bookingAssets: toStillOutBookingRows(
+            asset.bookingAssets ?? [],
+            stillOutByBooking
+          ),
+        }
+      : asset;
 
     const header: HeaderData = {
       title: asset.title,

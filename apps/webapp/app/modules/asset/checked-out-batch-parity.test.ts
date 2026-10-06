@@ -43,7 +43,10 @@ import type { ExtendedPrismaClient } from "~/database/db.server";
 import { computeCheckedOutForAsset } from "~/modules/booking/checked-out.server";
 import type { AvailabilityBatchClient } from "./availability.server";
 import { getAssetAvailabilityBatch } from "./availability.server";
-import { getAssetQuantityRows } from "./quantity-breakdown.server";
+import {
+  getAssetQuantityRows,
+  getStillOutBookingRowsByAsset,
+} from "./quantity-breakdown.server";
 
 // why: see the module doc above — importing the real `booking/service.server`
 // module (for the real `computeCheckedOutForAsset`) transitively imports
@@ -312,6 +315,21 @@ function createFakeClient(fixture: {
         const booking = bookingById.get(where.id);
         return booking ? { status: booking.status } : null;
       }),
+      findMany: vitest.fn(
+        ({
+          where,
+        }: {
+          where: { id?: { in: string[] }; organizationId?: string };
+        }) =>
+          fixture.bookings
+            .filter(
+              (b) =>
+                (!where.id || where.id.in.includes(b.id)) &&
+                (!where.organizationId ||
+                  b.organizationId === where.organizationId)
+            )
+            .map((b) => ({ id: b.id, name: b.id, status: b.status }))
+      ),
     },
     partialBookingCheckout: {
       findMany: vitest.fn(
@@ -1069,5 +1087,139 @@ describe("the status-badge tooltip and mobile detail agree with the overview", (
     ]);
     expect(breakdown?.checkedOut).toBe(0);
     expect(breakdown?.reserved).toBe(5);
+  });
+});
+
+describe("the asset index badge agrees with the asset page", () => {
+  /**
+   * The index ships each asset's booking rows raw (booked units) and only the
+   * first active one. Two active bookings for `a1`: 10 out with 4 back, and 3
+   * out. `a2`'s only booking has all its units back. `a3` is INDIVIDUAL.
+   */
+  function indexFixture() {
+    const client = createFakeClient({
+      bookingAssets: [
+        {
+          id: "s1",
+          assetId: "a1",
+          bookingId: "b1",
+          quantity: 10,
+          checkedOutQuantity: 10,
+        },
+        {
+          id: "s2",
+          assetId: "a1",
+          bookingId: "b2",
+          quantity: 3,
+          checkedOutQuantity: 3,
+        },
+        {
+          id: "s3",
+          assetId: "a2",
+          bookingId: "b1",
+          quantity: 5,
+          checkedOutQuantity: 5,
+        },
+      ],
+      bookings: [
+        { id: "b1", status: BookingStatus.ONGOING, organizationId: ORG_ID },
+        { id: "b2", status: BookingStatus.OVERDUE, organizationId: ORG_ID },
+      ],
+      sessions: [],
+      dispositions: [
+        {
+          assetId: "a1",
+          bookingId: "b1",
+          bookingAssetId: "s1",
+          category: "RETURN",
+          quantity: 4,
+        },
+        {
+          assetId: "a2",
+          bookingId: "b1",
+          bookingAssetId: "s3",
+          category: "RETURN",
+          quantity: 5,
+        },
+      ],
+      assets: [
+        { id: "a1", quantity: 20 },
+        { id: "a2", quantity: 5 },
+      ],
+    });
+
+    const b1 = { id: "b1", status: "ONGOING" };
+    const indexAssets = [
+      {
+        id: "a1",
+        type: "QUANTITY_TRACKED",
+        quantity: 20,
+        bookingAssets: [{ quantity: 10, assetKitId: null, booking: b1 }],
+      },
+      {
+        id: "a2",
+        type: "QUANTITY_TRACKED",
+        quantity: 5,
+        bookingAssets: [{ quantity: 5, assetKitId: null, booking: b1 }],
+      },
+      {
+        id: "a3",
+        type: "INDIVIDUAL",
+        quantity: null,
+        bookingAssets: [{ quantity: 1, assetKitId: null, booking: b1 }],
+      },
+    ];
+    return { client, indexAssets };
+  }
+
+  it("gives each asset the same booking rows as its asset page, in one batched read", async () => {
+    const { client, indexAssets } = indexFixture();
+
+    const byAsset = await getStillOutBookingRowsByAsset(
+      client as unknown as ExtendedPrismaClient,
+      { assets: indexAssets, organizationId: ORG_ID }
+    );
+    const assetPage = await getAssetQuantityRows(
+      client as unknown as ExtendedPrismaClient,
+      { assetId: "a1", organizationId: ORG_ID }
+    );
+
+    // Both of a1's active bookings, although the index row carried only b1.
+    expect(byAsset.get("a1")).toEqual(assetPage.bookingAssets);
+    expect(byAsset.get("a1")?.map((row) => row.quantity)).toEqual([6, 3]);
+    // a2 is on an active booking but nothing of it is still out.
+    expect(byAsset.get("a2")).toEqual([]);
+    // INDIVIDUAL assets never read these rows.
+    expect(byAsset.has("a3")).toBe(false);
+  });
+
+  it("makes the badge read the netted rows over the raw ones", async () => {
+    const { client, indexAssets } = indexFixture();
+    const byAsset = await getStillOutBookingRowsByAsset(
+      client as unknown as ExtendedPrismaClient,
+      { assets: indexAssets, organizationId: ORG_ID }
+    );
+
+    const breakdown = getQuantityData({
+      ...indexAssets[0],
+      stillOutBookingAssets: byAsset.get("a1"),
+    } as Parameters<typeof getQuantityData>[0]);
+
+    expect(breakdown?.checkedOut).toBe(
+      await computeCheckedOutForAsset(client, "a1", ORG_ID)
+    );
+    expect(breakdown?.checkedOut).toBe(9);
+  });
+
+  it("reads nothing when no quantity-tracked asset is on an active booking", async () => {
+    const { client, indexAssets } = indexFixture();
+
+    const byAsset = await getStillOutBookingRowsByAsset(
+      client as unknown as ExtendedPrismaClient,
+      { assets: [indexAssets[2]], organizationId: ORG_ID }
+    );
+
+    expect(byAsset.size).toBe(0);
+    expect(client.bookingAsset.findMany).not.toHaveBeenCalled();
   });
 });
