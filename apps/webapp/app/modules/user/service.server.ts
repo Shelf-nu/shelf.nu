@@ -626,7 +626,8 @@ interface UserOrgTransition {
  * `TeamMember.user` with no membership check, so a linked row keeps routing
  * this workspace's booking emails and recipient pickers to the user.
  *
- * The workspace OWNER is never revoked here (see the branch below).
+ * The workspace OWNER is never revoked or re-roled here (see the branches
+ * below): ownership changes only through transfer-ownership.
  *
  * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
  * whole login rather than being logged and skipped per workspace: swallowing it
@@ -707,6 +708,14 @@ async function reconcileSsoGroupMembership(
           previousRoles: currentRoles,
         },
       });
+    } else if (currentRoles.includes(OrganizationRoles.OWNER)) {
+      /**
+       * Ownership moves only through transfer-ownership. Group claims set the
+       * role of every other member, but replacing OWNER with the claimed role
+       * would leave `Organization.userId` pointing at someone without owner
+       * permissions, so the owner's role is left as it is.
+       */
+      transition.newRole = OrganizationRoles.OWNER;
     } else {
       // Update to SCIM-based role
       await db.userOrganization.update({
@@ -826,8 +835,13 @@ export async function updateUserFromSSO(
   try {
     let user = existingUser;
 
-    // Update user profile if needed
-    if (user.firstName !== firstName || user.lastName !== lastName) {
+    // Update the profile only from real names: an empty value means the IdP
+    // sent none, and must never blank a stored name.
+    if (
+      firstName &&
+      lastName &&
+      (user.firstName !== firstName || user.lastName !== lastName)
+    ) {
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },

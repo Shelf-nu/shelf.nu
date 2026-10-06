@@ -174,6 +174,10 @@ export default {
             text: "Shibboleth",
             link: "/sso/providers/shibboleth",
           },
+          {
+            text: "Okta",
+            link: "/sso/providers/okta",
+          },
         ],
       },
       {

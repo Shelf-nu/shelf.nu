@@ -33,6 +33,7 @@ function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
     baseUserGroupId: null,
     selfServiceGroupId: null,
     adminGroupId: null,
+    requireSsoLogin: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
