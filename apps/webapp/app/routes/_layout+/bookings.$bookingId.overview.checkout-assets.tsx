@@ -20,6 +20,7 @@ import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-chec
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import {
   checkoutAssets,
   computeBookingAssetRemainingToCheckOut,
@@ -360,6 +361,16 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title,
     };
 
+    /**
+     * Pools on this booking at two or more locations that have not gone out
+     * yet. The drawer shows a "From location" select under each one's
+     * quantity input.
+     */
+    const checkoutSourceQuestions = await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId: booking.id,
+    });
+
     return payload({
       title,
       header,
@@ -369,6 +380,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       remainingToCheckOutByAsset,
       expectedAssets,
       expectedKits,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

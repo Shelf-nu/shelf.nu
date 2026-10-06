@@ -1,9 +1,6 @@
 import { Readable } from "node:stream";
 
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -19,6 +16,7 @@ import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { getMaxFileSizeExceededError } from "./form-data-parse-errors.server";
 import { id } from "./id/id.server";
 import { detectImageFormat } from "./image-format.server";
 import {
@@ -457,6 +455,7 @@ export async function parseFileFormData({
         }MB`,
         additionalData: { maxFileSize },
         label,
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -470,6 +469,9 @@ export async function parseFileFormData({
         : "Something went wrong while uploading the file. Please try again or contact support.",
       title: nestedShelfError?.title,
       label,
+      // The parser wraps the upload's error; its status (a 400 for a file
+      // the user can fix) must survive the wrapping like its message does.
+      status: nestedShelfError?.status,
       shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
     });
   }
@@ -494,29 +496,6 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
-}
-
-/**
- * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
- *
- * `parseFormData` wraps errors, so this helper normalises the shape and lets
- * callers respond with the correct user-facing message when the underlying
- * file exceeds the configured size.
- */
-function getMaxFileSizeExceededError(
-  error: unknown
-): MaxFileSizeExceededError | null {
-  if (error instanceof MaxFileSizeExceededError) {
-    return error;
-  }
-
-  const cause = (error as { cause?: unknown })?.cause;
-
-  if (!cause) {
-    return null;
-  }
-
-  return getMaxFileSizeExceededError(cause);
 }
 
 /**

@@ -442,8 +442,11 @@ export async function upsertCustomField(
     for (const def of definitions) {
       let existingCustomField = await db.customField.findFirst({
         where: {
+          // `in` + insensitive is an exact LOWER(name) match, like the unique
+          // index. `equals` + insensitive would be an ILIKE, where `_` and `%`
+          // in a field name act as wildcards.
           name: {
-            equals: def.name,
+            in: [def.name],
             mode: "insensitive",
           },
           organizationId: def.organizationId,

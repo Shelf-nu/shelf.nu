@@ -41,6 +41,11 @@ import {
   signInWithEmail,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
+import {
+  signupIntentEventProperties,
+  signupIntentInitialPersonProperties,
+} from "~/modules/signup-intent/analytics";
+import type { SignupIntent } from "~/modules/signup-intent/schema";
 
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import type { DetectedFormatPrefs } from "~/utils/date-format";
@@ -179,9 +184,75 @@ export async function getUserWithContact<T extends Prisma.UserInclude>(
   }
 }
 
+/**
+ * Finds a user by id without throwing when there is none.
+ *
+ * Sign-in uses this to decide whether the authenticated person already has an
+ * account, keyed on the auth id rather than the address they typed, so neither
+ * letter case nor an out-of-date stored email can make it create a second one.
+ *
+ * @param id - The auth user id
+ * @returns The user's id and onboarding state, or null when there is no row
+ * @throws {ShelfError} If the lookup fails
+ */
+export async function findUserById(id: User["id"]) {
+  try {
+    return await db.user.findUnique({
+      where: { id },
+      select: { id: true, onboarded: true },
+    });
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to find user",
+      additionalData: { id },
+      label,
+    });
+  }
+}
+
+/**
+ * Picks the account an email address resolves to among rows that match it
+ * without regard to letter case.
+ *
+ * Stored addresses can carry capitals from before every path lowercased them,
+ * so one person can have rows that differ only by case. The row stored in
+ * lowercase wins, since that is what every path writes today; otherwise the
+ * oldest, so the same address always resolves to the same account.
+ *
+ * @param users - Matching rows, ordered oldest first
+ * @param email - The address being resolved
+ * @returns The account to use, or null when there is none
+ */
+function pickUserForEmail<T extends { email: string }>(
+  users: T[],
+  email: string
+): T | null {
+  return (
+    users.find((user) => user.email === normalizeInviteEmail(email)) ??
+    users[0] ??
+    null
+  );
+}
+
+/**
+ * Finds the account for an email address, whatever case it was stored in.
+ *
+ * Sign-in and signup decide from this whether a person already has an account,
+ * so an exact-case match would lock out anyone whose stored address has
+ * capitals, and let them sign up a second time.
+ *
+ * @param email - The address as the person typed it
+ * @returns The user, or null when no account has the address
+ * @throws {ShelfError} If the lookup fails
+ */
 export async function findUserByEmail(email: User["email"]) {
   try {
-    return await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    const users = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(email) },
+      orderBy: { createdAt: "asc" },
+    });
+    return pickUserForEmail(users, email);
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -323,21 +394,17 @@ export async function createUserOrAttachOrg({
   try {
     /**
      * `User.email` can contain capitals, so the existing account is matched
-     * without regard to letter case. When rows differ only by case, the
-     * lowercase row wins, because that is the form sign-in uses; where no row
-     * carries that form, the oldest one does. Order the query: without it the
-     * fallback returns whichever row Postgres happened to read first, so the
-     * same invite can attach to a different account on a later call.
+     * without regard to letter case and `pickUserForEmail` chooses among rows
+     * that differ only by case. Keep the query ordered oldest first: the
+     * fallback depends on it, or the same invite could attach to a different
+     * account on a later call.
      */
     const matchingUsers = await db.user.findMany({
       where: { email: caseInsensitiveEmailFilter(email) },
       select: USER_WITH_SSO_DETAILS_SELECT,
       orderBy: { createdAt: "asc" },
     });
-    const shelfUser =
-      matchingUsers.find(
-        (user) => user.email === normalizeInviteEmail(email)
-      ) ?? matchingUsers[0];
+    const shelfUser = pickUserForEmail(matchingUsers, email);
 
     // If no Prisma User exists, create one.
     // First try creating a fresh auth account. If that fails (email already
@@ -559,7 +626,8 @@ interface UserOrgTransition {
  * `TeamMember.user` with no membership check, so a linked row keeps routing
  * this workspace's booking emails and recipient pickers to the user.
  *
- * The workspace OWNER is never revoked here (see the branch below).
+ * The workspace OWNER is never revoked or re-roled here (see the branches
+ * below): ownership changes only through transfer-ownership.
  *
  * ERROR SEMANTICS: deliberately fail closed. Any other failure aborts the
  * whole login rather than being logged and skipped per workspace: swallowing it
@@ -640,6 +708,14 @@ async function reconcileSsoGroupMembership(
           previousRoles: currentRoles,
         },
       });
+    } else if (currentRoles.includes(OrganizationRoles.OWNER)) {
+      /**
+       * Ownership moves only through transfer-ownership. Group claims set the
+       * role of every other member, but replacing OWNER with the claimed role
+       * would leave `Organization.userId` pointing at someone without owner
+       * permissions, so the owner's role is left as it is.
+       */
+      transition.newRole = OrganizationRoles.OWNER;
     } else {
       // Update to SCIM-based role
       await db.userOrganization.update({
@@ -759,8 +835,13 @@ export async function updateUserFromSSO(
   try {
     let user = existingUser;
 
-    // Update user profile if needed
-    if (user.firstName !== firstName || user.lastName !== lastName) {
+    // Update the profile only from real names: an empty value means the IdP
+    // sent none, and must never blank a stored name.
+    if (
+      firstName &&
+      lastName &&
+      (user.firstName !== firstName || user.lastName !== lastName)
+    ) {
       user = await db.user.update({
         where: { id: userId },
         data: { firstName, lastName },
@@ -919,6 +1000,12 @@ export async function createUser(
     /** Browser-detected prefs to stamp on the new row; undefined → resolved at read time. */
     formatPrefs?: DetectedFormatPrefs;
     skipPersonalOrg?: boolean;
+    /**
+     * What the signup link asked for (plan, trial, campaign), carried by the
+     * signup flow. Recorded on the `signup_completed` event only; the
+     * business-intel record is written at onboarding, which owns the cookie.
+     */
+    signupIntent?: SignupIntent | null;
   }
 ) {
   const {
@@ -933,6 +1020,7 @@ export async function createUser(
     createdWithInvite,
     formatPrefs,
     skipPersonalOrg,
+    signupIntent,
   } = payload;
 
   /**
@@ -1048,7 +1136,9 @@ export async function createUser(
      * Best-effort funnel analytics: a brand-new account was created. Fire-and-
      * forget — never throws and is a no-op when PostHog is unconfigured, so it
      * cannot affect signup. `created_with_invite` / `is_sso` let the funnel
-     * isolate genuine self-serve signups downstream.
+     * isolate genuine self-serve signups downstream; the signup link's plan
+     * and campaign (when there was one) let it attribute them, and are also
+     * set once on the person so the first campaign stays with them.
      */
     captureServerEvent({
       distinctId: userId,
@@ -1056,7 +1146,9 @@ export async function createUser(
       properties: {
         created_with_invite: Boolean(createdWithInvite),
         is_sso: Boolean(isSSO),
+        ...signupIntentEventProperties(signupIntent),
       },
+      setOnce: signupIntentInitialPersonProperties(signupIntent),
     });
 
     return createdUser;

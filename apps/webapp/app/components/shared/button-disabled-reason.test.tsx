@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Button } from "./button";
 
@@ -87,5 +88,43 @@ describe("Button disabled with reason", () => {
     expect(document.getElementById(describedBy as string)).toHaveTextContent(
       REASON
     );
+  });
+});
+
+/**
+ * `reason` is typed `ReactNode`, and callers rely on that: the booking Reserve
+ * button names the assets blocking it as a list rather than only asserting
+ * some exist.
+ *
+ * Asserted on SERVER-rendered markup, because the hover card itself is
+ * unmounted while closed — the accessible description is the only copy that
+ * reaches the page on first paint, and it is what a screen-reader user gets
+ * before any pointer touches the button.
+ */
+describe("Button disabled with a rich reason", () => {
+  const markup = () =>
+    renderToStaticMarkup(
+      <Button
+        type="button"
+        disabled={{
+          reason: (
+            <>
+              This booking holds assets marked as unavailable.
+              <ul>
+                <li>Barndoors in kit Aputure 120d II Kit 02</li>
+              </ul>
+            </>
+          ),
+        }}
+      >
+        Reserve
+      </Button>
+    );
+
+  it("carries a structured reason into the accessible description", () => {
+    const html = markup();
+
+    expect(html).toContain("Barndoors in kit Aputure 120d II Kit 02");
+    expect(html).toMatch(/class="sr-only"[^>]*>[\s\S]*<ul>/);
   });
 });

@@ -5,7 +5,8 @@
  * code to its asset/kit via the shared resolver but must NEVER write scan
  * provenance (mirrors the web's `get-scanned-item` resolve; used by the audit
  * scanner so audit lookups don't pollute an asset's "last scanned" history).
- * The key assertion is that `createScan` is never called.
+ * The key assertion is that `createScan` is never called. The resolved asset
+ * carries custody filtered for the caller, as on the asset detail.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
@@ -33,45 +34,21 @@ vitest.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: external auth — we don't want to hit Supabase in tests
-// why: the whole module is mocked to keep Supabase out of these tests, so the
-// pure shape helpers must be provided too. These mirror the real ones (flatten
-// the quantities pivot shape into the flat shape the companion expects), and the
-// photo re-sign step only shapes, since it has its own tests.
-vitest.mock("~/modules/api/mobile-auth.server", () => {
-  /** The pivot fields the shaper flattens; every other field passes through. */
-  type ShapeableAsset = Record<string, unknown> & {
-    assetKits: Array<{ kit: { id: string } | null }>;
-    assetLocations: Array<{ location: unknown }>;
-    custody: unknown[];
-  };
-  const shapeAsset = (asset: ShapeableAsset) => {
-    const { assetKits, assetLocations, custody, ...rest } = asset;
-    const kit = assetKits[0]?.kit ?? null;
-    return {
-      ...rest,
-      kitId: kit?.id ?? null,
-      kit,
-      location: assetLocations[0]?.location ?? null,
-      custody: custody[0] ?? null,
-    };
-  };
+// why: external auth, we don't want to hit Supabase in tests. Only the auth,
+// org-access and viewer-context lookups are stubbed; the real shape helpers
+// run, so the custody assertions below see the actual flattening and the
+// actual viewer filter. The photo re-sign step is a no-op for these fixtures
+// (no photo to re-sign).
+vitest.mock("~/modules/api/mobile-auth.server", async () => {
+  const actual = await vitest.importActual<
+    typeof import("~/modules/api/mobile-auth.server")
+  >("~/modules/api/mobile-auth.server");
   return {
+    ...actual,
     requireMobileAuth: vitest.fn(),
     requireOrganizationAccess: vitest.fn(),
-    MOBILE_ASSET_SELECT: {
-      id: true,
-      title: true,
-      status: true,
-      mainImage: true,
-      category: { select: { name: true } },
-      location: { select: { name: true } },
-    },
-    MOBILE_KIT_SELECT: { id: true, name: true },
-    shapeMobileAssetResponse: shapeAsset,
-    resignAndShapeMobileAsset: (asset: ShapeableAsset) =>
-      Promise.resolve(shapeAsset(asset)),
-    shapeMobileKitResponse: (kit: unknown) => kit ?? null,
+    // why: reads the caller's membership; the tests set custody visibility
+    getMobileUserContext: vitest.fn(),
   };
 });
 
@@ -102,7 +79,10 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobileAuth,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { createScan } from "~/modules/scan/service.server";
 
@@ -127,6 +107,41 @@ const mockQr = {
   organizationId: "org-1",
 };
 
+/** One operator-assigned custody row, as `MOBILE_ASSET_SELECT` returns it. */
+function custodyRow(
+  custodianId: string,
+  name: string,
+  userId: string | null,
+  quantity: number
+) {
+  return {
+    quantity,
+    kitCustodyId: null,
+    custodian: { id: custodianId, name, userId },
+  };
+}
+
+/**
+ * A quantity-tracked asset held by two people, oldest custody first: a
+ * colleague and the caller (`user-1`).
+ */
+const sharedAsset = {
+  ...mockAsset,
+  type: "QUANTITY_TRACKED",
+  quantity: 20,
+  custody: [
+    custodyRow("tm-colleague", "Colleague One", "user-2", 3),
+    custodyRow("tm-caller", "Test User", "user-1", 2),
+  ],
+};
+
+/** Sets whether the caller may see every holder's custody in the workspace. */
+function asViewer({ canSeeAllCustody }: { canSeeAllCustody: boolean }) {
+  vitest.mocked(getMobileUserContext).mockResolvedValue({
+    canSeeAllCustody,
+  } as Awaited<ReturnType<typeof getMobileUserContext>>);
+}
+
 function createRequest() {
   return new Request("http://localhost:3000/api/mobile/get-scanned-item/qr-1", {
     headers: { Authorization: "Bearer test-token" },
@@ -147,6 +162,7 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
     (db.qr.findUnique as any).mockResolvedValue(mockQr);
     (db.userOrganization.findUnique as any).mockResolvedValue({ id: "uo-1" });
     (db.asset.findFirst as any).mockResolvedValue(mockAsset);
+    asViewer({ canSeeAllCustody: true });
   });
 
   it("resolves the asset WITHOUT recording a scan", async () => {
@@ -167,5 +183,53 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
 
     expect((result as unknown as Response).status).toBe(404);
     expect(createScan).not.toHaveBeenCalled();
+  });
+
+  describe("custody visibility", () => {
+    beforeEach(() => {
+      (db.asset.findFirst as any).mockResolvedValue(sharedAsset);
+    });
+
+    it("sends a caller without custody visibility only their own holding and a count of the others", async () => {
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await run(createRequest());
+
+      const body = await (result as unknown as Response).json();
+      expect(body.qr.asset.custodyList).toEqual([
+        {
+          custodian: { id: "tm-caller", name: "Test User", userId: "user-1" },
+          quantity: 2,
+          releasableQuantity: 2,
+        },
+      ]);
+      expect(body.qr.asset.custodyListOthersCount).toBe(1);
+      expect(body.qr.asset.custody).toBeNull();
+      const payload = JSON.stringify(body);
+      expect(payload).not.toContain("Colleague One");
+      expect(payload).not.toContain("user-2");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-1");
+    });
+
+    it("sends every holder to a caller who may see all custody", async () => {
+      asViewer({ canSeeAllCustody: true });
+
+      const result = await run(createRequest());
+
+      const body = await (result as unknown as Response).json();
+      expect(
+        body.qr.asset.custodyList.map(
+          (entry: { custodian: { id: string } }) => entry.custodian.id
+        )
+      ).toEqual(["tm-colleague", "tm-caller"]);
+      expect(body.qr.asset.custodyListOthersCount).toBe(0);
+      expect(body.qr.asset.custody).toEqual({
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague One",
+          userId: "user-2",
+        },
+      });
+    });
   });
 });

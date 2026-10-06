@@ -24,6 +24,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckoutDialog from "~/components/booking/checkout-dialog";
+import { CheckoutSourceSelect } from "~/components/booking/checkout-source-select";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -166,6 +167,12 @@ type CheckoutDispositionContextValue = {
   qtyByBookingAssetId: Record<string, CheckoutQtyInfo>;
   updateQuantity: (bookingAssetId: string, value: string) => void;
 };
+
+/**
+ * The footer form's id. Rows render outside it, so their inputs (the
+ * "From location" select) join the submission through `form=`.
+ */
+const PARTIAL_CHECKOUT_FORM_ID = "partial-checkout-form";
 
 const CheckoutDispositionContext =
   createContext<CheckoutDispositionContextValue | null>(null);
@@ -1390,6 +1397,13 @@ function QuantityCheckoutBlock({
   info: CheckoutQtyInfo;
 }) {
   const { dispositions, updateQuantity } = useCheckoutDispositionContext();
+  // A pool at two or more locations going out for the first time asks
+  // where its units leave from. The select lives in this row, outside the
+  // footer form, so it joins the submission through `form=`.
+  const { checkoutSourceQuestions } = useLoaderData<typeof loader>();
+  const sourceQuestion = checkoutSourceQuestions.find(
+    (question) => question.sliceId === bookingAssetId
+  );
   // Default value: full slice qty. Tracked as a string so an empty
   // input stays empty (controlled `value=""`) instead of coercing to 0.
   const state = dispositions[bookingAssetId];
@@ -1439,6 +1453,15 @@ function QuantityCheckoutBlock({
           </span>
         </div>
       </label>
+      {sourceQuestion ? (
+        <CheckoutSourceSelect
+          question={sourceQuestion}
+          fieldKey={bookingAssetId}
+          formId={PARTIAL_CHECKOUT_FORM_ID}
+          variant="inline"
+          className="mt-2"
+        />
+      ) : null}
     </div>
   );
 }
@@ -1604,7 +1627,7 @@ const CustomForm = ({
   return (
     <Form
       ref={setFormElement}
-      id="partial-checkout-form"
+      id={PARTIAL_CHECKOUT_FORM_ID}
       className="mb-4 flex max-h-full w-full"
       method="post"
     >
@@ -1648,7 +1671,7 @@ const CustomForm = ({
               isLoading || hasBlockers || assetIdsForCheckout.length === 0
             }
             portalContainer={formElement || undefined}
-            formId="partial-checkout-form"
+            formId={PARTIAL_CHECKOUT_FORM_ID}
             // CheckoutDialog's trigger defaults to `grow` (designed for the
             // full-width booking-header bar). Inside this drawer footer the
             // sibling Cancel is `w-auto`, so the default grow makes the

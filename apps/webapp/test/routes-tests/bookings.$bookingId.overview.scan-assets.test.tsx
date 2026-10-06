@@ -10,6 +10,7 @@ vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
 import type { action as scanAssetsAction } from "~/routes/_layout+/bookings.$bookingId.overview.scan-assets";
 import { requirePermission } from "~/utils/roles.server";
 import { addScannedAssetsToBooking } from "~/modules/booking/service.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 
 // why: preventing fuzzy search library initialization during route import
 vi.mock("fuse.js", () => ({
@@ -55,6 +56,14 @@ vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
 }));
 
+// why: the route now imports `db` at module scope for the ownership guard's
+// booking lookup. `requirePermissionMock` below resolves no role, so
+// `isSelfServiceOrBase` is falsy and the lookup never runs, but the module
+// still has to resolve to something without touching a real database.
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findUniqueOrThrow: vi.fn() } },
+}));
+
 // why: preventing actual notification sending during route tests
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
@@ -78,6 +87,7 @@ vi.mock("react-router", async () => {
 
 const requirePermissionMock = vi.mocked(requirePermission);
 const addScannedAssetsToBookingMock = vi.mocked(addScannedAssetsToBooking);
+const sendNotificationMock = vi.mocked(sendNotification);
 let action: typeof scanAssetsAction;
 
 beforeAll(async () => {
@@ -112,7 +122,15 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
     } as any);
-    addScannedAssetsToBookingMock.mockResolvedValue(undefined as any);
+    // why: the action destructures `addedAssetIds`/`claimedAssetIds` off the
+    // service's return value to choose its notification; this test only
+    // cares about the call args and the redirect, so one added asset is a
+    // sane default that keeps the destructure from throwing.
+    addScannedAssetsToBookingMock.mockResolvedValue({
+      booking: { id: "booking-123", name: "Booking One", status: "DRAFT" },
+      addedAssetIds: ["asset-123"],
+      claimedAssetIds: [],
+    } as any);
   });
 
   it("allows submitting only asset IDs without kit IDs", async () => {
@@ -149,5 +167,81 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       kitSlices: [],
     });
     expect(vi.mocked(redirect)).toHaveBeenCalledWith("/bookings/booking-123");
+  });
+
+  /**
+   * A scan can add rows, claim existing ones toward a reservation, or do
+   * neither. Reporting "Assets added" for all three tells an operator the
+   * hand-over happened when nothing moved, which is the failure the branch
+   * exists to prevent. Each outcome is pinned here because nothing else
+   * distinguishes them: all three redirect the same way.
+   */
+  describe("notification", () => {
+    async function runWith(result: {
+      addedAssetIds: string[];
+      claimedAssetIds: string[];
+    }) {
+      addScannedAssetsToBookingMock.mockResolvedValue({
+        booking: { id: "booking-123", name: "Booking One", status: "DRAFT" },
+        ...result,
+      } as any);
+
+      const formData = new FormData();
+      formData.append("assetIds[0]", "asset-123");
+
+      await action(
+        createActionArgs({
+          request: new Request(
+            "https://example.com/bookings/booking-123/overview/scan-assets",
+            { method: "POST", body: formData }
+          ),
+        })
+      );
+
+      return sendNotificationMock.mock.calls.at(-1)?.[0];
+    }
+
+    it("reports what was added when a scan creates rows", async () => {
+      const notification = await runWith({
+        addedAssetIds: ["asset-123"],
+        claimedAssetIds: [],
+      });
+
+      expect(notification).toMatchObject({ title: "Assets added" });
+    });
+
+    // The headline case: nothing new joins the booking, but an asset already
+    // on it now answers a reserved unit. "Assets added" would be false here.
+    it("reports a reservation claim when no row was created", async () => {
+      const notification = await runWith({
+        addedAssetIds: [],
+        claimedAssetIds: ["asset-123"],
+      });
+
+      expect(notification).toMatchObject({ title: "Reservation updated" });
+    });
+
+    // Added wins when a scan does both, because the new rows are the larger
+    // change and the claim is visible on the booking either way.
+    it("reports the addition when a scan both adds and claims", async () => {
+      const notification = await runWith({
+        addedAssetIds: ["asset-123"],
+        claimedAssetIds: ["asset-456"],
+      });
+
+      expect(notification).toMatchObject({ title: "Assets added" });
+    });
+
+    it("says nothing changed when a scan neither adds nor claims", async () => {
+      const notification = await runWith({
+        addedAssetIds: [],
+        claimedAssetIds: [],
+      });
+
+      expect(notification).toMatchObject({
+        title: "Nothing to add",
+        icon: { name: "scan", variant: "gray" },
+      });
+    });
   });
 });

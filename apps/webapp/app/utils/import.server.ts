@@ -1,3 +1,4 @@
+import { parseBackupPlacements } from "~/modules/asset/backup-placements";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
 import { decodeCsvListCell } from "./csv-cells";
 import { ShelfError } from "./error";
@@ -120,7 +121,7 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
   const keys = data[0] as string[];
   const values = data.slice(1) as string[][];
 
-  return values.map((entry) =>
+  return values.map((entry, rowIndex) =>
     Object.fromEntries(
       entry
         .map((value, index) => {
@@ -128,10 +129,15 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
 
           // Backup-export emits `assetModel` as a JSON-serialised object
           // (`{ name }`) so cross-org backup-restore can resolve / create
-          // the model by name. Symmetric with `category` / `location`.
+          // the model by name. Symmetric with `category`.
           switch (keys[index]) {
-            case "category":
+            case "assetLocations":
+              // Row 1 is the header, so the first data row is row 2.
+              return [keys[index], parseBackupPlacements(value, rowIndex + 2)];
+            // Only a backup written before placements existed has this
+            // column; `placementsForRestore` turns it into one placement.
             case "location":
+            case "category":
             case "tags":
             case "notes":
             case "custody":

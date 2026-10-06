@@ -109,6 +109,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import { isAssetPartiallyCheckedIn } from "~/utils/booking-assets";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import type { RowWithCustody } from "~/utils/custody-visibility.server";
@@ -248,6 +249,14 @@ export type AssetWithBooking = Asset & {
    * the row); absent on surfaces that don't project it.
    */
   fulfilsModelName?: string | null;
+  /**
+   * The location a checked-out pool slice's units left from
+   * (`BookingAsset.sourceLocationId`), shown as "from <Location>" under the
+   * title. Resolved by the booking-overview loader, and only for standalone
+   * slices of pools at two or more placements; absent on surfaces that don't
+   * project it.
+   */
+  sourceLocation?: { id: string; name: string } | null;
   // Pickup location rendered in the booking Location column. On the
   // pivot model this comes from `assetLocations[0].location` via the
   // loader's `getPrimaryLocation` normalisation.
@@ -287,6 +296,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       isSelfServiceOrBase,
       canSeeAllCustody,
+      role,
     } = await requirePermission({
       userId: authSession?.userId,
       request,
@@ -333,6 +343,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
       }),
     ]);
+
+    /**
+     * The permission check above proves `booking: update`, and BASE holds
+     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
+     * which only SELF_SERVICE holds (see the ownership check in
+     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
+     * restricted roles are checked here: a BASE or SELF_SERVICE user may
+     * only open this picker for a booking they created or hold custody of.
+     * `getBooking` fetches with `include`, which returns every scalar
+     * column, so `creatorId`/`custodianUserId` are already on `booking`.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "manage assets for",
+      });
+    }
 
     /**
      * For QUANTITY_TRACKED assets, compute available quantity via the
@@ -642,7 +671,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase, canSeeAllCustody } =
+    const { organizationId, isSelfServiceOrBase, canSeeAllCustody, role } =
       await requirePermission({
         userId: authSession?.userId,
         request,
@@ -780,6 +809,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           id: true,
           name: true,
           status: true,
+          // Both custody links, needed by the ownership check below.
+          creatorId: true,
+          custodianUserId: true,
           /**
            * We need the original assets and their quantities so we can
            * compare and detect changes. Asset `title` and `type` are
@@ -809,6 +841,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             "Booking not found. Are you sure it exists in the current workspace.",
         });
       });
+
+    /**
+     * The permission check above proves `booking: update`, and BASE holds
+     * that permission alongside SELF_SERVICE, unlike `booking: checkout`,
+     * which only SELF_SERVICE holds (see the ownership check in
+     * `bookings.$bookingId.overview.fulfil-and-checkout.tsx`). So both
+     * restricted roles are checked here: a BASE or SELF_SERVICE user may
+     * only write assets to a booking they created or hold custody of.
+     */
+    if (isSelfServiceOrBase) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "manage assets for",
+      });
+    }
 
     /** Self service can only manage assets for bookings that are DRAFT */
     const cantManageAssetsAsBase =

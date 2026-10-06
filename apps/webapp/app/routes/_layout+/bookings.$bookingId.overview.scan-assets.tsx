@@ -6,7 +6,7 @@ import type {
   ActionFunctionArgs,
   LinksFunction,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { addScannedItemAtom } from "~/atoms/qr-scanner";
 import Header from "~/components/layout/header";
@@ -16,6 +16,8 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import AddAssetsToBookingDrawer, {
   addScannedAssetsToBookingSchema,
 } from "~/components/scanner/drawer/uses/add-assets-to-booking-drawer";
+import { db } from "~/database/db.server";
+import { useBookingAssignSessionInitialization } from "~/hooks/use-booking-assign-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { ScannedKitSliceSpec } from "~/modules/booking/service.server";
@@ -23,8 +25,13 @@ import {
   addScannedAssetsToBooking,
   getBooking,
 } from "~/modules/booking/service.server";
+import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import {
+  isSelfServiceOrBaseRole,
+  validateBookingOwnership,
+} from "~/utils/booking-authorization.server";
 import { canUserManageBookingAssets } from "~/utils/bookings";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -47,6 +54,23 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
 ];
 
+/**
+ * Loader for the Scan to Assign route.
+ *
+ * Auths the user against `booking.update`, loads the booking, and derives
+ * `assignSession`: the outstanding model reservations and the assets already
+ * on the booking, in the shape `useBookingAssignSessionInitialization` seeds
+ * into the scanner atoms. `assignSession` is null when the booking reserves
+ * no models, so the screen renders exactly as it did before this reservation
+ * context existed.
+ *
+ * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+ * neither role is stopped by `requirePermission` alone: past that gate, this
+ * also proves the caller CREATED or holds CUSTODY of the booking, otherwise a
+ * restricted user could open any booking in the workspace through this
+ * screen. `canUserManageBookingAssets` cannot substitute for that check: it
+ * reads only the booking's status, never `userId`.
+ */
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -74,6 +98,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
+    /**
+     * `booking:update` is a permission BASE holds as well as SELF_SERVICE,
+     * unlike the fulfil-and-checkout screen's `booking:checkout`, which BASE
+     * does not hold and so can leave BASE out of its own ownership check.
+     * Without this, a SELF_SERVICE or BASE user could load another member's
+     * booking, its outstanding reservations and its asset list through this
+     * screen, even though the action below refuses the write. Matches the
+     * role set the mobile twin (`api+/mobile+/bookings.add-scanned-assets.ts`)
+     * restricts for this same operation, which also folds BASE in with
+     * SELF_SERVICE.
+     *
+     * Ownership is judged before status, as on the sibling booking screens: a
+     * caller with no claim on the booking should not learn what state it is
+     * in.
+     */
+    if (isSelfServiceOrBaseRole(role)) {
+      validateBookingOwnership({
+        booking,
+        userId,
+        role,
+        action: "add assets to",
+      });
+    }
+
     const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
 
     if (!canManageAssets) {
@@ -85,12 +133,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+
     const title = `Scan assets for booking | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
 
-    return payload({ title, header, booking });
+    /**
+     * Reservation context for the scanner, or null when the booking reserves
+     * no models and the drawer should look exactly as it always has.
+     *
+     * `getBooking` already returns everything `deriveBookingScanSession`
+     * needs, so there is no extra query here beyond its own supplementary
+     * asset lookup: `modelRequests` with its model's name, and
+     * `bookingAssets` with every scalar plus the asset's type. The
+     * derivation is shared with the Check Out scanner's loader so a scan can
+     * never be worth a different amount depending which screen is open.
+     */
+    const { expectedModelRequests, alreadyIncluded } =
+      await deriveBookingScanSession({
+        modelRequests: booking.modelRequests,
+        bookingAssets: booking.bookingAssets,
+        organizationId,
+      });
+
+    const assignSession =
+      expectedModelRequests.length === 0
+        ? null
+        : { expectedModelRequests, alreadyIncluded };
+
+    return payload({ title, header, booking, assignSession });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
     throw data(error(reason), { status: reason.status });
@@ -106,12 +178,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.update,
-    });
+    const { organizationId, role, isSelfServiceOrBase } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      });
 
     const formData = await request.formData();
 
@@ -229,7 +302,34 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (id) => !kitSliceAssetIds.has(id)
     );
 
-    await addScannedAssetsToBooking({
+    /**
+     * `requirePermission` above only proves the caller holds `booking:update`
+     * in this organization. BASE holds it too, unlike the fulfil-and-checkout
+     * action's `booking:checkout`, which is why that route can leave BASE out
+     * of its own ownership check. Without this, a direct POST from a
+     * SELF_SERVICE or BASE user could write to a booking they neither created
+     * nor hold custody of; the loader's `canUserManageBookingAssets` only
+     * shapes what renders, it is not consulted on a POST that skips the page.
+     * Runs before `addScannedAssetsToBooking`, which is the write it guards.
+     * Matches the role set the mobile twin
+     * (`api+/mobile+/bookings.add-scanned-assets.ts`) restricts for this same
+     * operation, which also folds BASE in with SELF_SERVICE.
+     */
+    if (isSelfServiceOrBase) {
+      const basicBookingInfo = await db.booking.findUniqueOrThrow({
+        where: { id: bookingId, organizationId },
+        select: { creatorId: true, custodianUserId: true },
+      });
+
+      validateBookingOwnership({
+        booking: basicBookingInfo,
+        userId,
+        role,
+        action: "add assets to",
+      });
+    }
+
+    const { addedAssetIds, claimedAssetIds } = await addScannedAssetsToBooking({
       bookingId,
       assetIds: standaloneAssetIds,
       kitIds,
@@ -239,12 +339,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitSlices,
     });
 
-    sendNotification({
-      title: "Assets added",
-      message: "All the scanned assets has been successfully added to booking.",
-      icon: { name: "success", variant: "success" },
-      senderId: authSession.userId,
-    });
+    /**
+     * A scan can legitimately change nothing: every item may already sit on
+     * the booking. `addedAssetIds` is what got a new row; `claimedAssetIds`
+     * is what counted an EXISTING row toward a reservation without a new one.
+     * The notification names whichever actually happened, since a blanket
+     * "added" claim is false the moment neither set has anything in it.
+     */
+    const addedCount = addedAssetIds.length;
+    const claimedCount = claimedAssetIds.length;
+
+    if (addedCount > 0) {
+      sendNotification({
+        title: "Assets added",
+        message:
+          addedCount === 1
+            ? "The scanned asset was added to the booking."
+            : `${addedCount} scanned assets were added to the booking.`,
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+    } else if (claimedCount > 0) {
+      sendNotification({
+        title: "Reservation updated",
+        message:
+          claimedCount === 1
+            ? "That asset was already on the booking. It now counts toward a reservation."
+            : "Those assets were already on the booking. They now count toward reservations.",
+        icon: { name: "success", variant: "success" },
+        senderId: authSession.userId,
+      });
+    } else {
+      sendNotification({
+        title: "Nothing to add",
+        message: "Every scanned item is already on this booking.",
+        icon: { name: "scan", variant: "gray" },
+        senderId: authSession.userId,
+      });
+    }
 
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
@@ -263,6 +395,12 @@ export const handle = {
 };
 
 export default function ScanAssetsForBookings() {
+  const { booking, assignSession } = useLoaderData<typeof loader>();
+  useBookingAssignSessionInitialization({
+    session: assignSession,
+    bookingId: booking.id,
+  });
+
   const addItem = useSetAtom(addScannedItemAtom);
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
