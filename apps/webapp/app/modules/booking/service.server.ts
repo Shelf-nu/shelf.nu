@@ -66,7 +66,6 @@ import {
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
 } from "~/modules/asset/availability.server";
-import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
   reconcileManualPlacementsForStockDecrease,
   reportAmbiguousPlacementReconcile,
@@ -869,12 +868,20 @@ async function reconcileAssetStatusForBookingExit({
  * `Kit.status` is workspace-wide state that one booking's exit must not
  * overwrite on another's behalf:
  *
- *  - `status: CHECKED_OUT` leaves a kit held in a custodian's hands alone, so
- *    it cannot be stranded AVAILABLE with its `KitCustody` row still attached;
+ *  - `status: CHECKED_OUT` leaves a kit that is IN_CUSTODY (or already
+ *    AVAILABLE) alone: only a kit a booking took out is a booking's to hand
+ *    back;
  *  - a kit any OTHER live booking still has out is dropped outright. That one
  *    the status filter cannot catch, because such a kit is legitimately
  *    CHECKED_OUT — and releasing it would let it be booked again while it is
  *    physically away (`assertKitsAddableToActiveBooking` gates on this column).
+ *
+ * A released kit goes back to whatever still holds it once the booking lets
+ * go: IN_CUSTODY when it carries a `KitCustody` row, AVAILABLE otherwise. A
+ * kit in custody can go out on a booking (check-out refuses only INDIVIDUAL
+ * members in custody, and a quantity-only kit has none), so skipping such a
+ * kit here would leave it CHECKED_OUT with no booking holding it, and nothing
+ * in the UI could release it.
  *
  * @param client Pass the active `tx` when called inside a transaction.
  * @param args.excludeBookingIds The exiting bookings, so their own slices
@@ -980,12 +987,18 @@ async function releaseCheckedOutKits(
   );
   if (releasableKitIds.length === 0) return;
 
-  return client.kit.updateMany({
-    where: {
-      id: { in: releasableKitIds },
-      organizationId,
-      status: KitStatus.CHECKED_OUT,
-    },
+  const checkedOutReleasable = {
+    id: { in: releasableKitIds },
+    organizationId,
+    status: KitStatus.CHECKED_OUT,
+  };
+
+  await client.kit.updateMany({
+    where: { ...checkedOutReleasable, custody: { isNot: null } },
+    data: { status: KitStatus.IN_CUSTODY },
+  });
+  await client.kit.updateMany({
+    where: { ...checkedOutReleasable, custody: { is: null } },
     data: { status: KitStatus.AVAILABLE },
   });
 }
@@ -5524,7 +5537,7 @@ export async function checkinBooking({
               quantity: true,
               // Kit provenance: which kit this slice came from, which survives
               // the member being detached from the kit mid-booking. Required by
-              // `getKitIdsByBookingSlices`, so dropping either is a type error.
+              // `getKitIdsToAcquire`, so dropping either is a type error.
               assetKitId: true,
               sourceKitId: true,
               // Whether the slice left, which bounds what the auto-default may
@@ -5592,30 +5605,23 @@ export async function checkinBooking({
     const bookingFoundAssets = bookingFound.bookingAssets.map((ba) => ba.asset);
 
     /**
-     * Kits to release, from BOTH directions.
-     *
-     * Live membership alone misses a kit whose member was detached while the
-     * booking ran; the booking's own slices alone miss a kit reached through a
-     * standalone row, which carries no provenance. A kit released redundantly
-     * is a no-op write; a kit missed stays stuck with no way out of the UI.
-     */
-    const sliceKitAssetIds = await getKitIdsByBookingSlices({
-      slices: bookingFound.bookingAssets,
-      organizationId,
-    });
-    /**
      * Kits this booking took out, resolved exactly as the check-out that
      * stamped them did — release has to be the inverse of acquire, or it
      * either strands a kit or hands back one it never held. In particular a
      * standalone `QUANTITY_TRACKED` slice stamps no kit, so it releases none:
      * its units come out of the free pool, and every kit holding that asset
      * kept its own slice throughout.
+     *
+     * Kept per slice so `kitIdsToRelease` below can tell which kit a member
+     * that stays out belongs to.
      */
-    const kitIds = await getKitIdsToAcquire({
+    const kitIdsBySliceId = await getKitIdsToAcquireBySlice({
       slices: bookingFound.bookingAssets,
       organizationId,
     });
-    const hasKits = kitIds.length > 0;
+    const kitIds = [
+      ...new Set([...kitIdsBySliceId.values()].flatMap((ids) => [...ids])),
+    ];
 
     const isEarlyCheckin = isBookingEarlyCheckin(bookingFound.to!);
 
@@ -5731,31 +5737,34 @@ export async function checkinBooking({
       })
       .map((asset) => asset.id);
 
-    // Pre-compute which kits to check in
     const assetsToCheckinSet = new Set(assetsToCheckin);
-    const kitsToCheckin = hasKits
-      ? kitIds.filter((kitId) => {
-          // Same union as the resolution above. Filtering on membership alone
-          // yields [] for a kit reached only through provenance, and `.every()`
-          // on [] is vacuously true — which would release it unconditionally.
-          //
-          // Membership is matched across EVERY `AssetKit` row: a
-          // `QUANTITY_TRACKED` asset can belong to several kits, and the rows
-          // come back unordered, so a first-row read tests an arbitrary one.
-          const kitAssetsInBooking = bookingFoundAssets.filter(
-            (asset) =>
-              sliceKitAssetIds.get(kitId)?.has(asset.id) ||
-              (asset.assetKits ?? []).some(
-                (membership) => membership?.kitId === kitId
-              )
-          );
-          return kitAssetsInBooking.every(
-            (asset) =>
-              assetsToCheckinSet.has(asset.id) ||
-              asset.status === AssetStatus.AVAILABLE
-          );
-        })
-      : [];
+
+    /**
+     * The kits this check-in hands back. A kit stays CHECKED_OUT while one of
+     * its `INDIVIDUAL` members does: the filter above leaves such a member out
+     * when another live booking lists it, and a kit released around it would
+     * read AVAILABLE, and be bookable, with that member still away.
+     *
+     * Only `INDIVIDUAL` members gate. A `QUANTITY_TRACKED` member's status is
+     * one value across every kit and booking holding its units, so it reads
+     * CHECKED_OUT while any OTHER kit holding it is out, which says nothing
+     * about this kit. Whether another live booking still has this kit out is
+     * decided per slice by `releaseCheckedOutKits`.
+     */
+    const kitIdsKeptOut = new Set<string>();
+    for (const slice of bookingFound.bookingAssets) {
+      if (
+        slice.asset.type !== AssetType.INDIVIDUAL ||
+        slice.asset.status !== AssetStatus.CHECKED_OUT ||
+        assetsToCheckinSet.has(slice.asset.id)
+      ) {
+        continue;
+      }
+      for (const kitId of kitIdsBySliceId.get(slice.id) ?? []) {
+        kitIdsKeptOut.add(kitId);
+      }
+    }
+    const kitIdsToRelease = kitIds.filter((kitId) => !kitIdsKeptOut.has(kitId));
 
     /**
      * Build the lookups of explicit dispositions. Qty-tracked slices
@@ -6250,9 +6259,9 @@ export async function checkinBooking({
           }
         }
         /* If there are any kits associated with the booking, then update their status */
-        if (hasKits) {
+        if (kitIdsToRelease.length > 0) {
           await releaseCheckedOutKits(tx, {
-            kitIds: kitsToCheckin,
+            kitIds: kitIdsToRelease,
             organizationId,
             excludeBookingIds: [id],
           });

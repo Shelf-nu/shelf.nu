@@ -1863,12 +1863,13 @@ describe("partialCheckinBooking", () => {
     // Verify kit status updated when all assets checked in
     expect(db.kit.updateMany).toHaveBeenCalledWith({
       // why: the kit status update is scoped by organizationId (cross-org
-      // IDOR hardening) and by CHECKED_OUT, so a kit that shares a member
-      // with this booking but is held in custody is left alone.
+      // IDOR hardening) and by CHECKED_OUT, so a kit held in custody is left
+      // alone; a kit with no KitCustody row is the one that goes AVAILABLE.
       where: {
         id: { in: ["kit-1"] },
         organizationId: "org-1",
         status: KitStatus.CHECKED_OUT,
+        custody: { is: null },
       },
       data: { status: KitStatus.AVAILABLE },
     });
@@ -16070,9 +16071,364 @@ describe("checkinBooking - releases a kit detached mid-booking", () => {
         id: { in: ["kit-1"] },
         organizationId: "org-1",
         status: KitStatus.CHECKED_OUT,
+        custody: { is: null },
       },
       data: { status: KitStatus.AVAILABLE },
     });
+  });
+});
+
+/**
+ * Which kits the Check in button hands back, and to what status.
+ *
+ * A `QUANTITY_TRACKED` asset can sit in several kits at once, and a unit of it
+ * out on another booking under a DIFFERENT kit keeps `Asset.status` at
+ * CHECKED_OUT. That status says nothing about this booking's kit, whose own
+ * slices all come back here. An `INDIVIDUAL` member the check-in leaves out is
+ * different: it stays CHECKED_OUT, so its kit does too.
+ *
+ * `kit.updateMany` writes to an in-memory kit table that applies the `where`
+ * filters the release sends, so each case asserts the status a kit ends on
+ * rather than the shape of the query.
+ */
+describe("checkinBooking - kit release on the Check in button", () => {
+  const ORG = "org-1";
+  const OUT = new Date("2026-09-28T16:09:27.000Z");
+
+  /** A slice of another live booking, as the release guard reads it. */
+  type HeldElsewhereSlice = {
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    sourceKitId: string | null;
+    asset: { type: AssetType; assetKits: { kitId: string }[] };
+  };
+
+  /** The `bookingAsset.findMany` filters the router below tells apart. */
+  type BookingAssetFindManyArgs = {
+    where?: {
+      bookingId?: { notIn?: string[] };
+      assetId?: string | { in: string[] };
+      OR?: unknown[];
+    };
+  };
+
+  /** The `kit.updateMany` filters `releaseCheckedOutKits` sends. */
+  type KitUpdateManyArgs = {
+    where: {
+      id: { in: string[] };
+      status?: KitStatus;
+      custody?: { is?: null; isNot?: null };
+    };
+    data: { status: KitStatus };
+  };
+
+  /** A kit row as far as the release cares. */
+  type KitRow = { status: KitStatus; hasCustody: boolean };
+
+  /**
+   * Installs `impl` on a shared module mock for the current test only, and
+   * puts the previous implementation back when it finishes, so this suite's
+   * fixtures never answer a later suite's reads.
+   */
+  function overrideForThisTest(
+    fn: unknown,
+    impl: Parameters<ReturnType<typeof vitest.fn>["mockImplementation"]>[0]
+  ) {
+    const mock = fn as ReturnType<typeof vitest.fn>;
+    const previous = mock.getMockImplementation();
+    mock.mockImplementation(impl);
+    onTestFinished(() => {
+      if (previous) mock.mockImplementation(previous);
+      else mock.mockReset();
+    });
+  }
+
+  /** A kit-driven `QUANTITY_TRACKED` slice of kit 1, out on this booking. */
+  function kitOneQtySlice({
+    assetId,
+    title,
+    assetKits,
+    liveBookingIds,
+  }: {
+    assetId: string;
+    title: string;
+    assetKits: { kitId: string }[];
+    liveBookingIds: string[];
+  }) {
+    return {
+      id: `ba-${assetId}-k1`,
+      assetId,
+      quantity: 1,
+      assetKitId: `ak-${assetId}-k1`,
+      sourceKitId: "kit-1",
+      checkedOutAt: OUT,
+      checkedInAt: null,
+      asset: {
+        id: assetId,
+        type: AssetType.QUANTITY_TRACKED,
+        consumptionType: ConsumptionType.TWO_WAY,
+        unitOfMeasure: "pcs",
+        title,
+        assetKits,
+        status: AssetStatus.CHECKED_OUT,
+        bookingAssets: liveBookingIds.map((bookingId) => ({
+          booking: { id: bookingId, status: BookingStatus.ONGOING },
+        })),
+      },
+    };
+  }
+
+  /**
+   * The tripod belongs to kit 1 and kit 2. Kit 2 is out on booking-2, so the
+   * asset reads CHECKED_OUT and booking-2 is live on it.
+   */
+  const sharedTripod = kitOneQtySlice({
+    assetId: "asset-tripod",
+    title: "Tripod",
+    assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+    liveBookingIds: ["booking-1", "booking-2"],
+  });
+
+  const mic = kitOneQtySlice({
+    assetId: "asset-mic",
+    title: "Mic",
+    assetKits: [{ kitId: "kit-1" }],
+    liveBookingIds: ["booking-1"],
+  });
+
+  /**
+   * Kit 1's `INDIVIDUAL` camera, out on this booking.
+   *
+   * @param alsoListedOn - Other live bookings that list the camera. Any one of
+   *   them makes the check-in leave the camera CHECKED_OUT.
+   */
+  function camera(alsoListedOn: string[] = []) {
+    return {
+      id: "ba-camera-k1",
+      assetId: "asset-camera",
+      quantity: 1,
+      assetKitId: "ak-camera-k1",
+      sourceKitId: "kit-1",
+      checkedOutAt: OUT,
+      checkedInAt: null,
+      asset: {
+        id: "asset-camera",
+        type: AssetType.INDIVIDUAL,
+        consumptionType: null,
+        unitOfMeasure: null,
+        title: "Camera",
+        assetKits: [{ kitId: "kit-1" }],
+        status: AssetStatus.CHECKED_OUT,
+        bookingAssets: ["booking-1", ...alsoListedOn].map((bookingId) => ({
+          booking: { id: bookingId, status: BookingStatus.ONGOING },
+        })),
+      },
+    };
+  }
+
+  /** Kit 2's tripod slice, out on booking-2. It holds kit 2, not kit 1. */
+  const kitTwoTripodOut: HeldElsewhereSlice = {
+    id: "ba-tripod-k2",
+    assetId: "asset-tripod",
+    assetKitId: "ak-tripod-k2",
+    sourceKitId: "kit-2",
+    asset: {
+      type: AssetType.QUANTITY_TRACKED,
+      assetKits: [{ kitId: "kit-1" }, { kitId: "kit-2" }],
+    },
+  };
+
+  /**
+   * Arranges booking-1 holding `slices` under kit 1, and returns the kit table
+   * the release writes to.
+   *
+   * @param args.slices - This booking's slices.
+   * @param args.heldElsewhere - Slices of other live bookings still out.
+   * @param args.kitOneHasCustody - Whether kit 1 carries a `KitCustody` row.
+   */
+  function arrange({
+    slices,
+    heldElsewhere = [],
+    kitOneHasCustody = false,
+  }: {
+    slices: Array<
+      ReturnType<typeof kitOneQtySlice> | ReturnType<typeof camera>
+    >;
+    heldElsewhere?: HeldElsewhereSlice[];
+    kitOneHasCustody?: boolean;
+  }) {
+    const booking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: slices,
+      partialCheckins: [],
+    };
+
+    const kits = new Map<string, KitRow>([
+      [
+        "kit-1",
+        { status: KitStatus.CHECKED_OUT, hasCustody: kitOneHasCustody },
+      ],
+    ]);
+
+    // why: the booking under check-in is the fixture above; the real read
+    // needs a database this suite does not have.
+    overrideForThisTest(db.booking.findUniqueOrThrow, () =>
+      Promise.resolve(booking)
+    );
+    // why: the completing write returns the booking the post-transaction
+    // notes and emails read; its shape is not under test.
+    overrideForThisTest(db.booking.update, () =>
+      Promise.resolve({ ...booking, status: BookingStatus.COMPLETE })
+    );
+    // why: three reads share this model method and each needs its own
+    // answer; routing by query shape lets one fixture describe what other
+    // live bookings still have out.
+    overrideForThisTest(
+      db.bookingAsset.findMany,
+      (args?: BookingAssetFindManyArgs) => {
+        const where = args?.where ?? {};
+        const assetIdFilter = where.assetId;
+        if (where.bookingId?.notIn && typeof assetIdFilter === "object") {
+          return Promise.resolve(
+            heldElsewhere
+              .filter((slice) => assetIdFilter.in.includes(slice.assetId))
+              .map((slice) => ({ assetId: slice.assetId }))
+          );
+        }
+        if (where.bookingId?.notIn && where.OR) {
+          return Promise.resolve(heldElsewhere);
+        }
+        if (typeof assetIdFilter === "string") {
+          return Promise.resolve([{ quantity: 1 }]);
+        }
+        return Promise.resolve([]);
+      }
+    );
+    // why: each slice is booked for one unit, so the per-slice remaining
+    // read answers 1 and the default disposition returns it.
+    overrideForThisTest(db.bookingAsset.findUnique, () =>
+      Promise.resolve({ quantity: 1 })
+    );
+    // why: no unit has been logged back yet, so nothing is already claimed.
+    overrideForThisTest(db.consumptionLog.aggregate, () =>
+      Promise.resolve({ _sum: { quantity: 0 } })
+    );
+    // why: no other booking has a partial check-in, so their holds stand.
+    overrideForThisTest(db.partialBookingCheckin.findMany, () =>
+      Promise.resolve([])
+    );
+    // why: the row lock is a raw `SELECT ... FOR UPDATE`, which the
+    // model-shaped database mock cannot express; the locked row's pool is
+    // large enough that returning units never trips the pool-drain guard.
+    overrideForThisTest(quantityLock.lockAssetForQuantityUpdate, () =>
+      Promise.resolve({
+        id: "asset-tripod",
+        title: "Tripod",
+        quantity: 20,
+        type: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: "pcs",
+        consumptionType: ConsumptionType.TWO_WAY,
+      })
+    );
+    // why: the kit status is the outcome under test, and only a table that
+    // applies the release's own filters shows what status a kit ends on.
+    overrideForThisTest(
+      db.kit.updateMany,
+      ({ where, data }: KitUpdateManyArgs) => {
+        let count = 0;
+        for (const kitId of where.id.in) {
+          const kit = kits.get(kitId);
+          if (!kit) continue;
+          if (where.status && kit.status !== where.status) continue;
+          if (where.custody?.is === null && kit.hasCustody) continue;
+          if (where.custody?.isNot === null && !kit.hasCustody) continue;
+          kit.status = data.status;
+          count += 1;
+        }
+        return Promise.resolve({ count });
+      }
+    );
+
+    return kits;
+  }
+
+  /** Checks booking-1 in with the button, with no scanned subset. */
+  function checkIn() {
+    return checkinBooking({
+      id: "booking-1",
+      organizationId: ORG,
+      hints: mockClientHints,
+      userId: "user-1",
+    });
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("releases a quantity-only kit when a shared member is out on another booking under another kit", async () => {
+    const kits = arrange({
+      slices: [sharedTripod, mic],
+      heldElsewhere: [kitTwoTripodOut],
+    });
+
+    await checkIn();
+
+    expect(kits.get("kit-1")?.status).toBe(KitStatus.AVAILABLE);
+  });
+
+  it("releases a mixed kit whose INDIVIDUAL member comes back with it", async () => {
+    const kits = arrange({
+      slices: [camera(), sharedTripod],
+      heldElsewhere: [kitTwoTripodOut],
+    });
+
+    await checkIn();
+
+    expect(kits.get("kit-1")?.status).toBe(KitStatus.AVAILABLE);
+  });
+
+  it("keeps the kit CHECKED_OUT while another live booking still has one of its own slices out", async () => {
+    const kits = arrange({
+      slices: [sharedTripod, mic],
+      heldElsewhere: [
+        kitTwoTripodOut,
+        {
+          id: "ba-mic-k1-elsewhere",
+          assetId: "asset-mic",
+          assetKitId: "ak-asset-mic-k1",
+          sourceKitId: "kit-1",
+          asset: {
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [{ kitId: "kit-1" }],
+          },
+        },
+      ],
+    });
+
+    await checkIn();
+
+    expect(kits.get("kit-1")?.status).toBe(KitStatus.CHECKED_OUT);
+  });
+
+  it("keeps the kit CHECKED_OUT while the check-in leaves one of its INDIVIDUAL members out", async () => {
+    // booking-3 lists the camera without having scanned it out, so no slice
+    // of another booking pins the kit; only the member left out can.
+    const kits = arrange({ slices: [camera(["booking-3"]), mic] });
+
+    await checkIn();
+
+    expect(kits.get("kit-1")?.status).toBe(KitStatus.CHECKED_OUT);
+  });
+
+  it("returns a kit that carries a KitCustody row to IN_CUSTODY", async () => {
+    const kits = arrange({ slices: [mic], kitOneHasCustody: true });
+
+    await checkIn();
+
+    expect(kits.get("kit-1")?.status).toBe(KitStatus.IN_CUSTODY);
   });
 });
 
@@ -16227,10 +16583,24 @@ describe("partialCheckinBooking — slice-grained kit release", () => {
   }
 
   /** Kit ids the transaction released, flattened across calls. */
+  /**
+   * Kit ids the release sent to AVAILABLE. The release also issues an
+   * IN_CUSTODY write over the same ids for kits with a custodian, which is
+   * not a release to the shelf.
+   */
   const releasedKitIds = () =>
-    (db.kit.updateMany as ReturnType<typeof vitest.fn>).mock.calls.flatMap(
-      (call: any[]) => call[0]?.where?.id?.in ?? []
-    );
+    (db.kit.updateMany as ReturnType<typeof vitest.fn>).mock.calls
+      .map(
+        ([args]) =>
+          args as
+            | {
+                where?: { id?: { in?: string[] } };
+                data?: { status?: KitStatus };
+              }
+            | undefined
+      )
+      .filter((args) => args?.data?.status === KitStatus.AVAILABLE)
+      .flatMap((args) => args?.where?.id?.in ?? []);
 
   const params = (overrides: Record<string, unknown>) => ({
     id: "booking-1",
