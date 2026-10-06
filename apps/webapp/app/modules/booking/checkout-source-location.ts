@@ -146,6 +146,12 @@ export type PoolSourceSnapshot = {
   placements: SourcePlacement[];
   /** `Asset.quantity` minus the manual placements, never below 0. */
   unplaced: number;
+  /**
+   * What the unplaced units have left to hand out: `unplaced` minus custody
+   * taken from them (`unitsLeftAtSource` for NULL). Decides whether
+   * "Unplaced" can stand in when no location has units left.
+   */
+  unplacedLeft: number;
 };
 
 /**
@@ -223,7 +229,9 @@ export function poolAsksForSource(snapshot: PoolSourceSnapshot): boolean {
 
 /**
  * The source a slice gets when nobody picked one: also the option the
- * check-out dialog pre-selects.
+ * check-out dialog pre-selects. For two or more placements it is the one with
+ * the most units left, unless no placement has any left and the unplaced
+ * units do: then the unplaced units, the same fallback custody's Assign uses.
  *
  * @param snapshot - The pool's placements
  * @returns A location id, or `null` for "record nothing"
@@ -245,6 +253,7 @@ export function defaultSourceLocationId(
   for (const placement of placements.slice(1)) {
     if (placement.left > best.left) best = placement;
   }
+  if (best.left <= 0 && snapshot.unplacedLeft > 0) return null;
   return best.locationId;
 }
 

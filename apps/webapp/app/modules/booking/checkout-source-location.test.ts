@@ -36,11 +36,13 @@ const studio = {
   left: 40,
 };
 
+/** A pool's snapshot; the unplaced units have `unplacedLeft` left (all, by default). */
 function snapshot(
   placements: PoolSourceSnapshot["placements"],
-  unplaced = 0
+  unplaced = 0,
+  unplacedLeft = unplaced
 ): PoolSourceSnapshot {
-  return { placements, unplaced };
+  return { placements, unplaced, unplacedLeft };
 }
 
 function input(overrides: Partial<SliceSourceInput> = {}): SliceSourceInput {
@@ -98,6 +100,36 @@ describe("defaultSourceLocationId", () => {
         ])
       )
     ).toBe("loc-studio");
+  });
+
+  it("falls back to the unplaced units when no placement has any left", () => {
+    expect(
+      defaultSourceLocationId(
+        snapshot(
+          [
+            { ...cameraRoom, left: 0 },
+            { ...studio, left: 0 },
+          ],
+          10
+        )
+      )
+    ).toBeNull();
+  });
+
+  it("keeps a location when nothing anywhere has units left", () => {
+    // 10 unplaced, all of them already in custody.
+    expect(
+      defaultSourceLocationId(
+        snapshot(
+          [
+            { ...cameraRoom, left: 0 },
+            { ...studio, left: 0 },
+          ],
+          10,
+          0
+        )
+      )
+    ).toBe("loc-camera");
   });
 
   it("keeps the earliest placement on a tie", () => {

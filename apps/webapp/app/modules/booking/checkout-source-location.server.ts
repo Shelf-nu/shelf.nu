@@ -168,6 +168,7 @@ export async function loadPoolSourceSnapshots(
       unitOfMeasure: asset.unitOfMeasure,
       placements: assetPlacements,
       unplaced: Math.max(0, (asset.quantity ?? 0) - placedSum),
+      unplacedLeft: unitsLeftAtSource(state, null),
     });
   }
 
@@ -278,6 +279,7 @@ export async function recordCheckoutSourceLocations(
     const snapshot = snapshots.get(slice.assetId) ?? {
       placements: [],
       unplaced: 0,
+      unplacedLeft: 0,
     };
     const decision = resolveSliceSource({
       checkedOutQuantity: 0,
