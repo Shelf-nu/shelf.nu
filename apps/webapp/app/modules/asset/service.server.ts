@@ -193,6 +193,7 @@ import type {
 } from "./types";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
+  buildLowStockWhere,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
@@ -207,6 +208,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
@@ -635,6 +637,8 @@ export async function getAssets(params: {
   hideUnavailableToAddToKit?: boolean;
   assetKitFilter?: string | null;
   availableToBookOnly?: boolean;
+  /** QUANTITY_TRACKED assets at or below their minimum only. */
+  lowStockOnly?: boolean;
 }) {
   let {
     organizationId,
@@ -655,6 +659,7 @@ export async function getAssets(params: {
     extraInclude,
     assetKitFilter,
     availableToBookOnly,
+    lowStockOnly,
   } = params;
 
   try {
@@ -665,6 +670,11 @@ export async function getAssets(params: {
 
     if (availableToBookOnly) {
       where.availableToBook = true;
+    }
+
+    // First writer of `where.AND`; every later writer spreads it.
+    if (lowStockOnly) {
+      where.AND = [buildLowStockWhere()];
     }
 
     if (search) {
@@ -2630,7 +2640,7 @@ export async function updateAsset({
             category: ConsumptionCategory.ADJUSTMENT,
             quantity: delta,
             userId,
-            note: "Quantity adjusted via asset edit",
+            note: ASSET_EDIT_ADJUSTMENT_NOTE,
             tx,
           });
         }
@@ -4556,6 +4566,7 @@ export async function getPaginatedAndFilterableAssets({
         extraInclude,
         assetKitFilter,
         availableToBookOnly: isSelfService,
+        lowStockOnly: searchParams.get("lowStockOnly") === "true",
       }),
     ]);
 
