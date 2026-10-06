@@ -104,6 +104,7 @@ export default function AssignCustodyDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const pickedSources = useAtomValue(scannedAssetSourcesAtom);
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
@@ -111,6 +112,7 @@ export default function AssignCustodyDrawer({
     items,
     removeAssetsFromList,
     removeItemsFromList,
+    pickedSources,
   });
 
   // Create blockers component

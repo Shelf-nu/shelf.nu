@@ -120,10 +120,12 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
         id: true,
         createdAt: true,
         quantity: true,
-        // The location the units were taken from (NULL: unplaced, or not
-        // recorded). The custody breakdown lists it per holder and the
-        // release dialog asks per location when there are several.
+        // The location the units were taken from (NULL: unplaced, or with
+        // `sourceUnknown` not recorded). The custody breakdown lists it per
+        // holder and the release dialog asks per location when there are
+        // several.
         location: { select: { id: true, name: true } },
+        sourceUnknown: true,
         // why: kit-allocated custody rows must not be released directly
         // from the asset's custody-breakdown card. The UI uses
         // `kitCustodyId` to swap the Release button for a "held via kit"

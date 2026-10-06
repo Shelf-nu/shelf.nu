@@ -117,7 +117,12 @@ export async function loadPoolSourceSnapshots(
         kitCustodyId: null,
         asset: { organizationId },
       },
-      select: { assetId: true, locationId: true, quantity: true },
+      select: {
+        assetId: true,
+        locationId: true,
+        sourceUnknown: true,
+        quantity: true,
+      },
     }),
     // Units out on other bookings from each location are not there either.
     loadBookedOutBySource(tx, { assetIds: uniqueAssetIds, organizationId }),

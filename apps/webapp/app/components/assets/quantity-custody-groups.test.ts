@@ -3,7 +3,8 @@ import { formatCustodySourceOption } from "./custody-source-select";
 import {
   describeCustodySources,
   groupCustodyRecords,
-  releaseLineLabel,
+  releaseLineSource,
+  releaseSourceValue,
 } from "./quantity-custody-groups";
 import { releaseLinesReducer } from "./release-by-source-button";
 
@@ -59,64 +60,75 @@ describe("groupCustodyRecords", () => {
 describe("describeCustodySources", () => {
   it("says 'from <Location>' for a single source", () => {
     expect(
-      describeCustodySources(
-        [{ quantity: 2, location: studio, custodian: { id: "tm" } }],
-        false
-      )
+      describeCustodySources([
+        { quantity: 2, location: studio, custodian: { id: "tm" } },
+      ])
     ).toEqual([{ key: "loc-studio", text: "from Studio", muted: false }]);
   });
 
   it("lists every source with its count when there are several", () => {
     expect(
-      describeCustodySources(
-        [
-          { quantity: 2, location: camera, custodian: { id: "tm" } },
-          { quantity: 1, location: studio, custodian: { id: "tm" } },
-        ],
-        false
-      ).map((p) => p.text)
+      describeCustodySources([
+        { quantity: 2, location: camera, custodian: { id: "tm" } },
+        { quantity: 1, location: studio, custodian: { id: "tm" } },
+      ]).map((p) => p.text)
     ).toEqual(["2 from Camera Room", "1 from Studio"]);
   });
 
-  it("calls a missing source unplaced when the pool has unplaced units", () => {
+  it("calls a row with no location unplaced", () => {
     expect(
-      describeCustodySources(
-        [{ quantity: 1, location: null, custodian: { id: "tm" } }],
-        true
-      )
-    ).toEqual([{ key: "none", text: "unplaced", muted: false }]);
+      describeCustodySources([
+        { quantity: 1, location: null, custodian: { id: "tm" } },
+      ])
+    ).toEqual([{ key: "unplaced", text: "unplaced", muted: false }]);
   });
 
-  it("marks a missing source on a fully placed pool as not recorded, lighter", () => {
+  it("marks a source never recorded as not recorded, lighter", () => {
     expect(
-      describeCustodySources(
-        [{ quantity: 2, location: null, custodian: { id: "tm" } }],
-        false
-      )
-    ).toEqual([{ key: "none", text: "location not recorded", muted: true }]);
+      describeCustodySources([
+        {
+          quantity: 2,
+          location: null,
+          sourceUnknown: true,
+          custodian: { id: "tm" },
+        },
+      ])
+    ).toEqual([
+      { key: "unrecorded", text: "location not recorded", muted: true },
+    ]);
+  });
+
+  it("keeps the unplaced units and a source never recorded apart for one person", () => {
+    expect(
+      describeCustodySources([
+        { quantity: 1, location: null, custodian: { id: "tm" } },
+        {
+          quantity: 2,
+          location: null,
+          sourceUnknown: true,
+          custodian: { id: "tm" },
+        },
+      ])
+    ).toEqual([
+      { key: "unplaced", text: "1 unplaced", muted: false },
+      { key: "unrecorded", text: "2 location not recorded", muted: true },
+    ]);
   });
 });
 
-describe("releaseLineLabel", () => {
-  it("names the source and the most that can come from it", () => {
-    expect(
-      releaseLineLabel(
-        { quantity: 2, location: camera, custodian: { id: "tm" } },
-        false
-      )
-    ).toBe("From Camera Room: max 2");
-    expect(
-      releaseLineLabel(
-        { quantity: 1, location: null, custodian: { id: "tm" } },
-        true
-      )
-    ).toBe("Unplaced: max 1");
-    expect(
-      releaseLineLabel(
-        { quantity: 1, location: null, custodian: { id: "tm" } },
-        false
-      )
-    ).toBe("Location not recorded: max 1");
+describe("releaseLineSource and releaseSourceValue", () => {
+  it("name each source and post the value the release route reads", () => {
+    const located = { quantity: 2, location: camera, custodian: { id: "tm" } };
+    const unplaced = { quantity: 1, location: null, custodian: { id: "tm" } };
+    const unrecorded = { ...unplaced, sourceUnknown: true };
+
+    expect(releaseLineSource(located)).toBe("From Camera Room");
+    expect(releaseLineSource(unplaced)).toBe("Unplaced");
+    expect(releaseLineSource(unrecorded)).toBe("Location not recorded");
+
+    expect(releaseSourceValue(located)).toBe("loc-camera");
+    expect(releaseSourceValue(unplaced)).toBe("unplaced");
+    expect(releaseSourceValue(unrecorded)).toBe("unrecorded");
   });
 });
 
@@ -130,8 +142,20 @@ describe("releaseLinesReducer", () => {
     expect(
       releaseLinesReducer([], { type: "reset", rows, isConsumable: true })
     ).toEqual([
-      { locationId: "loc-camera", max: 2, quantity: 2, consumed: 2 },
-      { locationId: "loc-studio", max: 1, quantity: 1, consumed: 1 },
+      {
+        source: "loc-camera",
+        label: "From Camera Room",
+        max: 2,
+        quantity: 2,
+        consumed: 2,
+      },
+      {
+        source: "loc-studio",
+        label: "From Studio",
+        max: 1,
+        quantity: 1,
+        consumed: 1,
+      },
     ]);
   });
 
@@ -162,6 +186,26 @@ describe("releaseLinesReducer", () => {
       value: 4,
     });
     expect(lines[1].consumed).toBe(1);
+  });
+
+  it("takes whole units only: a decimal is cut, an unreadable value is 0", () => {
+    let lines = releaseLinesReducer([], {
+      type: "reset",
+      rows,
+      isConsumable: false,
+    });
+    lines = releaseLinesReducer(lines, {
+      type: "set_quantity",
+      index: 0,
+      value: 1.5,
+    });
+    expect(lines[0].quantity).toBe(1);
+    lines = releaseLinesReducer(lines, {
+      type: "set_quantity",
+      index: 0,
+      value: Number.NaN,
+    });
+    expect(lines[0].quantity).toBe(0);
   });
 });
 

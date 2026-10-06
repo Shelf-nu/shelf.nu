@@ -21,7 +21,7 @@
 
 import type { ScanListItems } from "~/atoms/qr-scanner";
 import type { CustodySourceOption } from "~/modules/asset/custody-source";
-import { defaultSourceOption } from "~/modules/asset/custody-source";
+import { defaultAssignSourceOption } from "~/modules/asset/custody-source";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 
@@ -147,8 +147,9 @@ export function buildQuantitiesPayload({
 
 /**
  * The "From location" choices of a scanned pool and the one in effect: the
- * operator's pick, else the location with the most units left (also when the
- * pick is no longer among the options). No options for an individual asset
+ * operator's pick, else the location with the most units left, or Unplaced
+ * when no location has any left (also when the pick is no longer among the
+ * options). No options for an individual asset
  * or a pool placed at fewer than two locations: those rows show no picker and
  * send no entry, exactly as before sources existed.
  *
@@ -167,7 +168,7 @@ export function scannedSourceChoice(
   const value =
     pick !== undefined && options.some((option) => option.value === pick)
       ? pick
-      : defaultSourceOption(options)?.value ?? null;
+      : defaultAssignSourceOption(options)?.value ?? null;
   return { options, value };
 }
 

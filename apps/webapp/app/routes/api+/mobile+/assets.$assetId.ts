@@ -161,6 +161,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: the location each operator row's units were taken from,
             // for the additive `custodyList[].sources` below.
             location: { select: { id: true, name: true } },
+            // why: tells unplaced units apart from a source never recorded
+            // in those `sources` (both have a null location).
+            sourceUnknown: true,
             custodian: {
               select: {
                 id: true,
@@ -437,11 +440,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     /**
      * Additive: where each holder's operator units were taken from, one entry
-     * per source (`locationId` null: the unplaced units, or a source that was
-     * never recorded). Kit-inherited units are not listed: they follow the
-     * kit. The app shows these only for a pool placed at two or more
-     * distinct locations (count distinct manual `placements`), and uses a
-     * source's `locationId` to release per location.
+     * per source (`locationId` null: the unplaced units, or with
+     * `unrecorded: true` a source never recorded). Kit-inherited units are not
+     * listed: they follow the kit. The app shows these only for a pool placed
+     * at two or more distinct locations (count distinct manual `placements`),
+     * and releases per source with the entry's `locationId`, or
+     * `"unrecorded"` for an unrecorded entry.
      */
     const custodyList = visibleCustodyList.map((entry) => ({
       ...entry,
