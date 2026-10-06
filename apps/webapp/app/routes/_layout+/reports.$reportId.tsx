@@ -31,6 +31,10 @@ import {
   useReportRowHandlers,
 } from "~/components/reports";
 import {
+  loadReportFilterOptions,
+  resolveReportFilters,
+} from "~/modules/reports/filters.server";
+import {
   resolveTimeframe,
   bookingComplianceReport,
   overdueItemsReport,
@@ -141,11 +145,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const customTo = url.searchParams.get("to");
 
   // Resolve the acting user's date/time formatting preferences so timeframe
-  // labels (e.g. custom ranges) render in their configured format.
-  const formatPrefs = await resolveUserFormatPrefsById(
-    userId,
-    getClientHint(request)
-  );
+  // labels (e.g. custom ranges) render in their configured format. The
+  // filters are verified against the workspace and the pick-lists loaded in
+  // the same round so the page renders in one pass.
+  const [formatPrefs, reportFilters, filterOptions] = await Promise.all([
+    resolveUserFormatPrefsById(userId, getClientHint(request)),
+    resolveReportFilters({
+      organizationId,
+      searchParams: url.searchParams,
+      reportDef,
+    }),
+    loadReportFilterOptions({ organizationId, reportDef }),
+  ]);
 
   const timeframe = resolveTimeframe(
     timeframePreset,
@@ -171,6 +182,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         // Anchor trend-chart axis labels in the acting user's timezone (D2).
         timeZone: formatPrefs.timeZone,
+        statusFilter:
+          reportFilters.bookingStatuses.length > 0
+            ? reportFilters.bookingStatuses
+            : undefined,
+        custodianTeamMemberId: reportFilters.teamMemberId ?? undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
         sortBy,
@@ -183,7 +200,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await overdueItemsReport({
         organizationId,
         currency: currentOrganization.currency,
-        custodianId: url.searchParams.get("custodian") || undefined,
+        custodianTeamMemberId: reportFilters.teamMemberId ?? undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -198,8 +216,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         idleThresholdDays: getIntParam(url.searchParams, "days", 30, {
           min: 1,
         }),
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -209,8 +226,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await custodySnapshotReport({
         organizationId,
         currency: currentOrganization.currency,
-        teamMemberId: url.searchParams.get("teamMember") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
+        teamMemberId: reportFilters.teamMemberId ?? undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -220,8 +237,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await topBookedAssetsReport({
         organizationId,
         timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -240,6 +256,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await assetDistributionReport({
         organizationId,
         currency: currentOrganization.currency,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -249,15 +266,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await assetInventoryReport({
         organizationId,
         currency: currentOrganization.currency,
-        categoryIds:
-          url.searchParams.get("categories")?.split(",").filter(Boolean) ||
-          undefined,
-        locationIds:
-          url.searchParams.get("locations")?.split(",").filter(Boolean) ||
-          undefined,
-        statuses:
-          url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
-          undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -267,8 +276,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await monthlyBookingTrendsReport({
         organizationId,
         timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 12),
       });
@@ -278,8 +286,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await assetUtilizationReport({
         organizationId,
         timeframe,
-        categoryId: url.searchParams.get("category") || undefined,
-        locationId: url.searchParams.get("location") || undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -289,8 +296,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await assetActivityReport({
         organizationId,
         timeframe,
-        assetId: url.searchParams.get("asset") || undefined,
-        categoryId: url.searchParams.get("category") || undefined,
+        assetId: reportFilters.assetId ?? undefined,
+        assetFilter: reportFilters.assetFilter,
         page: getIntParam(url.searchParams, "page", 1),
         pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
@@ -313,6 +320,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       title: reportData.report.title,
       subHeading: reportData.report.description,
     },
+    // Filter bar inputs. The paged pick-lists and their totals are spread
+    // onto the top level because the shared `DynamicDropdown` reads them
+    // from the route's loader data by key (`categories`/`totalCategories`).
+    ...filterOptions,
+    filterOptions,
+    filterConfigs: reportDef.filters,
+    activeFilters: reportFilters.active,
   });
 }
 
@@ -338,6 +352,9 @@ export default function ReportPage() {
     topBookedKit,
     distributionBreakdown,
     chartSeries,
+    filterOptions,
+    filterConfigs,
+    activeFilters,
   } = loaderData as typeof loaderData & {
     complianceData?: ComplianceData;
     topBookedAsset?: TopBookedAssetRow | null;
@@ -370,6 +387,9 @@ export default function ReportPage() {
           reportId={reportId}
           timeframe={filters.timeframe}
           isLoading={isLoading}
+          filterConfigs={filterConfigs}
+          activeFilters={activeFilters}
+          filterOptions={filterOptions}
         />
 
         <div className={tw("transition-opacity", isLoading && "opacity-60")}>
