@@ -237,6 +237,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       kitSlices,
       kitIds,
       userId,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
     // Distinct member assets just added — used to attribute the per-asset

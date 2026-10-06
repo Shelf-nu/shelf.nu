@@ -933,6 +933,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // attributes the BOOKING_ASSETS_ADDED events and the model-request
         // assignment notes, which are separate concerns.
         skipBookingNote: true,
+        // Re-checks the add rule against the locked booking status.
+        access,
       });
 
       /**
@@ -1108,6 +1110,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // route's own "adjusted booked quantity" note below is the truthful
         // record of what happened.
         skipBookingNote: true,
+        // Re-checks the add rule against the locked booking status.
+        access,
       });
 
       /**

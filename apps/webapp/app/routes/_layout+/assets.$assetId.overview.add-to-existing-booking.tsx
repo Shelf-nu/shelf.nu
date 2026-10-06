@@ -207,6 +207,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
       userId,
       quantities,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
     const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });

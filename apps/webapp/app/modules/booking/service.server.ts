@@ -95,6 +95,7 @@ import {
   bookingAddableStatusClause,
   bookingWriteScopeClause,
   assertCanAddBookingItems,
+  assertCanDuplicateBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
@@ -9996,7 +9997,14 @@ export async function updateBookingAssets({
   quantities,
   kitSlices,
   skipBookingNote,
+  access,
 }: Pick<Booking, "id" | "organizationId"> & {
+  /**
+   * The adding caller's access. Its add-items rule is checked against the
+   * booking status read under the row lock below, so a booking that leaves
+   * the caller's add statuses after the route's own check still refuses.
+   */
+  access: RoleAccess;
   /**
    * Standalone assets to add (no kit attribution). Kit-driven rows are
    * supplied separately via `kitSlices` so the same asset can be both
@@ -10063,15 +10071,13 @@ export async function updateBookingAssets({
         },
       });
 
-      // The four callers each validate the status before getting here, but
-      // every one of them does so in a read of its own, so a booking closed in
-      // between was still written to. (detail.dev D055)
-      //
-      // Re-reading inside this transaction is NOT sufficient on its own: under
-      // READ COMMITTED the `findUniqueOrThrow` above takes no lock, so a
-      // concurrent check-in or cancellation can still commit between it and
-      // the writes below. The row lock is what actually closes the window —
-      // it is held until this transaction commits.
+      // Every caller checks the status in a read of its own first, so the
+      // status these writes depend on is decided here, under a row lock held
+      // until the transaction commits. A plain re-read is not enough: under
+      // READ COMMITTED it takes no lock, and a concurrent check-in,
+      // cancellation or reservation could still commit before the writes.
+      // The closed-booking refusal applies to everyone; the add-items rule is
+      // the caller's own (restricted roles add only to drafts).
       const lockedStatus = await lockBookingForStatusCheck(
         tx,
         id,
@@ -10082,6 +10088,7 @@ export async function updateBookingAssets({
         operation: "change the items on",
         bookingId: id,
       });
+      assertCanAddBookingItems({ access, bookingStatus: lockedStatus });
 
       const slices = kitSlices ?? [];
 
@@ -16765,9 +16772,13 @@ export async function computeBookingKitDrift({
  * @param args.from - Start date for the new booking
  * @param args.to - End date for the new booking
  * @param args.request - The incoming request, forwarded to `getBooking` for
- *   client-hint resolution and ownership checks
+ *   client-hint resolution
+ * @param args.access - The caller's access. The duplicate guard runs on the
+ *   same source row the copy is built from, so a custodian reassigned after
+ *   any earlier read cannot slip into the copy unchecked.
  * @returns The newly created booking row
- * @throws {ShelfError} If anything in the transaction fails
+ * @throws {ShelfError} 403 if the caller may not duplicate the source
+ *   (`assertCanDuplicateBooking`), or if anything in the transaction fails
  */
 export async function duplicateBooking({
   bookingId,
@@ -16776,6 +16787,7 @@ export async function duplicateBooking({
   from,
   to,
   request,
+  access,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
@@ -16783,6 +16795,7 @@ export async function duplicateBooking({
   from: Date;
   to: Date;
   request: Request;
+  access: RoleAccess;
 }) {
   try {
     const bookingToDuplicate = await getBooking({
@@ -16793,6 +16806,9 @@ export async function duplicateBooking({
         notificationRecipients: { select: { id: true } },
       },
     });
+
+    // Authorize the exact row every field of the copy is read from below.
+    assertCanDuplicateBooking({ booking: bookingToDuplicate, userId, access });
 
     // Three-way split of the source's snapshot:
     //  - genuine standalone (BOTH pointers null) -> copied verbatim. A user

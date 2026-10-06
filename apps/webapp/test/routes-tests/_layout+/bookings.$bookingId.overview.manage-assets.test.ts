@@ -747,6 +747,11 @@ describe("manage-assets route validation", () => {
         // form makes a silent regression impossible: dropping the flag fails
         // this test rather than quietly restoring the duplicate.
         skipBookingNote: true,
+        // The caller's access, so the service re-checks the add rule against
+        // the booking status it reads under the row lock.
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ writeAll: true }),
+        }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link

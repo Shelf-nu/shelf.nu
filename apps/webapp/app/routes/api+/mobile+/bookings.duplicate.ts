@@ -10,7 +10,6 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { duplicateBooking } from "~/modules/booking/service.server";
-import { assertCanDuplicateBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -27,8 +26,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * new from/to defaulted) the user can then edit. Returns the new booking so the
  * app can navigate straight into its edit screen.
  *
- * Gated by `PermissionAction.create` plus `assertCanDuplicateBooking` on the
- * SOURCE booking, the same guard the web route runs: a caller who does not
+ * Gated by `PermissionAction.create`, and by `assertCanDuplicateBooking`, which
+ * `duplicateBooking` runs on the source row it copies from: a caller who does not
  * write every booking may only duplicate their own, and a caller who may only
  * book for themself must also be the source's custodian, because the copy
  * keeps the source custodian.
@@ -64,16 +63,10 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Org-scoped lookup (foreign-org id 404s) + ownership fields for the guard.
+    // Org-scoped lookup (a foreign-org id 404s) for the source's window.
     const source = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: {
-        id: true,
-        creatorId: true,
-        custodianUserId: true,
-        from: true,
-        to: true,
-      },
+      select: { id: true, from: true, to: true },
     });
 
     if (!source) {
@@ -82,10 +75,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { status: 404 }
       );
     }
-
-    // The source must be the caller's to write, and a caller who may only
-    // book for themself must hold it (the copy keeps the source custodian).
-    assertCanDuplicateBooking({ booking: source, userId: user.id, access });
 
     const newBooking = await duplicateBooking({
       bookingId,
@@ -97,6 +86,9 @@ export async function action({ request }: ActionFunctionArgs) {
       // window; the duplicate lands as a DRAFT the user can reschedule.
       from: source.from,
       to: source.to,
+      // The service checks the caller may duplicate the source on the same
+      // row it copies from (`assertCanDuplicateBooking`).
+      access,
     });
 
     return data({

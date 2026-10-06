@@ -620,6 +620,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         kitIds: newlyAddedKitIds, // Only kits being added — see comment above
         userId,
         kitSlices,
+        // Re-checks the add rule against the locked booking status.
+        access,
       });
 
       if (newlyAddedKitIds.length > 0) {

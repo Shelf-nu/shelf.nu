@@ -2640,6 +2640,7 @@ describe("updateBookingAssets", () => {
       updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: ["asset-1"],
         userId: "user-1",
       })
@@ -2651,6 +2652,31 @@ describe("updateBookingAssets", () => {
     // moved somewhere that lets writes happen first.
     expect(db.asset.findMany).not.toHaveBeenCalled();
   });
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the locked status no longer takes its additions",
+    async (role) => {
+      // The caller's route checked the add rule on an unlocked read; by the
+      // time the write locks the row the booking has been reserved, which
+      // restricted roles may not add to. The rule is judged against the
+      // locked status, so the add refuses before any write.
+      // why: the lock is a raw SQL read; answer it once with the new status.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+
+      await expect(
+        updateBookingAssets({
+          id: "booking-1",
+          organizationId: "org-1",
+          access: accessFor([role]),
+          assetIds: ["asset-1"],
+          userId: "user-1",
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+    }
+  );
 
   /**
    * The booking activity feed must record one add as ONE event.
@@ -2680,6 +2706,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1"],
       userId: "user-1",
     });
@@ -2704,6 +2731,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1"],
       userId: "user-1",
       skipBookingNote: true,
@@ -2746,6 +2774,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1", "asset-2"],
       userId: "user-1",
     });
@@ -2763,6 +2792,7 @@ describe("updateBookingAssets", () => {
     id: "booking-1",
     organizationId: "org-1",
     assetIds: ["asset-1", "asset-2"],
+    access: accessFor([OrganizationRoles.ADMIN]),
   };
 
   it("should update booking assets successfully for DRAFT booking", async () => {
@@ -3026,6 +3056,7 @@ describe("updateBookingAssets", () => {
     const params = {
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       // No standalone assets — this mirrors a kit-add submission.
       assetIds: [] as string[],
       // `kitIds` is always passed on the kit-add path; it skips the
@@ -3127,6 +3158,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: [],
       kitIds: ["kit-1"],
       kitSlices: [
@@ -3166,6 +3198,7 @@ describe("updateBookingAssets", () => {
     const qtyParams = {
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: [QT_ASSET_ID],
       quantities: { [QT_ASSET_ID]: 7 },
     };
@@ -7522,6 +7555,37 @@ describe("duplicateBooking", () => {
     vitest.clearAllMocks();
   });
 
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the source it copies from is held by someone else",
+    async (role) => {
+      // The caller created the source, but the row this call reads, which
+      // every field of the copy comes from, now sits in another member's
+      // custody (say it was reassigned after the route's own read). The guard
+      // runs on that row, so nothing is created.
+      //@ts-expect-error missing vitest type
+      db.booking.findFirstOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        creatorId: "user-1",
+        custodianUserId: "someone-else",
+        bookingAssets: [],
+        tags: [],
+      });
+
+      await expect(
+        duplicateBooking({
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          from: DUPLICATE_FROM,
+          to: DUPLICATE_TO,
+          request: new Request("https://example.com"),
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.booking.create).not.toHaveBeenCalled();
+    }
+  );
+
   it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);
 
@@ -7573,6 +7637,7 @@ describe("duplicateBooking", () => {
       from,
       to,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     expect(db.booking.create).toHaveBeenCalledWith(
@@ -7709,6 +7774,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     // Both slices are recreated, each carrying its own assetKitId — the
@@ -7903,6 +7969,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8060,6 +8127,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8152,6 +8220,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8250,6 +8319,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -15595,6 +15665,7 @@ describe("booking notes + events — qty-tracked axis", () => {
     await updateBookingAssets({
       id: "booking-qty",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-pens"],
       userId: "user-1",
       quantities: { "asset-pens": 50 },
@@ -15648,6 +15719,7 @@ describe("booking notes + events — qty-tracked axis", () => {
     await updateBookingAssets({
       id: "booking-ind",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-camera"],
       userId: "user-1",
     });
@@ -16768,6 +16840,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         // A new unit, a quantity-tracked pool, and a unit already on the booking.
         assetIds: ["asset-ind", "asset-qt", "asset-held"],
         quantities: { "asset-qt": 3 },
@@ -16805,6 +16878,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: ["asset-ind", "asset-qt", "asset-held"],
         quantities: { "asset-qt": 3 },
         kitSlices: [
@@ -16851,6 +16925,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: [],
         kitSlices: [
           {
@@ -16877,6 +16952,7 @@ describe("model reservation guard — write paths", () => {
         updateBookingAssets({
           id: "booking-1",
           organizationId: "org-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
           assetIds: ["asset-ind"],
           userId: "user-1",
         })
