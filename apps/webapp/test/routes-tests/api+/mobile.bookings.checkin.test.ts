@@ -162,6 +162,28 @@ describe("POST /api/mobile/bookings/checkin", () => {
     });
   });
 
+  // The "Completed by" line in the completion email names `checkinBooking`'s
+  // `userId` (see "booking emails name who acted" in the booking service
+  // suite). This pins that the mobile route passes the signed-in caller, not
+  // the booking's creator or custodian.
+  it("checks the booking in as the signed-in mobile user, who the completion email names", async () => {
+    vi.mocked(requireMobileAuth).mockResolvedValue({
+      user: { id: "admin-7" },
+    } as Awaited<ReturnType<typeof requireMobileAuth>>);
+    vi.mocked(db.booking.findFirst).mockResolvedValue(
+      bookingRow({ creatorId: "user-1", custodianUserId: "user-3" })
+    );
+
+    const request = createCheckinRequest({ bookingId: "booking-1" });
+    const result = await action(createActionArgs({ request }));
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(checkinBooking).toHaveBeenCalledTimes(1);
+    expect(checkinBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "booking-1", userId: "admin-7" })
+    );
+  });
+
   it("should return 403 when user lacks checkin permission", async () => {
     vi.mocked(requireMobilePermission).mockRejectedValue(
       Object.assign(new Error("Permission denied"), { status: 403 })
