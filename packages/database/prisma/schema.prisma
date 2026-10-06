@@ -474,6 +474,8 @@ model AssetModel {
 
   @@index([organizationId, name])
   @@index([userId])
+  // Trigram index for substring search from the asset-list search bar
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "AssetModel_name_trgm_idx")
 }
 
 /// Book-by-Model: intent row attached to a booking for a quantity of

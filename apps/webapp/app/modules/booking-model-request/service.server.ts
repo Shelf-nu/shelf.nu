@@ -1746,6 +1746,10 @@ export async function writeBookingModelRequestInTx(
         cause: null,
         label,
         status: 400,
+        // Titled, because the generic fallback ("Oops! Something went wrong")
+        // reads as a fault in Shelf next to a message that is really a fact
+        // about the pool the user is asking from.
+        title: "Not enough units",
         message: `Cannot reserve ${quantity} × ${assetModel.name}. Only ${headroom} can be reserved in this window.${heldNote}`,
         shouldBeCaptured: false,
       });
