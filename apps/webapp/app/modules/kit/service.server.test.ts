@@ -7,6 +7,7 @@ import {
   AssetStatus,
   ErrorCorrection,
 } from "@prisma/client";
+import { onTestFinished } from "vitest";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -1252,6 +1253,18 @@ describe("bulkRemoveAssetsFromKits", () => {
   });
 });
 
+/**
+ * A `kit.findMany` answer for the bulk custody tests: their kits for every
+ * read, except the holder guard's "which of these are checked out" read
+ * (the one carrying `OR`), which none of them are unless a test says so.
+ *
+ * @param kits - The kits the bulk action resolves
+ */
+function kitsUnlessHolderRead(kits: unknown[]) {
+  return (args?: { where?: { OR?: unknown[] } }) =>
+    Promise.resolve(args?.where?.OR ? [] : kits);
+}
+
 describe("bulkAssignKitCustody", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -1275,7 +1288,7 @@ describe("bulkAssignKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
 
     //@ts-expect-error missing vitest type
     db.teamMember.findFirst.mockResolvedValue({
@@ -1306,6 +1319,75 @@ describe("bulkAssignKitCustody", () => {
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  it("refuses a kit that reads AVAILABLE while a live booking has some of its units out", async () => {
+    expect.assertions(2);
+    // A partial check-out leaves `Kit.status` alone until every unit is out,
+    // so the status check above passes; only the booking slice tells.
+    const partlyOutKits = [
+      { id: "kit-1", name: "Kit 1", status: KitStatus.AVAILABLE, assets: [] },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockImplementation(
+      (args?: { where?: { OR?: Array<{ id?: { in?: string[] } }> } }) =>
+        Promise.resolve(
+          args?.where?.OR
+            ? args.where.OR.some((or) => or.id?.in?.includes("kit-1"))
+              ? [{ id: "kit-1", name: "Kit 1" }]
+              : []
+            : partlyOutKits
+        )
+    );
+    const bookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
+      typeof vitest.fn
+    >;
+    const priorBookingAssetFindMany =
+      bookingAssetFindMany.getMockImplementation();
+    onTestFinished(() => {
+      if (priorBookingAssetFindMany) {
+        bookingAssetFindMany.mockImplementation(priorBookingAssetFindMany);
+      } else {
+        bookingAssetFindMany.mockResolvedValue([]);
+      }
+    });
+    // why: the other booking's slice is a database row; it left and has not
+    // come back, and names kit-1 as the kit it was booked under.
+    bookingAssetFindMany.mockImplementation(
+      (args?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+        Promise.resolve(
+          args?.where?.bookingId?.notIn
+            ? [
+                {
+                  id: "ba-out",
+                  assetKitId: null,
+                  sourceKitId: "kit-1",
+                  asset: { type: AssetType.QUANTITY_TRACKED, assetKits: [] },
+                },
+              ]
+            : []
+        )
+    );
+    //@ts-expect-error missing vitest type
+    db.teamMember.findFirst.mockResolvedValue({
+      id: "custodian-1",
+      name: "John Doe",
+      user: { id: "user-1", firstName: "John", lastName: "Doe" },
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await expect(
+      bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        kitIds: ["kit-1"],
+        organizationId: "org-1",
+        custodianId: "custodian-1",
+        custodianName: "John Doe",
+        userId: "user-1",
+      })
+    ).rejects.toThrow("Cannot assign custody.");
+    expect(db.kitCustody.createMany).not.toHaveBeenCalled();
+  });
+
   it("should throw error when kits are not available", async () => {
     expect.assertions(1);
     const unavailableKits = [
@@ -1317,7 +1399,7 @@ describe("bulkAssignKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(unavailableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(unavailableKits));
 
     await expect(
       bulkAssignKitCustody({
@@ -1357,7 +1439,7 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsInCustody));
 
     //@ts-expect-error missing vitest type
     db.$transaction.mockImplementation((callback) =>
@@ -1388,7 +1470,7 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
 
     await expect(
       bulkReleaseKitCustody({
@@ -1426,7 +1508,7 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(colleaguesKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(colleaguesKits));
 
     await expect(
       bulkReleaseKitCustody({
@@ -1460,7 +1542,7 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(ownKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(ownKits));
     //@ts-expect-error missing vitest type
     db.$transaction.mockImplementation((callback) => callback(db));
 
@@ -1481,7 +1563,7 @@ describe("bulkReleaseKitCustody", () => {
     // binary oracle for "does this custodian hold any kit".
     expect.assertions(1);
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue([]);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead([]));
 
     await expect(
       bulkReleaseKitCustody({
@@ -1796,7 +1878,7 @@ describe("getAvailableKitAssetForBooking", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsWithAssets);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsWithAssets));
 
     const result = await getAvailableKitAssetForBooking(
       ["kit-1", "kit-2"],
@@ -2772,7 +2854,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-1",
@@ -2893,7 +2975,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-nikolay",
@@ -2995,7 +3077,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-1",
@@ -3076,7 +3158,7 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsInCustody));
     //@ts-expect-error missing vitest type
     db.kitCustody.findMany.mockResolvedValue([
       { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
