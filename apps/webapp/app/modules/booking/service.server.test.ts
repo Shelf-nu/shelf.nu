@@ -12871,6 +12871,61 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     });
   });
 
+  it("spreads an untagged CONSUME over several slices the way the readers do", async () => {
+    expect.assertions(2);
+
+    // 60 at Store + 40 at Studio, fully placed. The booking holds the pool
+    // twice: a standalone slice of 4 that left from Studio, and a kit slice
+    // of 6. An older phone app checks in 4 used up without naming a slice.
+    // The readers fill the standalone slice first, so Studio loses the 4.
+    setupQtyMocks();
+    const booking = makeQtyBooking();
+    const [base] = booking.bookingAssets;
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...booking,
+      bookingAssets: [
+        {
+          ...base,
+          id: "ba-kit",
+          quantity: 6,
+          checkedOutQuantity: 6,
+          assetKitId: "ak-1",
+          sourceKitId: "kit-1",
+          sourceLocationId: "loc-kit-shelf",
+        },
+        {
+          ...base,
+          id: "ba-loose",
+          quantity: 4,
+          checkedOutQuantity: 4,
+          assetKitId: null,
+          sourceKitId: null,
+          sourceLocationId: "loc-studio",
+        },
+      ],
+    });
+    const placements = installStatefulPlacements([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 40 },
+    ]);
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [{ assetId: mockQtyAssetId, consumed: 4 }],
+    });
+
+    expect(placements).toEqual([
+      { id: "al-store", locationId: "loc-store", quantity: 60 },
+      { id: "al-studio", locationId: "loc-studio", quantity: 36 },
+    ]);
+    expect(db.consumptionLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ assetId: mockQtyAssetId }),
+      })
+    );
+  });
+
   it("changes no placement when everything checked in is returned", async () => {
     expect.assertions(1);
 

@@ -156,6 +156,7 @@ import {
   checkinPlacementSources,
   parseSourceLocationsFromFormData,
   sliceForDisposition,
+  untaggedCheckinPlacementSources,
 } from "./checkout-source-location";
 import { recordCheckoutSourceLocations } from "./checkout-source-location.server";
 import {
@@ -7215,6 +7216,38 @@ export async function partialCheckinBooking({
           assetId: disp.assetId,
           bookingAssetId: disp.bookingAssetId,
         });
+        /**
+         * Where used-up, lost and damaged units come off. With no single
+         * slice (untagged, several slices) the units are spread over the
+         * slices the way the readers will attribute the logs written below,
+         * so read the asset's earlier logs first, under the asset lock.
+         */
+        let placementSources = checkinPlacementSources({
+          slice: sourceSlice,
+          consumed: disp.consumed,
+          lost: disp.lost,
+          damaged: disp.damaged,
+        });
+        if (!sourceSlice && !disp.bookingAssetId && poolDecrement > 0) {
+          const priorLogs = await tx.consumptionLog.findMany({
+            where: {
+              bookingId: id,
+              assetId: disp.assetId,
+              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+            },
+            select: { bookingAssetId: true, quantity: true },
+          });
+          placementSources = untaggedCheckinPlacementSources({
+            slices: bookingFound.bookingAssets.filter(
+              (ba) => ba.assetId === disp.assetId
+            ),
+            priorLogs,
+            returned: disp.returned,
+            consumed: disp.consumed,
+            lost: disp.lost,
+            damaged: disp.damaged,
+          });
+        }
         if ((disp.returned ?? 0) > 0) {
           await createConsumptionLog({
             assetId: disp.assetId,
@@ -7297,12 +7330,7 @@ export async function partialCheckinBooking({
             assetId: disp.assetId,
             newTotal: beforeQuantity - poolDecrement,
             tx,
-            sources: checkinPlacementSources({
-              slice: sourceSlice,
-              consumed: disp.consumed,
-              lost: disp.lost,
-              damaged: disp.damaged,
-            }),
+            sources: placementSources,
           });
 
           reportAmbiguousPlacementReconcile({

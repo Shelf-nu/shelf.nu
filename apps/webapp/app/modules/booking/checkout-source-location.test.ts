@@ -14,6 +14,7 @@ import {
   resolveSliceSource,
   sliceForDisposition,
   sourceLocationFieldName,
+  untaggedCheckinPlacementSources,
   sourceSubmissionFromRecord,
   submittedSourceForSlice,
 } from "./checkout-source-location";
@@ -408,5 +409,66 @@ describe("checkoutSourceOptions", () => {
       "Studio · 40 pcs",
       "Unplaced · 5 pcs",
     ]);
+  });
+});
+
+describe("untaggedCheckinPlacementSources", () => {
+  const loose = {
+    id: "ba-loose",
+    quantity: 4,
+    checkedOutQuantity: 4,
+    assetKitId: null,
+    sourceKitId: null,
+    sourceLocationId: "loc-studio",
+  };
+  const kit = {
+    id: "ba-kit",
+    quantity: 6,
+    checkedOutQuantity: 6,
+    assetKitId: "ak-1",
+    sourceKitId: "kit-1",
+    sourceLocationId: "loc-kit-shelf",
+  };
+
+  it("fills the standalone slice first, as the readers do", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [kit, loose],
+        priorLogs: [],
+        consumed: 6,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 4 }]);
+  });
+
+  it("puts returned units first, so used-up ones land where the readers put them", () => {
+    // 3 returned fill the loose slice to 1 left; 2 consumed: 1 there, 1 on the kit.
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [loose, kit],
+        priorLogs: [],
+        returned: 3,
+        consumed: 2,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 1 }]);
+  });
+
+  it("counts earlier logs, tagged or not, before filling", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [loose, kit],
+        priorLogs: [{ bookingAssetId: null, quantity: 4 }],
+        consumed: 2,
+      })
+    ).toEqual([]);
+  });
+
+  it("lets a slice that went out twice absorb both trips", () => {
+    expect(
+      untaggedCheckinPlacementSources({
+        slices: [{ ...loose, checkedOutQuantity: 8 }, kit],
+        priorLogs: [],
+        consumed: 6,
+      })
+    ).toEqual([{ locationId: "loc-studio", quantity: 6 }]);
   });
 });

@@ -29,6 +29,10 @@
  */
 
 import { z } from "zod";
+import {
+  attributeDispositionsByBookingAsset,
+  compareSlicesForGreedyFill,
+} from "./checkout-attribution";
 
 /**
  * Form value an "Unplaced" option submits. A `<select>` cannot submit `null`,
@@ -426,8 +430,8 @@ export function checkinPlacementSources({
 /**
  * The slice a check-in disposition belongs to. A disposition that names its
  * slice gets that slice. One that does not (an older phone app) gets the
- * asset's only slice on the booking; with several slices the owner is
- * unknown and nothing is guessed.
+ * asset's only slice on the booking; with several slices there is no single
+ * owner, and {@link untaggedCheckinPlacementSources} spreads the units.
  *
  * @param slices - The booking's slices
  * @param disposition - The asset and, when the client knows it, the slice
@@ -450,4 +454,106 @@ export function sliceForDisposition<T extends CheckinSourceSlice>(
     (slice) => slice.assetId === disposition.assetId
   );
   return ofAsset.length === 1 ? ofAsset[0] : null;
+}
+
+/** A slice as {@link untaggedCheckinPlacementSources} spreads units over it. */
+export type UntaggedCheckinSlice = Pick<
+  CheckinSourceSlice,
+  "id" | "assetKitId" | "sourceKitId" | "sourceLocationId"
+> & {
+  /** Booked units on the slice. */
+  quantity: number;
+  /** Units sent out on it so far, cumulative across trips. */
+  checkedOutQuantity: number;
+};
+
+/**
+ * Which manual placements lose the units of a check-in disposition that names
+ * no slice (an older phone app), for an asset with several slices on the
+ * booking.
+ *
+ * The units are spread exactly as every reader attributes an untagged log
+ * ({@link attributeDispositionsByBookingAsset}): slices in
+ * {@link compareSlicesForGreedyFill} order, each up to the larger of its booked
+ * quantity and its cumulative departures (a slice can go out more than once),
+ * minus what earlier logs already took. The same capacity
+ * `unitsStillOutBySlice` uses, so the location page agrees. The categories fill in the order the
+ * logs are written (returned, consumed, lost, damaged), so the used-up, lost
+ * and damaged units land on the same slices the readers will later put them
+ * on. Each slice's share then comes off its own manual source (see
+ * {@link isManualSourceSlice}); units on a kit slice, or beyond every slice's
+ * room, are left to the unplaced units.
+ *
+ * @param args.slices - The asset's slices on this booking
+ * @param args.priorLogs - The asset's earlier check-in logs on this booking
+ * @returns The `sources` for `reconcileManualPlacementsForStockDecrease`
+ */
+export function untaggedCheckinPlacementSources({
+  slices,
+  priorLogs,
+  returned = 0,
+  consumed = 0,
+  lost = 0,
+  damaged = 0,
+}: {
+  slices: readonly UntaggedCheckinSlice[];
+  priorLogs: ReadonlyArray<{ bookingAssetId: string | null; quantity: number }>;
+  returned?: number;
+  consumed?: number;
+  lost?: number;
+  damaged?: number;
+}): Array<{ locationId: string; quantity: number }> {
+  const capacity = (slice: UntaggedCheckinSlice) =>
+    Math.max(slice.quantity, slice.checkedOutQuantity);
+  const already = attributeDispositionsByBookingAsset({
+    bookingAssetRows: slices.map((slice) => ({
+      id: slice.id,
+      assetKitId: slice.assetKitId,
+      quantity: capacity(slice),
+    })),
+    consumptionLogs: [...priorLogs],
+  });
+  const room = new Map(
+    slices.map((slice) => [
+      slice.id,
+      Math.max(0, capacity(slice) - (already.get(slice.id) ?? 0)),
+    ])
+  );
+  const ordered = [...slices].sort(compareSlicesForGreedyFill);
+  const destroyedBySlice = new Map<string, number>();
+
+  const fill = (units: number, destroyed: boolean) => {
+    let left = units;
+    for (const slice of ordered) {
+      if (left <= 0) return;
+      const take = Math.min(room.get(slice.id) ?? 0, left);
+      if (take <= 0) continue;
+      room.set(slice.id, (room.get(slice.id) ?? 0) - take);
+      left -= take;
+      if (destroyed) {
+        destroyedBySlice.set(
+          slice.id,
+          (destroyedBySlice.get(slice.id) ?? 0) + take
+        );
+      }
+    }
+  };
+  fill(returned, false);
+  fill(consumed, true);
+  fill(lost, true);
+  fill(damaged, true);
+
+  const byLocation = new Map<string, number>();
+  for (const slice of ordered) {
+    const units = destroyedBySlice.get(slice.id) ?? 0;
+    if (units <= 0 || !isManualSourceSlice(slice)) continue;
+    byLocation.set(
+      slice.sourceLocationId,
+      (byLocation.get(slice.sourceLocationId) ?? 0) + units
+    );
+  }
+  return [...byLocation].map(([locationId, quantity]) => ({
+    locationId,
+    quantity,
+  }));
 }
