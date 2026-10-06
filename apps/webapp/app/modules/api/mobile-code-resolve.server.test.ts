@@ -222,7 +222,13 @@ describe("resolveMobileScannedCode failure discrimination", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: "qr-claimed",
+      scanToRecord: {
+        codeType: "QR",
+        qrId: "qr-claimed",
+        assetId: null,
+        kitId: null,
+        organizationId: "org-1",
+      },
       qr: {
         id: "qr-claimed",
         assetId: null,
@@ -268,6 +274,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
   it("resolves an asset-linked barcode when no asset carries that SAM id", async () => {
     assetFindFirst.mockResolvedValue(null);
     barcodeByValue.mockResolvedValue({
+      id: "barcode-1",
       value: SAM_SHAPED,
       assetId: "asset-1",
       kitId: null,
@@ -279,8 +286,14 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      // A barcode has no QR row, so there is nothing to attribute a scan to.
-      recordableQrId: null,
+      // Recorded as the barcode it is, not as a SAM ID.
+      scanToRecord: {
+        codeType: "BARCODE",
+        barcodeId: "barcode-1",
+        assetId: "asset-1",
+        kitId: null,
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: "asset-1",
@@ -305,6 +318,7 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
   it("resolves a kit-linked barcode with the kit shaped as the QR path shapes it", async () => {
     assetFindFirst.mockResolvedValue(null);
     barcodeByValue.mockResolvedValue({
+      id: "barcode-2",
       value: SAM_SHAPED,
       assetId: null,
       kitId: "kit-1",
@@ -316,7 +330,13 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: "BARCODE",
+        barcodeId: "barcode-2",
+        assetId: null,
+        kitId: "kit-1",
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: null,
@@ -376,7 +396,11 @@ describe("resolveMobileScannedCode SAM-shaped barcode fallback", () => {
 
     expect(result).toEqual({
       ok: true,
-      recordableQrId: null,
+      scanToRecord: {
+        codeType: "SAM_ID",
+        assetId: "asset-9",
+        organizationId: ORG_ID,
+      },
       qr: {
         id: SAM_SHAPED,
         assetId: "asset-9",

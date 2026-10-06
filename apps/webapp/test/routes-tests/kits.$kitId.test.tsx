@@ -107,7 +107,7 @@ vi.mock("~/modules/qr/utils.server", () => ({
 }));
 
 vi.mock("~/modules/scan/service.server", () => ({
-  getScanByQrId: vi.fn(),
+  getLastScanForTarget: vi.fn(),
 }));
 
 vi.mock("~/modules/scan/utils.server", () => ({

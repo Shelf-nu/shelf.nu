@@ -162,6 +162,7 @@ describe("POST /api/audits/record-scan", () => {
       assetId: "asset-1",
       userId: expect.any(String),
       organizationId: "org-1",
+      userAgent: null,
     });
   });
 });

@@ -280,6 +280,7 @@ model Asset {
   reminders       AssetReminder[]
   auditEntries    AuditAsset[]
   auditScans      AuditScan[]
+  scans           Scan[]
   assetKits      AssetKit[]
   assetLocations AssetLocation[]
 
@@ -699,6 +700,8 @@ model Barcode {
   // are not chosen as the asset's display-preferred one.
   preferredByAsset Asset? @relation("AssetPreferredBarcode")
 
+  scans Scan[]
+
   kit   Kit?    @relation(fields: [kitId], references: [id], onDelete: SetNull)
   kitId String?
 
@@ -782,15 +785,40 @@ model Scan {
 
   userAgent String?
 
-  // When a logged in user scanned the QR code, we store it here
+  // When a logged in user scanned the code, we store it here
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId String?
 
+  // Set only for a QR scan. A barcode or SAM ID scan has no QR.
   qr   Qr?     @relation(fields: [qrId], references: [id], onDelete: SetNull)
   qrId String?
 
-  // We also store the qrId as a raw string for reference is fhte qr is deleted
-  rawQrId String
+  // The scanned QR id as a raw string, kept when the QR is deleted. NULL for a
+  // barcode or SAM ID scan; `code` carries the scanned value for every type.
+  rawQrId String?
+
+  // What kind of code was scanned, and its value exactly as scanned (a QR id,
+  // a barcode value or a SAM ID).
+  codeType ScanCodeType @default(QR)
+  code     String?
+
+  // Set only for a barcode scan.
+  barcode   Barcode? @relation(fields: [barcodeId], references: [id], onDelete: SetNull)
+  barcodeId String?
+
+  // What the code resolved to at scan time. Stamped on the row so the last
+  // scan of an asset or kit is read by the entity, whichever code was scanned,
+  // and survives the code being relinked or deleted.
+  asset          Asset?        @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  assetId        String?
+  kit            Kit?          @relation(fields: [kitId], references: [id], onDelete: SetNull)
+  kitId          String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String?
+
+  // Which surface recorded the scan. NULL on rows written before it was
+  // tracked: their source cannot be told honestly.
+  source ScanSource?
 
   // This will be true if the user manually created the scan by using "Update GPS coordinates"
   manuallyGenerated Boolean @default(false)
@@ -802,13 +830,39 @@ model Scan {
   // Indexes for foreign keys
   @@index([qrId])
   @@index([userId])
-  // Serves getScanByQrId (last-scan card on asset overview + kit detail):
-  // WHERE rawQrId = ? ORDER BY createdAt DESC LIMIT 1. Scan is a global,
-  // append-only table (public QR hits + companion scans, never pruned), so
-  // without this index every page view pays a full sequential scan of all
-  // tenants' scan history. rawQrId seeks the QR; createdAt lets the top-1
-  // sort early-terminate (Postgres walks the btree backwards for DESC).
+  // Serves the scan lookups by QR id. Scan is a global, append-only table
+  // (never pruned), so every read must seek an index rather than scan all
+  // tenants' history; createdAt lets a top-1 DESC sort stop early.
   @@index([rawQrId, createdAt])
+  // Serve the last-scan card on the asset overview and the kit page:
+  // WHERE assetId|kitId = ? ORDER BY createdAt DESC LIMIT 1.
+  @@index([assetId, createdAt])
+  @@index([kitId, createdAt])
+  @@index([barcodeId])
+  @@index([organizationId])
+}
+
+/// The kind of code a `Scan` recorded.
+enum ScanCodeType {
+  QR
+  BARCODE
+  SAM_ID
+}
+
+/// The surface that recorded a `Scan`.
+enum ScanSource {
+  /// The public QR page, `/qr/:qrId` (phone camera or web scanner "view")
+  QR_LINK
+  /// The web scanner's "View asset" action for a barcode or SAM ID
+  WEB_SCANNER
+  /// A web scanner drawer list (bookings, kits, locations, custody)
+  WEB_DRAWER
+  /// An audit scan, web or companion
+  AUDIT
+  /// The companion app's scanner
+  COMPANION
+  /// "Update GPS coordinates" on the asset page
+  GPS_UPDATE
 }
 
 model Location {
@@ -960,6 +1014,7 @@ model Organization {
   assets  Asset[]
   assetKits AssetKit[]
   assetLocations AssetLocation[]
+  scans   Scan[]
 
   image   Image?  @relation("orgImage", fields: [imageId], references: [id])
   imageId String? @unique
@@ -1983,6 +2038,7 @@ model Kit {
   qrCodes  Qr[]
   barcodes Barcode[]
   reports  ReportFound[]
+  scans    Scan[]
 
   // NOTE: there is intentionally no `bookingAssets BookingAsset[]`
   // back-relation here. `BookingAsset.sourceKitId` is a plain FK column

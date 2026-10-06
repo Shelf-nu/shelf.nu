@@ -145,6 +145,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
       assetId: "asset-1",
       userId: "user-1",
       organizationId: "org-1",
+      userAgent: null,
     });
 
     // why: ADMIN role must map to isSelfServiceOrBase: false so admins can

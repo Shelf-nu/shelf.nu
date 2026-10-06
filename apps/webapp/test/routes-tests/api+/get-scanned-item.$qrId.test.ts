@@ -66,6 +66,12 @@ const { mockGetQr } = vi.hoisted(() => ({ mockGetQr: vi.fn() }));
 // module cannot fall through to a database.
 vi.mock("~/modules/qr/service.server", () => ({ getQr: mockGetQr }));
 
+// why: recording writes to the database; what these resolves record is pinned
+// in get-scanned-item.$qrId.records-scan.test.ts.
+vi.mock("~/modules/scan/service.server", () => ({
+  recordScanNonFatal: vi.fn(),
+}));
+
 import { loader } from "~/routes/api+/get-scanned-item.$qrId";
 
 const ORG_ID = "org-1";

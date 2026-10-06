@@ -1,11 +1,13 @@
 /**
  * Test suite for GET /api/mobile/qr/:qrId.
  *
- * Covers QR→asset resolution and the scan-provenance write (who + when via
- * `createScan`) added so companion field scans appear in an asset's scan
- * history. Asserts provenance is recorded on a successful, in-org resolve;
- * NOT recorded on 404/403/401; the user-agent fallback; and that a
- * provenance failure is non-fatal (asset still resolves, error logged once).
+ * Covers QR / SAM ID / SAM-shaped barcode resolution and the scan record
+ * (via `recordScanNonFatal`) that puts companion field scans in an asset's
+ * scan history. Asserts what is recorded for each code type on a successful,
+ * in-org resolve; that nothing is recorded on 404/403/401; the user-agent
+ * fallback; and that the route stays up when recording yields nothing. That
+ * a failed record is swallowed and logged is pinned in
+ * `app/modules/scan/record-scan.test.ts`.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
@@ -101,17 +103,27 @@ vitest.mock("~/database/db.server", () => ({
     kit: {
       findFirst: vitest.fn(),
     },
+    organization: {
+      findUnique: vitest.fn(),
+    },
   },
 }));
 
-// why: external service — we assert provenance is recorded without hitting the DB
-vitest.mock("~/modules/scan/service.server", () => ({
-  createScan: vitest.fn(),
+// why: the barcode lookup reads the database; the SAM-shaped fallback case
+// controls what it finds.
+vitest.mock("~/modules/barcode/service.server", () => ({
+  getBarcodeByValue: vitest.fn(),
 }));
 
-// why: we assert non-fatal logging without emitting real logs
-vitest.mock("~/utils/logger", () => ({
-  Logger: { error: vitest.fn() },
+// why: the add-on gate depends on deployment config; these cases hold it.
+vitest.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vitest.fn(() => true),
+}));
+
+// why: the recording helper writes to the database; its own behaviour is
+// covered in record-scan.test.ts. Here we assert what the route asks it for.
+vitest.mock("~/modules/scan/service.server", () => ({
+  recordScanNonFatal: vitest.fn(),
 }));
 
 // why: we control error formatting in the loader's catch block (return
@@ -127,11 +139,14 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  requireMobileAuth,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
-import { createScan } from "~/modules/scan/service.server";
+import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import { recordScanNonFatal } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
-import { Logger } from "~/utils/logger";
 
 const mockUser = {
   id: "user-1",
@@ -170,24 +185,27 @@ const mockQr = {
  *   server-side `"mobile-companion"` fallback.
  * @returns a `Request` with a bearer token (and the UA header when given).
  */
-function createQrRequest(userAgent?: string) {
+function createQrRequest(userAgent?: string, code = "qr-1") {
   const headers: Record<string, string> = {
     Authorization: "Bearer test-token",
   };
   if (userAgent !== undefined) {
     headers["user-agent"] = userAgent;
   }
-  return new Request("http://localhost:3000/api/mobile/qr/qr-1", { headers });
+  return new Request(`http://localhost:3000/api/mobile/qr/${code}`, {
+    headers,
+  });
 }
 
 /**
- * Invokes the QR loader with the standard `qr-1` route param.
+ * Invokes the QR loader with a scanned code as the route param.
  *
  * @param request - the request from {@link createQrRequest}.
+ * @param code - the scanned value; `qr-1` unless a case says otherwise.
  * @returns the loader result (a `Response` via the mocked `data()`).
  */
-function run(request: Request) {
-  return loader(createLoaderArgs({ request, params: { qrId: "qr-1" } }));
+function run(request: Request, code = "qr-1") {
+  return loader(createLoaderArgs({ request, params: { qrId: code } }));
 }
 
 describe("GET /api/mobile/qr/:qrId", () => {
@@ -202,7 +220,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
     (db.qr.findUnique as any).mockResolvedValue(mockQr);
     (db.userOrganization.findUnique as any).mockResolvedValue({ id: "uo-1" });
     (db.asset.findFirst as any).mockResolvedValue(mockAsset);
-    (createScan as any).mockResolvedValue({ id: "scan-1" });
+    (recordScanNonFatal as any).mockResolvedValue({ id: "scan-1" });
   });
 
   it("resolves a QR to its linked asset and records scan provenance", async () => {
@@ -214,18 +232,79 @@ describe("GET /api/mobile/qr/:qrId", () => {
     expect(body.qr.asset.id).toBe("asset-1");
 
     // why: who + when provenance must be written on a successful resolve
-    expect(createScan).toHaveBeenCalledWith({
+    expect(recordScanNonFatal).toHaveBeenCalledWith({
+      codeType: "QR",
+      code: "qr-1",
+      qrId: "qr-1",
+      assetId: "asset-1",
+      kitId: null,
+      organizationId: "org-1",
+      source: "COMPANION",
       userAgent: "ShelfCompanion/1.0 iOS",
       userId: "user-1",
-      qrId: "qr-1",
-      deleted: false,
+      writeNote: true,
     });
+  });
+
+  it("records a SAM ID scan against the asset, with a note", async () => {
+    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+
+    const result = await run(
+      createQrRequest(undefined, "sam-0001"),
+      "sam-0001"
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codeType: "SAM_ID",
+        // As scanned, not as normalized.
+        code: "sam-0001",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        source: "COMPANION",
+        writeNote: true,
+      })
+    );
+  });
+
+  it("records a SAM-shaped barcode as the barcode it is", async () => {
+    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    (db.asset.findFirst as any).mockResolvedValue(null);
+    (db.organization.findUnique as any).mockResolvedValue({
+      barcodesEnabled: true,
+    });
+    (getBarcodeByValue as any).mockResolvedValue({
+      id: "barcode-1",
+      value: "SAM-0001",
+      assetId: "asset-1",
+      kitId: null,
+      asset: mockAsset,
+      kit: null,
+    });
+
+    const result = await run(
+      createQrRequest(undefined, "SAM-0001"),
+      "SAM-0001"
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codeType: "BARCODE",
+        code: "SAM-0001",
+        barcodeId: "barcode-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        source: "COMPANION",
+      })
+    );
   });
 
   it("falls back to a channel user-agent when the header is absent", async () => {
     await run(createQrRequest());
 
-    expect(createScan).toHaveBeenCalledWith(
+    expect(recordScanNonFatal).toHaveBeenCalledWith(
       expect.objectContaining({ userAgent: "mobile-companion" })
     );
   });
@@ -236,7 +315,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(404);
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("does NOT record provenance when the QR has no organization (404)", async () => {
@@ -248,7 +327,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(404);
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
   it("does NOT record provenance for a cross-organization QR (403)", async () => {
@@ -257,11 +336,12 @@ describe("GET /api/mobile/qr/:qrId", () => {
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(403);
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 
-  it("is non-fatal: a provenance failure still resolves the asset", async () => {
-    (createScan as any).mockRejectedValue(new Error("scan-note write failed"));
+  it("still resolves the asset when recording yields nothing", async () => {
+    // A failed record comes back as null from the non-fatal wrapper.
+    (recordScanNonFatal as any).mockResolvedValue(null);
 
     const result = await run(createQrRequest());
 
@@ -269,7 +349,6 @@ describe("GET /api/mobile/qr/:qrId", () => {
     expect((result as unknown as Response).status).toBe(200);
     const body = await (result as unknown as Response).json();
     expect(body.qr.asset.id).toBe("asset-1");
-    expect(Logger.error).toHaveBeenCalledTimes(1);
   });
 
   it("handles auth errors from requireMobileAuth", async () => {
@@ -284,6 +363,6 @@ describe("GET /api/mobile/qr/:qrId", () => {
     const result = await run(createQrRequest());
 
     expect((result as unknown as Response).status).toBe(401);
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
   });
 });

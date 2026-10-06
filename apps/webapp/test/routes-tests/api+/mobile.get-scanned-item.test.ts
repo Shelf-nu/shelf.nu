@@ -3,9 +3,9 @@
  *
  * The non-recording sibling of `/api/mobile/qr/:qrId`: it resolves a scanned
  * code to its asset/kit via the shared resolver but must NEVER write scan
- * provenance (mirrors the web's `get-scanned-item` resolve; used by the audit
- * scanner so audit lookups don't pollute an asset's "last scanned" history).
- * The key assertion is that `createScan` is never called.
+ * provenance. The companion's audit scanner identifies codes here, and the
+ * audit's own writer (`recordAuditScan`) records that scan, so a record here
+ * would count it twice. The key assertion is that no scan is recorded.
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/get-scanned-item.$qrId.ts}
  */
@@ -87,7 +87,8 @@ vitest.mock("~/database/db.server", () => ({
 
 // why: the whole point of this route is that it never records — assert it
 vitest.mock("~/modules/scan/service.server", () => ({
-  createScan: vitest.fn(),
+  recordScan: vitest.fn(),
+  recordScanNonFatal: vitest.fn(),
 }));
 
 // why: control error formatting in the catch path without real logger/Sentry
@@ -104,7 +105,7 @@ vitest.mock("~/utils/error", () => ({
 
 import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
-import { createScan } from "~/modules/scan/service.server";
+import { recordScan, recordScanNonFatal } from "~/modules/scan/service.server";
 
 const mockUser = { id: "user-1", email: "test@example.com" };
 // quantities pivot shape (flattened back to the legacy flat shape the companion
@@ -157,7 +158,8 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
     expect(body.qr.id).toBe("qr-1");
     expect(body.qr.asset.id).toBe("asset-1");
     // why: the defining property of this route — no provenance write ever
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+    expect(recordScan).not.toHaveBeenCalled();
   });
 
   it("returns 404 for an unknown QR and still records nothing", async () => {
@@ -166,6 +168,7 @@ describe("GET /api/mobile/get-scanned-item/:qrId", () => {
     const result = await run(createRequest());
 
     expect((result as unknown as Response).status).toBe(404);
-    expect(createScan).not.toHaveBeenCalled();
+    expect(recordScanNonFatal).not.toHaveBeenCalled();
+    expect(recordScan).not.toHaveBeenCalled();
   });
 });

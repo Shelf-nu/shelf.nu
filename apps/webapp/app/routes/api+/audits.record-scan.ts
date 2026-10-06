@@ -66,6 +66,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       assetId,
       userId,
       organizationId,
+      userAgent: request.headers.get("user-agent"),
     });
 
     return data(payload({ success: true, ...result }));

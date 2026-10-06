@@ -1,4 +1,5 @@
 import type { Organization } from "@prisma/client";
+import { ScanCodeType, ScanSource } from "@prisma/client";
 import { redirect, data } from "react-router";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.
 import { getUserOrganizations } from "~/modules/organization/service.server";
 import { getQr } from "~/modules/qr/service.server";
 import {
-  createScan,
+  recordScan,
   updateScan,
   updateScanGeolocation,
 } from "~/modules/scan/service.server";
@@ -40,16 +41,36 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * If the QR doesn't exist, getQR will throw a 404
      */
 
-    /** Record the scan in the DB using the QR id
-     * if the QR doesn't exist, we still record the scan
-     * and we still save the id in a field specifically for deleted QRs
+    /**
+     * Record the scan against the asset or kit the QR points at, in its
+     * workspace. A QR no workspace has claimed is not recorded: no one could
+     * ever read that scan. The row's id rides the redirects below as
+     * `scanId`, for the follow-up geolocation post; with no row there is no
+     * `scanId`, and no post.
      */
-    const scan = await createScan({
-      userAgent: request.headers.get("user-agent") as string,
-      userId,
-      qrId: id,
-      deleted: !qr,
-    });
+    const scan = qr.organizationId
+      ? await recordScan({
+          codeType: ScanCodeType.QR,
+          code: id,
+          source: ScanSource.QR_LINK,
+          userAgent: request.headers.get("user-agent"),
+          userId,
+          qrId: qr.id,
+          assetId: qr.assetId,
+          kitId: qr.kitId,
+          organizationId: qr.organizationId,
+          writeNote: true,
+        })
+      : null;
+
+    /** `path` with its query, plus the recorded scan's id when there is one. */
+    const withScanId = (path: string, params: Record<string, string> = {}) => {
+      const search = new URLSearchParams({
+        ...(scan ? { scanId: scan.id } : {}),
+        ...params,
+      }).toString();
+      return search ? `${path}?${search}` : path;
+    };
 
     /**
      * Check if user is logged in.
@@ -57,22 +78,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *  - If so, continue
      */
     if (!context.isAuthenticated) {
-      return redirect(`not-logged-in?scanId=${scan.id}&redirectTo=/qr/${id}`);
+      return redirect(withScanId("not-logged-in", { redirectTo: `/qr/${id}` }));
     }
 
-    /** Once the user is loged in and this loader gets re-validated,
+    /** Once the user is logged in and this loader gets re-validated,
      * we update the scan with the userId so we know which user scanned it */
-    await updateScan({
-      id: scan.id,
-      userId,
-    });
+    if (scan) {
+      await updateScan({
+        id: scan.id,
+        userId,
+      });
+    }
 
     /**
      * Does the QR code belong to any user or is it unclaimed?
      */
     if (!qr.organizationId) {
       /** We redirect to claim where we handle the linking of the code to an organization */
-      return redirect(`claim?scanId=${scan.id}`);
+      return redirect(withScanId("claim"));
     }
 
     /**
@@ -92,7 +115,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     ) as Pick<Organization, "id">;
 
     if (!organizationsIds.includes(qr.organizationId)) {
-      return redirect(`contact-owner?scanId=${scan.id}`);
+      return redirect(withScanId("contact-owner"));
     }
 
     const headers = [
@@ -109,7 +132,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * Here we redirect to a page where the user has the option to link to existing asset or kit create a new one.
      */
     if (!qr.assetId && !qr.kitId) {
-      return redirect(`link?scanId=${scan.id}`, {
+      return redirect(withScanId("link"), {
         headers,
       });
     }
@@ -117,7 +140,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     /** If its linked to an asset, redirect to the asset */
     if (qr.assetId) {
       return redirect(
-        `/assets/${qr.assetId}/overview?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        withScanId(`/assets/${qr.assetId}/overview`, {
+          ref: "qr",
+          qrId: qr.id,
+        }),
         {
           headers,
         }
@@ -125,7 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     } else if (qr.kitId) {
       /** If its linked to a kit, redirect to the kit */
       return redirect(
-        `/kits/${qr.kitId}?ref=qr&scanId=${scan.id}&qrId=${qr.id}`,
+        withScanId(`/kits/${qr.kitId}`, { ref: "qr", qrId: qr.id }),
         {
           headers,
         }
