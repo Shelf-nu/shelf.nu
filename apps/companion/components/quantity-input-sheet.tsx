@@ -39,6 +39,7 @@ import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
+import type { SourcePickerOption } from "@/lib/custody-source-options";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -71,6 +72,19 @@ type Props = {
     label: string;
     /** Initial value when the sheet opens (clamped to [0, primary]). */
     defaultValue?: number;
+  };
+  /**
+   * Optional "From location" picker rendered above the quantity: one row per
+   * source the units can come from. Only a pool placed at two or more
+   * locations gets one. The caller owns the selection so it can tie `max`
+   * to the picked row.
+   */
+  source?: {
+    /** Section label, e.g. "From location". */
+    label: string;
+    options: SourcePickerOption[];
+    value: string;
+    onChange: (value: string) => void;
   };
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
@@ -119,6 +133,7 @@ export function QuantityInputSheet({
   defaultValue,
   unitOfMeasure,
   secondary,
+  source,
   confirmLabel,
   destructive,
   isSubmitting = false,
@@ -257,6 +272,48 @@ export function QuantityInputSheet({
 
         <View style={styles.body}>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+          {/* "From location": one tappable row per source. The picked row
+              drives `max`, so the quantity echo and the cap follow it. */}
+          {source ? (
+            <View style={styles.sourceSection}>
+              <Text style={styles.sourceLabel}>{source.label}</Text>
+              {source.options.map((option) => {
+                const selected = option.value === source.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.sourceRow,
+                      selected && styles.sourceRowSelected,
+                    ]}
+                    onPress={() => source.onChange(option.value)}
+                    disabled={isSubmitting}
+                    activeOpacity={0.7}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, disabled: isSubmitting }}
+                    accessibilityLabel={
+                      option.hint
+                        ? `${option.label}, ${option.hint}`
+                        : option.label
+                    }
+                  >
+                    <Ionicons
+                      name={selected ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={selected ? colors.primary : colors.muted}
+                    />
+                    <View style={styles.sourceText}>
+                      <Text style={styles.sourceRowLabel}>{option.label}</Text>
+                      {option.hint ? (
+                        <Text style={styles.sourceRowHint}>{option.hint}</Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
 
           {/* Quantity row: [-] [input] [+] */}
           <View style={styles.quantityRow}>
@@ -418,6 +475,42 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  sourceSection: {
+    gap: spacing.xs,
+  },
+  sourceLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+    marginBottom: spacing.xs,
+  },
+  sourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.white,
+  },
+  sourceRowSelected: {
+    borderColor: colors.primary,
+  },
+  sourceText: {
+    flex: 1,
+    gap: 2,
+  },
+  sourceRowLabel: {
+    fontSize: fontSize.md,
+    fontWeight: "500",
+    color: colors.foreground,
+  },
+  sourceRowHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
   },
   quantityRow: {
     flexDirection: "row",

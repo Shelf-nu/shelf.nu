@@ -96,6 +96,18 @@ vitest.mock("~/modules/asset/quantity-breakdown.server", () => ({
   }),
 }));
 
+// why: the custody-source summary reads placements, custody and bookings
+// from the database. Stub it with the one-location shape (nothing to ask) so
+// the existing cases keep their numbers; the dedicated case below feeds a
+// two-location pool and checks the field is forwarded as-is.
+vitest.mock("~/modules/asset/custody-source.server", () => ({
+  getCustodySourceSummary: vitest.fn().mockResolvedValue({
+    multiSource: false,
+    options: [],
+    poolAvailable: 1,
+  }),
+}));
+
 // why: `subscription.server` loads the Stripe client and the billing config at
 // module load. Stubbing the one capability helper also puts the add-on gate
 // under explicit control, so these tests do not depend on the ambient
@@ -125,6 +137,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
@@ -404,6 +417,57 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     assetFindUniqueMock.mockResolvedValue(buildAsset());
+  });
+
+  it("forwards the custody source summary for a pool placed at two or more locations", async () => {
+    const summary = {
+      multiSource: true,
+      poolAvailable: 1,
+      options: [
+        {
+          value: "loc-a",
+          locationId: "loc-a",
+          label: "Camera Room",
+          placed: 6,
+          inCustody: 5,
+          onBooking: 0,
+          left: 1,
+        },
+        {
+          value: "loc-b",
+          locationId: "loc-b",
+          label: "Studio",
+          placed: 4,
+          inCustody: 4,
+          onBooking: 0,
+          left: 0,
+        },
+      ],
+    };
+    vitest.mocked(getCustodySourceSummary).mockResolvedValueOnce(summary);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+
+    expect((result as unknown as Response).status).toBe(200);
+    const body = await (result as unknown as Response).json();
+
+    // The pool's total feeds the summary, scoped to the caller's workspace.
+    expect(getCustodySourceSummary).toHaveBeenCalledWith({
+      assetId: "asset-1",
+      organizationId: "org-1",
+      total: 10,
+    });
+    // The app reads `multiSource` to decide whether to ask, and `options` to
+    // build the picker; `poolAvailable` is not sent (custodyAvailable is).
+    expect(body.asset.custodySources).toEqual({
+      multiSource: true,
+      options: summary.options,
+    });
   });
 
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {

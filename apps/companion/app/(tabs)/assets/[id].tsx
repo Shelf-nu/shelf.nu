@@ -1,5 +1,5 @@
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -44,6 +44,15 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import { custodyAssignCap } from "@/lib/custody-scan-quantities";
+import {
+  assignSourceOptions,
+  assignSourceRequestValue,
+  defaultAssignSource,
+  describeHolderSources,
+  releaseSourceOptions,
+  releaseSourceRequestValue,
+  releaseSourceValue,
+} from "@/lib/custody-source-options";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
@@ -170,6 +179,36 @@ export default function AssetDetailScreen() {
   );
   const [releaseQtyEntry, setReleaseQtyEntry] =
     useState<AssetCustodyListEntry | null>(null);
+
+  // "From location" for the assign and release sheets. Only a pool placed at
+  // two or more locations asks (the server says so through
+  // `custodySources.multiSource`); the picked row drives each sheet's cap.
+  const sourceSummary = asset?.custodySources ?? null;
+  const multiSource =
+    sourceSummary?.multiSource === true && sourceSummary.options.length > 0;
+  const [assignSource, setAssignSource] = useState<string | null>(null);
+  const [releaseSource, setReleaseSource] = useState<string | null>(null);
+  // The row the assign sheet opens on: the location with the most left. A
+  // string, so a refetch that changes nothing does not re-seed a pick.
+  const defaultAssignValue = useMemo(
+    () =>
+      sourceSummary
+        ? defaultAssignSource(sourceSummary.options)?.value ?? null
+        : null,
+    [sourceSummary]
+  );
+  useEffect(() => {
+    setAssignSource(assignQtyMember && multiSource ? defaultAssignValue : null);
+  }, [assignQtyMember, multiSource, defaultAssignValue]);
+  const releaseDefaultValue =
+    releaseQtyEntry?.sources && releaseQtyEntry.sources.length > 0
+      ? releaseSourceValue(releaseQtyEntry.sources[0])
+      : null;
+  useEffect(() => {
+    setReleaseSource(
+      releaseQtyEntry && multiSource ? releaseDefaultValue : null
+    );
+  }, [releaseQtyEntry, multiSource, releaseDefaultValue]);
 
   // Notes
   const [noteText, setNoteText] = useState("");
@@ -461,6 +500,63 @@ export default function AssetDetailScreen() {
   // what the server does. Servers predating the field send no consumptionType,
   // which falls through to the returnable copy — the server's own default.
   const isConsumable = releaseCategory(asset.consumptionType) === "CONSUME";
+  // The assign sheet's picker and cap. With a source picked, the cap is what
+  // that source has left (never above the pool-wide cap).
+  const selectedAssignOption =
+    multiSource && sourceSummary && assignSource != null
+      ? sourceSummary.options.find((option) => option.value === assignSource) ??
+        null
+      : null;
+  const assignSheetMax = selectedAssignOption
+    ? Math.min(assignMax, Math.max(0, selectedAssignOption.left))
+    : assignMax;
+  const assignSourceProp =
+    multiSource && sourceSummary && assignSource != null
+      ? {
+          label: "From location",
+          options: assignSourceOptions(
+            sourceSummary.options,
+            asset.unitOfMeasure
+          ),
+          value: assignSource,
+          onChange: setAssignSource,
+        }
+      : undefined;
+  // The release sheet's picker and cap: one row per source the holder took
+  // units from, shown only when there are two or more. The cap is what that
+  // source holds.
+  const releaseSources =
+    multiSource &&
+    releaseQtyEntry?.sources &&
+    releaseQtyEntry.sources.length > 0
+      ? releaseQtyEntry.sources
+      : null;
+  const selectedReleaseEntry =
+    releaseSources && releaseSource != null
+      ? releaseSources.find(
+          (entry) => releaseSourceValue(entry) === releaseSource
+        ) ?? null
+      : null;
+  const releaseSheetMax = selectedReleaseEntry
+    ? Math.min(releaseMax, selectedReleaseEntry.quantity)
+    : releaseMax;
+  const releaseSourceProp =
+    releaseSources && releaseSources.length > 1 && releaseSource != null
+      ? {
+          label: "From",
+          options: releaseSourceOptions(releaseSources, asset.unitOfMeasure),
+          value: releaseSource,
+          onChange: setReleaseSource,
+        }
+      : undefined;
+  const releaseSourceNote =
+    selectedReleaseEntry && !selectedReleaseEntry.unrecorded
+      ? selectedReleaseEntry.locationId === null
+        ? "Goes back to the unplaced units."
+        : `Goes back to ${
+            selectedReleaseEntry.name ?? "its location"
+          }, where the units came from.`
+      : null;
   // Custody holders the server hid from this caller (privacy filtering for
   // roles without view-all-custody). Shown as a muted "+N others" row.
   const custodyOthersCount = isQtyTracked
@@ -720,13 +816,14 @@ export default function AssetDetailScreen() {
                     key={entry.custodian.id}
                     icon="person-outline"
                     label={entry.custodian.name}
-                    value={
+                    value={withSourceLine(
                       kitHeldQty > 0
                         ? `${
                             qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
                           } • ${kitHeldQty} via kit`
-                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
-                    }
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY,
+                      multiSource ? describeHolderSources(entry.sources) : null
+                    )}
                     onPress={
                       canReleaseRow
                         ? () => setReleaseQtyEntry(entry)
@@ -1024,15 +1121,23 @@ export default function AssetDetailScreen() {
                       : `Assign to ${memberDisplayName(assignQtyMember)}`
                     : undefined
                 }
-                max={assignMax}
+                max={assignSheetMax}
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
+                source={assignSourceProp}
                 confirmLabel={isSelfService ? "Take" : "Assign"}
                 isSubmitting={isActionLoading}
                 onSubmit={(quantity) => {
                   if (!assignQtyMember) return;
-                  void performAssignQuantity(assignQtyMember, quantity, () =>
-                    setAssignQtyMember(null)
+                  void performAssignQuantity(
+                    assignQtyMember,
+                    quantity,
+                    () => setAssignQtyMember(null),
+                    // Sent only when the pool asked; otherwise the server
+                    // records its own default, as before.
+                    assignSourceProp && assignSource != null
+                      ? assignSourceRequestValue(assignSource)
+                      : undefined
                   );
                 }}
                 onClose={() => setAssignQtyMember(null)}
@@ -1046,20 +1151,25 @@ export default function AssetDetailScreen() {
                       ? `End the hold on how many of ${
                           releaseQtyEntry.custodian.name
                         }'s ${
-                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                          String(releaseMax)
+                          formatQuantity(
+                            releaseSheetMax,
+                            asset.unitOfMeasure
+                          ) ?? String(releaseSheetMax)
                         }, and how many were used up? Used-up units permanently reduce total stock.`
                       : `Release how many of ${
                           releaseQtyEntry.custodian.name
                         }'s ${
-                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                          String(releaseMax)
-                        }?`
+                          formatQuantity(
+                            releaseSheetMax,
+                            asset.unitOfMeasure
+                          ) ?? String(releaseSheetMax)
+                        }?${releaseSourceNote ? ` ${releaseSourceNote}` : ""}`
                     : undefined
                 }
-                max={releaseMax}
+                source={releaseSourceProp}
+                max={releaseSheetMax}
                 // Web parity: the release dialog pre-fills a full release.
-                defaultValue={releaseMax}
+                defaultValue={releaseSheetMax}
                 unitOfMeasure={asset.unitOfMeasure}
                 secondary={
                   isConsumable
@@ -1067,7 +1177,7 @@ export default function AssetDetailScreen() {
                         label: "Of those, how many were used up?",
                         // Pre-fill a full consume — the common case, and what
                         // the server defaults to when no split is sent.
-                        defaultValue: releaseMax,
+                        defaultValue: releaseSheetMax,
                       }
                     : undefined
                 }
@@ -1080,7 +1190,12 @@ export default function AssetDetailScreen() {
                     releaseQtyEntry.custodian.id,
                     quantity,
                     consumed,
-                    () => setReleaseQtyEntry(null)
+                    () => setReleaseQtyEntry(null),
+                    // Only a pool that asked releases per source; otherwise
+                    // the server draws the holder's rows as before.
+                    releaseSources && releaseSource != null
+                      ? releaseSourceRequestValue(releaseSource)
+                      : undefined
                   );
                 }}
                 onClose={() => setReleaseQtyEntry(null)}
@@ -1102,6 +1217,14 @@ export default function AssetDetailScreen() {
  * @param member - The selected team member.
  * @returns The display name.
  */
+/**
+ * A holder's quantity with where it came from appended, for a pool placed at
+ * two or more locations: "2 pcs · 1 from Camera Room · 1 from Studio".
+ */
+function withSourceLine(value: string, line: string | null): string {
+  return line ? `${value} · ${line}` : value;
+}
+
 function memberDisplayName(member: TeamMember): string {
   if (member.user) {
     const fullName = [member.user.firstName, member.user.lastName]

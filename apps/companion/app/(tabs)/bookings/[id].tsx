@@ -31,6 +31,7 @@ import {
   type BookingDetail,
   type BookingAsset,
   type CheckoutDisposition,
+  type CheckoutSourceQuestion,
   type CheckinDisposition,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
@@ -51,6 +52,8 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
+import { questionsForAssets } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
   unassignedCheckoutConfirm,
@@ -124,6 +127,18 @@ export default function BookingDetailScreen() {
   // The check-out twin: false hides "Check Out All Assets". Read through
   // canOfferQuickCheckout, which keeps the button for servers without the flag.
   const [canQuickCheckout, setCanQuickCheckout] = useState(true);
+  // Pools this booking must ask "Where do the units come from?" about before
+  // they go out (kept at two or more locations). Empty when nothing needs
+  // asking, which is also what an older server means by not sending it.
+  const [sourceQuestions, setSourceQuestions] = useState<
+    CheckoutSourceQuestion[]
+  >([]);
+  // The question sheet, when open: which pools it asks about and what to do
+  // with the answers. The sheet stays open until the server accepts.
+  const [sourcePrompt, setSourcePrompt] = useState<{
+    questions: CheckoutSourceQuestion[];
+    onConfirm: (sourceLocations: Record<string, string | null>) => void;
+  } | null>(null);
   // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
   const [bookingActions, setBookingActions] = useState({
@@ -233,6 +248,7 @@ export default function BookingDetailScreen() {
     );
     setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
+    setSourceQuestions(data.checkoutSourceQuestions ?? []);
     // Clear stale selections — checked-in assets are no longer selectable
     setSelectedAssetIds(new Set());
     lastFetchedAt.current = Date.now();
@@ -301,24 +317,39 @@ export default function BookingDetailScreen() {
   const handleCheckout = async () => {
     if (!booking || !currentOrg) return;
 
-    const submit = async () => {
+    const submit = async (sourceLocations?: Record<string, string | null>) => {
       setIsActioning(true);
       const { error: err } = await api.checkoutBooking(
         currentOrg.id,
         booking.id,
-        getTimeZone()
+        getTimeZone(),
+        sourceLocations
       );
       setIsActioning(false);
       if (err) {
+        // A refusal keeps the source sheet (if any) open with its answers.
         Alert.alert("Error", err);
         return;
       }
+      setSourcePrompt(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Mutation changed this booking — force the list to refetch.
       markBookingsListDirty();
       Alert.alert("Checked Out", `"${booking.name}" is now ongoing.`, [
         { text: "OK", onPress: () => fetchBooking() },
       ]);
+    };
+    // A booking holding a pool kept at two or more locations is asked where
+    // the units leave from first; the answers ride on the same request.
+    const run = () => {
+      if (sourceQuestions.length > 0) {
+        setSourcePrompt({
+          questions: sourceQuestions,
+          onConfirm: (sourceLocations) => void submit(sourceLocations),
+        });
+        return;
+      }
+      void submit();
     };
 
     // Reserved units nobody has assigned yet don't stop the check-out; they
@@ -337,7 +368,7 @@ export default function BookingDetailScreen() {
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        { text: unassignedConfirm.confirmLabel, onPress: () => void submit() },
+        { text: unassignedConfirm.confirmLabel, onPress: run },
       ]);
       return;
     }
@@ -347,7 +378,7 @@ export default function BookingDetailScreen() {
       `Check out "${booking.name}"?\n\nAll ${booking.assetCount} assets will be marked as checked out.`,
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Check Out", onPress: () => void submit() },
+        { text: "Check Out", onPress: run },
       ]
     );
   };
@@ -497,7 +528,8 @@ export default function BookingDetailScreen() {
     assetIds: string[],
     checkouts: CheckoutDisposition[],
     batch: SelectionCounts,
-    closeSheet?: () => void
+    closeSheet?: () => void,
+    sourceLocations?: Record<string, string | null>
   ) => {
     if (!booking || !currentOrg) return;
     const orgId = currentOrg.id;
@@ -511,7 +543,8 @@ export default function BookingDetailScreen() {
           bookingId,
           assetIds,
           getTimeZone(),
-          checkouts.length > 0 ? checkouts : undefined
+          checkouts.length > 0 ? checkouts : undefined,
+          sourceLocations
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -1138,7 +1171,11 @@ export default function BookingDetailScreen() {
                       label="booked"
                     />
                     <Text style={styles.assetKit} numberOfLines={1}>
-                      {slice.kit ? `Kit: ${slice.kit.name}` : "Standalone"}
+                      {slice.kit
+                        ? `Kit: ${slice.kit.name}`
+                        : slice.sourceLocation
+                        ? `Standalone · from ${slice.sourceLocation.name}`
+                        : "Standalone"}
                     </Text>
                   </View>
                 ))}
@@ -1152,6 +1189,16 @@ export default function BookingDetailScreen() {
                     label="booked"
                   />
                 )}
+                {/* Where a checked-out pool's units left from, as the web
+                    booking row shows it. Only a pool kept at two or more
+                    locations has it. */}
+                {item.type === "QUANTITY_TRACKED" &&
+                item.slices?.length === 1 &&
+                item.slices[0].sourceLocation ? (
+                  <Text style={styles.assetKit} numberOfLines={1}>
+                    From {item.slices[0].sourceLocation.name}
+                  </Text>
+                ) : null}
                 {/* Under a kit header the name is already on screen; naming
                     it again on every member is noise. */}
                 {item.kit && !inKit && (
@@ -2359,6 +2406,30 @@ export default function BookingDetailScreen() {
                 collected,
               });
             } else {
+              // A picked pool kept at two or more locations is asked where
+              // its units leave from. The quantities travel with the sheet,
+              // and the quantity picker makes way for it (two page sheets
+              // cannot stack).
+              const asked = questionsForAssets(
+                sourceQuestions,
+                collected.map((c) => c.assetId)
+              );
+              if (asked.length > 0) {
+                const { individualIds, batch } = checkoutQueue;
+                setCheckoutQueue(null);
+                setSourcePrompt({
+                  questions: asked,
+                  onConfirm: (sourceLocations) =>
+                    void submitCheckout(
+                      individualIds,
+                      collected,
+                      batch,
+                      () => setSourcePrompt(null),
+                      sourceLocations
+                    ),
+                });
+                return;
+              }
               // The last asset submits with the sheet still open. The queue
               // clears only once the server accepts, so a refusal keeps every
               // collected quantity for a retry.
@@ -2373,6 +2444,18 @@ export default function BookingDetailScreen() {
           onClose={() => setCheckoutQueue(null)}
         />
       )}
+
+      {/* "Where do the units come from?" — asked once, at check-out, for pools
+          kept at two or more locations. Stays open until the server accepts. */}
+      <CheckoutSourceSheet
+        visible={sourcePrompt != null}
+        questions={sourcePrompt?.questions ?? []}
+        isSubmitting={isActioning}
+        onConfirm={(sourceLocations) =>
+          sourcePrompt?.onConfirm(sourceLocations)
+        }
+        onClose={() => setSourcePrompt(null)}
+      />
 
       {/* Check-in disposition picker — walks the selected QT assets one at a
           time, asking returned / consumed / lost / damaged per asset. */}
