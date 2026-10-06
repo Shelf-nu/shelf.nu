@@ -21,7 +21,14 @@ export const assetsApi = {
       perPage?: number;
       myCustody?: boolean;
       status?: string;
-    }
+    },
+    /**
+     * Lets a screen abandon this request when a newer search, filter or page
+     * supersedes it. Without one, whichever answer lands last wins the list.
+     *
+     * @see {@link file://./../latest-request.ts}
+     */
+    options?: { signal?: AbortSignal }
   ) => {
     const searchParams = new URLSearchParams({ orgId });
     if (params?.search) searchParams.set("search", params.search);
@@ -29,7 +36,9 @@ export const assetsApi = {
     if (params?.perPage) searchParams.set("perPage", String(params.perPage));
     if (params?.myCustody) searchParams.set("myCustody", "true");
     if (params?.status) searchParams.set("status", params.status);
-    return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`);
+    return apiFetch<AssetsResponse>(`/api/mobile/assets?${searchParams}`, {
+      signal: options?.signal,
+    });
   },
 
   /**
