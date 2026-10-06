@@ -25,6 +25,7 @@ import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import { assertKitsCustodyAssignable } from "~/modules/booking/service.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   buildKitCustodyInheritData,
@@ -284,6 +285,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // serializes queries within a transaction, so Promise.all here would
     // provide no benefit and could fragment failure semantics.
     const kit = await db.$transaction(async (tx) => {
+      // A kit out on a booking is with its borrower, so it cannot also go to a
+      // custodian; re-checked here because the loader's read is not locked.
+      await assertKitsCustodyAssignable(tx, {
+        kitIds: [kitId],
+        organizationId,
+      });
+
       const updatedKit = await tx.kit.update({
         where: { id: kitId, organizationId },
         data: {
