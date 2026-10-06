@@ -20,6 +20,7 @@ import {
   isScimValueObject,
   normalizeScimPath,
   readScimAttribute,
+  readScimNameObject,
   readScimStringValue,
 } from "./patch-attributes.server";
 import type { ScimListResponse, ScimUser } from "./types";
@@ -740,6 +741,12 @@ export async function patchScimUser(
       newFirstName = readScimStringValue(op.value, "name.givenName");
     } else if (path === "name.familyname") {
       newLastName = readScimStringValue(op.value, "name.familyName");
+    } else if (path === "name" && isScimValueObject(op.value)) {
+      // A complex attribute path carrying its sub-attributes as an object:
+      // { op: "Replace", path: "name", value: { givenName: "Jane" } }
+      const name = readScimNameObject(op.value);
+      if (name.firstName !== undefined) newFirstName = name.firstName;
+      if (name.lastName !== undefined) newLastName = name.lastName;
     } else if (!path && isScimValueObject(op.value)) {
       // Path-less op: attributes live as keys of the value object.
       // e.g. { op: "Replace", value: { active: false } } or
@@ -753,17 +760,9 @@ export async function patchScimUser(
       // Nested name object: { name: { givenName, familyName } }
       const nested = readScimAttribute(val, "name");
       if (nested.present && isScimValueObject(nested.value)) {
-        const givenName = readScimAttribute(nested.value, "givenName");
-        if (givenName.present) {
-          newFirstName = readScimStringValue(givenName.value, "name.givenName");
-        }
-        const familyName = readScimAttribute(nested.value, "familyName");
-        if (familyName.present) {
-          newLastName = readScimStringValue(
-            familyName.value,
-            "name.familyName"
-          );
-        }
+        const name = readScimNameObject(nested.value);
+        if (name.firstName !== undefined) newFirstName = name.firstName;
+        if (name.lastName !== undefined) newLastName = name.lastName;
       }
       // Flat dotted keys: { "name.givenName": "Jane" }
       const dottedGiven = readScimAttribute(val, "name.givenName");

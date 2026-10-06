@@ -21,10 +21,24 @@
 import { ScimError } from "./errors.server";
 
 /**
+ * The core User schema URN, lowercased, with the separator that precedes an
+ * attribute name.
+ *
+ * A path may be fully qualified (RFC 7644 Section 3.10), so
+ * `urn:ietf:params:scim:schemas:core:2.0:User:name.givenName` names the same
+ * attribute as `name.givenName`. Only this one prefix is stripped: an extension
+ * URN such as `...:extension:enterprise:2.0:User:department` names a different
+ * attribute from a core `department`, and conflating them would write one from
+ * the other.
+ */
+const CORE_USER_SCHEMA_PREFIX = "urn:ietf:params:scim:schemas:core:2.0:user:";
+
+/**
  * The comparable form of a SCIM attribute path.
  *
  * @param path - The operation's `path`, absent on a path-less operation
- * @returns The path lowercased and trimmed, or undefined when there is none
+ * @returns The attribute name lowercased, with the core User schema URN
+ *   removed, or undefined when the operation names no attribute
  */
 export function normalizeScimPath(
   path: string | undefined
@@ -32,7 +46,12 @@ export function normalizeScimPath(
   if (typeof path !== "string") {
     return undefined;
   }
-  const normalized = path.trim().toLowerCase();
+  let normalized = path.trim().toLowerCase();
+  if (normalized.startsWith(CORE_USER_SCHEMA_PREFIX)) {
+    normalized = normalized.slice(CORE_USER_SCHEMA_PREFIX.length);
+  }
+  // A path that was only the URN names the resource rather than an attribute,
+  // which is what a path-less operation means, so it takes that branch.
   return normalized === "" ? undefined : normalized;
 }
 
@@ -114,4 +133,38 @@ function describeType(value: unknown): string {
     return "an object";
   }
   return `a ${typeof value}`;
+}
+
+/**
+ * Reads a SCIM complex `name` value.
+ *
+ * Three shapes carry a name and all of them land here: a `name` path with a
+ * sub-attribute object, a path-less operation with a nested `name`, and the
+ * dotted sub-attribute paths. Reading them in one place is what keeps the
+ * case-insensitivity and the string check from applying to some and not others.
+ *
+ * Only sub-attributes actually present are reported, so an operation naming
+ * just `givenName` does not clear the family name.
+ *
+ * @param value - The complex name value
+ * @returns The sub-attributes present, each already validated as text
+ * @throws {ScimError} 400 `invalidValue` when a sub-attribute is not text
+ */
+export function readScimNameObject(value: Record<string, unknown>): {
+  firstName?: string;
+  lastName?: string;
+} {
+  const result: { firstName?: string; lastName?: string } = {};
+
+  const givenName = readScimAttribute(value, "givenName");
+  if (givenName.present) {
+    result.firstName = readScimStringValue(givenName.value, "name.givenName");
+  }
+
+  const familyName = readScimAttribute(value, "familyName");
+  if (familyName.present) {
+    result.lastName = readScimStringValue(familyName.value, "name.familyName");
+  }
+
+  return result;
 }

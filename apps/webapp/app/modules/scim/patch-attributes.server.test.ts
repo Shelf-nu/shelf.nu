@@ -5,6 +5,7 @@ import {
   isScimValueObject,
   normalizeScimPath,
   readScimAttribute,
+  readScimNameObject,
   readScimStringValue,
 } from "./patch-attributes.server";
 
@@ -22,6 +23,37 @@ describe("normalizeScimPath", () => {
     ["  active  ", "active"],
   ])("reads %j as %j", (input, expected) => {
     expect(normalizeScimPath(input)).toBe(expected);
+  });
+
+  // RFC 7644 Section 3.10 also permits a fully qualified path, which lowercasing
+  // alone leaves matching nothing.
+  it.each([
+    [
+      "urn:ietf:params:scim:schemas:core:2.0:User:name.givenName",
+      "name.givenname",
+    ],
+    ["urn:ietf:params:scim:schemas:core:2.0:User:active", "active"],
+    ["URN:IETF:PARAMS:SCIM:SCHEMAS:CORE:2.0:USER:userName", "username"],
+  ])("strips the core User schema from %j", (input, expected) => {
+    expect(normalizeScimPath(input)).toBe(expected);
+  });
+
+  it("keeps an extension path distinct from a core attribute", () => {
+    // Stripping this too would let an enterprise-extension attribute write the
+    // core attribute of the same name.
+    const extension =
+      "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User:department";
+
+    expect(normalizeScimPath(extension)).toBe(extension.toLowerCase());
+    expect(normalizeScimPath(extension)).not.toBe("department");
+  });
+
+  it("treats a path that is only the core URN as naming no attribute", () => {
+    // It names the resource, which is what a path-less operation means, so it
+    // must take that branch rather than matching nothing.
+    expect(
+      normalizeScimPath("urn:ietf:params:scim:schemas:core:2.0:User:")
+    ).toBeUndefined();
   });
 
   it("reports no path for a path-less operation", () => {
@@ -130,5 +162,34 @@ describe("readScimStringValue", () => {
     } catch (error) {
       expect((error as ScimError).message).not.toContain("s3cret-token");
     }
+  });
+});
+
+describe("readScimNameObject", () => {
+  it("reads both sub-attributes whatever their case", () => {
+    expect(
+      readScimNameObject({ GivenName: "Jane", FamilyName: "Doe" })
+    ).toEqual({ firstName: "Jane", lastName: "Doe" });
+  });
+
+  it("reports only the sub-attributes present", () => {
+    // A replace naming one half must not clear the other.
+    expect(readScimNameObject({ givenName: "Jane" })).toEqual({
+      firstName: "Jane",
+    });
+    expect(readScimNameObject({ familyName: "Doe" })).toEqual({
+      lastName: "Doe",
+    });
+    expect(readScimNameObject({})).toEqual({});
+  });
+
+  it("reads a present null as clearing that half", () => {
+    expect(readScimNameObject({ givenName: null })).toEqual({ firstName: "" });
+  });
+
+  it("refuses a sub-attribute that is not text", () => {
+    expect(() => readScimNameObject({ givenName: { first: "Jane" } })).toThrow(
+      ScimError
+    );
   });
 });
