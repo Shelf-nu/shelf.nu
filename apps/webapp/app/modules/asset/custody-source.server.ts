@@ -214,10 +214,10 @@ export async function rehomeCustodyForPlacementChanges(
 }
 
 /**
- * Units a source has left to hand out: placed there minus already in custody
- * from there (NULL: unplaced minus custody recorded against the unplaced
- * units). The DB-backed form of `unitsLeftAtSource`, and the only way server
- * code should ask the question.
+ * Units a source has left to hand out: placed there, minus already in custody
+ * from there, minus out on a booking from there (NULL: the unplaced units
+ * minus custody recorded against them). The DB-backed form of
+ * `unitsLeftAtSource`, and the only way server code should ask the question.
  */
 export async function unitsLeftAtLocation(
   tx: CustodySourceTxClient,
