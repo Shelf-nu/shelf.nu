@@ -4215,6 +4215,21 @@ const CHECKIN_DISPOSITION_CATEGORIES = [
 ] as const;
 
 /**
+ * Whether a `ConsumptionLog.category` is one of the check-in dispositions in
+ * {@link CHECKIN_DISPOSITION_CATEGORIES}.
+ *
+ * @param category - Any consumption log category
+ * @returns True for RETURN, CONSUME, LOSS and DAMAGE
+ */
+function isCheckinDispositionCategory(
+  category: string
+): category is (typeof CHECKIN_DISPOSITION_CATEGORIES)[number] {
+  return (CHECKIN_DISPOSITION_CATEGORIES as readonly string[]).includes(
+    category
+  );
+}
+
+/**
  * The {@link DispositionCategoryBreakdown} field each disposition category
  * fills. Every category in {@link CHECKIN_DISPOSITION_CATEGORIES} needs an
  * entry, or its units silently drop out of every breakdown built from it.
@@ -5962,6 +5977,75 @@ export async function checkinBooking({
               .map((slice) => slice.id)
           );
 
+        /**
+         * Units already accounted for on each ONE_WAY slice, from every
+         * disposition this booking has logged for the asset. An earlier
+         * mobile check-in names no slice, so its logs are untagged; they are
+         * spread over the slices with {@link spreadSessionDispositionsOverSlices},
+         * the attribution the partial check-in used when it took that
+         * session's units out of the kit. Counting tagged logs alone would
+         * credit those units to no slice, consume a slice's units a second
+         * time and leave the kit holding units that are gone.
+         */
+        const oneWayAssetIds = [
+          ...new Set(
+            qtyTrackedSlices
+              .filter((slice) => slice.consumptionType === "ONE_WAY")
+              .map((slice) => slice.assetId)
+          ),
+        ];
+        const accountedBySliceId = new Map<string, number>();
+        if (oneWayAssetIds.length > 0) {
+          const loggedRows = await tx.consumptionLog.findMany({
+            where: {
+              bookingId: id,
+              assetId: { in: oneWayAssetIds },
+              category: { in: [...CHECKIN_DISPOSITION_CATEGORIES] },
+            },
+            select: {
+              assetId: true,
+              bookingAssetId: true,
+              category: true,
+              quantity: true,
+            },
+          });
+          // The query already filters to these categories; this narrows the
+          // type for the spread.
+          const loggedDispositions = loggedRows.flatMap((row) =>
+            isCheckinDispositionCategory(row.category)
+              ? [{ ...row, category: row.category }]
+              : []
+          );
+          for (const assetId of oneWayAssetIds) {
+            const spread = spreadSessionDispositionsOverSlices({
+              slices: qtyTrackedSlices
+                .filter((slice) => slice.assetId === assetId)
+                .map((slice) => ({
+                  id: slice.id,
+                  assetKitId: slice.assetKitId,
+                  booked: slice.quantity,
+                  owed: unitsSentOutOnSlice(
+                    slice,
+                    remainingToCheckOutBySlice.get(slice.id) ?? 0
+                  ),
+                })),
+              priorLogs: [],
+              sessionLogs: loggedDispositions.filter(
+                (log) => log.assetId === assetId
+              ),
+            });
+            for (const [sliceId, onSlice] of spread) {
+              accountedBySliceId.set(
+                sliceId,
+                onSlice.returned +
+                  onSlice.consumed +
+                  onSlice.lost +
+                  onSlice.damaged
+              );
+            }
+          }
+        }
+
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
@@ -6005,8 +6089,7 @@ export async function checkinBooking({
             unitsSentOutOnSlice(
               slice,
               remainingToCheckOutBySlice.get(slice.id) ?? 0
-            ) -
-              (slice.quantity - sliceRemaining)
+            ) - (accountedBySliceId.get(slice.id) ?? 0)
           );
 
           const disposition: CheckinDispositionInput = explicit ?? {

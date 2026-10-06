@@ -17876,6 +17876,122 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     );
   });
 
+  it("credits an earlier untagged check-in to the slices it was spread over", async () => {
+    // why: a phone check-in names no slice, so its CONSUME 5 log is written
+    // untagged while the kit is shrunk by the share the spread put on the kit
+    // slice (loose 3, kit 2). The big button must size each slice the same
+    // way: the loose slice has nothing left out, the kit slice still has 3.
+    // Sizing from slice-tagged logs alone consumes the loose slice's 3 again
+    // and leaves the kit holding 3 units that no longer exist.
+    expect.assertions(2);
+
+    const slice = (
+      sliceId: string,
+      assetKitId: string | null,
+      qty: number
+    ) => ({
+      id: sliceId,
+      checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+      checkedInAt: null,
+      assetId: ASSET_ID,
+      assetKitId,
+      sourceKitId: assetKitId ? "kit-pens" : null,
+      quantity: qty,
+      asset: {
+        id: ASSET_ID,
+        type: AssetType.QUANTITY_TRACKED,
+        consumptionType: ConsumptionType.ONE_WAY,
+        title: "Pens",
+        assetKits: [{ kitId: "kit-pens" }],
+        status: AssetStatus.CHECKED_OUT,
+        bookingAssets: [
+          { booking: { id: BOOKING_ID, status: BookingStatus.ONGOING } },
+        ],
+      },
+    });
+    const slices = [
+      slice("ba-loose", null, 3),
+      slice("ba-kit", ASSET_KIT_ID, 5),
+    ];
+    const booking = {
+      id: BOOKING_ID,
+      name: "Field day",
+      status: BookingStatus.ONGOING,
+      organizationId: "org-1",
+      creatorId: "user-1",
+      custodianUserId: "user-1",
+      custodianTeamMemberId: null,
+      from: futureFromDate,
+      to: futureToDate,
+      bookingAssets: slices,
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(booking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...booking,
+      status: BookingStatus.COMPLETE,
+    });
+    // why: every slice read answers from the two slices above.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(
+      slices.map((s) => ({
+        id: s.id,
+        assetId: s.assetId,
+        quantity: s.quantity,
+        assetKitId: s.assetKitId,
+        asset: { status: AssetStatus.CHECKED_OUT },
+      }))
+    );
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockImplementation((q: { where: { id: string } }) =>
+      Promise.resolve(slices.find((s) => s.id === q.where.id) ?? null)
+    );
+    // why: the earlier session's CONSUME 5 is untagged, so it counts toward
+    // the asset's remaining but toward no slice's own tagged total.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockImplementation((q: { where: { bookingAssetId?: string } }) =>
+      Promise.resolve({
+        _sum: { quantity: q.where.bookingAssetId ? 0 : 5 },
+      })
+    );
+    (
+      db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        assetId: ASSET_ID,
+        bookingAssetId: null,
+        category: "CONSUME",
+        quantity: 5,
+      },
+    ]);
+    onTestFinished(() => {
+      (
+        db.consumptionLog.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([]);
+    });
+
+    await checkinBooking(params);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "CONSUME",
+        quantity: 3,
+        bookingAssetId: "ba-kit",
+      })
+    );
+    expect(removeDestroyedUnitsFromKits).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        destroyedUnitsByAssetKitId: new Map([[ASSET_KIT_ID, 3]]),
+      })
+    );
+  });
+
   it("notes an asset whose kit lost some units and kept the rest", async () => {
     expect.assertions(1);
 
