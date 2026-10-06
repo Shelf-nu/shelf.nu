@@ -31,3 +31,32 @@ export const ONE_DAY = ONE_HOUR * 24;
 /** Max number of characters a user-authored note can contain. Shared between
  * the webapp form and the mobile API to keep parity. */
 export const NOTE_MAX_CONTENT_LENGTH = 5000;
+
+/**
+ * Where the browser posts Sentry envelopes, so ad-blockers and tracking
+ * protection see our own domain instead of Sentry's.
+ *
+ * Three places have to name the same path and all three read it from here: the
+ * client SDK's `tunnel` option, the auth bypass that lets an anonymous visitor
+ * reach it, and the rate limit that bounds what an anonymous visitor may send.
+ * A path that drifts out of the bypass sends every anonymous error report to
+ * the login page instead, which is silent: the browser gets a 302 it ignores
+ * and the error is simply never reported.
+ *
+ * @see {@link file://./../routes/api+/sentry-tunnel.ts} the route itself
+ */
+export const SENTRY_TUNNEL_PATH = "/api/sentry-tunnel";
+
+/**
+ * Largest envelope the tunnel will read, in bytes.
+ *
+ * The route buffers the whole body before forwarding it, and the path is
+ * reachable without a session, so an unbounded body is an unauthenticated way
+ * to make the server allocate. A request-per-minute limit does not help: one
+ * request can be arbitrarily large.
+ *
+ * 1 MiB is far above anything this app sends. The browser SDK is configured
+ * with tracing only, no Replay and no attachments, so an envelope here is an
+ * error event or a sampled transaction, measured in kilobytes.
+ */
+export const SENTRY_TUNNEL_MAX_ENVELOPE_BYTES = 1024 * 1024;
