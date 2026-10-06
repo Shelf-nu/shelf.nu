@@ -1,7 +1,9 @@
 /**
  * Ownership transfer eligibility: the candidate list and the transfer's own
  * check both read the `membership.eligibleAsNewOwner` policy, and the current
- * owner is found by the owner role, wherever it sits in the membership.
+ * owner is found by the owner role, wherever it sits in the membership. Inside
+ * the write, both memberships are locked and the decision is made again from
+ * the locked rows, so a role change that commits in between is respected.
  *
  * @see {@link file://./service.server.ts} getOrganizationAdmins, transferOwnership
  */
@@ -136,5 +138,111 @@ describe("ownership transfer eligibility", () => {
         userId: "owner",
       })
     ).rejects.toThrow(/not an admin/);
+  });
+});
+
+/**
+ * A transaction client whose membership lock answers with the given roles per
+ * user, recording the order of locks and writes.
+ */
+function lockingTx(lockedRolesByUser: Record<string, string[] | null>) {
+  const lockedUsers: string[] = [];
+  const tx = {
+    // why: the lock is a raw `SELECT ... FOR UPDATE`; record which member it
+    // names (the first interpolated value) to assert the lock order
+    $queryRaw: vi.fn((_sql: TemplateStringsArray, userId: string) => {
+      lockedUsers.push(userId);
+      return Promise.resolve([]);
+    }),
+    userOrganization: {
+      findUnique: vi.fn(
+        ({
+          where,
+        }: {
+          where: { userId_organizationId: { userId: string } };
+        }) => {
+          const roles =
+            lockedRolesByUser[where.userId_organizationId.userId] ?? null;
+          return Promise.resolve(roles ? { roles } : null);
+        }
+      ),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    organization: { update: vi.fn().mockResolvedValue({}) },
+    user: { update: vi.fn().mockResolvedValue({}) },
+  };
+  return { tx, lockedUsers };
+}
+
+describe("ownership transfer under the membership lock", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({
+      id: "owner",
+      roles: [],
+    });
+    // The pre-transaction read sees an eligible candidate.
+    dbMock.userOrganization.findMany.mockResolvedValue([
+      membership("owner", ["OWNER"]),
+      membership("new", ["ADMIN"]),
+    ]);
+  });
+
+  it("refuses a candidate demoted after the first read, writing no role", async () => {
+    const { tx } = lockingTx({ owner: ["OWNER"], new: ["BASE"] });
+    dbMock.$transaction.mockImplementation((cb: any) => cb(tx));
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: "new",
+        userId: "owner",
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(tx.organization.update).not.toHaveBeenCalled();
+    expect(tx.userOrganization.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses with a 409 when the owner changed after the first read", async () => {
+    const { tx } = lockingTx({ owner: ["ADMIN"], new: ["ADMIN"] });
+    dbMock.$transaction.mockImplementation((cb: any) => cb(tx));
+
+    await expect(
+      transferOwnership({
+        currentOrganization,
+        newOwnerId: "new",
+        userId: "owner",
+      })
+    ).rejects.toMatchObject({ status: 409 });
+    expect(tx.userOrganization.update).not.toHaveBeenCalled();
+  });
+
+  it("locks both memberships in userId order before writing either role", async () => {
+    const { tx, lockedUsers } = lockingTx({
+      owner: ["OWNER"],
+      new: ["ADMIN"],
+    });
+    dbMock.$transaction.mockImplementation((cb: any) => cb(tx));
+
+    // Emails and post-commit steps are irrelevant here; only the transaction
+    // is under test.
+    await transferOwnership({
+      currentOrganization,
+      newOwnerId: "new",
+      userId: "owner",
+    }).catch(() => undefined);
+
+    expect(lockedUsers).toEqual(["new", "owner"]);
+    const lastLock = Math.max(...tx.$queryRaw.mock.invocationCallOrder);
+    const firstWrite = Math.min(
+      ...tx.organization.update.mock.invocationCallOrder,
+      ...tx.userOrganization.update.mock.invocationCallOrder
+    );
+    expect(lastLock).toBeLessThan(firstWrite);
+    expect(tx.userOrganization.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { roles: { set: ["OWNER"] } },
+      })
+    );
   });
 });

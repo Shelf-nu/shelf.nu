@@ -37,6 +37,7 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
+import { lockMembership } from "../user/membership-lock.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -1047,6 +1048,70 @@ export async function transferOwnership({
     const currentOwnerTierId: TierId = currentOwnerUserOrg.user.tierId;
 
     await db.$transaction(async (tx) => {
+      /**
+       * The checks above read both memberships before this transaction, so a
+       * concurrent role change could have committed since: a demotion of the
+       * new owner, or the current owner's role moving. Lock both memberships
+       * (the same lock every role-changing path takes first) in `userId`
+       * order, so two transfers between the same pair cannot deadlock, then
+       * decide again from the locked rows before writing either role.
+       */
+      const [firstUserId, secondUserId] = [
+        currentOwnerUserOrg.user.id,
+        newOwnerUserOrg.user.id,
+      ].sort();
+      const lockedRoles = new Map([
+        [
+          firstUserId,
+          await lockMembership(tx, {
+            userId: firstUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+        [
+          secondUserId,
+          await lockMembership(tx, {
+            userId: secondUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+      ]);
+      const lockedOwner = lockedRoles.get(currentOwnerUserOrg.user.id);
+      const lockedNewOwner = lockedRoles.get(newOwnerUserOrg.user.id);
+
+      if (!lockedOwner || !isWorkspaceOwner(lockedOwner.roles)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Ownership changed",
+          message:
+            "The workspace owner changed while this transfer was being made. Please reload and try again.",
+          additionalData: { organizationId: currentOrganization.id },
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (
+        !lockedNewOwner ||
+        !holdsRoleWhere(
+          lockedNewOwner.roles,
+          (p) => p.membership.eligibleAsNewOwner
+        )
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: "New owner is not an admin of the organization.",
+          additionalData: {
+            organizationId: currentOrganization.id,
+            newOwnerId,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Update the owner of the organization */
       await tx.organization.update({
         where: { id: currentOrganization.id },

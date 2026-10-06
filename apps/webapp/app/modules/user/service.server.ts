@@ -80,6 +80,7 @@ import {
 } from "~/utils/storage.server";
 import { randomUsernameFromEmail } from "~/utils/user";
 import { USER_WITH_SSO_DETAILS_SELECT } from "./fields";
+import { lockMembership } from "./membership-lock.server";
 import type { UpdateUserPayload } from "./types";
 import { defaultFields } from "../asset-index-settings/helpers";
 import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
@@ -1892,42 +1893,8 @@ async function deleteMembershipUnlessOwner(
   return count;
 }
 
-/**
- * Locks a membership row and returns its roles as persisted now.
- *
- * The manual change-role action (`resolveUserAction`'s `"changeRole"` case),
- * the SSO group reconciler (`reconcileSsoGroupMembership`), account deletion
- * (`softDeleteUser`) and membership revocation (`revokeMembershipInTx`) call
- * this FIRST in their transaction, before any entity write, so concurrent
- * role changes and removals on the same member queue on this lock instead of
- * each holding a lock the other needs. `transferOwnership` is the one
- * role-changing path that does not take it: it decides eligibility from a
- * pre-transaction read of both memberships. Decide from the returned roles,
- * never from a snapshot read before the transaction.
- *
- * @param tx - The surrounding transaction
- * @param args.userId - The member
- * @param args.organizationId - The workspace
- * @returns The persisted roles, or `null` when the membership no longer exists
- */
-export async function lockMembership(
-  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
-  {
-    userId,
-    organizationId,
-  }: { userId: User["id"]; organizationId: Organization["id"] }
-): Promise<{ roles: OrganizationRoles[] } | null> {
-  await tx.$queryRaw`
-    SELECT id FROM "UserOrganization"
-    WHERE "userId" = ${userId} AND "organizationId" = ${organizationId}
-    FOR UPDATE
-  `;
-
-  return tx.userOrganization.findUnique({
-    where: { userId_organizationId: { userId, organizationId } },
-    select: { roles: true },
-  });
-}
+/** Re-exported for callers that already import the user service. */
+export { lockMembership };
 
 /**
  * Removes a member from a workspace inside the caller's transaction: takes the
