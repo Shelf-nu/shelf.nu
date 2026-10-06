@@ -971,6 +971,31 @@ describe("ListAssetContent", () => {
       expect(tooltip.textContent).toMatch(/counts toward it/i);
     });
 
+    it("says which location a checked-out pool slice left from, even when its unit counter reads 0", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        // A one-click check-out writes no scan session, so the row's
+        // session-derived counter stays 0; the recorded source still shows.
+        checkedOutQuantity: 0,
+        sourceLocation: { id: "loc-studio", name: "Studio" },
+      } as unknown as AssetWithBooking);
+
+      expect(screen.getByText("from Studio")).toBeInTheDocument();
+    });
+
+    it("says nothing about a source the loader did not resolve", () => {
+      mockUseLoaderData.mockReturnValue(finishedBooking);
+
+      renderRow({
+        ...baseAsset,
+        sourceLocation: null,
+      } as unknown as AssetWithBooking);
+
+      expect(screen.queryByText(/^from /)).not.toBeInTheDocument();
+    });
+
     it("does NOT label a row that answered no reservation", () => {
       mockUseLoaderData.mockReturnValue(finishedBooking);
 
