@@ -898,6 +898,50 @@ export async function getBookingImpactForAssetKits({
  * the system notes alone cover the user-visible audit trail.
  */
 /**
+ * The check-out markers of a slice made by merging `parts` into one row, for
+ * {@link mergeStandaloneCollisionsForKitDetachment}.
+ *
+ * Units sent out add up and the earliest departure wins. The merged slice is
+ * checked in only when no part is still out (out and not checked in), and then
+ * at the latest part's check-in. Returns nothing when no part went out, so a
+ * merge on a booking that has not started leaves the markers alone.
+ *
+ * @param parts The survivor and every row folded into it
+ * @returns The marker fields to write on the survivor, or `{}`
+ */
+function mergeCheckoutMarkers(
+  parts: Array<{
+    checkedOutAt?: Date | null;
+    checkedOutById?: string | null;
+    checkedInAt?: Date | null;
+    checkedInById?: string | null;
+    checkedOutQuantity?: number;
+  }>
+) {
+  const sentOut = parts.filter((part) => part.checkedOutAt);
+  if (sentOut.length === 0) return {};
+
+  const byTime = (at: (part: (typeof parts)[number]) => Date) =>
+    [...sentOut].sort((a, b) => at(a).getTime() - at(b).getTime());
+  const firstOut = byTime((part) => part.checkedOutAt!)[0];
+  const stillOut = sentOut.some((part) => !part.checkedInAt);
+  const lastIn = stillOut
+    ? null
+    : byTime((part) => part.checkedInAt!)[sentOut.length - 1];
+
+  return {
+    checkedOutQuantity: parts.reduce(
+      (sum, part) => sum + (part.checkedOutQuantity ?? 0),
+      0
+    ),
+    checkedOutAt: firstOut.checkedOutAt,
+    checkedOutById: firstOut.checkedOutById ?? null,
+    checkedInAt: lastIn?.checkedInAt ?? null,
+    checkedInById: lastIn?.checkedInById ?? null,
+  };
+}
+
+/**
  * Resolves the standalone-vs-kit-driven `BookingAsset` collision that
  * arises when an `AssetKit` row is about to be deleted (kit removal,
  * cross-kit move). The DB-level `ON DELETE SET NULL` cascade would clear
@@ -940,6 +984,17 @@ export async function getBookingImpactForAssetKits({
  * a collision between two stamped rows means that invariant has already
  * slipped, and losing the unit silently would be worse than returning it.
  *
+ * A merged-away row on a started booking also carries per-slice state, and the
+ * survivor takes all of it, or the booking's screens start answering from half
+ * a slice:
+ * - the check-out markers: units sent out add up, the earliest departure wins,
+ *   and the survivor counts as checked in only when no part of it is still out;
+ * - the `ConsumptionLog` rows tagged with the merged-away row, which would
+ *   otherwise lose their tag to `ON DELETE SET NULL`;
+ * - the `PartialBookingCheckout.bookingAssetIds` entries naming it.
+ * The markers are written only when some part of the merge went out, so a
+ * merge on a booking that has not started writes exactly what it always has.
+ *
  * @param tx Active transaction — must be the one deleting the `AssetKit` rows
  * @param assetKitIds `AssetKit` rows about to be deleted
  */
@@ -956,6 +1011,11 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     assetId: true,
     quantity: true,
     bookingModelRequestId: true,
+    checkedOutAt: true,
+    checkedOutById: true,
+    checkedInAt: true,
+    checkedInById: true,
+    checkedOutQuantity: true,
   };
   type CollisionRow = {
     id: string;
@@ -963,6 +1023,11 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     assetId: string;
     quantity: number;
     bookingModelRequestId: string | null;
+    checkedOutAt?: Date | null;
+    checkedOutById?: string | null;
+    checkedInAt?: Date | null;
+    checkedInById?: string | null;
+    checkedOutQuantity?: number;
   };
 
   const kitDrivenRows: CollisionRow[] = await tx.bookingAsset.findMany({
@@ -1004,9 +1069,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
   /** Discharged units no surviving row can hold — one entry per lost unit. */
   const requestIdsToDecrement: string[] = [];
   const kitDrivenIdsToDelete: string[] = [];
+  /** Every row folded into each survivor, the survivor itself first. */
+  const partsByStandaloneId = new Map<string, CollisionRow[]>();
   for (const kdr of kitDrivenRows) {
     const standalone = standaloneByPair.get(`${kdr.bookingId}::${kdr.assetId}`);
     if (!standalone) continue;
+    partsByStandaloneId.set(standalone.id, [
+      ...(partsByStandaloneId.get(standalone.id) ?? [standalone]),
+      kdr,
+    ]);
     mergedQtyByStandaloneId.set(
       standalone.id,
       (mergedQtyByStandaloneId.get(standalone.id) ?? standalone.quantity) +
@@ -1032,8 +1103,15 @@ export async function mergeStandaloneCollisionsForKitDetachment(
     kitDrivenIdsToDelete.push(kdr.id);
   }
 
+  /** Merged-away row id → the survivor that now holds its units. */
+  const survivorIdByMergedId = new Map<string, string>();
   for (const [standaloneId, quantity] of mergedQtyByStandaloneId) {
     const adoptedRequestId = adoptedRequestIdByStandaloneId.get(standaloneId);
+    const parts = partsByStandaloneId.get(standaloneId) ?? [];
+    const mergedAway = parts.slice(1);
+    for (const part of mergedAway) {
+      survivorIdByMergedId.set(part.id, standaloneId);
+    }
     await tx.bookingAsset.update({
       where: { id: standaloneId },
       data: {
@@ -1041,9 +1119,51 @@ export async function mergeStandaloneCollisionsForKitDetachment(
         ...(adoptedRequestId
           ? { bookingModelRequestId: adoptedRequestId }
           : {}),
+        ...mergeCheckoutMarkers(parts),
       },
     });
+    // Keep the merged-away rows' dispositions on the slice that holds their
+    // units, before the delete below would null their tag.
+    await tx.consumptionLog.updateMany({
+      where: { bookingAssetId: { in: mergedAway.map((part) => part.id) } },
+      data: { bookingAssetId: standaloneId },
+    });
   }
+
+  // Sessions name slices positionally. Re-point the merged-away ids, so a
+  // tagged claim keeps counting against the slice that now holds its units.
+  const sentOutIds = kitDrivenRows
+    .filter((row) => survivorIdByMergedId.has(row.id) && row.checkedOutAt)
+    .map((row) => row.id);
+  if (sentOutIds.length > 0) {
+    const sessions: Array<{ id: string; bookingAssetIds: string[] }> =
+      await tx.partialBookingCheckout.findMany({
+        where: {
+          bookingId: {
+            in: [
+              ...new Set(
+                kitDrivenRows
+                  .filter((row) => sentOutIds.includes(row.id))
+                  .map((row) => row.bookingId)
+              ),
+            ],
+          },
+          bookingAssetIds: { hasSome: sentOutIds },
+        },
+        select: { id: true, bookingAssetIds: true },
+      });
+    for (const session of sessions) {
+      await tx.partialBookingCheckout.update({
+        where: { id: session.id },
+        data: {
+          bookingAssetIds: session.bookingAssetIds.map(
+            (sliceId) => survivorIdByMergedId.get(sliceId) ?? sliceId
+          ),
+        },
+      });
+    }
+  }
+
   if (kitDrivenIdsToDelete.length > 0) {
     await tx.bookingAsset.deleteMany({
       where: { id: { in: kitDrivenIdsToDelete } },
@@ -1364,14 +1484,28 @@ export type EmptiedKitMembership = {
   unitOfMeasure: string | null;
   kitId: string;
   kitName: string;
-  /** Units the membership held before they were destroyed. */
+  /**
+   * Units that left the kit. For an emptied membership, everything it held
+   * before they were destroyed.
+   */
   quantity: number;
+};
+
+/** One kit membership that {@link removeDestroyedUnitsFromKits} shrank but kept. */
+export type ShrunkKitMembership = EmptiedKitMembership & {
+  /** Units the kit holds now. */
+  remainingInKit: number;
 };
 
 /** What {@link removeDestroyedUnitsFromKits} changed, for the caller's post-transaction notes. */
 export type DestroyedKitUnitsResult = {
   /** Memberships that reached zero and were deleted. */
   emptiedMemberships: EmptiedKitMembership[];
+  /**
+   * Memberships that lost units and kept some. `quantity` is the units that
+   * left the kit.
+   */
+  shrunkMemberships: ShrunkKitMembership[];
   /**
    * Live bookings whose kit slice the deletion turned into a standalone one.
    * Pass it to {@link emitAssetKitDetachmentNotes} once the transaction has
@@ -1390,7 +1524,8 @@ export type DestroyedKitUnitsResult = {
  *
  * - The membership shrinks by the destroyed units, and the kit-driven
  *   `AssetLocation` row that mirrors it follows, so the kit's location stops
- *   showing units that no longer exist.
+ *   showing units that no longer exist. One `ASSET_KIT_CHANGED` event per
+ *   asset records the units that left the kit.
  * - A booking still in a planning status that holds the kit is capped at what
  *   the kit now holds. A booking that has started keeps its slice: it records
  *   what went out.
@@ -1403,7 +1538,7 @@ export type DestroyedKitUnitsResult = {
  * carries a drift this check-in did not cause, and any `AssetKit` write would
  * trip `enforce_asset_kit_sum_within_total` at commit and roll back a check-in
  * that physically happened. That asset's kits are left as they are and the
- * drift is logged.
+ * drift is reported to Sentry, since only someone fixing the data can clear it.
  *
  * Call it AFTER the stock decrement, in the same transaction, and after every
  * read the check-in makes of its own booking's slices: the collision merge can
@@ -1434,6 +1569,7 @@ export async function removeDestroyedUnitsFromKits(
 ): Promise<DestroyedKitUnitsResult> {
   const result: DestroyedKitUnitsResult = {
     emptiedMemberships: [],
+    shrunkMemberships: [],
     detachmentImpact: [],
   };
 
@@ -1487,6 +1623,16 @@ export async function removeDestroyedUnitsFromKits(
   });
   if (memberships.length === 0) return result;
 
+  /** A membership as the post-transaction notes name it. */
+  const describeMembership = (membership: Membership) => ({
+    assetId: membership.assetId,
+    assetTitle: membership.asset.title,
+    assetType: membership.asset.type,
+    unitOfMeasure: membership.asset.unitOfMeasure,
+    kitId: membership.kitId,
+    kitName: membership.kit.name,
+  });
+
   /** Units each membership gives up: never more than it holds. */
   const unitsTaken = (membership: Membership) =>
     Math.min(
@@ -1539,7 +1685,6 @@ export async function removeDestroyedUnitsFromKits(
             stockAfter,
           },
           label,
-          shouldBeCaptured: false,
         })
       );
     }
@@ -1555,17 +1700,22 @@ export async function removeDestroyedUnitsFromKits(
     /** Units the slice holds now. */
     remaining: number;
   }> = [];
+  /** Memberships that keep some units, with what they hold now. */
+  const shrunk: Array<{ membership: Membership; taken: number }> = [];
   for (const membership of memberships) {
     if (driftedAssetIds.has(membership.assetId)) continue;
     const taken = unitsTaken(membership);
     if (taken <= 0) continue;
 
-    const remaining = membership.quantity - taken;
-    if (remaining === 0) {
+    if (membership.quantity - taken === 0) {
       emptied.push(membership);
-      continue;
+    } else {
+      shrunk.push({ membership, taken });
     }
+  }
 
+  for (const { membership, taken } of shrunk) {
+    const remaining = membership.quantity - taken;
     await tx.assetKit.update({
       // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: membership.id came from the organizationId-scoped findMany above, inside this same tx
       where: { id: membership.id },
@@ -1577,34 +1727,82 @@ export async function removeDestroyedUnitsFromKits(
       where: { assetKitId: membership.id },
       data: { quantity: remaining },
     });
-    // A booking that has not started tracks the kit, so it cannot keep more
-    // of the kit than the kit now holds.
+  }
+
+  // A booking that has not started tracks the kit, so it cannot keep more of
+  // the kit than the kit now holds. One read covers every shrunk membership.
+  if (shrunk.length > 0) {
+    const remainingByAssetKitId = new Map(
+      shrunk.map(({ membership, taken }) => [
+        membership.id,
+        { membership, remaining: membership.quantity - taken },
+      ])
+    );
     const planningSlices: Array<{
       id: string;
       bookingId: string;
+      assetKitId: string;
       quantity: number;
     }> = await tx.bookingAsset.findMany({
       where: {
-        assetKitId: membership.id,
-        quantity: { gt: remaining },
+        OR: [...remainingByAssetKitId].map(([assetKitId, { remaining }]) => ({
+          assetKitId,
+          quantity: { gt: remaining },
+        })),
         booking: { organizationId, status: { in: PLANNING_BOOKING_STATUSES } },
       },
-      select: { id: true, bookingId: true, quantity: true },
+      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
     });
-    if (planningSlices.length > 0) {
+    // Grouped by the quantity each slice is capped to, one write per group.
+    const sliceIdsByRemaining = new Map<number, string[]>();
+    for (const slice of planningSlices) {
+      const entry = remainingByAssetKitId.get(slice.assetKitId);
+      if (!entry) continue;
+      capped.push({
+        bookingId: slice.bookingId,
+        membership: entry.membership,
+        removed: slice.quantity - entry.remaining,
+        remaining: entry.remaining,
+      });
+      sliceIdsByRemaining.set(entry.remaining, [
+        ...(sliceIdsByRemaining.get(entry.remaining) ?? []),
+        slice.id,
+      ]);
+    }
+    for (const [remaining, sliceIds] of sliceIdsByRemaining) {
       await tx.bookingAsset.updateMany({
-        where: { id: { in: planningSlices.map((slice) => slice.id) } },
+        where: { id: { in: sliceIds } },
         data: { quantity: remaining },
       });
-      for (const slice of planningSlices) {
-        capped.push({
-          bookingId: slice.bookingId,
-          membership,
-          removed: slice.quantity - remaining,
-          remaining,
-        });
-      }
     }
+
+    // The units that left each kit, in the shape `moveAssetKitUnits` records
+    // units leaving a kit: the kit as `fromValue`, the units in `meta`.
+    await recordEvents(
+      shrunk.map(({ membership, taken }) => ({
+        organizationId,
+        actorUserId,
+        action: "ASSET_KIT_CHANGED" as const,
+        entityType: "ASSET" as const,
+        entityId: membership.assetId,
+        assetId: membership.assetId,
+        kitId: membership.kitId,
+        bookingId,
+        field: "kitId",
+        fromValue: membership.kitId,
+        toValue: null,
+        meta: {
+          ...assetQtyMeta(membership.asset, taken),
+          remainingInKit: membership.quantity - taken,
+        },
+      })),
+      tx
+    );
+    result.shrunkMemberships = shrunk.map(({ membership, taken }) => ({
+      ...describeMembership(membership),
+      quantity: taken,
+      remainingInKit: membership.quantity - taken,
+    }));
   }
 
   if (capped.length > 0) {
@@ -1653,12 +1851,7 @@ export async function removeDestroyedUnitsFromKits(
   );
 
   result.emptiedMemberships = emptied.map((membership) => ({
-    assetId: membership.assetId,
-    assetTitle: membership.asset.title,
-    assetType: membership.asset.type,
-    unitOfMeasure: membership.asset.unitOfMeasure,
-    kitId: membership.kitId,
-    kitName: membership.kit.name,
+    ...describeMembership(membership),
     quantity: membership.quantity,
   }));
   return result;

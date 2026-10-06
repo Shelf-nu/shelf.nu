@@ -165,6 +165,15 @@ vitest.mock("~/database/db.server", () => ({
     // kit-driven slice's quantity.
     consumptionLog: {
       groupBy: vitest.fn().mockResolvedValue([]),
+      // why: `mergeStandaloneCollisionsForKitDetachment` re-tags a merged-away
+      // slice's dispositions onto the survivor before the delete nulls them.
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // why: the same merge re-points session entries naming a merged-away
+    // slice that went out. No sessions by default.
+    partialBookingCheckout: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      update: vitest.fn().mockResolvedValue({}),
     },
     // why: createKit/updateKit now run cross-org ownership guards that call
     // db.category.findFirst before connecting a category. Mocked so the guard
@@ -5963,6 +5972,147 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       data: { fulfilledQuantity: 0, fulfilledAt: null },
     });
   });
+
+  describe("on a booking that has started", () => {
+    const outAt = new Date("2026-10-01T09:00:00.000Z");
+    const kitOutAt = new Date("2026-10-01T10:00:00.000Z");
+    const kitInAt = new Date("2026-10-02T09:00:00.000Z");
+
+    /** Standalone slice: 5 booked, all 5 out, none back yet. */
+    const startedStandalone = {
+      ...standaloneRow,
+      quantity: 5,
+      checkedOutAt: outAt,
+      checkedOutById: "user-out",
+      checkedInAt: null,
+      checkedInById: null,
+      checkedOutQuantity: 5,
+    };
+    /** Kit slice: 3 booked, all 3 out and settled. */
+    const settledKitSlice = {
+      ...kitDrivenRow,
+      quantity: 3,
+      checkedOutAt: kitOutAt,
+      checkedOutById: "user-kit",
+      checkedInAt: kitInAt,
+      checkedInById: "user-in",
+      checkedOutQuantity: 3,
+    };
+
+    it("keeps the survivor out while any part of it is still out", async () => {
+      // why: the survivor now holds 8 units, 8 of which went out and 3 of which
+      // came back. Leaving `checkedOutQuantity` at 5 reads as 3 units still to
+      // check out, and stamping it checked in hides the 5 that are still out.
+      expect.assertions(1);
+
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([startedStandalone]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.bookingAsset.update).toHaveBeenCalledWith({
+        where: { id: "ba-standalone" },
+        data: {
+          quantity: 8,
+          checkedOutQuantity: 8,
+          checkedOutAt: outAt,
+          checkedOutById: "user-out",
+          checkedInAt: null,
+          checkedInById: null,
+        },
+      });
+    });
+
+    it("stamps the survivor checked in at the latest check-in once every part is back", async () => {
+      expect.assertions(1);
+
+      const standaloneInAt = new Date("2026-10-01T18:00:00.000Z");
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([
+          {
+            ...startedStandalone,
+            checkedInAt: standaloneInAt,
+            checkedInById: "user-early",
+          },
+        ]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.bookingAsset.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            checkedInAt: kitInAt,
+            checkedInById: "user-in",
+          }),
+        })
+      );
+    });
+
+    it("moves the merged-away slice's logs and session entries onto the survivor", async () => {
+      // why: `ConsumptionLog.bookingAssetId` is ON DELETE SET NULL, and a
+      // session's `bookingAssetIds` is a plain array. Left alone, the 3 units
+      // the kit slice settled become untagged and re-attribute to whichever
+      // slice the greedy fill reaches first.
+      expect.assertions(3);
+
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([startedStandalone]);
+      (
+        db.partialBookingCheckout.findMany as unknown as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockResolvedValueOnce([
+        { id: "pco-1", bookingAssetIds: ["ba-standalone", "ba-kit"] },
+      ]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.consumptionLog.updateMany).toHaveBeenCalledWith({
+        where: { bookingAssetId: { in: ["ba-kit"] } },
+        data: { bookingAssetId: "ba-standalone" },
+      });
+      expect(db.partialBookingCheckout.findMany).toHaveBeenCalledWith({
+        where: {
+          bookingId: { in: ["b-1"] },
+          bookingAssetIds: { hasSome: ["ba-kit"] },
+        },
+        select: { id: true, bookingAssetIds: true },
+      });
+      expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
+        where: { id: "pco-1" },
+        data: { bookingAssetIds: ["ba-standalone", "ba-standalone"] },
+      });
+    });
+
+    it("leaves sessions alone when the merged-away slice never went out", async () => {
+      expect.assertions(1);
+
+      sliceReads()
+        .mockResolvedValueOnce([
+          { ...settledKitSlice, checkedOutAt: null, checkedInAt: null },
+        ])
+        .mockResolvedValueOnce([startedStandalone]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.partialBookingCheckout.findMany).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**
@@ -7212,7 +7362,7 @@ describe("removeDestroyedUnitsFromKits", () => {
   });
 
   it("shrinks the membership and the kit placement that mirrors it", async () => {
-    expect.assertions(4);
+    expect.assertions(6);
 
     // 10 in stock, 5 of them in the kit; 3 of the kit's are consumed.
     membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
@@ -7221,7 +7371,7 @@ describe("removeDestroyedUnitsFromKits", () => {
     ]);
 
     const { removeDestroyedUnitsFromKits } = await import("./service.server");
-    await removeDestroyedUnitsFromKits(db, args(3));
+    const result = await removeDestroyedUnitsFromKits(db, args(3));
 
     expect(db.assetKit.update).toHaveBeenCalledWith({
       where: { id: "ak-1" },
@@ -7235,16 +7385,43 @@ describe("removeDestroyedUnitsFromKits", () => {
     // of it than the kit now holds.
     expect(db.bookingAsset.findMany).toHaveBeenCalledWith({
       where: {
-        assetKitId: "ak-1",
-        quantity: { gt: 2 },
+        OR: [{ assetKitId: "ak-1", quantity: { gt: 2 } }],
         booking: {
           organizationId: "org-1",
           status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
         },
       },
-      select: { id: true, bookingId: true, quantity: true },
+      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
     });
     expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+    // The units that left the kit are recorded the way a partial move out of a
+    // kit records them.
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          bookingId: "booking-1",
+          fromValue: "kit-1",
+          toValue: null,
+          meta: { quantity: 3, remainingInKit: 2 },
+        }),
+      ],
+      db
+    );
+    expect(result.shrunkMemberships).toEqual([
+      {
+        assetId: "asset-pool",
+        assetTitle: "Batteries",
+        assetType: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: null,
+        kitId: "kit-1",
+        kitName: "Kit A",
+        quantity: 3,
+        remainingInKit: 2,
+      },
+    ]);
   });
 
   it("caps a planning booking's kit slice and records why", async () => {
@@ -7258,7 +7435,12 @@ describe("removeDestroyedUnitsFromKits", () => {
     (
       db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
     ).mockResolvedValueOnce([
-      { id: "ba-next-week", bookingId: "booking-next-week", quantity: 5 },
+      {
+        id: "ba-next-week",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-1",
+        quantity: 5,
+      },
     ]);
 
     const { removeDestroyedUnitsFromKits } = await import("./service.server");
@@ -7369,13 +7551,23 @@ describe("removeDestroyedUnitsFromKits", () => {
       { assetId: "asset-pool", _sum: { quantity: 5 } },
       { assetId: "asset-cable", _sum: { quantity: 5 } },
     ]);
-    (db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>)
-      .mockResolvedValueOnce([
-        { id: "ba-pool", bookingId: "booking-next-week", quantity: 5 },
-      ])
-      .mockResolvedValueOnce([
-        { id: "ba-cable", bookingId: "booking-next-week", quantity: 5 },
-      ]);
+    // One read covers both kits' planning slices.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-pool",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-1",
+        quantity: 5,
+      },
+      {
+        id: "ba-cable",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-2",
+        quantity: 5,
+      },
+    ]);
 
     const { removeDestroyedUnitsFromKits } = await import("./service.server");
     await removeDestroyedUnitsFromKits(db, {
@@ -7487,7 +7679,10 @@ describe("removeDestroyedUnitsFromKits", () => {
 
     expect(db.assetKit.update).not.toHaveBeenCalled();
     expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
-    expect(loggerError).toHaveBeenCalledTimes(1);
+    // Reported to Sentry: only someone fixing the data can clear the drift.
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ shouldBeCaptured: true })
+    );
   });
 
   it("ignores a membership outside the organization", async () => {
@@ -7503,6 +7698,10 @@ describe("removeDestroyedUnitsFromKits", () => {
       })
     );
     expect(db.assetKit.update).not.toHaveBeenCalled();
-    expect(result).toEqual({ emptiedMemberships: [], detachmentImpact: [] });
+    expect(result).toEqual({
+      emptiedMemberships: [],
+      shrunkMemberships: [],
+      detachmentImpact: [],
+    });
   });
 });

@@ -348,9 +348,11 @@ vitest.mock("~/database/db.server", () => ({
 // kit/service.server.test.ts. Here the tests assert what each check-in path
 // hands them. Default: no membership emptied, no other booking affected.
 vitest.mock("~/modules/kit/service.server", () => ({
-  removeDestroyedUnitsFromKits: vitest
-    .fn()
-    .mockResolvedValue({ emptiedMemberships: [], detachmentImpact: [] }),
+  removeDestroyedUnitsFromKits: vitest.fn().mockResolvedValue({
+    emptiedMemberships: [],
+    shrunkMemberships: [],
+    detachmentImpact: [],
+  }),
   emitAssetKitDetachmentNotes: vitest.fn().mockResolvedValue(undefined),
 }));
 
@@ -17031,6 +17033,26 @@ describe("spreadSessionDispositionsOverSlices", () => {
     expect(spread.get("ba-kit")).toEqual({ ...nothing, consumed: 5 });
   });
 
+  it("never spreads the overflow onto a kit slice that did not go out", () => {
+    expect.assertions(3);
+
+    // 6 consumed against 4 sent out. The overflow belongs with the slices that
+    // left; the kit slice that never did keeps its 5 units.
+    const spread = spreadSessionDispositionsOverSlices({
+      slices: [
+        { ...looseSlice, booked: 2, owed: 2 },
+        { ...kitSlice, id: "ba-kit-out", booked: 4, owed: 2 },
+        { ...kitSlice, id: "ba-kit-home", assetKitId: "ak-2", owed: 0 },
+      ],
+      priorLogs: [],
+      sessionLogs: [{ bookingAssetId: null, category: "CONSUME", quantity: 6 }],
+    });
+
+    expect(spread.get("ba-loose")).toEqual({ ...nothing, consumed: 2 });
+    expect(spread.get("ba-kit-out")).toEqual({ ...nothing, consumed: 4 });
+    expect(spread.get("ba-kit-home")).toEqual(nothing);
+  });
+
   it("lets earlier sessions fill each slice before this one", () => {
     expect.assertions(2);
 
@@ -17077,9 +17099,18 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
     (db.assetLocation.findMany as ReturnType<typeof vitest.fn>)
       .mockReset()
       .mockResolvedValue([]);
+    // why: what each slice can still check out sizes the units it sent out.
+    // No sessions by default, so a slice marked out sent its whole quantity.
+    (db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
     (removeDestroyedUnitsFromKits as ReturnType<typeof vitest.fn>)
       .mockReset()
-      .mockResolvedValue({ emptiedMemberships: [], detachmentImpact: [] });
+      .mockResolvedValue({
+        emptiedMemberships: [],
+        shrunkMemberships: [],
+        detachmentImpact: [],
+      });
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({
@@ -17093,11 +17124,12 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
 
   /**
    * A booking holding 10 pens on ONE slice, drawn from a kit unless
-   * `assetKitId` is null.
+   * `assetKitId` is null. The slice went out unless `checkedOutAt` is null.
    */
   function arrangeBooking(
     consumptionType: ConsumptionType,
-    assetKitId: string | null = ASSET_KIT_ID
+    assetKitId: string | null = ASSET_KIT_ID,
+    checkedOutAt: Date | null = new Date("2026-01-01T10:00:00.000Z")
   ) {
     const booking = {
       id: BOOKING_ID,
@@ -17112,7 +17144,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       bookingAssets: [
         {
           id: "ba-pens",
-          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedOutAt,
           checkedInAt: null,
           assetId: ASSET_ID,
           assetKitId,
@@ -17166,6 +17198,100 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
       actorUserId: "user-1",
       bookingId: BOOKING_ID,
     });
+  });
+
+  it("consumes nothing on a one-way kit slice that never went out", async () => {
+    // why: a partly checked-out booking can be completed with the big Check-in
+    // button. The units on a slice that never left are still on the shelf, so
+    // consuming them would destroy stock and empty the kit for nothing.
+    expect.assertions(3);
+
+    arrangeBooking(ConsumptionType.ONE_WAY, ASSET_KIT_ID, null);
+
+    await checkinBooking(params);
+
+    expect(consumptionLogService.createConsumptionLog).not.toHaveBeenCalled();
+    expect(db.asset.update).not.toHaveBeenCalled();
+    expect(removeDestroyedUnitsFromKits).not.toHaveBeenCalled();
+  });
+
+  it("consumes only the units a one-way kit slice sent out", async () => {
+    expect.assertions(3);
+
+    arrangeBooking(ConsumptionType.ONE_WAY);
+    // why: the sizing reads the slice and the booking's sessions. 4 of the
+    // slice's 10 pens went out in a progressive check-out.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-pens",
+        assetId: ASSET_ID,
+        quantity: 10,
+        assetKitId: ASSET_KIT_ID,
+        asset: { status: AssetStatus.CHECKED_OUT },
+      },
+    ]);
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      { assetIds: [ASSET_ID], quantities: [4], bookingAssetIds: ["ba-pens"] },
+    ]);
+
+    await checkinBooking(params);
+
+    expect(consumptionLogService.createConsumptionLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "CONSUME",
+        quantity: 4,
+        bookingAssetId: "ba-pens",
+      })
+    );
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: ASSET_ID },
+      data: { quantity: { decrement: 4 } },
+    });
+    expect(removeDestroyedUnitsFromKits).toHaveBeenCalledWith(
+      db,
+      expect.objectContaining({
+        destroyedUnitsByAssetKitId: new Map([[ASSET_KIT_ID, 4]]),
+      })
+    );
+  });
+
+  it("notes an asset whose kit lost some units and kept the rest", async () => {
+    expect.assertions(1);
+
+    arrangeBooking(ConsumptionType.ONE_WAY);
+    (
+      removeDestroyedUnitsFromKits as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce({
+      emptiedMemberships: [],
+      shrunkMemberships: [
+        {
+          assetId: ASSET_ID,
+          assetTitle: "Pens",
+          assetType: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: null,
+          kitId: "kit-pens",
+          kitName: "Pen Kit",
+          quantity: 10,
+          remainingInKit: 5,
+        },
+      ],
+      detachmentImpact: [],
+    });
+
+    await checkinBooking(params);
+
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: [ASSET_ID],
+        content: expect.stringContaining(
+          '**10 units** in {% link to="/kits/kit-pens" text="Pen Kit" /%} were not returned, so the kit now holds **5 units**.'
+        ),
+      })
+    );
   });
 
   it("takes lost and damaged units out of the kit, and leaves returned ones in it", async () => {
@@ -17324,6 +17450,7 @@ describe("checkinBooking: units destroyed out of a kit slice leave the kit", () 
           quantity: 10,
         },
       ],
+      shrunkMemberships: [],
       detachmentImpact: [
         { ...otherBooking, bookingAssetId: "ba-pens", bookingId: BOOKING_ID },
         otherBooking,
@@ -17391,7 +17518,11 @@ describe("partialCheckinBooking: units destroyed out of a kit slice leave the ki
       );
     (removeDestroyedUnitsFromKits as ReturnType<typeof vitest.fn>)
       .mockReset()
-      .mockResolvedValue({ emptiedMemberships: [], detachmentImpact: [] });
+      .mockResolvedValue({
+        emptiedMemberships: [],
+        shrunkMemberships: [],
+        detachmentImpact: [],
+      });
     (
       quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
     ).mockResolvedValue({

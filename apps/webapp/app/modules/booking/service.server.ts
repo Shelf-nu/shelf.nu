@@ -94,6 +94,7 @@ import {
   emitAssetKitDetachmentNotes,
   removeDestroyedUnitsFromKits,
   type DestroyedKitUnitsResult,
+  type EmptiedKitMembership,
 } from "~/modules/kit/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
@@ -4157,6 +4158,47 @@ const CHECKIN_DISPOSITION_CATEGORIES = [
 ] as const;
 
 /**
+ * The {@link DispositionCategoryBreakdown} field each disposition category
+ * fills. Every category in {@link CHECKIN_DISPOSITION_CATEGORIES} needs an
+ * entry, or its units silently drop out of every breakdown built from it.
+ */
+const CATEGORY_FIELD = {
+  RETURN: "returned",
+  CONSUME: "consumed",
+  LOSS: "lost",
+  DAMAGE: "damaged",
+} as const satisfies Record<
+  (typeof CHECKIN_DISPOSITION_CATEGORIES)[number],
+  keyof DispositionCategoryBreakdown
+>;
+
+/**
+ * Units a slice actually sent out on its booking.
+ *
+ * Whether a slice left is answered by its own `checkedOutAt` and nothing else:
+ * {@link computeBookingAssetsSliceRemainingToCheckOut} reports a slice with no
+ * session claims as fully dispatched whenever the booking is live and the
+ * ASSET reads CHECKED_OUT, and that status is global, so a sibling slice being
+ * out is enough to trigger it. A slice that never left sent nothing.
+ *
+ * A slice marked out that the sessions cannot size falls back to its booked
+ * quantity, the direction that keeps its kit held while the two disagree.
+ *
+ * @param slice - The slice's booked quantity and its check-out marker
+ * @param remainingToCheckOut - What the slice can still check out, from
+ *   {@link computeBookingAssetsSliceRemainingToCheckOut}
+ * @returns Units the slice sent out, at most its booked quantity
+ */
+export function unitsSentOutOnSlice(
+  slice: { quantity: number; checkedOutAt: Date | null },
+  remainingToCheckOut: number
+): number {
+  if (!slice.checkedOutAt) return 0;
+  const dispatched = slice.quantity - remainingToCheckOut;
+  return dispatched > 0 ? dispatched : slice.quantity;
+}
+
+/**
  * Returns how many units of a QUANTITY_TRACKED asset still need to be
  * accounted for in a booking.
  *
@@ -4232,13 +4274,6 @@ export function attributeCategorizedDispositionsByBookingAsset(args: {
     runningTotal.set(row.id, 0);
   }
 
-  const CATEGORY_FIELD = {
-    RETURN: "returned",
-    CONSUME: "consumed",
-    LOSS: "lost",
-    DAMAGE: "damaged",
-  } as const;
-
   // Exact pass: logs that already know their slice land precisely.
   const legacyByCategory = new Map<string, number>();
   for (const log of consumptionLogs) {
@@ -4307,7 +4342,10 @@ type CheckinDispositionCategory =
  * up in the field can only have come from a slice that left: a standalone slice
  * that never went out must not absorb units a kit brought back consumed. Units
  * the first pass cannot place are spread against the booked quantity, the bound
- * the check-in cap itself enforces. In both passes the dispositions of earlier
+ * the check-in cap itself enforces, but only over slices that went out: a slice
+ * that never left holds nothing that could have been used up, so it absorbs
+ * nothing in either pass, and its kit keeps its units. Whatever both passes
+ * leave unplaced lands on no slice. In both passes the dispositions of earlier
  * sessions fill each slice first, spread the same way, so this session only
  * claims what they left.
  *
@@ -4361,13 +4399,6 @@ export function spreadSessionDispositionsOverSlices(args: {
     consumptionLogs: sessionLogs,
   });
 
-  const CATEGORY_FIELD = {
-    RETURN: "returned",
-    CONSUME: "consumed",
-    LOSS: "lost",
-    DAMAGE: "damaged",
-  } as const;
-
   // Tagged logs always land, so anything unplaced is untagged overflow.
   const leftover: typeof sessionLogs = [];
   for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
@@ -4388,14 +4419,17 @@ export function spreadSessionDispositionsOverSlices(args: {
   }
   if (leftover.length === 0) return firstPass;
 
+  /** Booked capacity, for the slices that went out. */
+  const bookedIfSentOut = (slice: (typeof slices)[number]) =>
+    slice.owed > 0 ? slice.booked : 0;
   const priorOnBooked = attributeDispositionsByBookingAsset({
-    bookingAssetRows: rowsHolding((slice) => slice.booked),
+    bookingAssetRows: rowsHolding(bookedIfSentOut),
     consumptionLogs: priorLogs,
   });
   const secondPass = attributeCategorizedDispositionsByBookingAsset({
     bookingAssetRows: rowsHolding(
       (slice) =>
-        slice.booked -
+        bookedIfSentOut(slice) -
         (priorOnBooked.get(slice.id) ?? 0) -
         total(firstPass.get(slice.id))
     ),
@@ -5294,7 +5328,8 @@ async function notifyLowStockForDecrementedAssets({
  * transaction commits.
  *
  * - Each asset that left a kit gets a note naming the kit and the booking, so
- *   its activity explains why the kit no longer lists it.
+ *   its activity explains why the kit no longer lists it. One that only lost
+ *   some of its units in the kit gets a note saying how many the kit holds now.
  * - Every OTHER live booking whose slice of that kit became standalone gets
  *   the kit service's detachment note. The booking being checked in is left
  *   out: its slice is the one that was just settled.
@@ -5320,6 +5355,7 @@ async function noteKitUnitsDestroyedAtCheckin({
 }) {
   if (
     result.emptiedMemberships.length === 0 &&
+    result.shrunkMemberships.length === 0 &&
     result.detachmentImpact.length === 0
   ) {
     return;
@@ -5341,21 +5377,44 @@ async function noteKitUnitsDestroyedAtCheckin({
       booking.name
     );
 
-    for (const membership of result.emptiedMemberships) {
-      const count =
-        formatUnitCount(
-          {
-            type: membership.assetType,
-            unitOfMeasure: membership.unitOfMeasure,
-          },
-          membership.quantity
-        ) ?? String(membership.quantity);
-      const kitLink = wrapKitsWithDataForNote(
+    /** A unit count in the asset's own unit of measure. */
+    const unitCount = (membership: EmptiedKitMembership, units: number) =>
+      formatUnitCount(
+        { type: membership.assetType, unitOfMeasure: membership.unitOfMeasure },
+        units
+      ) ?? String(units);
+    const kitLinkFor = (membership: EmptiedKitMembership) =>
+      wrapKitsWithDataForNote(
         { id: membership.kitId, name: membership.kitName.trim() },
         "removed"
       );
+
+    for (const membership of result.emptiedMemberships) {
       await createNotes({
-        content: `${actorLink} checked in ${bookingLink}. The last **${count}** in ${kitLink} were not returned, so the asset is no longer part of the kit.`,
+        content: `${actorLink} checked in ${bookingLink}. The last **${unitCount(
+          membership,
+          membership.quantity
+        )}** in ${kitLinkFor(
+          membership
+        )} were not returned, so the asset is no longer part of the kit.`,
+        type: "UPDATE",
+        userId,
+        assetIds: [membership.assetId],
+        organizationId,
+      });
+    }
+
+    for (const membership of result.shrunkMemberships) {
+      await createNotes({
+        content: `${actorLink} checked in ${bookingLink}. **${unitCount(
+          membership,
+          membership.quantity
+        )}** in ${kitLinkFor(
+          membership
+        )} were not returned, so the kit now holds **${unitCount(
+          membership,
+          membership.remainingInKit
+        )}**.`,
         type: "UPDATE",
         userId,
         assetIds: [membership.assetId],
@@ -5424,6 +5483,9 @@ export async function checkinBooking({
               // `getKitIdsByBookingSlices`, so dropping either is a type error.
               assetKitId: true,
               sourceKitId: true,
+              // Whether the slice left, which bounds what the auto-default may
+              // consume on it.
+              checkedOutAt: true,
               asset: {
                 select: {
                   id: true,
@@ -5690,6 +5752,8 @@ export async function checkinBooking({
         title: ba.asset.title,
         // The kit membership the slice draws from, or null when standalone.
         assetKitId: ba.assetKitId ?? null,
+        quantity: ba.quantity,
+        checkedOutAt: ba.checkedOutAt ?? null,
       }))
       // The relation carries no ORDER BY, and an asset-level disposition
       // applies to the FIRST slice of its asset, so the order is fixed here:
@@ -5815,6 +5879,23 @@ export async function checkinBooking({
          */
         const destroyedUnitsByAssetKitId = new Map<string, number>();
 
+        /**
+         * What each ONE_WAY slice can still check out, to size the units it
+         * sent out. Only read for slices that left: one that never did sent
+         * nothing, and no read is needed to say so.
+         */
+        const remainingToCheckOutBySlice =
+          await computeBookingAssetsSliceRemainingToCheckOut(
+            tx,
+            id,
+            qtyTrackedSlices
+              .filter(
+                (slice) =>
+                  slice.consumptionType === "ONE_WAY" && slice.checkedOutAt
+              )
+              .map((slice) => slice.id)
+          );
+
         for (const slice of qtyTrackedSlices) {
           const sliceRemaining = await computeBookingAssetSliceRemaining(
             tx,
@@ -5847,18 +5928,34 @@ export async function checkinBooking({
             }
           }
 
+          /**
+           * Units of a ONE_WAY slice that left and are not accounted for yet.
+           * Its auto-default consumes these and no more: units that never left
+           * the shelf were not used up, and consuming them would destroy stock
+           * (and, on a kit slice, take them out of the kit).
+           */
+          const unitsStillOut = Math.max(
+            0,
+            unitsSentOutOnSlice(
+              slice,
+              remainingToCheckOutBySlice.get(slice.id) ?? 0
+            ) -
+              (slice.quantity - sliceRemaining)
+          );
+
           const disposition: CheckinDispositionInput = explicit ?? {
             assetId: slice.assetId,
-            // Auto-default claims exactly `cap` units — never more than the
-            // pool can cover, so it can't throw on legacy-NULL-reduced pools.
+            // Auto-default never claims more than `cap`, the most the pool can
+            // cover, so it can't throw on legacy-NULL-reduced pools.
             ...(slice.consumptionType === "ONE_WAY"
-              ? { consumed: cap }
+              ? { consumed: Math.min(cap, unitsStillOut) }
               : { returned: cap }),
           };
 
           const claimed = sumDisposition(disposition);
           if (claimed === 0) {
-            // Explicit disposition with no quantities — "leave pending".
+            // An explicit disposition with no quantities ("leave pending"), or
+            // a ONE_WAY slice with nothing still out.
             continue;
           }
 
@@ -7508,17 +7605,13 @@ export async function partialCheckinBooking({
 
         if (qtyAssetIdsWithKitSlice.has(disp.assetId)) {
           const sessionLogs = sessionLogsByAssetId.get(disp.assetId) ?? [];
-          for (const [category, quantity] of [
-            ["RETURN", disp.returned],
-            ["CONSUME", disp.consumed],
-            ["LOSS", disp.lost],
-            ["DAMAGE", disp.damaged],
-          ] as const) {
-            if ((quantity ?? 0) > 0) {
+          for (const category of CHECKIN_DISPOSITION_CATEGORIES) {
+            const quantity = disp[CATEGORY_FIELD[category]] ?? 0;
+            if (quantity > 0) {
               sessionLogs.push({
                 bookingAssetId: dispBookingAssetId,
                 category,
-                quantity: quantity!,
+                quantity,
               });
             }
           }
@@ -7801,28 +7894,17 @@ export async function partialCheckinBooking({
            * the THRESHOLD it settles a slice on what it owes rather than what
            * it booked. Sizing the two differently strands a kit either way.
            *
-           * A slice marked out that the sessions cannot size falls back to its
-           * booked quantity, which holds its kit — the safe direction while the
-           * two disagree. One that never left owes nothing at all.
+           * How a slice is sized, including a slice that never left, is
+           * {@link unitsSentOutOnSlice}.
            */
           const owedBySlice = new Map<string, number>();
           for (const slice of slices) {
-            // Whether a slice left is answered by its OWN marker and nothing
-            // else. `computeBookingAssetsSliceRemainingToCheckOut` reports a
-            // slice with no session claims as fully dispatched whenever the
-            // booking is live and the ASSET reads CHECKED_OUT — and that status
-            // is global, so a sibling slice being out is enough to trigger it.
-            // Sizing from that alone hands a slice that never moved the whole
-            // obligation of one that did.
-            if (!slice.checkedOutAt) {
-              owedBySlice.set(slice.id, 0);
-              continue;
-            }
-            const dispatched =
-              slice.quantity - (remainingToCheckOutBySlice.get(slice.id) ?? 0);
             owedBySlice.set(
               slice.id,
-              dispatched > 0 ? dispatched : slice.quantity
+              unitsSentOutOnSlice(
+                slice,
+                remainingToCheckOutBySlice.get(slice.id) ?? 0
+              )
             );
           }
 
