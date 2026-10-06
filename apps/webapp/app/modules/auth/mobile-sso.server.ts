@@ -178,20 +178,43 @@ function verifyPkceChallenge(
 }
 
 /**
+ * Supabase Auth error codes that mean the session can no longer be refreshed.
+ * Every other code (a refresh `conflict`, a rate limit, anything unknown) is a
+ * service failure, never a reason to tell the app its code was bad.
+ */
+const DEAD_SESSION_CODES = new Set<string>([
+  "refresh_token_not_found",
+  "refresh_token_already_used",
+  "session_not_found",
+  "session_expired",
+  "user_not_found",
+  "user_banned",
+  "bad_jwt",
+]);
+
+/**
  * Whether a failed refresh means the session itself is no longer valid, as
  * opposed to Supabase failing to answer. `refreshAccessToken` wraps the
  * supabase-js error as the ShelfError's `cause`.
  *
+ * A coded response is judged by its code alone. A response without a code (an
+ * older GoTrue) falls back to its status: a 4xx means the session is gone,
+ * except 409 (a concurrent-refresh conflict) and 429 (a rate limit).
+ *
  * @param cause - What `refreshAccessToken` threw
- * @returns true for a 4xx Auth API refusal other than a rate limit
+ * @returns true when signing in again is the only remedy
  */
 function isDeadSessionRefusal(cause: unknown): boolean {
   if (!isLikeShelfError(cause)) return false;
   const apiError = cause.cause;
+  if (!isAuthApiError(apiError)) return false;
+
+  if (apiError.code) return DEAD_SESSION_CODES.has(apiError.code);
+
   return (
-    isAuthApiError(apiError) &&
     apiError.status >= 400 &&
     apiError.status < 500 &&
+    apiError.status !== 409 &&
     apiError.status !== 429
   );
 }
@@ -353,13 +376,13 @@ export async function redeemMobileAuthCode(
     try {
       session = await refreshAccessToken(refreshToken);
     } catch (cause) {
-      // A 4xx refusal from Supabase (other than a rate limit) means the session
-      // was signed out or expired between the callback and the exchange:
-      // signing in again is the only remedy, as for an expired code.
+      // Supabase says the session was signed out or expired between the
+      // callback and the exchange: signing in again is the only remedy, as for
+      // an expired code.
       if (isDeadSessionRefusal(cause)) throw invalidCodeError();
 
-      // Anything else (unreachable, 5xx, rate limited, an empty response) is an
-      // outage, reported and captured as one. The code is already spent, so
+      // Anything else (unreachable, 5xx, a conflict, rate limited, an empty
+      // response) is a service failure, reported and captured as one. The code is already spent, so
       // the app starts a new sign-in either way.
       throw new ShelfError({
         cause,

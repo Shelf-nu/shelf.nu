@@ -272,24 +272,38 @@ describe("redeemMobileAuthCode", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
-  it("refuses with a 400 when Supabase says the session is gone", async () => {
-    const { code } = await mintedCode();
-    vi.mocked(refreshAccessToken).mockRejectedValue(
-      refreshFailure(authApiError(400, "refresh_token_not_found"))
-    );
+  it.each([
+    [
+      "a coded refusal (refresh_token_not_found)",
+      authApiError(400, "refresh_token_not_found"),
+    ],
+    ["a coded refusal (session_expired)", authApiError(403, "session_expired")],
+    ["an uncoded 4xx from an older GoTrue", authApiError(400)],
+  ])(
+    "refuses with a 400 when Supabase says the session is gone: %s",
+    async (_label, cause) => {
+      const { code } = await mintedCode();
+      vi.mocked(refreshAccessToken).mockRejectedValue(refreshFailure(cause));
 
-    await expect(
-      redeemMobileAuthCode(code, TEST_VERIFIER)
-    ).rejects.toMatchObject({
-      status: 400,
-      message: "Invalid or expired authorization code",
-    });
-  });
+      await expect(
+        redeemMobileAuthCode(code, TEST_VERIFIER)
+      ).rejects.toMatchObject({
+        status: 400,
+        message: "Invalid or expired authorization code",
+      });
+    }
+  );
 
   it.each([
     ["an unreachable Supabase", { message: "fetch failed" }],
     ["a Supabase 5xx", authApiError(502)],
     ["a Supabase rate limit", authApiError(429)],
+    ["a concurrent-refresh conflict", authApiError(409, "conflict")],
+    ["an uncoded 409", authApiError(409)],
+    [
+      "a 4xx with a code that is not a dead session",
+      authApiError(422, "validation_failed"),
+    ],
     ["a refresh that returned no session", null],
   ])("reports %s as a 500", async (_label, cause) => {
     const { code } = await mintedCode();
