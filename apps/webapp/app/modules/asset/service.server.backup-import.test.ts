@@ -1,10 +1,11 @@
 /**
- * @file Tests how `createAssetsFromBackupImport` restores placements.
+ * @file Tests how `createAssetsFromBackupImport` restores placements, custody
+ * and the relations an asset points at by name.
  *
- * The restore creates its assets in parallel. Locations are therefore resolved
- * by name once, before the assets: resolving per asset would let two assets
- * that share a new location each try to create it. These tests pin that, and
- * the placements each asset is created with.
+ * Locations are resolved by name once, before any asset is created; the other
+ * relations are found or created row by row, one asset at a time. These tests
+ * pin what each asset is created with, and that a name shared by several
+ * assets is created once.
  *
  * @see {@link file://./service.server.ts} `createAssetsFromBackupImport`
  */
@@ -13,6 +14,9 @@ import { beforeEach, describe, expect, it, vitest } from "vitest";
 const locationFindMany = vitest.fn();
 const locationCreate = vitest.fn();
 const assetCreate = vitest.fn();
+const assetUpdate = vitest.fn().mockResolvedValue({});
+const assetModelFindFirst = vitest.fn();
+const assetModelCreate = vitest.fn();
 const categoryFindFirst = vitest.fn();
 const categoryCreate = vitest.fn();
 const tagFindFirst = vitest.fn();
@@ -25,7 +29,8 @@ const teamMemberCreate = vitest.fn();
 vitest.mock("~/database/db.server", () => ({
   db: {
     location: { findMany: locationFindMany, create: locationCreate },
-    asset: { create: assetCreate },
+    asset: { create: assetCreate, update: assetUpdate },
+    assetModel: { findFirst: assetModelFindFirst, create: assetModelCreate },
     category: { findFirst: categoryFindFirst, create: categoryCreate },
     tag: { findFirst: tagFindFirst, create: tagCreate },
     teamMember: { findFirst: teamMemberFindFirst, create: teamMemberCreate },
@@ -229,6 +234,69 @@ describe("createAssetsFromBackupImport placements", () => {
     });
   });
 
+  it("uses the location the database matches when JavaScript lower-cases the name differently", async () => {
+    // Postgres folds `İ` to `i`, JavaScript to `i` plus a combining dot, so
+    // the batch lookup finds a location the file's key does not recognise.
+    locationFindMany.mockResolvedValue([
+      { id: "loc-istanbul", name: "istanbul" },
+    ]);
+
+    await restore([
+      row({
+        title: "Map",
+        assetLocations: [{ location: "İstanbul", quantity: 1 }],
+      }),
+    ]);
+
+    expect(locationFindMany).toHaveBeenLastCalledWith({
+      where: {
+        organizationId: "org-1",
+        name: { in: ["İstanbul"], mode: "insensitive" },
+      },
+      select: { id: true, name: true },
+    });
+    expect(locationCreate).not.toHaveBeenCalled();
+    expect(placementsByTitle().Map).toEqual([
+      { locationId: "loc-istanbul", organizationId: "org-1", quantity: 1 },
+    ]);
+  });
+
+  it("restores a pool whose placements exceed its stock as the source holds it", async () => {
+    await restore([
+      row({
+        title: "Batteries",
+        type: "QUANTITY_TRACKED",
+        quantity: "94",
+        assetLocations: [
+          { location: "Store", quantity: 60 },
+          { location: "Studio", quantity: 40 },
+        ],
+      }),
+      row({
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: "143",
+        assetLocations: [{ location: "Store", quantity: 99 }],
+      }),
+    ]);
+
+    const assets = assetDataByTitle();
+    // Created with stock for its placements, so the placement check passes,
+    expect(assets.Batteries.quantity).toBe(100);
+    expect(placementsByTitle().Batteries).toEqual([
+      { locationId: "new-Store", organizationId: "org-1", quantity: 60 },
+      { locationId: "new-Studio", organizationId: "org-1", quantity: 40 },
+    ]);
+    // then lowered to the backup's stock.
+    expect(assetUpdate).toHaveBeenCalledTimes(1);
+    expect(assetUpdate).toHaveBeenCalledWith({
+      where: { id: "asset-Batteries", organizationId: "org-1" },
+      data: { quantity: 94 },
+    });
+    // A pool within its stock is created as it is.
+    expect(assets.Pens.quantity).toBe(143);
+  });
+
   it("leaves an unplaced asset without placements and looks nothing up", async () => {
     await restore([row({ title: "Loose" })]);
 
@@ -402,6 +470,30 @@ describe("createAssetsFromBackupImport shared relations", () => {
     expect(assetDataByTitle().Pens.custody).toEqual({
       create: [{ teamMemberId: "tm-existing", quantity: 8 }],
     });
+  });
+
+  it("matches an asset model by exact name regardless of case, oldest first", async () => {
+    assetModelFindFirst.mockResolvedValue({ id: "model-sm58" });
+
+    await restore([
+      row({
+        title: "Mic",
+        type: "INDIVIDUAL",
+        assetModel: { name: " SM_58 " },
+      }),
+    ]);
+
+    // `in` keeps `_` a plain character; `equals` + insensitive is an ILIKE,
+    // where it matches any one character.
+    expect(assetModelFindFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-1",
+        name: { in: ["SM_58"], mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(assetModelCreate).not.toHaveBeenCalled();
+    expect(assetDataByTitle().Mic.assetModelId).toBe("model-sm58");
   });
 
   it("links custom field values to the upserted definitions", async () => {

@@ -205,6 +205,28 @@ describe("getAssetModelRollup", () => {
     );
   });
 
+  it("matches a search term against the asset model's name", async () => {
+    await getAssetModelRollup({ ...baseArgs, search: "dell" });
+
+    const sql = lastQueryText();
+
+    // A term like "dell" names a MODEL, not an asset title, so the search has
+    // to reach `AssetModel.name`. Without that branch every row of this view
+    // reports 0 matching assets for a term the operator can see on the page.
+    expect(sql).toMatch(
+      /FROM public\."AssetModel" am\s+JOIN public\."Asset" a ON a\."assetModelId" = am\."id"/
+    );
+    expect(sql).toContain('am."name" ILIKE');
+
+    // The match narrows the ASSET side, ahead of the join, so a matching
+    // model's count rises from 0 while every other model keeps its row.
+    // Row-level counts come from Postgres, which this harness does not run, so
+    // the position of the predicate is what is assertable here.
+    expect(sql.indexOf('am."name" ILIKE')).toBeLessThan(
+      sql.indexOf("FULL OUTER JOIN")
+    );
+  });
+
   it("counts assets, not joined rows, so a model with no matches reports zero", async () => {
     await getAssetModelRollup(baseArgs);
 

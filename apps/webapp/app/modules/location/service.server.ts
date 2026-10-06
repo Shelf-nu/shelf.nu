@@ -10,7 +10,16 @@ import { AssetType, BookingStatus, Prisma } from "@prisma/client";
 import invariant from "tiny-invariant";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import type { CustodyRehomeResult } from "~/modules/asset/custody-source.server";
+import {
+  createCustodyRehomeNote,
+  custodyFromLocationWhere,
+  getMultiSourcePoolIdsAtLocation,
+  loadCustodySourcesForAssets,
+  rehomeCustodyForPlacementChanges,
+} from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { lockAssetsForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
 import { assetQtyMeta } from "~/utils/asset-quantity";
 import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
@@ -199,15 +208,37 @@ export async function getLocation(
       };
     }
 
+    /**
+     * Custody that counts as "at this location": for a pool placed at two
+     * or more locations only custody taken from HERE, for every other asset
+     * all of it (see `custodyFromLocationWhere`). Used by the custody
+     * filters and the custodian column alike.
+     */
+    const custodyFromHere = custodyFromLocationWhere({
+      locationId: id,
+      multiSourcePoolIds: await getMultiSourcePoolIdsAtLocation({
+        locationId: id,
+        organizationIds: [organizationId, ...(otherOrganizationIds ?? [])],
+      }),
+    });
+
     if (teamMemberIds && teamMemberIds.length) {
       assetsWhere.OR = [
         ...(assetsWhere.OR ?? []),
         {
-          custody: { some: { teamMemberId: { in: teamMemberIds } } },
+          custody: {
+            some: {
+              teamMemberId: { in: teamMemberIds },
+              ...custodyFromHere,
+            },
+          },
         },
         {
           custody: {
-            some: { custodian: { userId: { in: teamMemberIds } } },
+            some: {
+              custodian: { userId: { in: teamMemberIds } },
+              ...custodyFromHere,
+            },
           },
         },
         {
@@ -235,7 +266,7 @@ export async function getLocation(
           },
         },
         ...(teamMemberIds.includes("without-custody")
-          ? [{ custody: { none: {} } }]
+          ? [{ custody: { none: custodyFromHere } }]
           : []),
       ];
     }
@@ -351,11 +382,14 @@ export async function getLocation(
               qrCodes: { take: 1, select: { id: true } },
               barcodes: { select: { id: true, type: true, value: true } },
               custody: {
-                // The list column shows ONE custodian, chosen as `custody[0]`
-                // by `getPrimaryCustody`. Without an order the database is
-                // free to return the rows differently between requests, so a
-                // multi-custodian asset would show a different holder on
-                // refresh. `id` breaks ties on identical timestamps.
+                // Only custody taken from this location (see
+                // `custodyFromHere`). The list column shows ONE custodian,
+                // chosen as `custody[0]` by `getPrimaryCustody`. Without an
+                // order the database is free to return the rows differently
+                // between requests, so a multi-custodian asset would show a
+                // different holder on refresh. `id` breaks ties on identical
+                // timestamps.
+                where: custodyFromHere,
                 orderBy: [{ createdAt: "asc" }, { id: "asc" }],
                 select: {
                   quantity: true,
@@ -2329,9 +2363,40 @@ export async function updateLocationAssets({
       movedIndividualPriorLocations.keys()
     );
 
+    /** Custody re-homes per pool, for the notes after the commit. */
+    const rehomes: Array<{
+      assetId: string;
+      result: CustodyRehomeResult;
+    }> = [];
+
     await db.$transaction(async (tx) => {
+      /**
+       * Lock every quantity-tracked asset this call touches before any
+       * placement write, in one statement and in sorted id order: the same
+       * order the booking check-out and check-in paths lock assets in, so
+       * the two can never deadlock. The lock serializes these placement
+       * writes against custody and stock changes on the same pools, and the
+       * custody sources read right after it are what the re-home below
+       * compares against. Constant work however many pools are selected.
+       */
+      const poolIds = modifiedAssets
+        .filter((asset) => asset.type === AssetType.QUANTITY_TRACKED)
+        .map((asset) => asset.id);
+      const lockedPools = await lockAssetsForQuantityUpdate(
+        tx,
+        poolIds,
+        organizationId
+      );
+      const poolTotals = new Map(
+        lockedPools.map((pool) => [pool.id, pool.quantity ?? 0])
+      );
+      const custodyBefore = await loadCustodySourcesForAssets(
+        tx,
+        lockedPools.map((pool) => ({ id: pool.id, total: pool.quantity ?? 0 }))
+      );
+
       // Drop the prior manual row for each INDIVIDUAL being moved
-      // across locations — done BEFORE the createMany below so the
+      // across locations, done BEFORE the createMany below so the
       // INDIVIDUAL single-row trigger sees zero rows for these
       // assets when the new INSERT runs. Scoped to `assetKitId: null`
       // because INDIVIDUAL assets can't have kit-driven rows (the
@@ -2472,7 +2537,38 @@ export async function updateLocationAssets({
       if (locEvents.length > 0) {
         await recordEvents(locEvents, tx);
       }
+
+      /**
+       * Custody follows the units. A pool removed from this location, or
+       * lowered here below what is in custody from here, has that excess
+       * custody made unplaced. A pool added here or raised here took the
+       * units from its unplaced pile, so unplaced custody beyond what is
+       * left unplaced now belongs here. Never refused.
+       */
+      rehomes.push(
+        ...(await rehomeCustodyForPlacementChanges(tx, {
+          before: custodyBefore,
+          totals: poolTotals,
+          destinationFor: (assetId) =>
+            removedAssetIds.includes(assetId) ? null : locationId,
+        }))
+      );
     });
+
+    for (const { assetId, result } of rehomes) {
+      const asset = modifiedAssets.find((a) => a.id === assetId);
+      if (!asset) continue;
+      await createCustodyRehomeNote({
+        result,
+        asset: {
+          id: asset.id,
+          type: asset.type,
+          unitOfMeasure: asset.unitOfMeasure,
+        },
+        userId,
+        organizationId,
+      });
+    }
 
     /** Creates the relevant notes for all the changed assets (not critical for atomicity) */
     await createBulkLocationChangeNotes({

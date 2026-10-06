@@ -129,23 +129,59 @@ export const custodyApi = {
     return result;
   },
 
-  /** Bulk assign custody of multiple assets to a team member */
-  bulkAssignCustody: (orgId: string, assetIds: string[], custodianId: string) =>
+  /**
+   * Bulk assign custody of multiple assets to a team member.
+   *
+   * `quantities` gives units per QUANTITY_TRACKED asset id in `assetIds`; the
+   * server assigns those unit by unit and the rest whole, checking every unit
+   * count before it writes anything. Omitted when empty, so a scan without
+   * quantity rows sends the same body as before.
+   */
+  bulkAssignCustody: (
+    orgId: string,
+    assetIds: string[],
+    custodianId: string,
+    quantities: Record<string, number> = {}
+  ) =>
     apiFetch<BulkActionResponse>(
       `/api/mobile/bulk-assign-custody?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetIds, custodianId }),
+        body: JSON.stringify({
+          assetIds,
+          custodianId,
+          ...(Object.keys(quantities).length > 0 ? { quantities } : {}),
+        }),
+        // why: units make it non-idempotent: a timed-out-but-landed request
+        // must not be auto-retried, or the units are assigned twice.
+        retry: Object.keys(quantities).length === 0,
       }
     ),
 
-  /** Bulk release custody of multiple assets */
-  bulkReleaseCustody: (orgId: string, assetIds: string[]) =>
+  /**
+   * Bulk release custody of multiple assets.
+   *
+   * `quantities` gives units per QUANTITY_TRACKED asset id in `assetIds`; the
+   * server releases those from each asset's single holder and the rest whole.
+   * Omitted when empty, so a scan without quantity rows sends the same body
+   * as before.
+   */
+  bulkReleaseCustody: (
+    orgId: string,
+    assetIds: string[],
+    quantities: Record<string, number> = {}
+  ) =>
     apiFetch<BulkActionResponse>(
       `/api/mobile/bulk-release-custody?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetIds }),
+        body: JSON.stringify({
+          assetIds,
+          ...(Object.keys(quantities).length > 0 ? { quantities } : {}),
+        }),
+        // why: units make it non-idempotent: a timed-out-but-landed request
+        // must not be auto-retried, or the units are released twice.
+        retry: Object.keys(quantities).length === 0,
       }
     ),
 
