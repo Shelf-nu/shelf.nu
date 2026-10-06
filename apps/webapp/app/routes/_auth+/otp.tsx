@@ -4,7 +4,13 @@ import type {
   LoaderFunctionArgs,
   MetaFunction,
 } from "react-router";
-import { data, redirect, useActionData, useFetcher } from "react-router";
+import {
+  data,
+  redirect,
+  useActionData,
+  useFetcher,
+  useLoaderData,
+} from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
@@ -13,6 +19,7 @@ import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { verifyOtpAndSignin } from "~/modules/auth/service.server";
+import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
@@ -40,7 +47,7 @@ import { getOtpPageData, type OtpVerifyMode } from "~/utils/otp";
 import { tw } from "~/utils/tw";
 import type { action as resendOtpAction } from "./resend-otp";
 
-export function loader({ context, request }: LoaderFunctionArgs) {
+export async function loader({ context, request }: LoaderFunctionArgs) {
   const { searchParams } = new URL(request.url);
   const mode = searchParams.get("mode") as OtpVerifyMode;
   const title = getOtpPageData(mode).title;
@@ -49,7 +56,17 @@ export function loader({ context, request }: LoaderFunctionArgs) {
     return redirect("/assets");
   }
 
-  return payload({ title });
+  /**
+   * An address that must use SSO is sent no code, and the send answers as if
+   * it were. This page tells everyone on an SSO domain where to go instead. It
+   * depends only on the domain, so it says nothing about any one account.
+   */
+  const email = searchParams.get("email") ?? "";
+  const ssoDomainHint = validEmail(email)
+    ? await isSsoDomainEmail(email).catch(() => false)
+    : false;
+
+  return payload({ title, ssoDomainHint });
 }
 
 const OtpSchema = z.object({
@@ -181,6 +198,7 @@ export default function OtpPage() {
     type: "success" | "error";
   }>();
   const data = useActionData<typeof action>();
+  const { ssoDomainHint } = useLoaderData<typeof loader>();
   const [searchParams] = useSearchParams();
   const fetcher = useFetcher<resendAction>();
 
@@ -252,6 +270,17 @@ export default function OtpPage() {
               name="email"
               value={searchParams.get("email") || ""}
             />
+
+            {ssoDomainHint ? (
+              <p className="text-sm text-gray-600">
+                If your organization uses single sign-on, you may not receive a
+                code. Use{" "}
+                <Button variant="link" to="/sso-login">
+                  Login with SSO
+                </Button>{" "}
+                instead.
+              </p>
+            ) : null}
 
             {message?.message && (
               <p

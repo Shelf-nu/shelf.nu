@@ -82,6 +82,16 @@ const MODEL_BULK_ACTIONS = <BookSelectedModelsDropdown />;
 const ASSET_MODEL_EXPLAINER =
   "A model is a make and specification that several assets share, so a booking can ask for any unit of it.";
 
+/**
+ * The fill every header cell of the model view carries.
+ *
+ * `Th` draws no background of its own, so each cell in the group has to ask for
+ * this one by name. A cell that leaves it out renders transparent next to its
+ * tinted neighbours, which reads as a block of colour sitting over a single
+ * column rather than as a header row.
+ */
+const MODEL_HEADER_FILL = "bg-gray-25";
+
 export const AssetsList = ({
   customEmptyStateContent,
   disableTeamMemberFilter,
@@ -190,15 +200,20 @@ export const AssetsList = ({
           label="Name"
           columnName="name"
           className={tw(
-            "!border-b-0 border-r border-r-transparent bg-gray-25",
+            "!border-b-0 border-r border-r-transparent",
+            MODEL_HEADER_FILL,
             canBookSelectedModels ? "!pl-0" : ""
           )}
         />
         {/* "Default category", not "Category": the cell shows the model's
             DEFAULT, which applies at creation only, so its assets may sit in
             other categories. */}
-        <Th>Default category</Th>
-        <AssetModelSortHeader sortKey="assets" label="Assets" />
+        <Th className={MODEL_HEADER_FILL}>Default category</Th>
+        <AssetModelSortHeader
+          sortKey="assets"
+          label="Assets"
+          className={MODEL_HEADER_FILL}
+        />
         {/* "Status", not "Availability": the cell counts asset status, which is
             not what a booking can take. See `StatusSplit`. The cell carries
             three counts and the rollup can order by the first of them, so the
@@ -208,8 +223,13 @@ export const AssetsList = ({
           sortKey="available"
           label="Status"
           sortsBy="assets in"
+          className={MODEL_HEADER_FILL}
         />
-        <AssetModelSortHeader sortKey="value" label="Total value" />
+        <AssetModelSortHeader
+          sortKey="value"
+          label="Total value"
+          className={MODEL_HEADER_FILL}
+        />
       </>
     ),
     [canBookSelectedModels]
