@@ -7,7 +7,10 @@ import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
-import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
+import {
+  AssetQuantitiesSchema,
+  AssetSourceLocationsSchema,
+} from "~/utils/asset-quantities-schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -25,6 +28,12 @@ export const BulkAssignCustodySchema = z.object({
    * so it sends nothing and those assets keep being skipped.
    */
   quantities: AssetQuantitiesSchema,
+  /**
+   * Where each quantity-tracked asset's units come from, sent only by the
+   * scanner, and only for pools placed at two or more locations. Keyed by
+   * asset id: a location id or `"unplaced"`.
+   */
+  sourceLocations: AssetSourceLocationsSchema,
 });
 
 export default function BulkAssignCustodyDialog() {

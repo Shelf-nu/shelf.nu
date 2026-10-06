@@ -49,10 +49,23 @@ vi.mock("~/modules/asset/availability-primitives.server", () => ({
 }));
 
 // why: the custody writes are the services' job and have their own suites;
-// here they only need to succeed or refuse
+// here they only need to succeed or refuse. The resolved values carry the
+// source each service reports: none worth naming, so notes read as before.
 vi.mock("~/modules/asset/service.server", () => ({
-  checkOutQuantity: vi.fn().mockResolvedValue({}),
-  releaseQuantity: vi.fn().mockResolvedValue({ consumed: 0, returned: 3 }),
+  checkOutQuantity: vi.fn().mockResolvedValue({
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
+  releaseQuantity: vi.fn().mockResolvedValue({
+    consumed: 0,
+    returned: 3,
+    lines: [],
+    multiSource: false,
+  }),
 }));
 
 // why: notes are written to the database; the content is what is asserted
@@ -284,6 +297,26 @@ describe("resolveQuantityReleases", () => {
     expect(dbMocks.custodyFindMany).not.toHaveBeenCalled();
   });
 
+  it("counts one person holding units from two locations as one holder", async () => {
+    // One operator row per location the units came from, same person.
+    dbMocks.custodyFindMany.mockResolvedValue([
+      row("q1", "tm-1", 2),
+      row("q1", "tm-1", 3),
+    ]);
+
+    const resolved = await resolveQuantityReleases({
+      quantityAssetIds: ["q1"],
+      quantities: { q1: 5 },
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+      userId: "user-1",
+    });
+
+    expect(resolved).toEqual([
+      { assetId: "q1", custodian: { id: "tm-1", name: "tm-1", user: null } },
+    ]);
+  });
+
   it("resolves each asset to its single operator holder", async () => {
     dbMocks.custodyFindMany.mockResolvedValue([row("q1", "tm-1", 8)]);
 
@@ -401,8 +434,16 @@ describe("assignQuantities and releaseQuantities", () => {
   });
 
   it("keeps going past a refused asset and reports it by name", async () => {
+    const assigned = {
+      source: {
+        locationId: null,
+        locationName: null,
+        explicit: false,
+        multiSource: false,
+      },
+    } as never;
     vi.mocked(checkOutQuantity)
-      .mockResolvedValueOnce({} as never)
+      .mockResolvedValueOnce(assigned)
       .mockRejectedValueOnce(
         new ShelfError({
           cause: null,
@@ -410,7 +451,7 @@ describe("assignQuantities and releaseQuantities", () => {
           message: "Cannot check out 3 units. Only 1 units are available.",
         })
       )
-      .mockResolvedValueOnce({} as never);
+      .mockResolvedValueOnce(assigned);
 
     const refusals = await assignQuantities({
       quantityAssetIds: ["q1", "q2", "q3"],

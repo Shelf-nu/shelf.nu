@@ -58,6 +58,13 @@ const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `null` / `""` for the
+   * unplaced units. Optional and additive: an app build that does not send
+   * it gets the server-side default (the only placement of a pool at one
+   * location, otherwise no recorded source), never a refusal.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -107,7 +114,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, note, locationId } = parsed.data;
 
     /** Validate that the team member belongs to the same organization */
     const teamMember = await getTeamMember({
@@ -152,6 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       role,
       note,
+      locationId,
     });
 
     // No route-level sendNotification success toast here: that's the web's

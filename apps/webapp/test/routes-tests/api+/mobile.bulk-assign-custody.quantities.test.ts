@@ -58,12 +58,21 @@ vitest.mock("~/utils/rate-limit.server", () => ({
   enforceUserRateLimit: vitest.fn().mockResolvedValue(undefined),
 }));
 
-// why: exercising the route's split and pre-flight, not the custody writes
+// why: exercising the route's split and pre-flight, not the custody writes;
+// `checkOutQuantity` reports a source with nothing to name, as for a pool at
+// one location
 vitest.mock("~/modules/asset/service.server", () => ({
   bulkCheckOutAssets: vitest
     .fn()
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
-  checkOutQuantity: vitest.fn().mockResolvedValue({}),
+  checkOutQuantity: vitest.fn().mockResolvedValue({
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
 }));
 
 // why: the pre-flight's free-unit count is the availability leaf's job
