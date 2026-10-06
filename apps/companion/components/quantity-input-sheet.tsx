@@ -29,6 +29,7 @@ import {
   View,
   Text,
   Modal,
+  ScrollView,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
@@ -270,7 +271,10 @@ export function QuantityInputSheet({
           </TouchableOpacity>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+        >
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
           {/* "From location": one tappable row per source. The picked row
@@ -435,7 +439,7 @@ export function QuantityInputSheet({
               <Text style={styles.confirmText}>{confirmLabel}</Text>
             )}
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );

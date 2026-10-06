@@ -1,5 +1,5 @@
 import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -186,29 +186,38 @@ export default function AssetDetailScreen() {
   const sourceSummary = asset?.custodySources ?? null;
   const multiSource =
     sourceSummary?.multiSource === true && sourceSummary.options.length > 0;
-  const [assignSource, setAssignSource] = useState<string | null>(null);
-  const [releaseSource, setReleaseSource] = useState<string | null>(null);
-  // The row the assign sheet opens on: the location with the most left. A
-  // string, so a refetch that changes nothing does not re-seed a pick.
-  const defaultAssignValue = useMemo(
-    () =>
-      sourceSummary
-        ? defaultAssignSource(sourceSummary.options)?.value ?? null
-        : null,
-    [sourceSummary]
-  );
-  useEffect(() => {
-    setAssignSource(assignQtyMember && multiSource ? defaultAssignValue : null);
-  }, [assignQtyMember, multiSource, defaultAssignValue]);
+  // The operator's picks, keyed by who the sheet is for, so a pick never
+  // leaks from one member (or holder) to the next. The effective value is
+  // derived during render: the pick when it belongs to the sheet that is
+  // open, else the default. No effect seeds state.
+  const [assignPick, setAssignPick] = useState<{
+    memberId: string;
+    value: string;
+  } | null>(null);
+  const [releasePick, setReleasePick] = useState<{
+    custodianId: string;
+    value: string;
+  } | null>(null);
+  // The row the assign sheet opens on: the location with the most left.
+  const defaultAssignValue = sourceSummary
+    ? defaultAssignSource(sourceSummary.options)?.value ?? null
+    : null;
+  const assignSource =
+    assignQtyMember && multiSource
+      ? assignPick?.memberId === assignQtyMember.id
+        ? assignPick.value
+        : defaultAssignValue
+      : null;
   const releaseDefaultValue =
     releaseQtyEntry?.sources && releaseQtyEntry.sources.length > 0
       ? releaseSourceValue(releaseQtyEntry.sources[0])
       : null;
-  useEffect(() => {
-    setReleaseSource(
-      releaseQtyEntry && multiSource ? releaseDefaultValue : null
-    );
-  }, [releaseQtyEntry, multiSource, releaseDefaultValue]);
+  const releaseSource =
+    releaseQtyEntry && multiSource
+      ? releasePick?.custodianId === releaseQtyEntry.custodian.id
+        ? releasePick.value
+        : releaseDefaultValue
+      : null;
 
   // Notes
   const [noteText, setNoteText] = useState("");
@@ -519,7 +528,11 @@ export default function AssetDetailScreen() {
             asset.unitOfMeasure
           ),
           value: assignSource,
-          onChange: setAssignSource,
+          onChange: (value: string) => {
+            if (assignQtyMember) {
+              setAssignPick({ memberId: assignQtyMember.id, value });
+            }
+          },
         }
       : undefined;
   // The release sheet's picker and cap: one row per source the holder took
@@ -546,7 +559,14 @@ export default function AssetDetailScreen() {
           label: "From",
           options: releaseSourceOptions(releaseSources, asset.unitOfMeasure),
           value: releaseSource,
-          onChange: setReleaseSource,
+          onChange: (value: string) => {
+            if (releaseQtyEntry) {
+              setReleasePick({
+                custodianId: releaseQtyEntry.custodian.id,
+                value,
+              });
+            }
+          },
         }
       : undefined;
   const releaseSourceNote =

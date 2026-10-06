@@ -45,7 +45,7 @@ env:
     timeout: 10000
 - tapOn: "${SOURCE_LOCATION}.*"
 - assertVisible: "Quantity, maximum.*"
-- tapOn: "Assign"
+- tapOn: "Assign .*"
 
 # The holder's row names the source.
 - extendedWaitUntil:
@@ -58,7 +58,7 @@ env:
 - extendedWaitUntil:
     visible: ".*Goes back to ${SOURCE_LOCATION}.*"
     timeout: 10000
-- tapOn: "Release"
+- tapOn: "Release .*"
 - extendedWaitUntil:
     notVisible: ".*1 from ${SOURCE_LOCATION}.*"
     timeout: 15000

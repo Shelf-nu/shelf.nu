@@ -131,7 +131,7 @@ test("describeHolderSources names each source", () => {
       { locationId: null, unrecorded: false, name: null, quantity: 3 },
       { locationId: null, unrecorded: true, name: null, quantity: 4 },
     ]),
-    "3 unplaced · location not recorded"
+    "3 unplaced · 4 (location not recorded)"
   );
 });
 
@@ -204,11 +204,12 @@ test("check-out rows list each location, then Unplaced when there are unplaced u
   );
 });
 
-test("check-out default follows the server, then the first location, then Unplaced", () => {
+test("check-out default follows the server; a null default means Unplaced", () => {
   assert.equal(defaultCheckoutSource(question()), "cam");
+  // Every location empty, unplaced units left: the server says null = Unplaced.
   assert.equal(
-    defaultCheckoutSource(question({ defaultLocationId: null })),
-    "cam"
+    defaultCheckoutSource(question({ defaultLocationId: null, unplaced: 3 })),
+    UNPLACED_SOURCE
   );
   assert.equal(
     defaultCheckoutSource(
@@ -216,13 +217,22 @@ test("check-out default follows the server, then the first location, then Unplac
     ),
     UNPLACED_SOURCE
   );
+  // Nothing anywhere (should not happen): the first location, not a crash.
+  assert.equal(
+    defaultCheckoutSource(question({ defaultLocationId: null })),
+    "cam"
+  );
 });
 
-test("check-out answers go out keyed by slice with Unplaced as null", () => {
+test("check-out answers carry only the rows the operator changed, Unplaced as null", () => {
   assert.deepEqual(
-    checkoutSourceAnswers({ "slice-1": "stu", "slice-2": UNPLACED_SOURCE }),
+    checkoutSourceAnswers(
+      { "slice-1": "stu", "slice-2": UNPLACED_SOURCE, "slice-3": "cam" },
+      ["slice-1", "slice-2"]
+    ),
     { "slice-1": "stu", "slice-2": null }
   );
+  assert.deepEqual(checkoutSourceAnswers({ "slice-1": "stu" }, []), {});
 });
 
 test("questionsForAssets keeps only the pools in the selection", () => {

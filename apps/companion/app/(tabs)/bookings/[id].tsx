@@ -318,14 +318,26 @@ export default function BookingDetailScreen() {
     if (!booking || !currentOrg) return;
 
     const submit = async (sourceLocations?: Record<string, string | null>) => {
+      // The same synchronous lock the partial paths hold: a second tap on the
+      // source sheet's Confirm before the first request settles must not send
+      // the check-out twice (the service accepts a rerun and duplicates events).
+      if (bookingSubmitLock.current) return;
+      bookingSubmitLock.current = true;
       setIsActioning(true);
-      const { error: err } = await api.checkoutBooking(
-        currentOrg.id,
-        booking.id,
-        getTimeZone(),
-        sourceLocations
-      );
-      setIsActioning(false);
+      let err: string | null = null;
+      try {
+        ({ error: err } = await api.checkoutBooking(
+          currentOrg.id,
+          booking.id,
+          getTimeZone(),
+          sourceLocations
+        ));
+      } catch {
+        err = "Something went wrong";
+      } finally {
+        bookingSubmitLock.current = false;
+        setIsActioning(false);
+      }
       if (err) {
         // A refusal keeps the source sheet (if any) open with its answers.
         Alert.alert("Error", err);

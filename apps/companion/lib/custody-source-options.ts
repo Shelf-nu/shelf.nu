@@ -98,7 +98,7 @@ export function describeHolderSources(
   if (!sources || sources.length === 0) return null;
   return sources
     .map((entry) => {
-      if (entry.unrecorded) return "location not recorded";
+      if (entry.unrecorded) return `${entry.quantity} (location not recorded)`;
       if (entry.locationId === null) return `${entry.quantity} unplaced`;
       return `${entry.quantity} from ${entry.name ?? "Unknown location"}`;
     })
@@ -165,26 +165,34 @@ export function checkoutSourceOptions(
 }
 
 /**
- * The row a check-out question opens on: the server's own default, else the
- * first location, else "Unplaced".
+ * The row a check-out question opens on: the server's own default. A null
+ * default means the unplaced units (every location is empty but unplaced
+ * units are left), so that row is picked, not the first location. Only a
+ * question with neither falls back to the first location.
  */
 export function defaultCheckoutSource(
   question: CheckoutSourceQuestion
 ): string {
   if (question.defaultLocationId) return question.defaultLocationId;
+  if (question.unplaced > 0) return UNPLACED_SOURCE;
   if (question.placements.length > 0) return question.placements[0].locationId;
   return UNPLACED_SOURCE;
 }
 
 /**
- * The `sourceLocations` body for a check-out: one answer per asked slice,
- * "Unplaced" sent as `null`.
+ * The `sourceLocations` body for a check-out: the answers the operator
+ * changed, "Unplaced" sent as `null`. A row left on its pre-selected default
+ * is not sent, so the server records its own default from the state at
+ * check-out time rather than a value that may be a minute old.
  */
 export function checkoutSourceAnswers(
-  answers: Record<string, string>
+  answers: Record<string, string>,
+  touched: Iterable<string>
 ): Record<string, string | null> {
   const body: Record<string, string | null> = {};
-  for (const [sliceId, value] of Object.entries(answers)) {
+  for (const sliceId of touched) {
+    const value = answers[sliceId];
+    if (value === undefined) continue;
     body[sliceId] = assignSourceRequestValue(value);
   }
   return body;

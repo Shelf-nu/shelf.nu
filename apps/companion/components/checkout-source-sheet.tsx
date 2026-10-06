@@ -63,6 +63,9 @@ export function CheckoutSourceSheet({
   const { colors } = useTheme();
   const styles = useStyles();
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  // Rows the operator changed. Only those go out; a row left on its default
+  // lets the server record its own, current default.
+  const [touched, setTouched] = useState<Set<string>>(new Set());
 
   // Seed every question with its default each time the sheet opens, so an
   // earlier check-out's picks never leak into this one.
@@ -73,6 +76,7 @@ export function CheckoutSourceSheet({
       seeded[question.sliceId] = defaultCheckoutSource(question);
     }
     setAnswers(seeded);
+    setTouched(new Set());
   }, [visible, questions]);
 
   const requestClose = () => {
@@ -132,12 +136,15 @@ export function CheckoutSourceSheet({
                         styles.sourceRow,
                         selected && styles.sourceRowSelected,
                       ]}
-                      onPress={() =>
+                      onPress={() => {
                         setAnswers((prev) => ({
                           ...prev,
                           [question.sliceId]: option.value,
-                        }))
-                      }
+                        }));
+                        setTouched((prev) =>
+                          new Set(prev).add(question.sliceId)
+                        );
+                      }}
                       disabled={isSubmitting}
                       activeOpacity={0.7}
                       accessibilityRole="radio"
@@ -175,7 +182,7 @@ export function CheckoutSourceSheet({
               styles.confirmButton,
               !canConfirm && styles.confirmButtonDisabled,
             ]}
-            onPress={() => onConfirm(checkoutSourceAnswers(answers))}
+            onPress={() => onConfirm(checkoutSourceAnswers(answers, touched))}
             disabled={!canConfirm}
             activeOpacity={0.8}
             accessibilityRole="button"
