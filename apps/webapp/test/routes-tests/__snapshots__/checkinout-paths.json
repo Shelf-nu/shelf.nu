@@ -5,7 +5,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "checkoutBooking",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -66,6 +66,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -154,6 +183,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -206,6 +293,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -240,6 +338,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -274,6 +394,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -308,6 +439,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -342,6 +495,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -376,6 +540,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -395,7 +581,7 @@
     "kind": "action",
     "direction": "checkin",
     "sentinel": "checkinBooking",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -456,6 +642,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -544,6 +759,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -596,6 +869,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -630,6 +914,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -664,6 +970,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -698,6 +1015,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -732,6 +1071,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -766,6 +1116,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -785,7 +1157,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "checkoutRemainingAssets",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -846,6 +1218,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -934,6 +1335,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -986,6 +1445,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -1020,6 +1490,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1054,6 +1546,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -1088,6 +1591,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1122,6 +1647,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -1156,6 +1692,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1175,7 +1733,7 @@
     "kind": "action",
     "direction": "checkin",
     "sentinel": "checkinAssets",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -1236,6 +1794,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -1324,6 +1911,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1376,6 +2021,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -1410,6 +2066,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1429,7 +2107,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "checkoutAssets",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -1490,6 +2168,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -1578,6 +2285,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1630,6 +2395,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -1664,6 +2440,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1683,7 +2481,7 @@
     "kind": "loader",
     "direction": "checkout",
     "sentinel": "getDetailedPartialCheckoutData",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -1744,6 +2542,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -1832,6 +2659,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1884,6 +2769,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
@@ -1918,6 +2814,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1937,7 +2855,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "checkoutAssets",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -1998,6 +2916,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -2086,6 +3033,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2138,6 +3143,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
@@ -2172,6 +3188,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2191,7 +3229,7 @@
     "kind": "loader",
     "direction": "checkin",
     "sentinel": "getDetailedPartialCheckinData",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -2252,6 +3290,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -2340,6 +3407,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2392,6 +3517,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
@@ -2426,6 +3562,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2445,7 +3603,7 @@
     "kind": "action",
     "direction": "checkin",
     "sentinel": "checkinAssets",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -2506,6 +3664,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -2594,6 +3781,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2646,6 +3891,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
@@ -2680,6 +3936,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2699,7 +3977,7 @@
     "kind": "loader",
     "direction": "checkout",
     "sentinel": "getOutstandingModelRequests",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -2760,6 +4038,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -2848,6 +4155,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -2900,6 +4265,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -2934,6 +4310,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -2953,7 +4351,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "fulfilAndCheckOut",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -3014,6 +4412,35 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
@@ -3102,6 +4529,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -3154,6 +4639,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -3188,6 +4684,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -3222,6 +4740,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
@@ -3256,6 +4785,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -3290,6 +4841,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
@@ -3324,6 +4886,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -3343,7 +4927,7 @@
     "kind": "action",
     "direction": "checkin",
     "sentinel": "checkinBooking",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -3404,6 +4988,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -3492,6 +5105,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3544,6 +5215,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -3578,6 +5260,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3612,6 +5316,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -3646,6 +5361,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -3680,6 +5417,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -3714,6 +5462,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3733,7 +5503,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "checkoutBooking",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -3794,6 +5564,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -3882,6 +5681,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3934,6 +5791,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -3968,6 +5836,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4002,6 +5892,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -4036,6 +5937,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -4070,6 +5993,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
@@ -4104,6 +6038,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4123,7 +6079,7 @@
     "kind": "action",
     "direction": "checkin",
     "sentinel": "partialCheckinBooking",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -4184,6 +6140,35 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -4272,6 +6257,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4324,6 +6367,17 @@
             "CANCELLED": "denied"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
@@ -4358,6 +6412,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4377,7 +6453,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "partialCheckoutBooking",
-    "cases": 168,
+    "cases": 252,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -4438,6 +6514,35 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
@@ -4526,6 +6631,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4578,6 +6741,17 @@
             "CANCELLED": "allowed"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -4612,6 +6786,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4631,7 +6827,7 @@
     "kind": "action",
     "direction": "checkout",
     "sentinel": "fulfilAndCheckOut",
-    "cases": 252,
+    "cases": 378,
     "outcomes": {
       "toggles-off|explicit-off": {
         "OWNER": {
@@ -4692,6 +6888,35 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
@@ -4780,6 +7005,64 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4832,6 +7115,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
@@ -4866,6 +7160,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4900,6 +7216,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
@@ -4934,6 +7261,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -4968,6 +7317,17 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
+        "CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
         "SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
@@ -5002,6 +7362,28 @@
           }
         },
         "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE+CUSTODY_MANAGER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "CUSTODY_MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",

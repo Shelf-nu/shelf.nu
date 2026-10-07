@@ -61,10 +61,22 @@ import {
 import { visibleSettingsTabs, visibleTeamTabs } from "./settings-tabs";
 
 const R = OrganizationRoles;
-const SINGLE_ROLES = [R.OWNER, R.ADMIN, R.SELF_SERVICE, R.BASE] as const;
+const SINGLE_ROLES = [
+  R.OWNER,
+  R.ADMIN,
+  R.CUSTODY_MANAGER,
+  R.SELF_SERVICE,
+  R.BASE,
+] as const;
 
 /** Key order of the recorded D-10 label map. */
-const D10_KEY_ORDER = [R.ADMIN, R.OWNER, R.BASE, R.SELF_SERVICE] as const;
+const D10_KEY_ORDER = [
+  R.ADMIN,
+  R.OWNER,
+  R.BASE,
+  R.SELF_SERVICE,
+  R.CUSTODY_MANAGER,
+] as const;
 
 /** Every role set the fixture evaluates: singles, every ordered pair, empty, unknown. */
 export const ROLE_SETS: string[][] = [
@@ -1330,14 +1342,16 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // locked when the caller does not own the workspace and the target's
   // team-list roleEnum (its effective role) needs the owner to change it. The
   // page needs teamMember:read (settings.team.users.tsx loader); the row menu
-  // is hidden when the target's effective role owns the workspace
-  // (settings.team.users.tsx UserRow).
+  // needs teamMember:update and is hidden when the target's effective role
+  // owns the workspace (settings.team.users.tsx UserRow).
   snapshot["B9:D-07:users-menu"] = perRoleSet((caller) => {
     const { ownsWorkspace } = accessFor(caller);
     const reachesPage = can(caller, E.teamMember, A.read);
+    const showsMenu = can(caller, E.teamMember, A.update);
     return perRoleSet((target) => {
       const roleEnum = resolveRole(target);
       if (!reachesPage) return "no-page";
+      if (!showsMenu) return "no-menu";
       if (ROLE_POLICIES[roleEnum].membership.ownsWorkspace) return "no-menu";
       return !ownsWorkspace && roleChangeRequiresOwner(roleEnum)
         ? "locked"
@@ -1380,11 +1394,14 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // components/workspace/change-role-dialog.tsx, from the member's full
   // membership. Both ask roleChangeTransfers; true when anything moves.
   snapshot["B9:D-02/D-03:role-change-transfers"] = perRoleSet((roles) =>
-    perCase([R.ADMIN, R.SELF_SERVICE, R.BASE] as const, (to) => {
-      const moves = roleChangeTransfers({ fromRoles: roles, to });
-      const transfers = moves.ownership || moves.bookingsCreatedForOthers;
-      return { server: transfers, dialog: transfers };
-    })
+    perCase(
+      [R.ADMIN, R.CUSTODY_MANAGER, R.SELF_SERVICE, R.BASE] as const,
+      (to) => {
+        const moves = roleChangeTransfers({ fromRoles: roles, to });
+        const transfers = moves.ownership || moves.bookingsCreatedForOthers;
+        return { server: transfers, dialog: transfers };
+      }
+    )
   );
 
   // B9:D-05 (+F6, F12): SSO group-claim transition, `reconcileSsoGroupMembership`
@@ -1395,23 +1412,26 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // (`changeUserRole`) and moves what `transferOnRoleChange` moves for a manual
   // change from the effective role (F6, B9).
   snapshot["B9:D-05:sso-transition"] = perRoleSet((current) =>
-    perCase(["ADMIN", "SELF_SERVICE", "BASE", "none"] as const, (desired) => {
-      if (isWorkspaceOwner(current)) {
+    perCase(
+      ["ADMIN", "CUSTODY_MANAGER", "SELF_SERVICE", "BASE", "none"] as const,
+      (desired) => {
+        if (isWorkspaceOwner(current)) {
+          return {
+            rolesAfter: current,
+            newRole: resolveRole(current),
+            transfers: NO_TRANSFER,
+          };
+        }
+        if (desired === "none") {
+          return { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
+        }
         return {
-          rolesAfter: current,
-          newRole: resolveRole(current),
-          transfers: NO_TRANSFER,
+          rolesAfter: [desired],
+          newRole: desired,
+          transfers: roleChangeTransfers({ fromRoles: current, to: desired }),
         };
       }
-      if (desired === "none") {
-        return { rolesAfter: null, newRole: null, transfers: NO_TRANSFER };
-      }
-      return {
-        rolesAfter: [desired],
-        newRole: desired,
-        transfers: roleChangeTransfers({ fromRoles: current, to: desired }),
-      };
-    })
+    )
   );
 
   // B9:F4: announcement audience role. The layout badge
