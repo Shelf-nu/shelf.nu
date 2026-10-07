@@ -12,7 +12,7 @@ import { ChevronRight } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import {
   PermissionAction,
@@ -58,7 +58,7 @@ export function ActionSwitcher() {
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isLoading = useDisabled();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   // Filter actions based on user permissions
   const availableActions = useMemo(

@@ -56,13 +56,8 @@ vi.mock("../shared/date", () => ({
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    isBase: false,
-    isSelfService: false,
-    isBaseOrSelfService: false,
-    roles: [],
-  }),
+vi.mock("~/hooks/use-reservation-is-request", () => ({
+  useReservationIsRequest: () => false,
 }));
 
 import ListBookingsContent from "./list-bookings-content";

@@ -41,7 +41,7 @@ import { Button } from "~/components/shared/button";
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -101,7 +101,7 @@ function ConditionalActionsDropdown() {
   const [open, setOpen] = useState(false);
   const organization = useCurrentOrganization();
   const selectedModels = useAtomValue(selectedBulkItemsAtom);
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const canCreateBooking = userHasPermission({
     roles,

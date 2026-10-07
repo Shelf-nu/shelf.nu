@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -97,8 +96,8 @@ export async function action({ request }: ActionFunctionArgs) {
       action: intent2ActionMap[body.intent],
     });
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { access } = await getMobileUserContext(user.id, organizationId);
+    const assignsSelfOnly = access.custody.assign === "self";
 
     switch (body.intent) {
       case "assign-custody": {
@@ -114,9 +113,10 @@ export async function action({ request }: ActionFunctionArgs) {
           select: { id: true, name: true, userId: true },
         });
 
-        // Self-service users may only take custody themselves (web parity —
-        // the kit services don't take a role param, so the route enforces).
-        if (isSelfService && teamMember.userId !== user.id) {
+        // A caller whose custody scope is `self` may only take custody
+        // themselves (web parity: `bulkAssignKitCustody` takes no custody
+        // scope, so the route enforces it).
+        if (assignsSelfOnly && teamMember.userId !== user.id) {
           throw new ShelfError({
             cause: null,
             title: "Action not allowed",
@@ -144,18 +144,15 @@ export async function action({ request }: ActionFunctionArgs) {
       }
 
       case "release-custody": {
-        // Self-service users may only release kits they hold themselves. The
-        // check now lives in `bulkReleaseKitCustody` so it runs on the RESOLVED
-        // kits: the version here queried `kitCustody` with the raw
-        // `body.kitIds`, so `["all-selected"]` matched zero rows and the guard
-        // passed. That mattered more on mobile than on web — no
-        // `currentSearchParams` is sent, so the resolved set is every kit in
-        // the organization.
+        // `bulkReleaseKitCustody` enforces the caller's custody scope on the
+        // RESOLVED kits: the raw `body.kitIds` is `["all-selected"]` on a
+        // select-all, and mobile sends no `currentSearchParams`, so the
+        // resolved set is every kit in the organization.
         await bulkReleaseKitCustody({
           kitIds: body.kitIds,
           organizationId,
           userId: user.id,
-          role,
+          custodyAssign: access.custody.assign,
           // Mobile passes no `currentSearchParams`, so `getKitsWhereInput`
           // returns before any custodian clause is built and this is inert.
           // It is stated rather than defaulted so a future mobile select-all

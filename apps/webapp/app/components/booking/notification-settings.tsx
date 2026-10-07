@@ -245,14 +245,15 @@ export function NotificationSettings({
                 name: "teamMember",
                 queryKey: "name",
                 deletedAt: null,
-                userWithAdminAndOwnerOnly: true,
+                selectableRecipientsOnly: true,
                 usersOnly: true,
-                // why: no `custodyPurpose` on purpose. This picks admins to
-                // notify — neither custody nor a booking custodian — and
-                // `userWithAdminAndOwnerOnly` already does the narrowing. The
-                // endpoint's assignment fallback resolves to "all" for the
-                // ADMIN/OWNER users this is rendered for, and fails closed for
-                // anyone else, which is what we want here.
+                // why: no `custodyPurpose` on purpose. This picks members to
+                // notify (neither custody nor a booking custodian), and
+                // `selectableRecipientsOnly` already narrows to members who
+                // may be picked as recipients. The endpoint's assignment
+                // fallback resolves to "all" for the members who reach this
+                // settings page, and fails closed for anyone else, which is
+                // what we want here.
               }}
               initialDataKey="teamMembersForNotify"
               countKey="totalTeamMembersForNotify"

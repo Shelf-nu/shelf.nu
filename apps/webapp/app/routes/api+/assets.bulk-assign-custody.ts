@@ -37,7 +37,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         request,
         userId,
@@ -83,7 +83,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     /**
      * Validate the custodian belongs to the same organization (early 404).
-     * The SELF_SERVICE "assign-to-self" guard lives in the services, not here.
+     * The "assign only to yourself" guard (`access.custody.assign`) lives in
+     * the services, not here.
      * The name fields are what the per-unit audit notes render.
      */
     const custodianRecord = await getTeamMember({
@@ -108,10 +109,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
     });
 
     /**
-     * The SELF_SERVICE "assign-to-self" guard lives inside the services
-     * themselves: `bulkCheckOutAssets` for whole assets and
-     * `checkOutQuantity` for the per-unit path, so web and mobile share one
-     * source of truth. The route passes `role` through to both.
+     * The caller's custody scope is enforced inside the services themselves:
+     * `bulkCheckOutAssets` for whole assets and `checkOutQuantity` for the
+     * per-unit path, so web and mobile share one source of truth. The route
+     * passes `access.custody.assign` through to both.
      */
     // Acting user's timezone: when "select all" is active the affected set is
     // resolved from the current date filters, which must truncate the day in
@@ -122,15 +123,15 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Every per-unit assignment is checked before anything is written,
-    // including the SELF_SERVICE rule and, for a pool placed at two or more
-    // locations, what the scanner's chosen location has left.
+    // including the "assign only to yourself" rule and, for a pool placed at
+    // two or more locations, what the scanner's chosen location has left.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       sourceLocations,
       organizationId,
       custodian: custodianRecord,
-      role,
+      custodyAssign: access.custody.assign,
       userId,
     });
 
@@ -143,7 +144,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           custodianId: custodian.id,
           custodianName: custodian.name,
@@ -158,7 +159,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             teamMemberIds: new URLSearchParams(
               currentSearchParams ?? ""
             ).getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
           }),
@@ -172,7 +173,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       custodian: custodianRecord,
       userId,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
     if (refusals.length) throw quantityRefusalsError("assigned", refusals);
 

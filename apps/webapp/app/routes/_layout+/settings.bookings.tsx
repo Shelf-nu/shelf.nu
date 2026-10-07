@@ -1,4 +1,4 @@
-import { OrganizationRoles, OrganizationType } from "@prisma/client";
+import { OrganizationType } from "@prisma/client";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -132,7 +132,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.workingHours,
@@ -518,7 +518,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       case "updateExplicitCheckin": {
         // Only workspace owners can change explicit check-in settings
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Not allowed",
@@ -559,7 +559,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
       case "updateExplicitCheckout": {
         // Only workspace owners can change explicit check-out settings
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Not allowed",

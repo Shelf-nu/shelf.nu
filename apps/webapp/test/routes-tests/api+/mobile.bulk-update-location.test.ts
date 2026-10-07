@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/bulk-update-location";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -106,8 +107,8 @@ describe("POST /api/mobile/bulk-update-location", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
     (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
+      access: accessFor(["ADMIN"]),
     });
   });
 

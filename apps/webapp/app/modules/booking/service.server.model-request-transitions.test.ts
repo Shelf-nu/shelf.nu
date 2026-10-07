@@ -276,7 +276,7 @@ const reserveParams = {
   to,
   description: "Reserved booking description",
   hints: hints as never,
-  isSelfServiceOrBase: false,
+  alertsOrgOnReservation: false,
   tags: [],
 };
 

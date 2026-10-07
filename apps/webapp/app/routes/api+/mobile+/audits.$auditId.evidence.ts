@@ -3,13 +3,17 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssignee } from "~/modules/audit/service.server";
-import { resolveMostPrivilegedRole } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 import { resolveUserDisplayName, type UserNameFields } from "~/utils/user";
 
 /**
@@ -56,7 +60,15 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { roles, canUseAudits } = await getMobileUserContext(
+
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.read,
+    });
+
+    const { access, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -91,18 +103,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
 
     // Gate the READ on assignment, exactly as the audit detail route does.
     // This route returns the notes and photos people recorded, which is the
-    // same class of data that gate was added to protect: without it an
-    // unassigned BASE or SELF_SERVICE user could read the evidence of any
-    // audit in the workspace by id. The write halves (`audits.note`,
-    // `audits.image`) already require it through
-    // `requireAuditAssetInSession`; reading must not be the loose end.
-    //
-    // Resolved from ALL roles, never from `roles[0]`: `getMobileUserContext`
-    // sets `role = roles[0]`, so a membership ordered [SELF_SERVICE, ADMIN]
-    // would refuse a real admin who is not assigned.
-    const effectiveRole = resolveMostPrivilegedRole(roles);
-    const isSelfServiceOrBase =
-      effectiveRole === "SELF_SERVICE" || effectiveRole === "BASE";
+    // same class of data that gate protects: without it an unassigned caller
+    // limited to assigned audits could read the evidence of any audit in the
+    // workspace by id. The write halves (`audits.note`, `audits.image`)
+    // require it through `requireAuditAssetInSession`; reading must not be
+    // the loose end.
 
     // Prove the audit is in this workspace before reporting anything about
     // it, so a guessed id from another org cannot be probed through this
@@ -123,7 +128,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId: user.id,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     const [notes, images] = await Promise.all([

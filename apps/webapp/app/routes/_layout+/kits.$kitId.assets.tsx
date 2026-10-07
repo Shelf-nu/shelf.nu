@@ -26,7 +26,7 @@ import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
@@ -174,7 +174,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 }
 
 export default function KitAssets() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -265,7 +265,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
   // Phase 4a-Polish-2; we only care about THIS kit's slice here).
   const { kitId } = useParams<{ kitId: string }>();
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
     ? resolveDisplayCode({

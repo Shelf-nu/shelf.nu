@@ -19,6 +19,8 @@
  * @see {@link file://./../../../app/routes/api+/asset-models.unassigned-assets.ts}
  * @see {@link file://./asset-models.$assetModelId.assets.test.ts} The per-model route
  */
+import type { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { loader } from "~/routes/api+/asset-models.unassigned-assets";
 
@@ -109,6 +111,33 @@ function queryArgs() {
 }
 
 /**
+ * A `requirePermission` result for `role`, built from the real policy.
+ * `custodySeeAll` defaults to hidden: the workspace toggles that widen custody
+ * visibility default to off in production, so the redaction cases exercise
+ * the common case.
+ */
+function caller(
+  role: string,
+  {
+    organizationId,
+    custodySeeAll = false,
+  }: { organizationId: string; custodySeeAll?: boolean }
+) {
+  const ctx = permissionContext({
+    roles: [role as OrganizationRoles],
+    organizationId,
+  });
+  return {
+    ...ctx,
+    canUseBarcodes: false,
+    access: {
+      ...ctx.access,
+      custody: { ...ctx.access.custody, seeAll: custodySeeAll },
+    },
+  };
+}
+
+/**
  * The WHERE clause the unfiltered count ran with, or `undefined` when it never
  * ran.
  *
@@ -135,15 +164,12 @@ describe("unassigned assets endpoint", () => {
       timeZone: "Asia/Tokyo",
     } as never);
 
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-      canUseBarcodes: false,
-      // Restricted-by-default: `baseUserCanSeeCustody` /
-      // `selfServiceCanSeeCustody` both default to `false` in production, so
-      // the redaction test below exercises the common case, not an edge one.
-      canSeeAllCustody: false,
-    } as never);
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("ADMIN", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
     vitest.mocked(getAssetIndexSettings).mockResolvedValue({
       mode: "ADVANCED",
       columns: [],
@@ -268,12 +294,12 @@ describe("unassigned assets endpoint", () => {
   });
 
   it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
-    vitest.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "SELF_SERVICE",
-      canUseBarcodes: false,
-      canSeeAllCustody: false,
-    } as never);
+    vitest.mocked(requirePermission).mockResolvedValue(
+      caller("SELF_SERVICE", {
+        organizationId: "org-1",
+        custodySeeAll: false,
+      }) as never
+    );
 
     await loader({ context, request: request(), params: {} } as never);
 

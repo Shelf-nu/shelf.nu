@@ -20,6 +20,8 @@ import {
 import { assertUploadedImageContentType } from "~/utils/image-upload.server";
 import { Logger } from "~/utils/logger";
 import { emailMatchesDomains } from "~/utils/misc";
+import { holdsRoleWhere } from "~/utils/permissions/membership-access";
+import { isWorkspaceOwner, rolesWhere } from "~/utils/permissions/role-access";
 import {
   createStripeCustomer,
   customerHasPaymentMethod,
@@ -35,6 +37,7 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
+import { lockMembership } from "../user/membership-lock.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -555,69 +558,37 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
   }
 }
 
-export async function getOrganizationAdminsEmails({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
-  try {
-    const admins = await db.userOrganization.findMany({
-      where: {
-        organizationId,
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
-      },
-      select: {
-        user: {
-          select: {
-            email: true,
-          },
-        },
-      },
-    });
-
-    return admins.map((a) => a.user.email);
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while fetching organization admins emails. Please try again or contact support.",
-      additionalData: { organizationId },
-      label,
-    });
-  }
-}
+/** A workspace-wide notification audience, named after its policy field. */
+export type NotificationAudience = "orgBookingBroadcasts" | "inventoryAlerts";
 
 /**
- * Returns admin and owner users for an organization with their full
- * notification-relevant fields: `id`, `email`, `firstName`, `lastName`, plus
- * the four raw date/time format-preference columns (`dateFormat`,
- * `timeFormat`, `weekStart`, `timeZone`) so recipient-specific email
- * formatting resolves from the loaded row.
+ * The users of an organization who receive one kind of workspace-wide
+ * notification, with the fields a notification needs: `id` (so the resolver
+ * can exclude the editor), `email`, the name fields, and the four raw
+ * format-preference columns so each email resolves its recipient's own date
+ * and time formatting from the loaded row.
  *
- * This differs from `getOrganizationAdminsEmails()` (which returns only
- * email strings) because the notification recipient resolver needs the
- * `userId` to perform editor exclusion — if the admin performing an action
- * is also in the recipient list, they should be filtered out so they don't
- * email themselves. Returning bare email strings would not support that
- * matching.
+ * The roles come from the policy table (`notifications.<audience>`), so a role
+ * that should hear about bookings but not about stock is one field away.
  *
- * @param organizationId - The organization to fetch admins for
- * @returns Array of user objects with id, email, firstName, lastName
+ * @param args.organizationId - The organization
+ * @param args.audience - `orgBookingBroadcasts` (new-reservation "pickup"
+ *   alerts) or `inventoryAlerts` (low stock)
+ * @returns The audience's users
+ * @throws {ShelfError} when the query fails
  */
-export async function getOrganizationAdminsForNotification({
+export async function getOrganizationNotificationAudience({
   organizationId,
+  audience,
 }: {
   organizationId: string;
+  audience: NotificationAudience;
 }) {
   try {
-    const admins = await db.userOrganization.findMany({
+    const members = await db.userOrganization.findMany({
       where: {
         organizationId,
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
+        roles: { hasSome: rolesWhere((p) => p.notifications[audience]) },
       },
       select: {
         user: {
@@ -625,10 +596,10 @@ export async function getOrganizationAdminsForNotification({
             id: true,
             email: true,
             ...USER_NAME_SELECT,
-            // Format-preference columns so the booking notification resolver
-            // can carry them onto each recipient and resolve recipient-specific
-            // email date/time formatting from the loaded row (no per-recipient
-            // DB fetch). See `NotificationRecipient`.
+            // Format-preference columns so the notification resolver can carry
+            // them onto each recipient and resolve recipient-specific email
+            // date/time formatting from the loaded row (no per-recipient DB
+            // fetch). See `NotificationRecipient`.
             dateFormat: true,
             timeFormat: true,
             weekStart: true,
@@ -638,13 +609,13 @@ export async function getOrganizationAdminsForNotification({
       },
     });
 
-    return admins.map((a) => a.user);
+    return members.map((m) => m.user);
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
-      additionalData: { organizationId },
+        "Something went wrong while fetching who to notify. Please try again or contact support.",
+      additionalData: { organizationId, audience },
       label,
     });
   }
@@ -873,15 +844,28 @@ export function updateOrganizationPermissions({
   });
 }
 
+/**
+ * Members who may be chosen as the new owner in an ownership transfer
+ * (`membership.eligibleAsNewOwner`). `transferOwnership` re-checks the same
+ * policy, so the candidate list and the transfer cannot disagree.
+ *
+ * @param args.organizationId - The workspace being transferred
+ * @returns The eligible members' users
+ * @throws {ShelfError} If the query fails
+ */
 export async function getOrganizationAdmins({
   organizationId,
 }: {
   organizationId: Organization["id"];
 }) {
   try {
-    /** Get all the admins in current organization */
     const admins = await db.userOrganization.findMany({
-      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
+      where: {
+        organizationId,
+        roles: {
+          hasSome: rolesWhere((p) => p.membership.eligibleAsNewOwner),
+        },
+      },
       select: {
         user: {
           select: {
@@ -954,7 +938,11 @@ export async function transferOwnership({
         organizationId: currentOrganization.id,
         OR: [
           { userId: newOwnerId },
-          { roles: { has: OrganizationRoles.OWNER } },
+          {
+            roles: {
+              hasSome: rolesWhere((p) => p.membership.ownsWorkspace),
+            },
+          },
         ],
       },
       select: {
@@ -986,7 +974,7 @@ export async function transferOwnership({
      * all, so the two identities must stay separate.
      */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
-      userOrg.roles.includes(OrganizationRoles.OWNER)
+      isWorkspaceOwner(userOrg.roles)
     );
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
@@ -1025,8 +1013,13 @@ export async function transferOwnership({
       });
     }
 
-    /** Validate if the new owner is ADMIN in the current organization */
-    if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
+    /** The new owner must hold a role eligible to own the workspace */
+    if (
+      !holdsRoleWhere(
+        newOwnerUserOrg.roles,
+        (p) => p.membership.eligibleAsNewOwner
+      )
+    ) {
       throw new ShelfError({
         cause: null,
         message: "New owner is not an admin of the organization.",
@@ -1055,6 +1048,70 @@ export async function transferOwnership({
     const currentOwnerTierId: TierId = currentOwnerUserOrg.user.tierId;
 
     await db.$transaction(async (tx) => {
+      /**
+       * The checks above read both memberships before this transaction, so a
+       * concurrent role change could have committed since: a demotion of the
+       * new owner, or the current owner's role moving. Lock both memberships
+       * (the same lock every role-changing path takes first) in `userId`
+       * order, so two transfers between the same pair cannot deadlock, then
+       * decide again from the locked rows before writing either role.
+       */
+      const [firstUserId, secondUserId] = [
+        currentOwnerUserOrg.user.id,
+        newOwnerUserOrg.user.id,
+      ].sort();
+      const lockedRoles = new Map([
+        [
+          firstUserId,
+          await lockMembership(tx, {
+            userId: firstUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+        [
+          secondUserId,
+          await lockMembership(tx, {
+            userId: secondUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+      ]);
+      const lockedOwner = lockedRoles.get(currentOwnerUserOrg.user.id);
+      const lockedNewOwner = lockedRoles.get(newOwnerUserOrg.user.id);
+
+      if (!lockedOwner || !isWorkspaceOwner(lockedOwner.roles)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Ownership changed",
+          message:
+            "The workspace owner changed while this transfer was being made. Please reload and try again.",
+          additionalData: { organizationId: currentOrganization.id },
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (
+        !lockedNewOwner ||
+        !holdsRoleWhere(
+          lockedNewOwner.roles,
+          (p) => p.membership.eligibleAsNewOwner
+        )
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: "New owner is not an admin of the organization.",
+          additionalData: {
+            organizationId: currentOrganization.id,
+            newOwnerId,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Update the owner of the organization */
       await tx.organization.update({
         where: { id: currentOrganization.id },

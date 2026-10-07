@@ -14,6 +14,7 @@
  * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
 import { loader } from "~/routes/api+/mobile+/qr.$qrId";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -176,8 +177,13 @@ const sharedAsset = {
 
 /** Sets whether the caller may see every holder's custody in the workspace. */
 function asViewer({ canSeeAllCustody }: { canSeeAllCustody: boolean }) {
+  const context = mobileUserContext();
   vitest.mocked(getMobileUserContext).mockResolvedValue({
-    canSeeAllCustody,
+    ...context,
+    access: {
+      ...context.access,
+      custody: { ...context.access.custody, seeAll: canSeeAllCustody },
+    },
   } as Awaited<ReturnType<typeof getMobileUserContext>>);
 }
 

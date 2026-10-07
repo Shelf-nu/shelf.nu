@@ -77,7 +77,7 @@ describe("audit receipt — what it may truncate", () => {
       "audit-1",
       "org-1",
       "user-1",
-      undefined,
+      false,
       new Request("http://localhost/x")
     );
   });
@@ -199,7 +199,7 @@ describe("audit receipt — the printed asset code", () => {
       "audit-1",
       "org-1",
       "user-1",
-      undefined,
+      false,
       new Request("http://localhost/x")
     );
   }
@@ -343,18 +343,18 @@ describe("audit receipt — the printed asset code", () => {
 describe("audit receipt — refusals keep their status", () => {
   /**
    * The fetcher refuses two ways on purpose: the audit does not exist, or the
-   * caller is a BASE/SELF_SERVICE member it is not assigned to. Both are
+   * caller is limited to assigned audits and is not assigned to this one. Both are
    * answers for the user, and the catch around the fetch must not turn them
    * into a captured 500.
    */
   const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
-  const fetchAs = (role: "BASE" | undefined) =>
+  const fetchAs = (assignedOnly: boolean) =>
     fetchAllAuditPdfRelatedData(
       "audit-1",
       "org-1",
       "user-1",
-      role,
+      assignedOnly,
       new Request("http://localhost/x")
     );
 
@@ -363,13 +363,13 @@ describe("audit receipt — refusals keep their status", () => {
     // why: no audit with this id in the workspace.
     mockOf(db.auditSession.findUnique).mockResolvedValue(null);
 
-    await expect(fetchAs(undefined)).rejects.toMatchObject({
+    await expect(fetchAs(false)).rejects.toMatchObject({
       status: 404,
       shouldBeCaptured: false,
     });
   });
 
-  it("answers 403 for a BASE member the audit is not assigned to", async () => {
+  it("answers 403 for a caller limited to assigned audits who is not assigned", async () => {
     vi.clearAllMocks();
     // why: an audit assigned to someone else.
     mockOf(db.auditSession.findUnique).mockResolvedValue({
@@ -377,7 +377,7 @@ describe("audit receipt — refusals keep their status", () => {
       assignments: [{ user: { id: "someone-else" } }],
     });
 
-    await expect(fetchAs("BASE")).rejects.toMatchObject({
+    await expect(fetchAs(true)).rejects.toMatchObject({
       status: 403,
       shouldBeCaptured: false,
     });

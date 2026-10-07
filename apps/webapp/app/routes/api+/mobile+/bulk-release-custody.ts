@@ -91,14 +91,16 @@ export async function action({ request }: ActionFunctionArgs) {
       quantities
     );
 
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    const { canUseBarcodes, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Each per-unit release is resolved to its single holder and checked
@@ -107,14 +109,13 @@ export async function action({ request }: ActionFunctionArgs) {
       quantityAssetIds,
       quantities,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       userId: user.id,
     });
 
     /**
-     * Pass `role` so the service-level SELF_SERVICE guard fires.
-     * Without it, a SELF_SERVICE user could release custody on any
-     * team member's asset (hex-security r3202161632).
+     * The services enforce the caller's custody scope
+     * (`access.custody.assign`): a "self" caller releases only their own.
      *
      * The whole-asset call runs before the per-unit releases, as on the web
      * route: it validates and writes in one transaction, so if it refuses,
@@ -123,7 +124,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckInAssets({
           userId: user.id,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           organizationId,
           currentSearchParams: "",
@@ -136,19 +137,19 @@ export async function action({ request }: ActionFunctionArgs) {
            * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
            * they can still filter by their OWN custody.
            */
-          allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+          allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
         })
       : { skippedQuantityTracked: 0 };
 
     // Checked above, so a refusal here can only come from a concurrent change
     // to that asset; it is reported by asset (see the assign route).
-    // `releaseQuantity` also applies the SELF_SERVICE rule on each write.
+    // `releaseQuantity` also applies the "release only your own" rule on each write.
     const refusedQuantities = await releaseQuantities({
       releases: resolvedReleases,
       quantities,
       userId: user.id,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
 
     // The service skips QUANTITY_TRACKED ids that came without a quantity in a

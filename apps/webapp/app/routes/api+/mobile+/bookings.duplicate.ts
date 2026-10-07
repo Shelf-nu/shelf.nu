@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -11,8 +10,7 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { duplicateBooking } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { makeShelfError, ShelfError } from "~/utils/error";
+import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
@@ -28,14 +26,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * new from/to defaulted) the user can then edit. Returns the new booking so the
  * app can navigate straight into its edit screen.
  *
- * PARITY: the web duplicate route (bookings.$bookingId.overview.duplicate.tsx)
- * is gated by `PermissionAction.create` and relies on the page loader's
- * read-filter for ownership — which a direct mobile POST bypasses. We add the
- * shared `validateBookingOwnership` guard on the SOURCE booking: self-service/
- * base may only duplicate their own. Since the source must then be theirs, the
- * copy's custodian (cloned verbatim) is also them — so the new DRAFT is
- * correctly owned without any extra custodian-forcing. Mobile must never be
- * more permissive than web.
+ * Gated by `PermissionAction.create`, and by `assertCanDuplicateBooking`, which
+ * `duplicateBooking` runs on the source row it copies from: a caller who does not
+ * write every booking may only duplicate their own, and a caller who may only
+ * book for themself must also be the source's custodian, because the copy
+ * keeps the source custodian.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -66,18 +61,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Org-scoped lookup (foreign-org id 404s) + ownership fields for the guard.
+    // Org-scoped lookup (a foreign-org id 404s) for the source's window.
     const source = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: {
-        id: true,
-        creatorId: true,
-        custodianUserId: true,
-        from: true,
-        to: true,
-      },
+      select: { id: true, from: true, to: true },
     });
 
     if (!source) {
@@ -85,31 +74,6 @@ export async function action({ request }: ActionFunctionArgs) {
         { error: { message: "Booking not found in this workspace." } },
         { status: 404 }
       );
-    }
-
-    // Self-service/base may only duplicate their own (creator OR custodian).
-    validateBookingOwnership({
-      booking: source,
-      userId: user.id,
-      role,
-      action: "duplicate",
-    });
-
-    // duplicateBooking clones the SOURCE custodian, so the creator-or-custodian
-    // guard above isn't enough for restricted roles: a caller who is only the
-    // creator would mint a new draft assigned to someone else's custody. Require
-    // them to be the custodian so the clone is owned by themselves.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    if (isSelfServiceOrBase && source.custodianUserId !== user.id) {
-      throw new ShelfError({
-        cause: null,
-        message: "You can only duplicate bookings assigned to you.",
-        label: "Booking",
-        status: 403,
-        shouldBeCaptured: false,
-      });
     }
 
     const newBooking = await duplicateBooking({
@@ -122,6 +86,9 @@ export async function action({ request }: ActionFunctionArgs) {
       // window; the duplicate lands as a DRAFT the user can reschedule.
       from: source.from,
       to: source.to,
+      // The service checks the caller may duplicate the source on the same
+      // row it copies from (`assertCanDuplicateBooking`).
+      access,
     });
 
     return data({

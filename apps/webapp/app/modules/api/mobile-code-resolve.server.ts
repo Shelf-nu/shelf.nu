@@ -137,14 +137,14 @@ export async function shapeScannedAssetForViewer({
   organizationId: string;
   viewerUserId: string;
 }): Promise<MobileAssetForViewer> {
-  const [shaped, { canSeeAllCustody }] = await Promise.all([
+  const [shaped, { access }] = await Promise.all([
     resignAndShapeMobileAsset(asset, organizationId),
     getMobileUserContext(viewerUserId, organizationId),
   ]);
 
   return scopeMobileAssetCustodyToViewer(shaped, {
     viewerUserId,
-    canSeeAllCustody,
+    canSeeAllCustody: access.custody.seeAll,
   });
 }
 

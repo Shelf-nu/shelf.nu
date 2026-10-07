@@ -3,7 +3,7 @@
  *
  * Ends a team member's hold on N units of a QUANTITY_TRACKED asset. Mobile twin
  * of the web's `/api/assets/release-quantity-custody` route: same Zod schema,
- * same SELF_SERVICE guard, and the same `releaseQuantityFromCustodian` call
+ * same custody-scope guard, and the same `releaseQuantityFromCustodian` call
  * (the release, its audit note and the low-stock check).
  *
  * **What happens to the units is decided server-side** from the asset's
@@ -40,7 +40,6 @@
  * @see {@link file://./custody.assign-quantity.ts} — counterpart assign route
  */
 
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -116,13 +115,10 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Role for the SELF_SERVICE guard below; canSeeAllCustody for shaping
-    // the refreshed asset. No getAssetIndexSettings here: releaseQuantity
+    // Access for the custody-scope guard below and for shaping the
+    // refreshed asset. No getAssetIndexSettings here: releaseQuantity
     // takes no `settings` param (that call is bulk-route plumbing only).
-    const { role, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // why: siblings use raw `.parse`, which surfaces a ZodError as a 500
     // through makeShelfError's unknown-error branch. The web route returns
@@ -166,11 +162,8 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only release their own custody */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== user.id
-    ) {
+    /** A caller whose custody scope is `self` may release only their own custody */
+    if (access.custody.assign === "self" && teamMember.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -196,7 +189,7 @@ export async function action({ request }: ActionFunctionArgs) {
       consumed,
       userId: user.id,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       note,
       locationId,
     });
@@ -216,7 +209,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         organizationId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
     } catch (refreshError) {
       Logger.error(

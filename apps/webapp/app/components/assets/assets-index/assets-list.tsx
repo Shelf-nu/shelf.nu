@@ -28,8 +28,8 @@ import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
@@ -124,7 +124,17 @@ export const AssetsList = ({
   const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
-  const { isBase, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  /** The bulk menu holds custody, edit and delete actions; any one opens it. */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -512,7 +522,7 @@ export const AssetsList = ({
               ItemComponent={modeIsSimple ? ListAssetContent : AdvancedAssetRow}
               customPagination={<AssetIndexPagination />}
               bulkActions={
-                disableBulkActions || isBase ? undefined : (
+                disableBulkActions || !canBulkAct ? undefined : (
                   <BulkActionsDropdown />
                 )
               }

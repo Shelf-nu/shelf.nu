@@ -19,8 +19,10 @@
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { accessFor } from "@helpers/role-access";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
+  assertBulkSelectionWithinOwnership,
   getBookingOwnershipScope,
   getBulkBookingsWhereInput,
 } from "./utils.server";
@@ -44,11 +46,15 @@ function ownershipBranches(
 
 describe("getBookingOwnershipScope", () => {
   it.each(UNRESTRICTED)("does not restrict %s", (role) => {
-    expect(getBookingOwnershipScope({ role, userId: ME })).toBeNull();
+    expect(
+      getBookingOwnershipScope({ access: accessFor([role]), userId: ME })
+    ).toBeNull();
   });
 
   it.each(RESTRICTED)("restricts %s to their own bookings", (role) => {
-    expect(getBookingOwnershipScope({ role, userId: ME })).toEqual({
+    expect(
+      getBookingOwnershipScope({ access: accessFor([role]), userId: ME })
+    ).toEqual({
       OR: [{ creatorId: ME }, { custodianUserId: ME }],
     });
   });
@@ -56,31 +62,39 @@ describe("getBookingOwnershipScope", () => {
   it("fails closed when a restricted role has no user to scope to", () => {
     // Returning null here would silently widen to the whole workspace
     expect(() =>
-      getBookingOwnershipScope({ role: OrganizationRoles.BASE })
+      getBookingOwnershipScope({
+        access: accessFor([OrganizationRoles.BASE]),
+      })
     ).toThrow();
   });
 
   it("restricts an unrecognised role rather than waving it through", () => {
-    // The check allow-lists ADMIN/OWNER, so a role added to the enum later
-    // lands in the RESTRICTED branch by default. A deny-list would hand it
-    // org-wide delete on the day it was introduced.
-    const futureRole = "AUDITOR" as OrganizationRoles;
-
-    expect(getBookingOwnershipScope({ role: futureRole, userId: ME })).toEqual({
+    // An unknown role resolves to the least privileged policy, so it is scoped
+    // to its own rows rather than handed org-wide delete.
+    expect(
+      getBookingOwnershipScope({
+        access: accessFor(["AUDITOR" as OrganizationRoles]),
+        userId: ME,
+      })
+    ).toEqual({
       OR: [{ creatorId: ME }, { custodianUserId: ME }],
     });
   });
 
-  it("covers every role in the enum, so a new one cannot slip past unreviewed", () => {
-    // Fails the moment `OrganizationRoles` grows a member: whoever adds it has
-    // to decide which side of this clause it belongs on.
-    expect(Object.values(OrganizationRoles).sort()).toEqual([
-      OrganizationRoles.ADMIN,
-      OrganizationRoles.BASE,
-      OrganizationRoles.OWNER,
-      OrganizationRoles.SELF_SERVICE,
-    ]);
-  });
+  it.each(RESTRICTED)(
+    "still scopes %s to its own rows when the workspace lets it see every booking",
+    (role) => {
+      expect(
+        getBookingOwnershipScope({
+          access: accessFor([role], {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          }),
+          userId: ME,
+        })
+      ).toEqual({ OR: [{ creatorId: ME }, { custodianUserId: ME }] });
+    }
+  );
 });
 
 describe("getBulkBookingsWhereInput — select all", () => {
@@ -89,7 +103,7 @@ describe("getBulkBookingsWhereInput — select all", () => {
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
-      role,
+      access: accessFor([role]),
       userId: ME,
     });
 
@@ -106,7 +120,7 @@ describe("getBulkBookingsWhereInput — select all", () => {
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
-      role,
+      access: accessFor([role]),
       userId: ME,
     });
 
@@ -122,7 +136,7 @@ describe("getBulkBookingsWhereInput — explicit ids", () => {
     const where = getBulkBookingsWhereInput({
       bookingIds: ["someone-elses-booking"],
       organizationId: ORG,
-      role,
+      access: accessFor([role]),
       userId: ME,
     });
 
@@ -137,7 +151,7 @@ describe("getBulkBookingsWhereInput — explicit ids", () => {
     const where = getBulkBookingsWhereInput({
       bookingIds: ["bk-1", "bk-2"],
       organizationId: ORG,
-      role,
+      access: accessFor([role]),
       userId: ME,
     });
 
@@ -156,11 +170,60 @@ describe("getBulkBookingsWhereInput — composition", () => {
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
-      role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
       userId: ME,
     });
 
     expect(Array.isArray(where.AND)).toBe(true);
     expect(where.OR).toBeUndefined();
+  });
+});
+
+describe("assertBulkSelectionWithinOwnership", () => {
+  it.each(RESTRICTED)(
+    "refuses %s when a selected booking was scoped out as someone else's",
+    (role) => {
+      expect(() =>
+        assertBulkSelectionWithinOwnership({
+          bookingIds: ["mine", "theirs"],
+          foundIds: ["mine"],
+          access: accessFor([role]),
+          action: "archive",
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each(RESTRICTED)("lets %s act on a selection of their own", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: ["mine", "also-mine"],
+        foundIds: ["also-mine", "mine"],
+        access: accessFor([role]),
+        action: "archive",
+      })
+    ).not.toThrow();
+  });
+
+  it.each(RESTRICTED)("leaves select-all to its filters for %s", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: [ALL_SELECTED_KEY],
+        foundIds: [],
+        access: accessFor([role]),
+        action: "cancel",
+      })
+    ).not.toThrow();
+  });
+
+  it.each(UNRESTRICTED)("never refuses %s", (role) => {
+    expect(() =>
+      assertBulkSelectionWithinOwnership({
+        bookingIds: ["a", "b"],
+        foundIds: ["a"],
+        access: accessFor([role]),
+        action: "delete",
+      })
+    ).not.toThrow();
   });
 });

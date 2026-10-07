@@ -32,7 +32,7 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
@@ -59,6 +59,10 @@ import {
   wrapCustodianForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+
+/** Whose custody the caller may change: their own only ("self"), or anyone's. */
+type CustodyAssign = RoleAccess["custody"]["assign"];
 
 /** A team member as a quantity custody note names them. */
 export type QuantityCustodian = {
@@ -139,10 +143,10 @@ export function splitQuantityAssetIds(
  *   or `"unplaced"`. Assets without an entry are checked pool-wide only.
  * @param args.organizationId - The caller's workspace.
  * @param args.custodian - Who receives the units.
- * @param args.role - The acting user's role.
+ * @param args.custodyAssign - Whose custody the caller may change (`access.custody.assign`).
  * @param args.userId - The acting user.
- * @throws {ShelfError} 403 when a self-service user assigns units to anyone
- *   but themselves; 400 "Nothing was assigned. ..." naming each asset that
+ * @throws {ShelfError} 403 when a caller limited to their own custody assigns
+ *   units to anyone else; 400 "Nothing was assigned. ..." naming each asset that
  *   asked for more units than are free (or than its chosen location has
  *   left), is not tracked by quantity, or is not in the workspace.
  */
@@ -152,7 +156,7 @@ export async function assertAssignableQuantities({
   sourceLocations = {},
   organizationId,
   custodian,
-  role,
+  custodyAssign,
   userId,
 }: {
   quantityAssetIds: string[];
@@ -160,17 +164,14 @@ export async function assertAssignableQuantities({
   sourceLocations?: Record<string, string>;
   organizationId: string;
   custodian: QuantityCustodian;
-  /** The acting user's role: self-service may only assign to themselves. */
-  role: OrganizationRoles;
+  /** Whose custody the caller may change (`access.custody.assign`): "self" assigns only to themselves. */
+  custodyAssign: CustodyAssign;
   /** The acting user. */
   userId: string;
 }): Promise<void> {
   if (!quantityAssetIds.length) return;
 
-  if (
-    role === OrganizationRoles.SELF_SERVICE &&
-    custodian.user?.id !== userId
-  ) {
+  if (custodyAssign === "self" && custodian.user?.id !== userId) {
     throw new ShelfError({
       cause: null,
       title: "Action not allowed",
@@ -296,7 +297,7 @@ export type ResolvedQuantityRelease = {
  * @param args.quantityAssetIds - Assets moved by units (see {@link splitQuantityAssetIds}).
  * @param args.quantities - Units per asset id.
  * @param args.organizationId - The caller's workspace.
- * @param args.role - The acting user's role.
+ * @param args.custodyAssign - Whose custody the caller may change (`access.custody.assign`).
  * @param args.userId - The acting user.
  * @returns One resolved release per asset, in the given order.
  * @throws {ShelfError} 400 when an asset has no operator-held units, more than
@@ -308,14 +309,14 @@ export async function resolveQuantityReleases({
   quantityAssetIds,
   quantities,
   organizationId,
-  role,
+  custodyAssign,
   userId,
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
   organizationId: string;
-  /** The acting user's role: self-service may only release their own units. */
-  role: OrganizationRoles;
+  /** Whose custody the caller may change (`access.custody.assign`): "self" releases only their own units. */
+  custodyAssign: CustodyAssign;
   /** The acting user. */
   userId: string;
 }): Promise<ResolvedQuantityRelease[]> {
@@ -372,10 +373,7 @@ export async function resolveQuantityReleases({
 
     // `releaseQuantity` applies the same rule on the write; checking it here
     // makes the refusal arrive before anything is written.
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      holder.custodian.user?.id !== userId
-    ) {
+    if (custodyAssign === "self" && holder.custodian.user?.id !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -416,8 +414,8 @@ type QuantityCustodyArgs = {
   /** The acting user. */
   userId: string;
   organizationId: string;
-  /** The acting user's role; the services apply the self-service rules. */
-  role: OrganizationRoles;
+  /** Whose custody the caller may change (`access.custody.assign`); the services apply the "self" rules. */
+  custodyAssign: CustodyAssign;
   /** Optional operator text, appended to the audit note. */
   note?: string;
   /**
@@ -447,7 +445,7 @@ export async function assignQuantityToCustodian({
   quantity,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
   locationId,
 }: QuantityCustodyArgs): Promise<void> {
@@ -457,7 +455,7 @@ export async function assignQuantityToCustodian({
     quantity,
     userId,
     organizationId,
-    role,
+    custodyAssign,
     note,
     locationId,
   });
@@ -471,7 +469,7 @@ export async function assignQuantityToCustodian({
     organizationId,
     note,
     baseLine: (actor) =>
-      role === OrganizationRoles.SELF_SERVICE
+      custodyAssign === "self"
         ? `${actor} took custody of **${quantity}** unit(s)${fromSource}.`
         : `${actor} assigned **${quantity}** unit(s) to ${custodianDisplay(
             custodian
@@ -506,7 +504,7 @@ export async function releaseQuantityFromCustodian({
   consumed,
   userId,
   organizationId,
-  role,
+  custodyAssign,
   note,
   locationId,
   sources,
@@ -529,7 +527,7 @@ export async function releaseQuantityFromCustodian({
     consumed,
     userId,
     organizationId,
-    role,
+    custodyAssign,
     note,
     locationId,
     sources,
@@ -586,7 +584,7 @@ export async function assignQuantities({
   custodian,
   userId,
   organizationId,
-  role,
+  custodyAssign,
 }: {
   quantityAssetIds: string[];
   quantities: Record<string, number>;
@@ -595,7 +593,7 @@ export async function assignQuantities({
   custodian: QuantityCustodian;
   userId: string;
   organizationId: string;
-  role: OrganizationRoles;
+  custodyAssign: CustodyAssign;
 }): Promise<QuantityRefusal[]> {
   const refusals: QuantityRefusal[] = [];
   for (const assetId of quantityAssetIds) {
@@ -606,7 +604,7 @@ export async function assignQuantities({
         quantity: quantities[assetId],
         userId,
         organizationId,
-        role,
+        custodyAssign,
         // Undefined for pools the scanner showed no picker for: the service
         // then resolves the source as for any caller that does not ask.
         locationId: sourceLocations[assetId],
@@ -632,13 +630,13 @@ export async function releaseQuantities({
   quantities,
   userId,
   organizationId,
-  role,
+  custodyAssign,
 }: {
   releases: ResolvedQuantityRelease[];
   quantities: Record<string, number>;
   userId: string;
   organizationId: string;
-  role: OrganizationRoles;
+  custodyAssign: CustodyAssign;
 }): Promise<QuantityRefusal[]> {
   const refusals: QuantityRefusal[] = [];
   for (const { assetId, custodian } of releases) {
@@ -649,7 +647,7 @@ export async function releaseQuantities({
         quantity: quantities[assetId],
         userId,
         organizationId,
-        role,
+        custodyAssign,
       });
     } catch (cause) {
       refusals.push(await refusalFor(assetId, organizationId, cause));

@@ -1,4 +1,5 @@
 import { loader } from "~/routes/api+/mobile+/audits.$auditId.evidence";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -27,17 +28,12 @@ vi.mock("react-router", async () => {
 vi.mock("~/modules/audit/service.server", () => ({
   requireAuditAssignee: vi.fn(),
 }));
-// why: pure role-precedence helper, but importing it pulls in server-only
-// booking authorization; the tests drive the role through getMobileUserContext.
-vi.mock("~/utils/booking-authorization.server", () => ({
-  resolveMostPrivilegedRole: (roles: string[]) =>
-    roles.includes("ADMIN") || roles.includes("OWNER") ? "ADMIN" : roles[0],
-}));
 // why: external auth — verifying a bearer token needs Supabase, which these
 // tests neither have nor are testing; the route's own gates are what matter.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  requireMobilePermission: vi.fn(),
   getMobileUserContext: vi.fn(),
 }));
 
@@ -140,11 +136,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     vi.clearAllMocks();
     (requireMobileAuth as any).mockResolvedValue({ user: { id: "user-1" } });
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["ADMIN"],
-      role: "ADMIN",
-      canUseAudits: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     (requireAuditAssignee as any).mockResolvedValue(undefined);
     mockDb.auditSession.findFirst.mockResolvedValue({ id: "audit-1" });
     mockDb.auditNote.findMany.mockResolvedValue([]);
@@ -280,10 +274,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
     });
 
     it("403s when audits are not enabled for the workspace", async () => {
-      (getMobileUserContext as any).mockResolvedValue({
-        role: "ADMIN",
-        canUseAudits: false,
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["ADMIN"], canUseAudits: false })
+      );
 
       const res = await loader(
         createLoaderArgs({ request: request(), ...ARGS })
@@ -308,10 +301,9 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
       // class of data #2900 gated on the detail route. Without this an
       // unassigned BASE or SELF_SERVICE user could read any audit's evidence
       // in the workspace by id, reopening the hole that PR closed.
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE"],
-        canUseAudits: true,
-      });
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE"] })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
@@ -319,24 +311,22 @@ describe("GET /api/mobile/audits/:auditId/evidence", () => {
         expect.objectContaining({
           auditSessionId: "audit-1",
           organizationId: "org-1",
-          isSelfServiceOrBase: true,
+          assignedOnly: true,
         })
       );
     });
 
     it("does not treat a privileged member as self-service", async () => {
-      // why: getMobileUserContext sets role = roles[0], so a membership
-      // ordered [SELF_SERVICE, ADMIN] would refuse a real admin. The role must
-      // be resolved from ALL roles.
-      (getMobileUserContext as any).mockResolvedValue({
-        roles: ["SELF_SERVICE", "ADMIN"],
-        canUseAudits: true,
-      });
+      // why: the scope follows the effective role, so a membership ordered
+      // [SELF_SERVICE, ADMIN] is not limited to assigned audits.
+      (getMobileUserContext as any).mockResolvedValue(
+        mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+      );
 
       await loader(createLoaderArgs({ request: request(), ...ARGS }));
 
       expect(requireAuditAssignee).toHaveBeenCalledWith(
-        expect.objectContaining({ isSelfServiceOrBase: false })
+        expect.objectContaining({ assignedOnly: false })
       );
     });
 

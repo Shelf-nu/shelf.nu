@@ -647,10 +647,10 @@ export async function assertAssetModelsBelongToOrg(
 /**
  * Asserts that a user is a member of `organizationId` (via UserOrganization).
  *
- * Used to validate request-supplied custodian *user* IDs before connecting
- * them to a booking — `custodianTeamMemberId` being org-valid does not prove
- * the paired `custodianUserId` is, so an attacker could otherwise bind an
- * arbitrary (foreign) user as the custodian user and leak their name/email.
+ * Validates any request-supplied *user* ID before it is written: a booking's
+ * custodian user (an org-valid `custodianTeamMemberId` does not prove the
+ * paired `custodianUserId` is) and an audit's assignee. Without it a caller
+ * could bind a foreign user and leak their name and email.
  *
  * @param params.userId - User ID sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
@@ -671,9 +671,9 @@ export async function assertUserBelongsToOrg(
   if (!found) {
     throw new ShelfError({
       cause: null,
-      title: "Invalid custodian",
+      title: "Invalid user",
       message:
-        "The selected custodian user is not a member of this workspace. Please reload and try again.",
+        "The selected user is not a member of this workspace. Please reload and try again.",
       label,
       status: 400,
       shouldBeCaptured: false,

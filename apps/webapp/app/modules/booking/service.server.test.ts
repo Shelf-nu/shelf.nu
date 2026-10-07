@@ -23,6 +23,7 @@ import {
   BOOKING_RESERVE_BLOCKED_LABELS,
 } from "@shelf/labels";
 import { onTestFinished } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
@@ -48,6 +49,7 @@ import {
 } from "~/modules/kit/service.server";
 import * as noteService from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
+import { ALL_SELECTED_KEY } from "~/utils/list";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
 import { scheduler } from "~/utils/scheduler.server";
 import { sendBookingUpdatedEmail } from "./email-helpers";
@@ -556,10 +558,7 @@ vitest.mock("./email-helpers", async () => {
 
 // why: avoiding organization admin lookups during booking notification tests
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsEmails: vitest
-    .fn()
-    .mockResolvedValue(["admin@example.com"]),
-  getOrganizationAdminsForNotification: vitest.fn().mockResolvedValue([
+  getOrganizationNotificationAudience: vitest.fn().mockResolvedValue([
     {
       id: "admin-1",
       email: "admin@example.com",
@@ -2714,6 +2713,7 @@ describe("updateBookingAssets", () => {
       updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: ["asset-1"],
         userId: "user-1",
       })
@@ -2725,6 +2725,31 @@ describe("updateBookingAssets", () => {
     // moved somewhere that lets writes happen first.
     expect(db.asset.findMany).not.toHaveBeenCalled();
   });
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the locked status no longer takes its additions",
+    async (role) => {
+      // The caller's route checked the add rule on an unlocked read; by the
+      // time the write locks the row the booking has been reserved, which
+      // restricted roles may not add to. The rule is judged against the
+      // locked status, so the add refuses before any write.
+      // why: the lock is a raw SQL read; answer it once with the new status.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+
+      await expect(
+        updateBookingAssets({
+          id: "booking-1",
+          organizationId: "org-1",
+          access: accessFor([role]),
+          assetIds: ["asset-1"],
+          userId: "user-1",
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.asset.findMany).not.toHaveBeenCalled();
+    }
+  );
 
   /**
    * The booking activity feed must record one add as ONE event.
@@ -2754,6 +2779,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1"],
       userId: "user-1",
     });
@@ -2778,6 +2804,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1"],
       userId: "user-1",
       skipBookingNote: true,
@@ -2820,6 +2847,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-1", "asset-2"],
       userId: "user-1",
     });
@@ -2837,6 +2865,7 @@ describe("updateBookingAssets", () => {
     id: "booking-1",
     organizationId: "org-1",
     assetIds: ["asset-1", "asset-2"],
+    access: accessFor([OrganizationRoles.ADMIN]),
   };
 
   it("should update booking assets successfully for DRAFT booking", async () => {
@@ -3100,6 +3129,7 @@ describe("updateBookingAssets", () => {
     const params = {
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       // No standalone assets — this mirrors a kit-add submission.
       assetIds: [] as string[],
       // `kitIds` is always passed on the kit-add path; it skips the
@@ -3201,6 +3231,7 @@ describe("updateBookingAssets", () => {
     await updateBookingAssets({
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: [],
       kitIds: ["kit-1"],
       kitSlices: [
@@ -3240,6 +3271,7 @@ describe("updateBookingAssets", () => {
     const qtyParams = {
       id: "booking-1",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: [QT_ASSET_ID],
       quantities: { [QT_ASSET_ID]: 7 },
     };
@@ -3762,7 +3794,7 @@ describe("reserveBooking", () => {
     to: futureToDate,
     description: "Reserved booking description",
     hints: mockClientHints,
-    isSelfServiceOrBase: false,
+    alertsOrgOnReservation: false,
     tags: [],
   };
 
@@ -7345,6 +7377,41 @@ describe("deleteBooking", () => {
     vitest.clearAllMocks();
   });
 
+  it("refuses to delete a booking that stopped being a draft when only drafts may be deleted", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findUnique.mockResolvedValue({
+      ...mockBookingData,
+      status: BookingStatus.DRAFT,
+    });
+    // The row was reserved between the read and the write: the draft-only
+    // delete matches nothing and Prisma reports P2025.
+    //@ts-expect-error missing vitest type
+    db.booking.delete.mockRejectedValueOnce(
+      Object.assign(new Error("Record to delete does not exist."), {
+        code: "P2025",
+      })
+    );
+
+    await expect(
+      deleteBooking(
+        { id: "booking-1", organizationId: "org-1" },
+        mockClientHints,
+        "user-1",
+        { onlyIfDraft: true }
+      )
+    ).rejects.toMatchObject({ status: 403 });
+    expect(db.booking.delete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "booking-1",
+          organizationId: "org-1",
+          status: BookingStatus.DRAFT,
+        },
+      })
+    );
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("should delete booking successfully", async () => {
     expect.assertions(1);
 
@@ -7603,6 +7670,37 @@ describe("duplicateBooking", () => {
     vitest.clearAllMocks();
   });
 
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the source it copies from is held by someone else",
+    async (role) => {
+      // The caller created the source, but the row this call reads, which
+      // every field of the copy comes from, now sits in another member's
+      // custody (say it was reassigned after the route's own read). The guard
+      // runs on that row, so nothing is created.
+      //@ts-expect-error missing vitest type
+      db.booking.findFirstOrThrow.mockResolvedValue({
+        ...mockBookingData,
+        creatorId: "user-1",
+        custodianUserId: "someone-else",
+        bookingAssets: [],
+        tags: [],
+      });
+
+      await expect(
+        duplicateBooking({
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          from: DUPLICATE_FROM,
+          to: DUPLICATE_TO,
+          request: new Request("https://example.com"),
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.booking.create).not.toHaveBeenCalled();
+    }
+  );
+
   it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);
 
@@ -7654,6 +7752,7 @@ describe("duplicateBooking", () => {
       from,
       to,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     expect(db.booking.create).toHaveBeenCalledWith(
@@ -7790,6 +7889,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     // Both slices are recreated, each carrying its own assetKitId — the
@@ -7984,6 +8084,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8141,6 +8242,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8233,6 +8335,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8331,6 +8434,7 @@ describe("duplicateBooking", () => {
       from: DUPLICATE_FROM,
       to: DUPLICATE_TO,
       request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     const createArg = (
@@ -8958,7 +9062,8 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -9033,7 +9138,8 @@ describe("extendBooking", () => {
       newEndDate,
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     // Every INDIVIDUAL unit the booking holds is handed over, under the new
@@ -9096,7 +9202,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(ShelfError);
     expect(db.booking.update).not.toHaveBeenCalled();
@@ -9139,7 +9246,8 @@ describe("extendBooking", () => {
       newEndDate,
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -9168,7 +9276,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9210,7 +9319,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        roles: [OrganizationRoles.SELF_SERVICE],
       })
     ).resolves.toBeDefined();
   });
@@ -9235,7 +9345,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        roles: [OrganizationRoles.SELF_SERVICE],
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9258,7 +9369,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.BASE,
+        access: accessFor([OrganizationRoles.BASE]),
+        roles: [OrganizationRoles.BASE],
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -9302,7 +9414,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1", // Different user (OWNER)
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
+        roles: [OrganizationRoles.OWNER],
       })
     ).resolves.toBeDefined();
   });
@@ -9346,7 +9459,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        roles: [OrganizationRoles.SELF_SERVICE],
       })
     ).resolves.toBeDefined();
   });
@@ -9390,7 +9504,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        roles: [OrganizationRoles.SELF_SERVICE],
       })
     ).resolves.toBeDefined();
   });
@@ -9442,7 +9557,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-03T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
       "Cannot extend booking because the extended period is overlapping"
@@ -9486,7 +9602,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).resolves.toBeDefined();
   });
@@ -9531,7 +9648,8 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-02T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     expect(db.booking.update).toHaveBeenCalledWith(
@@ -9615,7 +9733,8 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-03T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     // Should only check conflicts for asset-2 and asset-3 (not asset-1)
@@ -9680,7 +9799,8 @@ describe("extendBooking", () => {
       newEndDate: new Date("2025-01-03T17:00:00Z"),
       hints: mockClientHints,
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      roles: [OrganizationRoles.ADMIN],
     });
 
     // Should succeed - returned asset conflicts are ignored
@@ -9736,7 +9856,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-03T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
       "Cannot extend booking because the extended period is overlapping"
@@ -9792,7 +9913,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-03T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       })
     ).rejects.toThrow(
       "Cannot extend booking. All assets have been returned. Please complete the booking instead."
@@ -9834,7 +9956,8 @@ describe("extendBooking", () => {
         newEndDate: new Date("2025-01-02T17:00:00Z"),
         hints: mockClientHints,
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        access: accessFor([OrganizationRoles.ADMIN]),
+        roles: [OrganizationRoles.ADMIN],
       };
     }
 
@@ -13810,7 +13933,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["bk-arch-1", "bk-arch-2"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     // Service no longer wraps the updateMany + notes in an interactive
@@ -13857,7 +13980,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -13909,7 +14032,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b-archived-1", "b-archived-2"],
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
       })
     ).resolves.toBeUndefined();
 
@@ -13942,7 +14065,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b-archived", "b-complete"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith(
@@ -13971,7 +14094,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b-ongoing"],
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
       })
     ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
   });
@@ -13994,7 +14117,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["b1"],
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -14016,7 +14139,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["r1"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     expect(db.booking.updateMany).toHaveBeenCalledWith({
@@ -14050,7 +14173,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["r1"],
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
       })
     ).rejects.toThrow(ShelfError);
     expect(db.booking.updateMany).not.toHaveBeenCalled();
@@ -14074,7 +14197,7 @@ describe("bulkArchiveBookings", () => {
         bookingIds: ["o1"],
         organizationId: "org-1",
         userId: "user-1",
-        role: OrganizationRoles.OWNER,
+        access: accessFor([OrganizationRoles.OWNER]),
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -14103,7 +14226,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["c1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     // COMPLETE rows archive without the flag…
@@ -14153,7 +14276,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "b2"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -14214,7 +14337,7 @@ describe("bulkArchiveBookings", () => {
       bookingIds: ["b1", "r1"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
     });
 
     // Exactly one BOOKING_ARCHIVED event, for the archived booking only.
@@ -14278,7 +14401,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-canc-1", "bk-canc-2"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       hints: mockClientHints,
     });
 
@@ -14340,7 +14463,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-ongoing"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       hints: mockClientHints,
     });
 
@@ -14395,7 +14518,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-marker"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       hints: mockClientHints,
     });
 
@@ -14445,7 +14568,7 @@ describe("bulkCancelBookings", () => {
       bookingIds: ["bk-a", "bk-b"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       hints: mockClientHints,
     });
 
@@ -14508,7 +14631,7 @@ describe("bulkDeleteBookings", () => {
       bookingIds: ["bk-del-ongoing"],
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
       hints: mockClientHints,
     });
 
@@ -14527,6 +14650,161 @@ describe("bulkDeleteBookings", () => {
       "the remaining commitment should keep it checked out"
     ).toBe(true);
   });
+
+  /** A booking row in the shape `bulkDeleteBookings` reads, owned by user-1. */
+  const row = (id: string, status: BookingStatus) => ({
+    id,
+    name: id,
+    status,
+    creatorId: "user-1",
+    custodianUserId: "user-1",
+    activeSchedulerReference: null,
+    bookingAssets: [],
+    from: new Date("2025-01-01T09:00:00Z"),
+    to: new Date("2025-01-02T17:00:00Z"),
+    organization: { customEmailFooter: null },
+    custodianUser: null,
+    custodianTeamMember: null,
+    _count: { bookingAssets: 0 },
+  });
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "refuses a %s selection that includes a non-draft booking, deleting nothing",
+    async (role) => {
+      //@ts-expect-error missing vitest type
+      db.booking.findMany.mockResolvedValue([
+        row("bk-draft", BookingStatus.DRAFT),
+        row("bk-reserved", BookingStatus.RESERVED),
+      ]);
+
+      await expect(
+        bulkDeleteBookings({
+          bookingIds: ["bk-draft", "bk-reserved"],
+          organizationId: "org-1",
+          userId: "user-1",
+          access: accessFor([role]),
+          hints: mockClientHints,
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      expect(db.$transaction).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses a SELF_SERVICE select-all whose resolved rows include a non-draft booking", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+      row("bk-ongoing", BookingStatus.ONGOING),
+    ]);
+
+    await expect(
+      bulkDeleteBookings({
+        bookingIds: [ALL_SELECTED_KEY],
+        currentSearchParams: "status=ALL",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        hints: mockClientHints,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("refuses the whole request when a draft stops being a draft before the delete", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+    ]);
+    // The row was reserved between the read and the write, so the draft-only
+    // delete matches nothing.
+    //@ts-expect-error missing vitest type
+    db.booking.deleteMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      bulkDeleteBookings({
+        bookingIds: ["bk-draft"],
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+        hints: mockClientHints,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(db.booking.deleteMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ status: BookingStatus.DRAFT }),
+    });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not narrow the delete to drafts for a role that may delete any status", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-reserved", BookingStatus.RESERVED),
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.deleteMany.mockResolvedValueOnce({ count: 1 });
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-reserved"],
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      hints: mockClientHints,
+    });
+
+    const [args] = (db.booking.deleteMany as ReturnType<typeof vitest.fn>).mock
+      .calls[0];
+    expect(args.where).not.toHaveProperty("status");
+  });
+
+  it("lets SELF_SERVICE bulk-delete a selection of its own drafts", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+    ]);
+    // The draft-only delete still matches the one draft that was read.
+    //@ts-expect-error missing vitest type
+    db.booking.deleteMany.mockResolvedValueOnce({ count: 1 });
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-draft"],
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      hints: mockClientHints,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets ADMIN bulk-delete a selection that includes non-draft bookings", async () => {
+    //@ts-expect-error missing vitest type
+    db.booking.findMany.mockResolvedValue([
+      row("bk-draft", BookingStatus.DRAFT),
+      row("bk-reserved", BookingStatus.RESERVED),
+    ]);
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+    (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([]);
+
+    await bulkDeleteBookings({
+      bookingIds: ["bk-draft", "bk-reserved"],
+      organizationId: "org-1",
+      userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
+      hints: mockClientHints,
+    });
+
+    expect(db.$transaction).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("addScannedAssetsToBooking", () => {
@@ -14539,10 +14817,8 @@ describe("addScannedAssetsToBooking", () => {
     BookingStatus.ARCHIVED,
     BookingStatus.CANCELLED,
   ])("refuses to add scanned assets to a %s booking", async (status) => {
-    // This path had no booking-status check anywhere before: the route action
-    // only called requirePermission, and the loader's canUserManageBookingAssets
-    // decided what to RENDER, not what to accept. A direct POST could therefore
-    // append assets to a closed booking. (detail.dev D097)
+    // A direct POST reaches this service without any loader in between, so
+    // the closed-booking refusal has to live here.
     //
     // Asserting through the public service function rather than the assertion
     // helper directly, so this fails if the guard is ever unwired from the path.
@@ -14561,12 +14837,39 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       })
     ).rejects.toThrow(/closed records/);
 
     // The booking must be untouched — the guard runs before any write.
     expect(db.booking.update).not.toHaveBeenCalled();
   });
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s when the locked status no longer takes its additions",
+    async (role) => {
+      // The route checked the add rule on an unlocked read; by the time the
+      // write locks the row the booking has been reserved. The rule is judged
+      // again against the locked status, so the add still refuses.
+      // why: the lock is a raw SQL read; answer it once with the new status.
+      (db.$queryRaw as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+        { status: BookingStatus.RESERVED },
+      ]);
+
+      await expect(
+        addScannedAssetsToBooking({
+          assetIds: ["asset-1"],
+          kitIds: [],
+          bookingId: "booking-1",
+          organizationId: "org-1",
+          userId: "user-1",
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+      // Refused before any write.
+      expect(db.booking.update).not.toHaveBeenCalled();
+    }
+  );
 
   it("guards every loose scan against kit membership, with no kit exempt", async () => {
     // A client that sends a scanned kit's members as plain asset ids, with no
@@ -14591,6 +14894,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await expect(refused).rejects.toMatchObject({
@@ -14696,6 +15000,7 @@ describe("addScannedAssetsToBooking", () => {
           bookingId: "booking-1",
           organizationId: "org-1",
           userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
           quantities: { [QT_ID]: 5 },
         })
       ).rejects.toThrow(ShelfError);
@@ -14710,6 +15015,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         quantities: { [QT_ID]: 1 },
       }).catch(() => undefined);
 
@@ -14735,6 +15041,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       }).catch(() => undefined);
 
       // An INDIVIDUAL asset has no pool to draw on — locking it here would
@@ -14781,6 +15088,7 @@ describe("addScannedAssetsToBooking", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       })
     ).rejects.toThrow(/already booked or checked out/i);
 
@@ -14803,6 +15111,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-cables",
@@ -14940,6 +15249,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     expect(activityEventService.recordEvents).toHaveBeenCalledWith(
@@ -15007,6 +15317,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-kit-member",
@@ -15109,6 +15420,7 @@ describe("addScannedAssetsToBooking", () => {
       bookingId: "booking-scan",
       organizationId: "org-1",
       userId: "user-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       kitSlices: [
         {
           assetId: "asset-kit-member",
@@ -15320,7 +15632,7 @@ describe("processBooking — checked-out guard for active bookings", () => {
   // no-op for OWNER, keeping these focused on the CHECKED_OUT behavior.
   const OWNER_AUTH = {
     userId: "user-1",
-    role: OrganizationRoles.OWNER,
+    access: accessFor([OrganizationRoles.OWNER]),
   } as const;
 
   function mockBooking(
@@ -15344,6 +15656,38 @@ describe("processBooking — checked-out guard for active bookings", () => {
     });
   }
 
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "refuses %s adding to their own RESERVED booking with a 403",
+    async (role) => {
+      mockBooking(BookingStatus.RESERVED);
+      mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+      await expect(
+        processBooking("booking-1", ["asset-1"], "org-1", {
+          userId: "user-1",
+          access: accessFor([role]),
+        })
+      ).rejects.toMatchObject({ status: 403 });
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lets %s add to their own DRAFT booking",
+    async (role) => {
+      mockBooking(BookingStatus.DRAFT);
+      mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
+
+      const { finalAssetIds } = await processBooking(
+        "booking-1",
+        ["asset-1"],
+        "org-1",
+        { userId: "user-1", access: accessFor([role]) }
+      );
+
+      expect(finalAssetIds).toEqual(["asset-1"]);
+    }
+  );
+
   it("blocks a CHECKED_OUT asset from being added to an ONGOING booking", async () => {
     mockBooking(BookingStatus.ONGOING);
     mockAssets([
@@ -15366,20 +15710,23 @@ describe("processBooking — checked-out guard for active bookings", () => {
     await expect(
       processBooking("booking-1", ["asset-1"], "org-1", {
         userId: "attacker",
-        role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
       })
     ).rejects.toThrow(/not authorized/i);
   });
 
-  it("allows a SELF_SERVICE user to add to a booking they own", async () => {
-    mockBooking(BookingStatus.RESERVED, [], { creatorId: "owner-user" });
+  it("allows a SELF_SERVICE user to add to a draft booking they own", async () => {
+    mockBooking(BookingStatus.DRAFT, [], { creatorId: "owner-user" });
     mockAssets([{ id: "asset-1", status: AssetStatus.AVAILABLE }]);
 
     const { finalAssetIds } = await processBooking(
       "booking-1",
       ["asset-1"],
       "org-1",
-      { userId: "owner-user", role: OrganizationRoles.SELF_SERVICE }
+      {
+        userId: "owner-user",
+        access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      }
     );
     expect(finalAssetIds).toEqual(["asset-1"]);
   });
@@ -15636,6 +15983,7 @@ describe("booking notes + events — qty-tracked axis", () => {
     await updateBookingAssets({
       id: "booking-qty",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-pens"],
       userId: "user-1",
       quantities: { "asset-pens": 50 },
@@ -15689,6 +16037,7 @@ describe("booking notes + events — qty-tracked axis", () => {
     await updateBookingAssets({
       id: "booking-ind",
       organizationId: "org-1",
+      access: accessFor([OrganizationRoles.ADMIN]),
       assetIds: ["asset-camera"],
       userId: "user-1",
     });
@@ -17178,6 +17527,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         // A new unit, a quantity-tracked pool, and a unit already on the booking.
         assetIds: ["asset-ind", "asset-qt", "asset-held"],
         quantities: { "asset-qt": 3 },
@@ -17215,6 +17565,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: ["asset-ind", "asset-qt", "asset-held"],
         quantities: { "asset-qt": 3 },
         kitSlices: [
@@ -17261,6 +17612,7 @@ describe("model reservation guard — write paths", () => {
       await updateBookingAssets({
         id: "booking-1",
         organizationId: "org-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
         assetIds: [],
         kitSlices: [
           {
@@ -17287,6 +17639,7 @@ describe("model reservation guard — write paths", () => {
         updateBookingAssets({
           id: "booking-1",
           organizationId: "org-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
           assetIds: ["asset-ind"],
           userId: "user-1",
         })
@@ -17319,6 +17672,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // The scanned kit's INDIVIDUAL member is measured too: it can discharge
@@ -17359,6 +17713,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       expect(fulfilmentCandidateIds()).toEqual(["asset-kit"]);
@@ -17396,6 +17751,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // One INDIVIDUAL asset is one physical unit. The two partial uniques let
@@ -17445,6 +17801,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // Operators scan what is in front of them, which routinely includes
@@ -17497,6 +17854,7 @@ describe("model reservation guard — write paths", () => {
         bookingId: "booking-1",
         organizationId: "org-1",
         userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
       });
 
       // A quantity-tracked asset is a pool, not a unit: units committed to a
@@ -17524,6 +17882,7 @@ describe("model reservation guard — write paths", () => {
           bookingId: "booking-1",
           organizationId: "org-1",
           userId: "user-1",
+          access: accessFor([OrganizationRoles.ADMIN]),
         })
       ).rejects.toThrow(/reserved by model/);
 
@@ -17542,7 +17901,7 @@ describe("model reservation guard — write paths", () => {
       to: futureToDate,
       description: "Reserved booking description",
       hints: mockClientHints,
-      isSelfServiceOrBase: false,
+      alertsOrgOnReservation: false,
       tags: [],
     };
 

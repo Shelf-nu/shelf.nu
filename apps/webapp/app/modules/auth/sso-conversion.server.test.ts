@@ -549,7 +549,7 @@ describe("findEligibleAccountsForSsoConversion", () => {
     expect(db.userOrganization.findMany).toHaveBeenCalledWith({
       where: {
         userId: { in: ["u1", "u2", "u3"] },
-        roles: { has: "OWNER" },
+        roles: { hasSome: ["OWNER"] },
         organizationId: { in: [LINKED_ORG_ID] },
       },
       select: { userId: true },

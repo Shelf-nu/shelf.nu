@@ -14,6 +14,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import { checkOutQuantity } from "~/modules/asset/service.server";
 import { action } from "~/routes/api+/assets.bulk-assign-custody";
@@ -159,11 +160,12 @@ function makeRequest(
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
+    ...permissionContext({
+      roles: [OrganizationRoles.ADMIN],
+      organizationId: "org-1",
+    }),
     canUseBarcodes: false,
-    canSeeAllCustody: true,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  } as unknown as Awaited<ReturnType<typeof requirePermission>>);
   dbMocks.assetFindFirst.mockResolvedValue({
     title: "Spanner",
     quantity: 4,
