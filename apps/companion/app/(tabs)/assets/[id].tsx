@@ -51,10 +51,10 @@ import {
   defaultAssignSourceOption,
   describeHolderSources,
   releaseAsksForSource,
+  releaseNoteSource,
   releaseSourceOptions,
   releaseSourceQuantity,
   releaseSourceRequestValue,
-  releaseSourceValue,
 } from "@/lib/custody-source-options";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
@@ -617,14 +617,14 @@ export default function AssetDetailScreen() {
     pickedReleaseQuantity !== null
       ? Math.min(releaseMax, pickedReleaseQuantity)
       : releaseMax;
-  // The specific source picked, for the "goes back to" note. Null for "All
-  // sources", which can return units to several places.
-  const selectedReleaseEntry =
-    releaseSources && releaseSource != null && releaseSource !== ALL_SOURCES
-      ? releaseSources.find(
-          (entry) => releaseSourceValue(entry) === releaseSource
-        ) ?? null
-      : null;
+  // The source the "goes back to" note names: the picked row, or a holder's
+  // only source on a multi-location pool. Null for "All sources", which can
+  // return units to several places.
+  const selectedReleaseEntry = releaseNoteSource({
+    sources: releaseQtyEntry?.sources,
+    picked: releaseSource,
+    multiSource,
+  });
   const releaseSourceProp =
     releaseSources && releaseSource != null
       ? {

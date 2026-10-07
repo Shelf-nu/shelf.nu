@@ -144,6 +144,32 @@ export function releaseSourceOptions(
 }
 
 /**
+ * The source a release's "goes back to" note names: the row picked in the
+ * picker, or, for a holder with exactly one source on a pool kept at two or
+ * more locations, that source (no picker is shown, but the note still says
+ * where the units go). Null for "All sources", for a one-location pool, and
+ * when the picked row no longer exists.
+ *
+ * @param sources - The holder's sources
+ * @param picked - The picker's value, when a picker is shown
+ * @param multiSource - Whether the pool is placed at two or more locations
+ */
+export function releaseNoteSource({
+  sources,
+  picked,
+  multiSource,
+}: {
+  sources: AssetCustodySourceEntry[] | undefined;
+  picked: string | null;
+  multiSource: boolean;
+}): AssetCustodySourceEntry | null {
+  if (!sources || sources.length === 0) return null;
+  if (sources.length === 1) return multiSource ? sources[0] : null;
+  if (picked === null || picked === ALL_SOURCES) return null;
+  return sources.find((entry) => releaseSourceValue(entry) === picked) ?? null;
+}
+
+/**
  * The request value for a picked release row: a location id, `null` for the
  * unplaced units, the word the server uses for an unrecorded source, or
  * `undefined` for {@link ALL_SOURCES}, which sends no `locationId` at all.

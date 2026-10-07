@@ -47,9 +47,10 @@ env:
 - assertVisible: "Quantity, maximum.*"
 - tapOn: "Assign .*"
 
-# The holder's row names the source.
+# The holder's row names the source (one source reads "from <location>",
+# with no count).
 - extendedWaitUntil:
-    visible: ".*1 from ${SOURCE_LOCATION}.*"
+    visible: ".*from ${SOURCE_LOCATION}.*"
     timeout: 15000
 
 # Release it from that source again (one source: no picker, the sheet says
@@ -60,5 +61,5 @@ env:
     timeout: 10000
 - tapOn: "Release .*"
 - extendedWaitUntil:
-    notVisible: ".*1 from ${SOURCE_LOCATION}.*"
+    notVisible: ".*from ${SOURCE_LOCATION}.*"
     timeout: 15000

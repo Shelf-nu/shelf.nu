@@ -22,6 +22,7 @@ import {
   describeHolderSources,
   questionsForCheckouts,
   releaseAsksForSource,
+  releaseNoteSource,
   releaseSourceOptions,
   releaseSourceQuantity,
   releaseSourceRequestValue,
@@ -173,6 +174,41 @@ test("a release asks for a source only with two or more", () => {
   assert.equal(releaseAsksForSource(undefined), false);
   assert.equal(releaseAsksForSource([HOLDER_SOURCES[0]]), false);
   assert.equal(releaseAsksForSource(HOLDER_SOURCES), true);
+});
+
+test("the release note names the picked source, or a holder's only one", () => {
+  const [camera] = HOLDER_SOURCES;
+  // One source on a multi-location pool: no picker, but the note names it.
+  assert.equal(
+    releaseNoteSource({ sources: [camera], picked: null, multiSource: true }),
+    camera
+  );
+  // One-location pool: nothing to say.
+  assert.equal(
+    releaseNoteSource({ sources: [camera], picked: null, multiSource: false }),
+    null
+  );
+  // Several sources: the pick, never "All sources".
+  assert.equal(
+    releaseNoteSource({
+      sources: HOLDER_SOURCES,
+      picked: "a",
+      multiSource: true,
+    }),
+    camera
+  );
+  assert.equal(
+    releaseNoteSource({
+      sources: HOLDER_SOURCES,
+      picked: ALL_SOURCES,
+      multiSource: true,
+    }),
+    null
+  );
+  assert.equal(
+    releaseNoteSource({ sources: undefined, picked: null, multiSource: true }),
+    null
+  );
 });
 
 test("a release row caps at what it can give back", () => {

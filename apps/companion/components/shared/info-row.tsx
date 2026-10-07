@@ -47,7 +47,11 @@ export const InfoRow = memo(function InfoRow({
   hint?: string;
   /** When set, the row becomes tappable and shows a chevron affordance. */
   onPress?: () => void;
-  /** A11y label for the tappable row (defaults to the value text). */
+  /**
+   * A11y label for the tappable row (defaults to the value text). The hint,
+   * when set, is appended: an explicit label replaces the children's text for
+   * screen readers, so the hint would otherwise never be announced.
+   */
   accessibilityLabel?: string;
 }) {
   const { colors } = useTheme();
@@ -91,7 +95,11 @@ export const InfoRow = memo(function InfoRow({
         onPress={onPress}
         activeOpacity={0.6}
         accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel ?? value}
+        accessibilityLabel={
+          hint
+            ? `${accessibilityLabel ?? value}. ${hint}`
+            : accessibilityLabel ?? value
+        }
       >
         {content}
       </TouchableOpacity>

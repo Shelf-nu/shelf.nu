@@ -1135,9 +1135,11 @@ export default function BookingDetailScreen() {
           }}
           accessibilityLabel={`${item.title}${
             item.location ? `, at ${item.location.name}` : ""
-          }, ${stateLabel}${isCheckedIn ? ", checked in" : ""}${
-            isSelected ? ", selected" : ""
-          }${selectable ? ". Tap to select" : ""}`}
+          }${describeSliceSourcesForA11y(item)}, ${stateLabel}${
+            isCheckedIn ? ", checked in" : ""
+          }${isSelected ? ", selected" : ""}${
+            selectable ? ". Tap to select" : ""
+          }`}
           accessibilityRole="button"
         >
           {selectable && (
@@ -3058,3 +3060,19 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.base,
   },
 }));
+
+/**
+ * Where a pool's booked units left from, for the asset card's screen-reader
+ * label: ", booked units from Camera Room, Studio". The card's explicit label
+ * replaces the text of its children, so the visible "From ..." lines are not
+ * announced on their own. Empty when no standalone slice recorded a source.
+ *
+ * @param item - One booking asset row
+ */
+function describeSliceSourcesForA11y(item: BookingAsset): string {
+  if (item.type !== "QUANTITY_TRACKED") return "";
+  const names = (item.slices ?? []).flatMap((slice) =>
+    !slice.kit && slice.sourceLocation ? [slice.sourceLocation.name] : []
+  );
+  return names.length > 0 ? `, booked units from ${names.join(", ")}` : "";
+}
