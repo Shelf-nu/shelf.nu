@@ -88,12 +88,26 @@ export const bookingsApi = {
     ),
 
   /** Check out a booking (RESERVED -> ONGOING) */
-  checkoutBooking: (orgId: string, bookingId: string, timeZone?: string) =>
+  checkoutBooking: (
+    orgId: string,
+    bookingId: string,
+    timeZone?: string,
+    /**
+     * Answers to the booking's `checkoutSourceQuestions`, keyed by slice id:
+     * the location the units leave from, or `null` for the unplaced units.
+     * Left out, the server records its own default for each pool.
+     */
+    sourceLocations?: Record<string, string | null>
+  ) =>
     apiFetch<BookingActionResponse>(
       `/api/mobile/bookings/checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 
@@ -119,6 +133,8 @@ export const bookingsApi = {
     assetIds: string[],
     kitIds: string[] = [],
     timeZone?: string,
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
     method?: BookingMethod
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
@@ -126,7 +142,16 @@ export const bookingsApi = {
       {
         method: "POST",
         body: JSON.stringify(
-          withBookingMethod({ bookingId, assetIds, kitIds, timeZone }, method)
+          withBookingMethod(
+            {
+              bookingId,
+              assetIds,
+              kitIds,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
+            method
+          )
         ),
       }
     ),
@@ -179,6 +204,8 @@ export const bookingsApi = {
     assetIds: string[],
     timeZone?: string,
     checkouts?: CheckoutDisposition[],
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
     method?: BookingMethod
   ) =>
     apiFetch<PartialCheckoutResponse>(
@@ -187,7 +214,13 @@ export const bookingsApi = {
         method: "POST",
         body: JSON.stringify(
           withBookingMethod(
-            { bookingId, assetIds, checkouts, timeZone },
+            {
+              bookingId,
+              assetIds,
+              checkouts,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
             method
           )
         ),

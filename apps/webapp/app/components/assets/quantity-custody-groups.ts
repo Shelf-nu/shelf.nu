@@ -12,7 +12,14 @@
  * @see {@link file://../../modules/asset/custody-source.ts}
  */
 
+import type { SourcePart } from "@shelf/quantity-control";
+import {
+  describeCustodySourceParts,
+  sourceEntryLabel,
+} from "@shelf/quantity-control";
 import { custodySourceKey } from "~/modules/asset/custody-source";
+
+export type { SourcePart } from "@shelf/quantity-control";
 
 /** The fields of a custody record these helpers read. */
 export type GroupableCustodyRecord = {
@@ -88,23 +95,6 @@ export function groupCustodyRecords<T extends GroupableCustodyRecord>(
 }
 
 /**
- * What a row without a location means: the unplaced units, or, when
- * `sourceUnknown` is set, a source that was never recorded.
- */
-export function nullSourceLabel(sourceUnknown: boolean): string {
-  return sourceUnknown ? "location not recorded" : "unplaced";
-}
-
-/** One part of a person's source text. */
-export type SourcePart = {
-  /** Stable React key: the source's location id, or "none". */
-  key: string;
-  text: string;
-  /** Rendered lighter: the source was never recorded. */
-  muted: boolean;
-};
-
-/**
  * The source text after a person's quantity, for a pool with two or more
  * sources: "from Studio" for a single source, "2 from Camera Room, 1 from
  * Studio" for several, "unplaced" / "location not recorded" without a
@@ -115,41 +105,17 @@ export type SourcePart = {
 export function describeCustodySources(
   rows: GroupableCustodyRecord[]
 ): SourcePart[] {
-  if (rows.length === 1) {
-    const [only] = rows;
-    const unknown = Boolean(only.sourceUnknown);
-    return only.location
-      ? [
-          {
-            key: only.location.id,
-            text: `from ${only.location.name}`,
-            muted: false,
-          },
-        ]
-      : [
-          {
-            key: unknown ? "unrecorded" : "unplaced",
-            text: nullSourceLabel(unknown),
-            muted: unknown,
-          },
-        ];
-  }
+  return describeCustodySourceParts(rows.map(toSourceEntry));
+}
 
-  return rows.map((row) => {
-    const quantity = row.quantity ?? 1;
-    const unknown = Boolean(row.sourceUnknown);
-    return row.location
-      ? {
-          key: row.location.id,
-          text: `${quantity} from ${row.location.name}`,
-          muted: false,
-        }
-      : {
-          key: unknown ? "unrecorded" : "unplaced",
-          text: `${quantity} ${nullSourceLabel(unknown)}`,
-          muted: unknown,
-        };
-  });
+/** A custody record as the shared source entry the wording helpers read. */
+function toSourceEntry(row: GroupableCustodyRecord) {
+  return {
+    locationId: row.location?.id ?? null,
+    unrecorded: !row.location && Boolean(row.sourceUnknown),
+    name: row.location?.name ?? null,
+    quantity: row.quantity ?? 1,
+  };
 }
 
 /**
@@ -157,8 +123,9 @@ export function describeCustodySources(
  * "Unplaced" or "Location not recorded".
  */
 export function releaseLineSource(row: GroupableCustodyRecord): string {
-  if (row.location) return `From ${row.location.name}`;
-  return row.sourceUnknown ? "Location not recorded" : "Unplaced";
+  const entry = toSourceEntry(row);
+  const label = sourceEntryLabel(entry);
+  return entry.locationId !== null ? `From ${label}` : label;
 }
 
 /**

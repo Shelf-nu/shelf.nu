@@ -59,11 +59,12 @@ const bookingScreenSource = readFileSync(
 
 /**
  * Every `api.<fn>(` call in `source`, as the text between its parentheses.
- * Call sites are multi-line, so the argument list is matched up to the first
- * `);` that closes the call.
+ * Call sites are multi-line, and a chained call breaks the line between `api`
+ * and `.<fn>(`, so whitespace is allowed there; the argument list is matched up
+ * to the first `);` after the call.
  */
 function callArguments(source: string, fn: string): string[] {
-  const pattern = new RegExp(`api\\.${fn}\\(([\\s\\S]*?)\\);`, "g");
+  const pattern = new RegExp(`api\\s*\\.${fn}\\(([\\s\\S]*?)\\);`, "g");
   return [...source.matchAll(pattern)].map((match) => match[1]);
 }
 
