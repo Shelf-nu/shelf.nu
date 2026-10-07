@@ -86,12 +86,26 @@ export const bookingsApi = {
     ),
 
   /** Check out a booking (RESERVED -> ONGOING) */
-  checkoutBooking: (orgId: string, bookingId: string, timeZone?: string) =>
+  checkoutBooking: (
+    orgId: string,
+    bookingId: string,
+    timeZone?: string,
+    /**
+     * Answers to the booking's `checkoutSourceQuestions`, keyed by slice id:
+     * the location the units leave from, or `null` for the unplaced units.
+     * Left out, the server records its own default for each pool.
+     */
+    sourceLocations?: Record<string, string | null>
+  ) =>
     apiFetch<BookingActionResponse>(
       `/api/mobile/bookings/checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 
@@ -113,13 +127,21 @@ export const bookingsApi = {
     bookingId: string,
     assetIds: string[],
     kitIds: string[] = [],
-    timeZone?: string
+    timeZone?: string,
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          assetIds,
+          kitIds,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 
@@ -163,13 +185,21 @@ export const bookingsApi = {
     bookingId: string,
     assetIds: string[],
     timeZone?: string,
-    checkouts?: CheckoutDisposition[]
+    checkouts?: CheckoutDisposition[],
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          assetIds,
+          checkouts,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
         // why: non-idempotent — per-unit quantities carry no request key, so a
         // timed-out-but-landed request re-sent would check the units out twice.
         retry: false,

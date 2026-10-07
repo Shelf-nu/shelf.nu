@@ -482,9 +482,59 @@ type SourceLocationRow = {
 };
 
 /**
+ * Builds a pool's "From location" options: whether it is placed at two or
+ * more locations, and if so one option per location (and "Unplaced") with
+ * what each has left. Reads placements, custody and booked-out units, plus
+ * the location names only for a multi-source pool.
+ *
+ * Callers that also need the pool-wide availability use
+ * {@link getCustodySourceSummary}; a caller that already derives it (the
+ * mobile asset detail) reads this alone so availability is computed once.
+ *
+ * @param assetId - A pool already org-verified by the caller's loader
+ * @param total - `Asset.quantity`
+ */
+export async function getCustodySourceOptions({
+  assetId,
+  organizationId,
+  total,
+}: {
+  assetId: string;
+  organizationId: string;
+  total: number;
+}): Promise<Pick<CustodySourceSummary, "multiSource" | "options">> {
+  const { state } = await loadCustodySources(db, { assetId, total });
+
+  if (!hasMultipleSources(state)) {
+    return { multiSource: false, options: [] };
+  }
+
+  const locations: SourceLocationRow[] = await db.location.findMany({
+    where: {
+      id: { in: state.placements.map((p) => p.locationId) },
+      organizationId,
+    },
+    select: { id: true, name: true, parent: { select: { name: true } } },
+  });
+
+  return {
+    multiSource: true,
+    options: buildCustodySourceOptions(
+      state,
+      locations.map((l) => ({
+        id: l.id,
+        name: l.name,
+        parentName: l.parent?.name ?? null,
+      }))
+    ),
+  };
+}
+
+/**
  * Builds the source summary the asset page loader ships to both entry points
  * of the Assign dialog (custody card and header actions) and to the Adjust
- * dialog, so they all show the same numbers.
+ * dialog, so they all show the same numbers: the options from
+ * {@link getCustodySourceOptions} plus the pool-wide availability.
  *
  * @param assetId - A pool already org-verified by the caller's loader
  * @param total - `Asset.quantity`
@@ -498,39 +548,15 @@ export async function getCustodySourceSummary({
   organizationId: string;
   total: number;
 }): Promise<CustodySourceSummary> {
-  const [{ state }, { available }] = await Promise.all([
-    loadCustodySources(db, { assetId, total }),
+  const [sources, { available }] = await Promise.all([
+    getCustodySourceOptions({ assetId, organizationId, total }),
     computeCustodyAvailability(db, {
       assetId,
       organizationId,
       totalQuantity: total,
     }),
   ]);
-
-  if (!hasMultipleSources(state)) {
-    return { multiSource: false, options: [], poolAvailable: available };
-  }
-
-  const locations: SourceLocationRow[] = await db.location.findMany({
-    where: {
-      id: { in: state.placements.map((p) => p.locationId) },
-      organizationId,
-    },
-    select: { id: true, name: true, parent: { select: { name: true } } },
-  });
-
-  return {
-    multiSource: true,
-    poolAvailable: available,
-    options: buildCustodySourceOptions(
-      state,
-      locations.map((l) => ({
-        id: l.id,
-        name: l.name,
-        parentName: l.parent?.name ?? null,
-      }))
-    ),
-  };
+  return { ...sources, poolAvailable: available };
 }
 
 /** What happened to units at a location, for its timeline note. */
