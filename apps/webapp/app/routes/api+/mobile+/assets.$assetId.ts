@@ -25,6 +25,7 @@ import {
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
 import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -335,11 +336,34 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       checkedOut: number;
       custodyAvailable: number;
     } | null = null;
+    /**
+     * Where a pool's units can be taken from (additive). The same summary the
+     * web asset page ships to its Assign dialog: `multiSource` is true only
+     * for a pool placed at two or more locations, and `options` then lists
+     * each location (and "Unplaced" when units are unplaced) with what it has
+     * left. The app shows a "From location" picker from it; an older build
+     * ignores the field and the server records no source.
+     *
+     * Not gated on custody permissions: the holder rows' source line reads
+     * `multiSource` for every viewer. The options read skips the pool-wide
+     * availability, which this loader already derives from the quantity rows.
+     */
+    let custodySources: Awaited<
+      ReturnType<typeof getCustodySourceOptions>
+    > | null = null;
     if (isQuantityTracked(asset)) {
-      const rows = await getAssetQuantityRows(db, {
-        assetId,
-        organizationId,
-      });
+      const [rows, sources] = await Promise.all([
+        getAssetQuantityRows(db, {
+          assetId,
+          organizationId,
+        }),
+        getCustodySourceOptions({
+          assetId,
+          organizationId,
+          total: asset.quantity ?? 0,
+        }),
+      ]);
+      custodySources = sources;
       const breakdown = getQuantityData(rows);
       quantityBreakdown = breakdown
         ? {
@@ -571,6 +595,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // assets and for QUANTITY_TRACKED assets with no custody/booking
         // activity (see getQuantityData's null contract).
         quantityBreakdown,
+        // Where the pool's units can be taken from (additive, see above).
+        // Null for INDIVIDUAL assets.
+        custodySources,
         // Reshaped from the widened select above so the companion keeps
         // reading `asset.organization.currency` and nothing else.
         organization: { currency: detailOrganization.currency },
