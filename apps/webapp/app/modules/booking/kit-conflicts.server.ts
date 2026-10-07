@@ -14,7 +14,10 @@
 import type { BookingStatus, Prisma } from "@prisma/client";
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { hasKitBookingConflicts, type KitBookingSlice } from "./helpers";
-import { createBookingConflictConditions } from "./utils.server";
+import {
+  createBookingConflictConditions,
+  stillOutOnOverdueKitSlice,
+} from "./utils.server";
 
 /** A kit another booking holds, named for the error the caller shows. */
 export type ConflictingKit = { id: string; name: string };
@@ -157,9 +160,11 @@ const MEMBERSHIP_SELECT = {
 type Membership = { id: string; kitId: string; kit: { name: string } };
 
 /**
- * Reads the kit-driven slices on bookings that overlap `from`–`to`, using the
- * same RESERVED / ONGOING / OVERDUE window the asset conflict check uses, with
- * the current booking excluded.
+ * Reads the kit-driven slices that can hold a kit against `from`–`to`: those on
+ * bookings overlapping the window (the same RESERVED / ONGOING / OVERDUE window
+ * the asset conflict check uses), plus any still out on an OVERDUE booking
+ * whatever its dates, since an overdue kit has no known return date. The
+ * current booking is excluded from both.
  */
 async function findKitSlicesInWindow(
   {
@@ -195,7 +200,13 @@ async function findKitSlicesInWindow(
   return (await client.bookingAsset.findMany({
     where: {
       assetKitId,
-      booking: { ...windowBookingWhere, organizationId },
+      OR: [
+        { booking: { ...windowBookingWhere, organizationId } },
+        stillOutOnOverdueKitSlice({
+          currentBookingId: bookingId,
+          organizationId,
+        }),
+      ],
     },
     select: {
       assetKitId: true,

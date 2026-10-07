@@ -45,6 +45,42 @@ function stubClient(memberships: Membership[], slices: Slice[]) {
   return client;
 }
 
+/**
+ * Asserts the slice read covers both ways another booking can hold a kit: a
+ * RESERVED / ONGOING / OVERDUE booking overlapping the window, or a slice
+ * still out on an OVERDUE booking whatever its dates, since an overdue kit has
+ * no known return date. Both exclude the current booking and stay in the
+ * organization.
+ */
+function expectWindowOrStillOverdue(where: {
+  OR: [
+    { booking: { organizationId: string; OR: unknown[] } },
+    Record<string, unknown>,
+  ];
+}) {
+  const [inWindow, stillOverdue] = where.OR;
+  expect(inWindow.booking.organizationId).toBe("org-1");
+  expect(inWindow.booking.OR).toHaveLength(2);
+  expect(inWindow.booking.OR[0]).toMatchObject({
+    status: BookingStatus.RESERVED,
+    id: { not: "booking-current" },
+  });
+  expect(inWindow.booking.OR[1]).toMatchObject({
+    status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
+    id: { not: "booking-current" },
+  });
+  expect(stillOverdue).toEqual({
+    assetKitId: { not: null },
+    checkedOutAt: { not: null },
+    checkedInAt: null,
+    booking: {
+      organizationId: "org-1",
+      status: BookingStatus.OVERDUE,
+      id: { not: "booking-current" },
+    },
+  });
+}
+
 const baseArgs = {
   kitIds: ["kit-a", "kit-b"],
   bookingId: "booking-current",
@@ -92,19 +128,7 @@ describe("findConflictingKits", () => {
     // Detached rows carry `assetKitId: null`, so matching by membership id is
     // what keeps a standalone asset from counting as the kit.
     expect(where.assetKitId).toEqual({ in: ["ak-a1"] });
-    expect(where.booking.organizationId).toBe("org-1");
-    // The same RESERVED / ONGOING / OVERDUE window assets are checked against,
-    // with the current booking excluded.
-    const windowClauses = where.booking.OR;
-    expect(windowClauses).toHaveLength(2);
-    expect(windowClauses[0]).toMatchObject({
-      status: BookingStatus.RESERVED,
-      id: { not: "booking-current" },
-    });
-    expect(windowClauses[1]).toMatchObject({
-      status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-      id: { not: "booking-current" },
-    });
+    expectWindowOrStillOverdue(where);
   });
 
   it("skips the slice query when none of the kits has a membership", async () => {
@@ -211,17 +235,29 @@ describe("findKitsHeldByOtherBookings", () => {
     // Any kit's slice, but never a standalone row: a standalone slice of a
     // quantity-tracked member draws on the free pool and holds no kit.
     expect(where.assetKitId).toEqual({ not: null });
-    expect(where.booking.organizationId).toBe("org-1");
-    expect(where.booking.OR[0]).toMatchObject({
-      status: BookingStatus.RESERVED,
-      id: { not: "booking-current" },
-    });
-    expect(where.booking.OR[1]).toMatchObject({
-      status: { in: [BookingStatus.ONGOING, BookingStatus.OVERDUE] },
-      id: { not: "booking-current" },
-    });
+    expectWindowOrStillOverdue(where);
     // Nothing overlaps, so there is no membership to resolve.
     expect(client.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("holds a kit still out on an overdue booking that ended before the window", async () => {
+    // Kit A went out on a booking due back days before this window and never
+    // came back. Its dates no longer overlap, but the kit is still out.
+    const client = stubClient(
+      [{ id: "ak-a1", kitId: "kit-a", kit: { name: "Kit A" } }],
+      [
+        {
+          assetKitId: "ak-a1",
+          checkedOutAt: new Date("2026-09-10T09:00:00Z"),
+          checkedInAt: null,
+          booking: { id: "stale", status: BookingStatus.OVERDUE },
+        },
+      ]
+    );
+
+    await expect(
+      findKitsHeldByOtherBookings(windowArgs, client as never)
+    ).resolves.toEqual([{ id: "kit-a", name: "Kit A" }]);
   });
 
   it("holds only the kit whose own slice is booked, not a kit sharing its quantity pool", async () => {
