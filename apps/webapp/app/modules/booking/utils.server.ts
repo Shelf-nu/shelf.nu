@@ -912,6 +912,44 @@ export function createBookingConflictConditions({
 }
 
 /**
+ * Matches a kit-driven slice that is still out on another OVERDUE booking,
+ * whatever that booking's dates.
+ *
+ * An overdue kit has no known return date, so it holds the kit for every
+ * window, not only the one its stale `to` happens to overlap. Date overlap
+ * (`createBookingConflictConditions`) cannot see it once the due date has
+ * passed. Pair this with that window, ORed at the `BookingAsset` level, wherever
+ * a kit's own slices decide whether another booking holds it. Quantity
+ * availability applies the same rule to OVERDUE reservations
+ * (`buildActiveBookingWhere`).
+ *
+ * Scoped to kit-driven slices on purpose: whether an overdue INDIVIDUAL or
+ * standalone asset blocks other bookings is decided by the asset rules.
+ *
+ * @param args.currentBookingId - The booking being judged; its own slices never hold
+ * @param args.organizationId - Scopes the booking; omit where the caller is
+ *   already scoped through an org-scoped parent
+ * @returns A `BookingAssetWhereInput` for still-out overdue kit slices
+ */
+export function stillOutOnOverdueKitSlice({
+  currentBookingId,
+  organizationId,
+}: {
+  currentBookingId: string;
+  organizationId?: string;
+}): Prisma.BookingAssetWhereInput {
+  return {
+    checkedOutAt: { not: null },
+    checkedInAt: null,
+    booking: {
+      ...(organizationId ? { organizationId } : {}),
+      status: BookingStatus.OVERDUE,
+      id: { not: currentBookingId },
+    },
+  };
+}
+
+/**
  * Normalizes BookingAsset pivot records into a flat asset array
  * with bonus booking quantity info. Used at the boundary between
  * the service layer and UI components for backward compatibility.

@@ -1072,6 +1072,38 @@ describe("manage-kits loader — Models tab payload", () => {
     );
   });
 
+  it("feeds the kit rows every slice still out on an overdue booking, whatever its dates", async () => {
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    });
+
+    await loader(
+      createLoaderArgs({ context: mockContext, params: mockParams })
+    );
+
+    // The availability label judges a kit on its own slices. An overdue kit
+    // has no known return date, so its slice must reach the row even when the
+    // overdue booking's dates no longer overlap this one.
+    const [{ extraInclude }] = vi.mocked(
+      kitService.getPaginatedAndFilterableKits
+    ).mock.calls[0] as any;
+    const sliceWhere =
+      extraInclude.assetKits.select.asset.select.bookingAssets.where;
+    expect(sliceWhere.OR).toContainEqual({
+      checkedOutAt: { not: null },
+      checkedInAt: null,
+      booking: {
+        status: BookingStatus.OVERDUE,
+        id: { not: "booking123" },
+      },
+    });
+  });
+
   it("hides the Models tab when the org has no asset models", async () => {
     vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
       showModelsTab: false,
@@ -1263,7 +1295,11 @@ describe("manage-kits loader — Models tab payload", () => {
         select: {
           asset: {
             select: {
-              bookingAssets: { where: { booking: { OR: OverlapClause[] } } };
+              // The first branch is the date overlap; the second is the
+              // still-out overdue kit slice, which ignores dates.
+              bookingAssets: {
+                where: { OR: [{ booking: { OR: OverlapClause[] } }, unknown] };
+              };
             };
           };
         };
@@ -1324,8 +1360,8 @@ describe("manage-kits loader — Models tab payload", () => {
       // relations are `boolean | args` unions; this names the one shape the
       // loader builds.
       const include = args.extraInclude as unknown as IncludeWithOverlap;
-      return include.assetKits.select.asset.select.bookingAssets.where.booking
-        .OR;
+      return include.assetKits.select.asset.select.bookingAssets.where.OR[0]
+        .booking.OR;
     }
 
     // The booking being filled runs Jan 1 → Jan 2 (`mockLoaderBooking`).
