@@ -16117,6 +16117,12 @@ async function addScannedAssetsToBookingWithinTx(
         id: true,
         title: true,
         status: true,
+        // why: `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets only
+        // when it can see the type. Without it, a pool another booking holds a
+        // few units of reads as booked, and a kit sharing that pool with a
+        // reserved sibling kit is refused. Units are judged further down: a
+        // kit's own slice by the kit rule, standalone units by the pool guard.
+        type: true,
         // Bookings reach assets through the `BookingAsset` pivot, which is
         // what `hasAssetBookingConflicts` reads and what the
         // conflict-conditions helper returns.
@@ -16139,6 +16145,7 @@ async function addScannedAssetsToBookingWithinTx(
       id: string;
       title: string;
       status: string;
+      type: string;
       bookingAssets: Array<{ booking: { id: string; status: string } }>;
     };
     const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
