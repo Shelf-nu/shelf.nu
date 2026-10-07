@@ -30,6 +30,7 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
+import { sourceCommitmentParts } from "@shelf/quantity-control";
 import type { CustodySourceOption } from "~/modules/asset/custody-source";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
@@ -45,10 +46,11 @@ export function formatCustodySourceOption(
   option: CustodySourceOption,
   unitLabel: string
 ): string {
-  let text = `${option.label} · ${option.placed} ${unitLabel}`;
-  if (option.inCustody > 0) text += ` · ${option.inCustody} in custody`;
-  if (option.onBooking > 0) text += ` · ${option.onBooking} on a booking`;
-  return text;
+  return [
+    option.label,
+    `${option.placed} ${unitLabel}`,
+    ...sourceCommitmentParts(option),
+  ].join(" · ");
 }
 
 /** Props for {@link CustodySourceSelect}. */
