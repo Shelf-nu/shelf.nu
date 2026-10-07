@@ -88,6 +88,7 @@ function domainOrg() {
     id: ORG_ID,
     ssoDetails: {
       adminGroupId: null,
+      custodyManagerGroupId: null,
       baseUserGroupId: "g-staff",
       selfServiceGroupId: null,
     },

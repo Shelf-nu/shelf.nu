@@ -366,8 +366,8 @@ function groupClaimMatches(
  * Resolves the Shelf organization role for an SSO user from the SAML `groups`
  * claim, using the group ids mapped on `SsoDetails`. When the user's groups
  * match several columns, the highest-rank role wins (`resolveRole`: ADMIN >
- * SELF_SERVICE > BASE). Returns `null` when no configured group matches (the
- * caller then grants no org access, and the user lands on
+ * CUSTODY_MANAGER > SELF_SERVICE > BASE). Returns `null` when no configured
+ * group matches (the caller then grants no org access, and the user lands on
  * `/sso-pending-assignment`).
  *
  * @param ssoDetails - The org's SSO config (holds the per-role group ids)
