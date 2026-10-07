@@ -3982,6 +3982,11 @@ export async function fulfilModelRequestsAndCheckout({
 
     /** The assets the scan actually put on the booking, for the notes below. */
     let addedAssetIds: string[] = [];
+    /**
+     * Assets whose row was already on the booking and answered a reservation
+     * when scanned. They went through the scanner without gaining a row.
+     */
+    let claimedAssetIds: string[] = [];
 
     /**
      * Single atomic transaction:
@@ -4033,6 +4038,7 @@ export async function fulfilModelRequestsAndCheckout({
         // Read post-commit, for the notes below. A scan that only claimed a
         // unit already on the booking added nothing to narrate.
         addedAssetIds = scanResult.addedAssetIds;
+        claimedAssetIds = scanResult.claimedAssetIds;
 
         /**
          * Post-scan snapshot of every booking asset that needs
@@ -4043,6 +4049,9 @@ export async function fulfilModelRequestsAndCheckout({
           where: { bookingId },
           select: {
             id: true,
+            // The kit a kit-driven slice came from, so a scanned kit label
+            // marks its members' rows as scanned below.
+            sourceKitId: true,
             quantity: true,
             // Needed to exclude kit-driven slices from the standalone
             // availability guard below (#2790) — see the filter's rationale.
@@ -4114,11 +4123,24 @@ export async function fulfilModelRequestsAndCheckout({
           // One event per BookingAsset ROW (not deduped). For multi-row
           // qty-tracked, each event carries that row's own quantity in
           // `meta.quantity` (no-op for INDIVIDUAL).
-          // Only the rows this scan put on the booking went through the
-          // scanner. Rows assigned beforehand go out with the batch without
-          // being scanned, so their method is recorded as not said rather
-          // than as the batch's.
-          const scannedAssetIds = new Set(addedAssetIds);
+          // A row went through the scanner when the scan named it: an asset
+          // scanned directly (new to the booking, or already on it), a member
+          // of a scanned kit, or a row the scan claimed for a reservation.
+          // Rows the scan did not name go out with the batch unscanned, so
+          // their method is recorded as not said rather than as the batch's.
+          const scannedAssetIds = new Set([
+            ...assetIds,
+            ...kitSlices.map((slice) => slice.assetId),
+            ...addedAssetIds,
+            ...claimedAssetIds,
+          ]);
+          const scannedKitIds = new Set(kitIds);
+          const wasScanned = (row: {
+            asset: { id: string };
+            sourceKitId: string | null;
+          }) =>
+            scannedAssetIds.has(row.asset.id) ||
+            (row.sourceKitId !== null && scannedKitIds.has(row.sourceKitId));
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4131,7 +4153,7 @@ export async function fulfilModelRequestsAndCheckout({
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
                 ...bookingMethodMeta(
-                  provenance && !scannedAssetIds.has(ba.asset.id)
+                  provenance && !wasScanned(ba)
                     ? { ...provenance, method: null }
                     : provenance,
                   [ba.id]

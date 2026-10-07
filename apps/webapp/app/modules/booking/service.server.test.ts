@@ -5815,6 +5815,89 @@ describe("fulfilModelRequestsAndCheckout", () => {
     ]);
   });
 
+  it("records an item already on the booking as scanned when the fulfil scanner scans it", async () => {
+    expect.assertions(1);
+
+    // The reservations drawer checks out an item already on the booking by
+    // scanning it. The printer's row was there before the scan and its stamp
+    // is spent, so the scan adds no row for it and claims nothing; it still
+    // went through the scanner. The laptop is new to the booking. The HP was
+    // assigned beforehand and not scanned, so its method stays not said.
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: ["hp-1", "printer-2"].map((assetId) => ({
+        asset: {
+          id: assetId,
+          assetKits: [],
+          title: assetId,
+          status: AssetStatus.AVAILABLE,
+          bookingAssets: [],
+        },
+        assetId,
+        quantity: 1,
+        id: `ba-${assetId}`,
+        checkedOutAt: null,
+        checkedInAt: null,
+      })),
+    });
+    // why: the pre-tx load, then the post-tx hydrate; see the test above.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: every asset read in this flow (the scanned assets' metadata inside
+    // the tx, then the titles for the post-commit notes) describes the ids it
+    // asks for.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: id === "dell-1" ? "am-dell" : "am-printer",
+            assetKits: [],
+          }))
+        )
+    );
+    // why: the scan helper first reads which scanned assets already hold a
+    // standalone row: the printer does, so no row is added for it.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ assetId: "printer-2", quantity: 1 }]);
+    // why: the post-scan snapshot the check-out events are written from.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(
+      ["hp-1", "printer-2", "dell-1"].map((assetId) => ({
+        id: `ba-${assetId}`,
+        sourceKitId: null,
+        quantity: 1,
+        assetKitId: null,
+        asset: { id: assetId, title: assetId, type: AssetType.INDIVIDUAL },
+      }))
+    );
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["printer-2", "dell-1"],
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    const checkedOutEvents = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT");
+    expect(
+      checkedOutEvents.map((event) => [event.assetId, event.meta])
+    ).toEqual([
+      ["hp-1", { method: null, surface: "web" }],
+      ["printer-2", { method: "scanned", surface: "web" }],
+      ["dell-1", { method: "scanned", surface: "web" }],
+    ]);
+  });
+
   /**
    * Lock order rather than behaviour. The reservation writers take `AssetModel`
    * before `BookingModelRequest` and hold no booking lock, so this transaction
