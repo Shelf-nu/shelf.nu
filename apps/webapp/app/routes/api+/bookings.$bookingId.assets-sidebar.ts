@@ -62,7 +62,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, canSeeAllBookings } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -99,7 +99,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    if (!canSeeBooking({ canSeeAllBookings, booking, userId })) {
+    if (!canSeeBooking({ access, booking, userId })) {
       throw new ShelfError({
         cause: null,
         message: "You are not authorized to view this booking",

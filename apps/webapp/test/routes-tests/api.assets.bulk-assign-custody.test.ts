@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import {
@@ -74,7 +75,15 @@ vi.mock("~/modules/asset/service.server", () => ({
     .mockResolvedValue({ success: true, skippedQuantityTracked: 0 }),
   // why: the per-unit path is what the scanner submits; the route's job is to
   // split the submission and forward role, which is what these assert.
-  checkOutQuantity: vi.fn().mockResolvedValue({}),
+  // It reports a source with nothing to name, as for a pool at one location.
+  checkOutQuantity: vi.fn().mockResolvedValue({
+    source: {
+      locationId: null,
+      locationName: null,
+      explicit: false,
+      multiSource: false,
+    },
+  }),
 }));
 
 // why: the availability pre-flight lives in the dependency-free leaf, so it is
@@ -132,7 +141,17 @@ vi.mock("~/utils/http.server", async (importOriginal) => {
       // parse never yields `undefined` here. Mirror that: a mock that omits
       // the field tests a shape the route can't actually receive.
       const quantities = JSON.parse(formData.get("quantities") || "{}");
-      return { assetIds, custodian, currentSearchParams, quantities };
+      // Same for `AssetSourceLocationsSchema`: an absent field parses to {}.
+      const sourceLocations = JSON.parse(
+        formData.get("sourceLocations") || "{}"
+      );
+      return {
+        assetIds,
+        custodian,
+        currentSearchParams,
+        quantities,
+        sourceLocations,
+      };
     }),
   };
 });
@@ -188,6 +207,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -230,6 +250,7 @@ describe("api/assets/bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -274,16 +295,15 @@ describe("api/assets/bulk-assign-custody", () => {
     });
   });
 
-  // why: the SELF_SERVICE "assign-to-self" guard now lives inside
-  // `bulkCheckOutAssets` (centralised so web + mobile callers share one
-  // source of truth — the mobile route was missing this check pre-fix,
-  // hex-security r3202162994). The route's responsibility shrinks to
-  // "pass `role` through". Behavioural enforcement is unit-tested at
-  // the service layer (see service.server.test.ts).
-  it("forwards role through to bulkCheckOutAssets so the service-level SELF_SERVICE guard can fire", async () => {
+  // The "assign only to yourself" guard lives inside `bulkCheckOutAssets`,
+  // shared by web and mobile callers. The route forwards the caller's custody
+  // scope; enforcement is unit-tested at the service layer
+  // (see service.server.test.ts).
+  it("forwards a `self` custody scope to bulkCheckOutAssets so the service-level guard can fire", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -310,22 +330,22 @@ describe("api/assets/bulk-assign-custody", () => {
 
     await action(createActionArgs({ request }));
 
-    // Enforcement of the SELF_SERVICE self-restriction now lives inside
-    // bulkCheckOutAssets (unit-tested in asset/service.server.test.ts) so web
-    // and mobile share one implementation. The route's job is to forward role.
+    // bulkCheckOutAssets enforces the scope (unit-tested in
+    // asset/service.server.test.ts); the route's job is to forward it.
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
       expect.objectContaining({
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
         custodianId: "team-member-456",
         userId: "user-123",
       })
     );
   });
 
-  it("forwards ADMIN role transparently (service-level guard is no-op for non-SELF_SERVICE)", async () => {
+  it("forwards an ADMIN's `anyone` custody scope (the service-level guard does not fire)", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
       canUseBarcodes: false,
     } as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -358,7 +378,7 @@ describe("api/assets/bulk-assign-custody", () => {
     const responseData = await response.json();
     expect(responseData).toEqual({ error: null, success: true });
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(
-      expect.objectContaining({ role: OrganizationRoles.ADMIN })
+      expect.objectContaining({ custodyAssign: "anyone" })
     );
   });
   /**
@@ -387,6 +407,7 @@ describe("api/assets/bulk-assign-custody", () => {
       requirePermissionMock.mockResolvedValue({
         organizationId: "org-1",
         role: OrganizationRoles.SELF_SERVICE,
+        access: accessFor(["SELF_SERVICE"]),
         canUseBarcodes: false,
       } as Awaited<ReturnType<typeof requirePermission>>);
       // The caller's own team member: the shape QUANTITY_CUSTODIAN_SELECT reads.
@@ -425,7 +446,7 @@ describe("api/assets/bulk-assign-custody", () => {
       expect(bulkCheckOutAssets).not.toHaveBeenCalled();
     });
 
-    it("hands a named asset to checkOutQuantity and forwards the acting role", async () => {
+    it("hands a named asset to checkOutQuantity and forwards the caller's custody scope", async () => {
       await action(
         createActionArgs({ request: quantityRequest({ "asset-qty": 7 }) })
       );
@@ -437,9 +458,9 @@ describe("api/assets/bulk-assign-custody", () => {
           teamMemberId: "team-member-123",
           userId: "user-123",
           organizationId: "org-1",
-          // The service owns the SELF_SERVICE self-restriction for this path,
-          // so a route that drops `role` silently disables it.
-          role: OrganizationRoles.SELF_SERVICE,
+          // The service owns the "assign only to yourself" restriction for
+          // this path, so a route that drops the scope silently disables it.
+          custodyAssign: "self",
         })
       );
     });

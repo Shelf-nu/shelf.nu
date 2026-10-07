@@ -3,11 +3,14 @@ import { useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import { type loader } from "~/routes/_layout+/assets._index";
-import { AssetQuantitiesSchema } from "~/utils/asset-quantities-schema";
+import {
+  AssetQuantitiesSchema,
+  AssetSourceLocationsSchema,
+} from "~/utils/asset-quantities-schema";
 import { tw } from "~/utils/tw";
 import { resolveTeamMemberName } from "~/utils/user";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
@@ -25,12 +28,18 @@ export const BulkAssignCustodySchema = z.object({
    * so it sends nothing and those assets keep being skipped.
    */
   quantities: AssetQuantitiesSchema,
+  /**
+   * Where each quantity-tracked asset's units come from, sent only by the
+   * scanner, and only for pools placed at two or more locations. Keyed by
+   * asset id: a location id or `"unplaced"`.
+   */
+  sourceLocations: AssetSourceLocationsSchema,
 });
 
 export default function BulkAssignCustodyDialog() {
   const zo = useZorm("BulkAssignCustody", BulkAssignCustodySchema);
 
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { currentUserTeamMember } = useLoaderData<typeof loader>();
 
   const selectedItems = useAtomValue(selectedBulkItemsAtom);
@@ -42,9 +51,9 @@ export default function BulkAssignCustodyDialog() {
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="assign-custody"
-      title={`${isSelfService ? "Take" : "Assign"} custody of assets`}
+      title={`${assignsSelfOnly ? "Take" : "Assign"} custody of assets`}
       description={`These assets are currently available. You're about to assign custody to ${
-        isSelfService ? "yourself" : "one of your team members"
+        assignsSelfOnly ? "yourself" : "one of your team members"
       }.`}
       actionUrl="/api/assets/bulk-assign-custody"
       arrayFieldId="assetIds"
@@ -63,7 +72,7 @@ export default function BulkAssignCustodyDialog() {
             </div>
           ) : null}
           <div className="relative z-50 mb-8">
-            {isSelfService && currentUserTeamMember ? (
+            {assignsSelfOnly && currentUserTeamMember ? (
               <input
                 type="hidden"
                 name="custodian"
@@ -114,7 +123,7 @@ export default function BulkAssignCustodyDialog() {
             ) : null}
           </div>
 
-          <div className={tw("flex gap-3", isSelfService && "-mt-8")}>
+          <div className={tw("flex gap-3", assignsSelfOnly && "-mt-8")}>
             <Button
               type="button"
               variant="secondary"

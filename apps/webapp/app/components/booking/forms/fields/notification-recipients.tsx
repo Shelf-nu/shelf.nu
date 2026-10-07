@@ -1,12 +1,13 @@
 /**
  * Per-booking notification recipients field with live preview.
  *
- * Rendered inside the booking create/edit form. Allows admin/owner users to
- * add extra team members who should receive email notifications for this
- * specific booking. Non-admin users do not see this field (privacy gating).
+ * Rendered inside the booking create/edit form. Lets members who manage a
+ * booking's recipients (`notifications.manageBookingRecipients`) add extra
+ * team members who should receive email notifications for this specific
+ * booking. Everyone else does not see this field (privacy gating).
  *
  * Uses {@link DynamicDropdown} with the `teamMember` model and
- * `userWithAdminAndOwnerOnly` option, fetching data via the standard
+ * `selectableRecipientsOnly` option, fetching data via the standard
  * `/api/model-filters` endpoint with server-side search.
  *
  * The {@link NotificationPreview} updates dynamically as users are
@@ -20,6 +21,7 @@ import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import FormRow from "~/components/forms/form-row";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { TeamMemberNameFields, UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
@@ -38,8 +40,6 @@ type NotificationRecipientsFieldProps = {
   defaultSelected?: NotificationRecipientTeamMember[];
   /** Whether the field is disabled (e.g. during submission) */
   disabled?: boolean;
-  /** Gates visibility; returns null when false */
-  isAdminOrOwner: boolean;
   /** Display name of the booking custodian (always notified) */
   custodianName?: string;
   /** Display name of the booking creator (if different from custodian) */
@@ -51,8 +51,9 @@ type NotificationRecipientsFieldProps = {
 /**
  * Per-booking notification recipients field with live preview.
  *
- * **Visibility:** Only rendered for admin/owner users. Returns `null` for
- * self-service/base users to prevent them from seeing who else is notified.
+ * **Visibility:** rendered only for members whose policy lets them manage a
+ * booking's recipients (`notifications.manageBookingRecipients`); returns
+ * `null` for everyone else, who must not see who else is notified.
  *
  * **Dynamic preview:** The "Who will be notified" preview updates in real-time
  * as users are selected/deselected in the dropdown.
@@ -60,11 +61,12 @@ type NotificationRecipientsFieldProps = {
 export function NotificationRecipientsField({
   defaultSelected,
   disabled: _disabled,
-  isAdminOrOwner,
   custodianName,
   creatorName,
   adminCount,
 }: NotificationRecipientsFieldProps) {
+  const canManageRecipients =
+    useRoleAccess().policy.notifications.manageBookingRecipients;
   const bookingSettings = useBookingSettings();
 
   // Track selected IDs and a name map for the preview
@@ -175,7 +177,7 @@ export function NotificationRecipientsField({
     selectedNameMap,
   ]);
 
-  if (!isAdminOrOwner) {
+  if (!canManageRecipients) {
     return null;
   }
 
@@ -214,14 +216,15 @@ export function NotificationRecipientsField({
             name: "teamMember",
             queryKey: "name",
             deletedAt: null,
-            userWithAdminAndOwnerOnly: true,
+            selectableRecipientsOnly: true,
             usersOnly: true,
-            // why: no `custodyPurpose` on purpose. This picks admins to notify
-            // — neither custody nor a booking custodian — and
-            // `userWithAdminAndOwnerOnly` already does the narrowing. The
-            // endpoint's assignment fallback resolves to "all" for the
-            // ADMIN/OWNER users this is rendered for, and fails closed for
-            // anyone else, which is what we want here.
+            // why: no `custodyPurpose` on purpose. This picks members to notify
+            // (neither custody nor a booking custodian), and
+            // `selectableRecipientsOnly` already narrows to members who may be
+            // picked as recipients. The endpoint's assignment fallback
+            // resolves to "all" for the members this is rendered for (those
+            // who manage booking recipients), and fails closed for anyone
+            // else, which is what we want here.
           }}
           initialDataKey="teamMembersForNotify"
           countKey="totalTeamMembersForNotify"

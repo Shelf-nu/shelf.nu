@@ -1,4 +1,5 @@
 import { loader } from "~/routes/api+/mobile+/barcode.$value";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -38,6 +39,8 @@ vitest.mock("~/modules/api/mobile-auth.server", async () => {
     ...actual,
     requireMobileAuth: vitest.fn(),
     requireOrganizationAccess: vitest.fn(),
+    // why: reads the caller's membership; the tests set custody visibility
+    getMobileUserContext: vitest.fn(),
   };
 });
 
@@ -85,6 +88,7 @@ vitest.mock("~/utils/error", () => ({
 }));
 
 import {
+  getMobileUserContext,
   requireMobileAuth,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
@@ -130,6 +134,46 @@ const mockBarcode = {
   kit: null,
 };
 
+/** One operator-assigned custody row, as `MOBILE_ASSET_SELECT` returns it. */
+function custodyRow(
+  custodianId: string,
+  name: string,
+  userId: string | null,
+  quantity: number
+) {
+  return {
+    quantity,
+    kitCustodyId: null,
+    custodian: { id: custodianId, name, userId },
+  };
+}
+
+/**
+ * A quantity-tracked asset held by two people, oldest custody first: a
+ * colleague and the caller (`user-1`).
+ */
+const sharedAsset = {
+  ...mockAsset,
+  type: "QUANTITY_TRACKED",
+  quantity: 20,
+  custody: [
+    custodyRow("tm-colleague", "Colleague One", "user-2", 3),
+    custodyRow("tm-caller", "Test User", "user-1", 2),
+  ],
+};
+
+/** Sets whether the caller may see every holder's custody in the workspace. */
+function asViewer({ canSeeAllCustody }: { canSeeAllCustody: boolean }) {
+  const context = mobileUserContext();
+  vitest.mocked(getMobileUserContext).mockResolvedValue({
+    ...context,
+    access: {
+      ...context.access,
+      custody: { ...context.access.custody, seeAll: canSeeAllCustody },
+    },
+  } as Awaited<ReturnType<typeof getMobileUserContext>>);
+}
+
 function createBarcodeRequest(value: string, orgId = "org-1") {
   return new Request(
     `http://localhost:3000/api/mobile/barcode/${encodeURIComponent(
@@ -168,6 +212,7 @@ describe("GET /api/mobile/barcode/:value", () => {
     // cross-workspace lookup out of every current-workspace case.
     (db.userOrganization.findMany as any).mockResolvedValue([]);
     (db.barcode.findMany as any).mockResolvedValue([]);
+    asViewer({ canSeeAllCustody: true });
   });
 
   it("should resolve a barcode to its linked asset", async () => {
@@ -483,5 +528,96 @@ describe("GET /api/mobile/barcode/:value", () => {
     const body = await (result as unknown as Response).json();
     expect(body.barcode.kitId).toBe("kit-1");
     expect(body.barcode.asset).toBeNull();
+  });
+  describe("custody visibility", () => {
+    beforeEach(() => {
+      (getBarcodeByValue as any).mockResolvedValue({
+        ...mockBarcode,
+        asset: sharedAsset,
+      });
+    });
+
+    it("sends a caller without custody visibility only their own holding and a count of the others", async () => {
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(body.barcode.asset.custodyList).toEqual([
+        {
+          custodian: { id: "tm-caller", name: "Test User", userId: "user-1" },
+          quantity: 2,
+          releasableQuantity: 2,
+        },
+      ]);
+      expect(body.barcode.asset.custodyListOthersCount).toBe(1);
+      expect(body.barcode.asset.custody).toBeNull();
+      const payload = JSON.stringify(body);
+      expect(payload).not.toContain("Colleague One");
+      expect(payload).not.toContain("user-2");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-1");
+    });
+
+    it("sends every holder to a caller who may see all custody", async () => {
+      asViewer({ canSeeAllCustody: true });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(
+        body.barcode.asset.custodyList.map(
+          (entry: { custodian: { id: string } }) => entry.custodian.id
+        )
+      ).toEqual(["tm-colleague", "tm-caller"]);
+      expect(body.barcode.asset.custodyListOthersCount).toBe(0);
+      expect(body.barcode.asset.custody).toEqual({
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague One",
+          userId: "user-2",
+        },
+      });
+    });
+
+    it("reads custody visibility in the sibling workspace that owns the barcode", async () => {
+      // The caller's role and that workspace's settings apply there, not the
+      // ones of the workspace they scanned from.
+      (getBarcodeByValue as any)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          ...mockBarcode,
+          organizationId: "org-2",
+          asset: sharedAsset,
+        });
+      (db.userOrganization.findMany as any).mockResolvedValue([
+        { organizationId: "org-2", organization: { barcodesEnabled: true } },
+      ]);
+      (db.barcode.findMany as any).mockResolvedValue([
+        { organizationId: "org-2" },
+      ]);
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await loader(
+        createLoaderArgs({
+          request: createBarcodeRequest("BC001234"),
+          params: { value: "BC001234" },
+        })
+      );
+
+      const body = await (result as unknown as Response).json();
+      expect(body.barcode.organizationId).toBe("org-2");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-2");
+      expect(body.barcode.asset.custodyListOthersCount).toBe(1);
+    });
   });
 });

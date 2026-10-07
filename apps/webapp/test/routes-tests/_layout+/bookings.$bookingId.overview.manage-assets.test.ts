@@ -23,6 +23,7 @@ import {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -186,14 +187,15 @@ describe("manage-assets route validation", () => {
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      isSelfServiceOrBase: false,
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -745,6 +747,11 @@ describe("manage-assets route validation", () => {
         // form makes a silent regression impossible: dropping the flag fails
         // this test rather than quietly restoring the duplicate.
         skipBookingNote: true,
+        // The caller's access, so the service re-checks the add rule against
+        // the booking status it reads under the row lock.
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ writeAll: true }),
+        }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -1125,20 +1132,9 @@ describe("manage-assets route validation", () => {
     }
 
     function mockRole(role: OrganizationRoles) {
-      vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-        organizationId: "org123",
-        isSelfServiceOrBase:
-          role === OrganizationRoles.SELF_SERVICE ||
-          role === OrganizationRoles.BASE,
-        role,
-        organizations: [],
-        currentOrganization: {} as any,
-        userOrganizations: [],
-        canSeeAllBookings: false,
-        canSeeAllCustody: false,
-        canUseBarcodes: false,
-        canUseAudits: false,
-      });
+      vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role], organizationId: "org123" }) as any
+      );
     }
 
     beforeEach(() => {
@@ -1279,6 +1275,10 @@ describe("manage-assets loader — Models tab payload", () => {
     id: "booking123",
     name: "Test Booking",
     status: BookingStatus.DRAFT,
+    // The signed-in caller's own booking, so a restricted role passes the
+    // ownership check and the case stays about what the payload carries.
+    creatorId: "user123",
+    custodianUserId: null,
     from: new Date("2026-01-01"),
     to: new Date("2026-01-02"),
     bookingAssets: [],
@@ -1345,14 +1345,15 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1420,6 +1421,15 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it may
+    // manage items on its own DRAFT booking but may not see others' custody.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.SELF_SERVICE],
+      }) as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>
+    );
+
     // why: this fixture mirrors what `assetIndexFields()` actually selects —
     // the full `custody.custodian.user` including `email` — so the assertion
     // measures redaction rather than the shape of a real query. The picker is
@@ -1607,14 +1617,15 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1856,20 +1867,9 @@ describe("manage-assets loader: ownership gate", () => {
   }
 
   function mockRole(role: OrganizationRoles) {
-    vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      userOrganizations: [],
-      isSelfServiceOrBase:
-        role === OrganizationRoles.SELF_SERVICE ||
-        role === OrganizationRoles.BASE,
-      role,
-      organizations: [],
-      currentOrganization: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
-      canUseBarcodes: false,
-      canUseAudits: false,
-    });
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: [role], organizationId: "org123" }) as any
+    );
   }
 
   beforeEach(() => {

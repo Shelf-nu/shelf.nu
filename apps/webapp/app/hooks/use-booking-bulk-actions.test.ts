@@ -12,9 +12,10 @@ import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { renderHook } from "@testing-library/react";
 import { useLoaderData } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { useBookingBulkActions } from "./use-booking-bulk-actions";
-import { useUserRoleHelper } from "./user-user-role-helper";
+import { useOrganizationRoles } from "./use-organization-roles";
 
 // why: `useLoaderData` supplies the booking under test; the real hook needs a
 // data router this test does not mount.
@@ -25,20 +26,28 @@ vi.mock("react-router", async () => {
 
 // why: the roles under test. The real hook reads `useRouteLoaderData` for the
 // `_layout` route, which is not mounted here.
-vi.mock("./user-user-role-helper", () => ({
-  useUserRoleHelper: vi.fn(),
+vi.mock("./use-organization-roles", () => ({
+  useOrganizationRoles: vi.fn(),
+}));
+
+/** The roles the organization-roles mock returns; the access mock reads the same. */
+let mockRoles: OrganizationRoles[] = [];
+
+// why: the real hook reads the member's access from the `_layout` loader,
+// which is not mounted here; drive it from the same roles as the organization-roles mock.
+vi.mock("./use-role-access", () => ({
+  useRoleAccess: () => accessFor(mockRoles),
 }));
 
 const mockedUseLoaderData = vi.mocked(useLoaderData);
-const mockedUseUserRoleHelper = vi.mocked(useUserRoleHelper);
+const mockedUseOrganizationRoles = vi.mocked(useOrganizationRoles);
 
 function actions(status: BookingStatus, roles: OrganizationRoles[]) {
   mockedUseLoaderData.mockReturnValue({
     booking: { id: "b1", status },
   } as never);
-  mockedUseUserRoleHelper.mockReturnValue({ roles } as ReturnType<
-    typeof useUserRoleHelper
-  >);
+  mockedUseOrganizationRoles.mockReturnValue(roles);
+  mockRoles = roles;
 
   return renderHook(() => useBookingBulkActions()).result.current;
 }

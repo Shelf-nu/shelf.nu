@@ -1,7 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { getBooking } from "~/modules/booking/service.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { SERVER_URL } from "~/utils/env";
 import { makeShelfError } from "~/utils/error";
 import { error, getParams } from "~/utils/http.server";
@@ -22,13 +22,12 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
 
   try {
     /** Check if the current user is allowed to read booking */
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId: authSession.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId: authSession.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     const booking = await getBooking({
       id: bookingId,
@@ -36,16 +35,14 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       request,
     });
 
-    /** For self service & base users, we only allow them to read their own bookings */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId: authSession.userId,
-        role,
-        action: "download the calendar for",
-        checkCustodianOnly: true,
-      });
-    }
+    // Booking documents follow `bookings.documentsForOthers`: others'
+    // bookings only for roles granted it, otherwise the custodian's own.
+    assertCanDownloadBookingDocuments({
+      access,
+      booking,
+      userId: authSession.userId,
+      action: "download the calendar for",
+    });
 
     const bookingUrl = `${SERVER_URL}/bookings/${bookingId}`;
 

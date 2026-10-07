@@ -43,6 +43,12 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),
   requireOrganizationAccess: vi.fn(),
+  // why: custody visibility is pinned in mobile.barcode.test.ts; here every
+  // caller may see all custody, so the photo step is all that shapes the row.
+  // An Administrator's context: sees every holder's custody.
+  getMobileUserContext: vi.fn(async () =>
+    (await import("@helpers/mobile-user-context")).mobileUserContext()
+  ),
   MOBILE_ASSET_SELECT: {},
   MOBILE_KIT_SELECT: {},
   resignAndShapeMobileAsset: vi.fn((asset: { id: string }) =>

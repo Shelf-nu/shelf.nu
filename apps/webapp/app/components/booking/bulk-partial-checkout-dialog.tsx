@@ -48,6 +48,7 @@ import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
+import { CheckoutSourceSelect } from "./checkout-source-select";
 import { AssetImage } from "../assets/asset-image/component";
 import { Form } from "../custom-form";
 import KitImage from "../kits/kit-image";
@@ -177,7 +178,17 @@ export default function BulkPartialCheckoutDialog({
     checkedOutAssetIds,
     remainingToCheckOutByAsset,
     partialCheckinDetails,
+    checkoutSourceQuestions,
   } = useLoaderData<BookingPageLoaderData>();
+
+  /** "From location" questions by slice id, for the pool rows below. */
+  const sourceQuestionBySliceId = useMemo(
+    () =>
+      new Map(
+        checkoutSourceQuestions.map((question) => [question.sliceId, question])
+      ),
+    [checkoutSourceQuestions]
+  );
 
   const rawSelectedItems = useAtomValue(selectedBulkItemsAtom);
 
@@ -721,6 +732,12 @@ export default function BulkPartialCheckoutDialog({
                         const qtyInfo = bookingAssetId
                           ? qtySliceByBookingAssetId.get(bookingAssetId)
                           : undefined;
+                        // A pool at two or more locations going out for the
+                        // first time asks where its units leave from.
+                        const sourceQuestion =
+                          qtyInfo && bookingAssetId
+                            ? sourceQuestionBySliceId.get(bookingAssetId)
+                            : undefined;
                         return (
                           <li
                             key={
@@ -728,34 +745,46 @@ export default function BulkPartialCheckoutDialog({
                                 ? `${asset.id}-${bookingAssetId}`
                                 : asset.id
                             }
-                            className="flex items-center gap-2 text-sm text-gray-700"
+                            className="flex flex-col gap-1 text-sm text-gray-700"
                           >
-                            <AssetImage
-                              className="size-5"
-                              asset={{
-                                id: asset.id,
-                                thumbnailImage: asset.thumbnailImage,
-                                mainImage: asset.mainImage,
-                                mainImageExpiration: asset.mainImageExpiration,
-                                assetModel: asset.assetModel ?? null,
-                              }}
-                              alt={`${asset.title} main image`}
-                            />
-                            <span className="font-medium">{asset.title}</span>
-                            {asset.category && (
-                              <span className="text-gray-500">
-                                {" "}
-                                ({asset.category.name})
-                              </span>
-                            )}
-                            {qtyInfo && bookingAssetId ? (
-                              <CheckoutQtyInput
-                                bookingAssetId={bookingAssetId}
-                                max={qtyInfo.remaining}
-                                value={
-                                  qtyByBookingAssetId[bookingAssetId] ?? ""
-                                }
-                                onChange={handleQtyChange}
+                            <div className="flex items-center gap-2">
+                              <AssetImage
+                                className="size-5"
+                                asset={{
+                                  id: asset.id,
+                                  thumbnailImage: asset.thumbnailImage,
+                                  mainImage: asset.mainImage,
+                                  mainImageExpiration:
+                                    asset.mainImageExpiration,
+                                  assetModel: asset.assetModel ?? null,
+                                }}
+                                alt={`${asset.title} main image`}
+                              />
+                              <span className="font-medium">{asset.title}</span>
+                              {asset.category && (
+                                <span className="text-gray-500">
+                                  {" "}
+                                  ({asset.category.name})
+                                </span>
+                              )}
+                              {qtyInfo && bookingAssetId ? (
+                                <CheckoutQtyInput
+                                  bookingAssetId={bookingAssetId}
+                                  max={qtyInfo.remaining}
+                                  value={
+                                    qtyByBookingAssetId[bookingAssetId] ?? ""
+                                  }
+                                  onChange={handleQtyChange}
+                                />
+                              ) : null}
+                            </div>
+                            {sourceQuestion && bookingAssetId ? (
+                              <CheckoutSourceSelect
+                                question={sourceQuestion}
+                                fieldKey={bookingAssetId}
+                                disabled={disabled}
+                                variant="inline"
+                                className="pl-7"
                               />
                             ) : null}
                           </li>

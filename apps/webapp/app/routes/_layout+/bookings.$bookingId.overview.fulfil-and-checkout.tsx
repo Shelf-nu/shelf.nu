@@ -31,7 +31,7 @@
  *   for the loader derivation shared with the Scan to Assign screen.
  */
 
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -52,15 +52,15 @@ import { db } from "~/database/db.server";
 import { useBookingFulfilSessionInitialization } from "~/hooks/use-booking-fulfil-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
+import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { getBooking } from "~/modules/booking/service.server";
 import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -76,6 +76,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -126,6 +127,9 @@ export const fulfilAndCheckoutSchema = z.object({
  *   model requests: the regular checkout flow is correct in that case and
  *   the fulfil scanner would be a confusing detour.
  */
+/** Statuses a booking can be checked out in, as `fulfilAndCheckOut` accepts. */
+const FULFILLABLE_STATUSES: string[] = ["RESERVED", "ONGOING", "OVERDUE"];
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -137,20 +141,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   try {
     // Matches the action's gate: this screen exists only to check out, so a
     // role without `booking:checkout` should not reach it at all.
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: PermissionAction.checkout,
-      }
-    );
-
-    // NOTE: BASE is deliberately not folded in here. `canUserManageBookingAssets`
-    // takes an is-self-service flag, and BASE reaching this loader would get the
-    // permissive branch — but BASE does not hold `booking:checkout`, so the gate
-    // above now stops it before this matters.
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      });
 
     const booking = await getBooking({
       id: bookingId,
@@ -159,29 +156,28 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    // `canUserManageBookingAssets` takes only (status, from, to) plus an
-    // is-self-service flag — it never sees `userId`, so it cannot answer "is
-    // this MY booking". Without this, a SELF_SERVICE user could load another
-    // member's booking, its model requests and its asset data through this
-    // screen, even though the action would refuse the checkout. Read access is
-    // the leak; the write guard does not cover it.
-    if (isSelfService) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "check out",
-      });
-    }
+    // Seeing a booking does not grant checking it out: a caller who does not
+    // write every booking must own it. The action refuses the same callers, so
+    // this keeps another member's booking, model requests and asset data off
+    // this screen. No-op when `access.bookings.writeAll`.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "check out",
+    });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
-
-    if (!canManageAssets) {
+    // This screen is a check-out, so it takes the check-out rule (the
+    // permission above, ownership, and a status that can be checked out), not
+    // the add-items rule: assigning reserved units is part of checking the
+    // booking out, which Self service may do on its own booking. The service
+    // re-checks the status under a row lock.
+    if (!FULFILLABLE_STATUSES.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        message:
-          "You are not allowed to add assets for this booking at the moment.",
+        message: "This booking cannot be checked out in its current status.",
         label: "Booking",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -218,13 +214,26 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const checksOutScannedOnly =
-      isExplicitCheckoutRequired({ role, bookingSettings }) ||
-      booking.status !== BookingStatus.RESERVED;
+      isExplicitScanRequired({
+        access,
+        settings: bookingSettings,
+        direction: "checkout",
+      }) || booking.status !== BookingStatus.RESERVED;
 
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
+
+    /**
+     * Pools already on the booking at two or more locations that have not
+     * gone out yet. The check-out confirmation asks where each one's units
+     * leave from.
+     */
+    const checkoutSourceQuestions = await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId: booking.id,
+    });
 
     return payload({
       title,
@@ -233,6 +242,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       expectedModelRequests,
       alreadyIncluded,
       checksOutScannedOnly,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -267,13 +277,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // `checkout`, not `update`: BASE holds `update` and deliberately does NOT
     // hold `checkout`, so gating on `update` let a BASE user check out through
     // this route. The dedicated action exists precisely to withhold this.
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.checkout,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.checkout,
+    });
 
     const formData = await request.formData();
 
@@ -298,28 +307,26 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // The loader's `canUserManageBookingAssets` only shapes what renders; this
-    // check is what stops a cross-user check-out on a direct POST. SELF_SERVICE
-    // holds `booking:checkout`, and `fulfilAndCheckOut` does not check
-    // ownership itself. No-op for ADMIN/OWNER. Mirrors
-    // api+/mobile+/bookings.fulfil-and-checkout.ts.
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: basicBookingInfo,
-        userId,
-        role,
-        action: "check out",
-      });
-    }
+    // A direct POST skips the loader, so the action repeats the ownership
+    // check. SELF_SERVICE holds `booking:checkout`, and `fulfilAndCheckOut`
+    // does not check ownership itself. No-op when `access.bookings.writeAll`.
+    // Mirrors api+/mobile+/bookings.fulfil-and-checkout.ts.
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: "check out",
+    });
 
     // Decided after the booking and ownership checks, so a missing or foreign
     // booking answers as such. Under the requirement only the scanned units
     // are checked out.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const requireExplicitCheckout = isExplicitCheckoutRequired({
-      role,
-      bookingSettings,
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     const { remainingAssetCount } = await fulfilAndCheckOut({
@@ -335,6 +342,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       requireExplicitCheckout,
       // The fulfil scanner: every unit it sends out was scanned here.
       provenance: { surface: "web", method: "scanned" },
+      // The confirm dialog's "From location" picks, keyed by slice id, for
+      // pools already on the booking at two or more placements. A pool this
+      // scan adds has no slice yet, so it gets the default (see
+      // `recordCheckoutSourceLocations`).
+      sourceLocations: parseSourceLocationsFromFormData(formData),
     });
 
     sendNotification({
@@ -396,6 +408,7 @@ export default function FulfilAndCheckoutForBooking() {
     expectedModelRequests,
     alreadyIncluded,
     checksOutScannedOnly,
+    checkoutSourceQuestions,
   } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
@@ -429,7 +442,10 @@ export default function FulfilAndCheckoutForBooking() {
     <>
       <Header hidePageDescription />
 
-      <FulfilReservationsDrawer isLoading={isLoading} />
+      <FulfilReservationsDrawer
+        isLoading={isLoading}
+        sourceQuestions={checkoutSourceQuestions}
+      />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

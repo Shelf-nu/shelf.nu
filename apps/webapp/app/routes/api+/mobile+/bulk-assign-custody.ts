@@ -95,15 +95,17 @@ export async function action({ request }: ActionFunctionArgs) {
       quantities
     );
 
-    // Get user context (role + barcode access) for asset index settings
-    const { role, canUseBarcodes, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // Caller's access (effective role, custody scope) and barcode access
+    const { canUseBarcodes, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     const settings = await getAssetIndexSettings({
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     // Validate custodian belongs to the organization
@@ -123,19 +125,14 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    /**
-     * Pass `role` so the service-level SELF_SERVICE guard fires.
-     * Without it, a SELF_SERVICE user could assign custody to any
-     * team member (hex-security r3202162994).
-     */
     // Every per-unit assignment is checked before anything is written,
-    // including the SELF_SERVICE rule.
+    // including the "assign only to yourself" rule (`access.custody.assign`).
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
       organizationId,
       custodian: teamMember,
-      role,
+      custodyAssign: access.custody.assign,
       userId: user.id,
     });
 
@@ -146,7 +143,7 @@ export async function action({ request }: ActionFunctionArgs) {
     const { skippedQuantityTracked } = bulkAssetIds.length
       ? await bulkCheckOutAssets({
           userId: user.id,
-          role,
+          custodyAssign: access.custody.assign,
           assetIds: bulkAssetIds,
           custodianId,
           custodianName: teamMember.name,
@@ -161,7 +158,7 @@ export async function action({ request }: ActionFunctionArgs) {
            * custodian filter. Swap in `scopeCustodianFilterIds` at that point, so
            * they can still filter by their OWN custody.
            */
-          allowedTeamMemberIds: canSeeAllCustody ? "all" : [],
+          allowedTeamMemberIds: access.custody.seeAll ? "all" : [],
         })
       : { skippedQuantityTracked: 0 };
 
@@ -177,7 +174,7 @@ export async function action({ request }: ActionFunctionArgs) {
       custodian: teamMember,
       userId: user.id,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
     });
 
     // The service skips QUANTITY_TRACKED ids that came without a quantity in a

@@ -10,7 +10,7 @@
  * own gates are.
  *
  * @see {@link file://./mobile-auth.server.ts} `getMobileUserContext`
- * @see {@link file://./../../utils/booking-authorization.server.ts} `resolveCanSeeAllBookings`
+ * @see {@link file://./../../utils/permissions/role-access.ts} `resolveRoleAccess`
  */
 
 import { OrganizationRoles } from "@prisma/client";
@@ -96,8 +96,8 @@ describe("getMobileUserContext — booking visibility", () => {
 
       const ctx = await getMobileUserContext("user-1", "org-1");
 
-      expect(ctx.canSeeAllBookings).toBe(true);
-      expect(ctx.isSelfServiceOrBase).toBe(false);
+      expect(ctx.access.bookings.seeAll).toBe(true);
+      expect(ctx.access.bookings.writeAll).toBe(true);
     }
   );
 
@@ -108,8 +108,8 @@ describe("getMobileUserContext — booking visibility", () => {
 
       const ctx = await getMobileUserContext("user-1", "org-1");
 
-      expect(ctx.canSeeAllBookings).toBe(false);
-      expect(ctx.isSelfServiceOrBase).toBe(true);
+      expect(ctx.access.bookings.seeAll).toBe(false);
+      expect(ctx.access.bookings.writeAll).toBe(false);
     }
   );
 
@@ -118,7 +118,7 @@ describe("getMobileUserContext — booking visibility", () => {
 
     const ctx = await getMobileUserContext("user-1", "org-1");
 
-    expect(ctx.canSeeAllBookings).toBe(true);
+    expect(ctx.access.bookings.seeAll).toBe(true);
   });
 
   it("frees a SELF_SERVICE user when selfServiceCanSeeBookings is on", async () => {
@@ -128,7 +128,7 @@ describe("getMobileUserContext — booking visibility", () => {
 
     const ctx = await getMobileUserContext("user-1", "org-1");
 
-    expect(ctx.canSeeAllBookings).toBe(true);
+    expect(ctx.access.bookings.seeAll).toBe(true);
   });
 
   it("reads the override matching the ROLE, not either one", async () => {
@@ -138,7 +138,7 @@ describe("getMobileUserContext — booking visibility", () => {
 
     const ctx = await getMobileUserContext("user-1", "org-1");
 
-    expect(ctx.canSeeAllBookings).toBe(false);
+    expect(ctx.access.bookings.seeAll).toBe(false);
   });
 
   it("keeps booking and custody visibility independent", async () => {
@@ -147,22 +147,44 @@ describe("getMobileUserContext — booking visibility", () => {
     const ctx = await getMobileUserContext("user-1", "org-1");
 
     // Seeing a colleague's booking does not mean seeing who holds it.
-    expect(ctx.canSeeAllBookings).toBe(true);
-    expect(ctx.canSeeAllCustody).toBe(false);
+    expect(ctx.access.bookings.seeAll).toBe(true);
+    expect(ctx.access.custody.seeAll).toBe(false);
   });
 
   it("resolves the most privileged role, not whichever is stored first", async () => {
-    // `role` is roles[0] and is wrong for any gate: an admin whose membership
-    // happens to start with SELF_SERVICE would be treated as restricted.
+    // An admin whose membership happens to start with SELF_SERVICE is an
+    // admin: access reads the highest-rank role, never roles[0].
     membership([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
 
     const ctx = await getMobileUserContext("user-1", "org-1");
 
-    expect(ctx.effectiveRole).toBe(OrganizationRoles.ADMIN);
-    expect(ctx.canSeeAllBookings).toBe(true);
-    expect(ctx.canSeeAllCustody).toBe(true);
-    expect(ctx.isSelfServiceOrBase).toBe(false);
-    // The legacy field is deliberately left alone; callers still read it.
-    expect(ctx.role).toBe(OrganizationRoles.SELF_SERVICE);
+    expect(ctx.access.role).toBe(OrganizationRoles.ADMIN);
+    expect(ctx.access.bookings.seeAll).toBe(true);
+    expect(ctx.access.custody.seeAll).toBe(true);
+    // The whole membership stays available for matrix checks.
+    expect(ctx.roles).toEqual([
+      OrganizationRoles.SELF_SERVICE,
+      OrganizationRoles.ADMIN,
+    ]);
+  });
+
+  it("returns access resolved from the membership's highest role and the toggles", async () => {
+    membership([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+    const ctx = await getMobileUserContext("user-1", "org-1");
+
+    expect(ctx.access.role).toBe("ADMIN");
+    expect(ctx.access.bookings.writeAll).toBe(true);
+  });
+
+  it("a restricted membership's see-toggle widens access.bookings.seeAll only", async () => {
+    membership([OrganizationRoles.SELF_SERVICE], {
+      selfServiceCanSeeBookings: true,
+    });
+
+    const ctx = await getMobileUserContext("user-1", "org-1");
+
+    expect(ctx.access.bookings.seeAll).toBe(true);
+    expect(ctx.access.bookings.writeAll).toBe(false);
   });
 });

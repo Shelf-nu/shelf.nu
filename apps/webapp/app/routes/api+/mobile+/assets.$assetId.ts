@@ -24,6 +24,7 @@ import {
   filterMobileCustodyListForViewer,
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
+import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -72,13 +73,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Custody visibility is permission-gated (web parity): viewers without
     // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
     // allow) must not receive other holders' custody. Resolve the flags once
-    // here; the filtering happens below, after shaping. `canSeeAllBookings`
+    // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { canSeeAllCustody, canSeeAllBookings } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
       where: {
@@ -157,6 +155,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // why: discriminates operator rows (null) from kit-allocated rows
             // so the shaper can compute `releasableQuantity` per holder.
             kitCustodyId: true,
+            // why: the location each operator row's units were taken from,
+            // for the additive `custodyList[].sources` below.
+            location: { select: { id: true, name: true } },
+            // why: tells unplaced units apart from a source never recorded
+            // in those `sources` (both have a null location).
+            sourceUnknown: true,
             custodian: {
               select: {
                 id: true,
@@ -423,13 +427,31 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // `custodyList` to their OWN entries and report how many holders were
     // hidden — mirroring the web's `QuantityCustodyList` filter and hidden
     // count (its `canViewAllCustody` prop).
-    const { custodyList, custodyListOthersCount } =
+    const { custodyList: visibleCustodyList, custodyListOthersCount } =
       filterMobileCustodyListForViewer({
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
+
+    /**
+     * Additive: where each holder's operator units were taken from, one entry
+     * per source (`locationId` null: the unplaced units, or with
+     * `unrecorded: true` a source never recorded). Kit-inherited units are not
+     * listed: they follow the kit. The app shows these only for a pool placed
+     * at two or more distinct locations (count distinct manual `placements`),
+     * and releases per source with the entry's `locationId`, or
+     * `"unrecorded"` for an unrecorded entry.
+     */
+    const custodyList = visibleCustodyList.map((entry) => ({
+      ...entry,
+      sources: buildCustodySourceEntries(
+        detailCustody.filter(
+          (row) => !row.kitCustodyId && row.custodian.id === entry.custodian.id
+        )
+      ),
+    }));
 
     // Legacy single `custody`: the web HIDES its single-custodian card from
     // viewers without custody-view permission unless they ARE the custodian —
@@ -443,7 +465,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: primaryCustody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? primaryCustody
         : null;
@@ -468,7 +490,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const activeBooking =
       checkedOutOn &&
       canSeeBookingCustodian({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: checkedOutOn,
         userId: user.id,
       })
@@ -478,7 +500,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             from: checkedOutOn.from,
             // The resolver every mobile booking surface names a holder with.
             custodianName: resolveBookingCustodianName({
-              canSeeAllCustody,
+              canSeeAllCustody: access.custody.seeAll,
               booking: checkedOutOn,
               userId: user.id,
             }),
@@ -487,7 +509,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // the booking screen. This is that screen's own gate, answered here
             // so the app only offers a tap that will open.
             canOpen: canSeeBooking({
-              canSeeAllBookings,
+              access,
               booking: {
                 custodianUserId: checkedOutOn.custodianUser?.id ?? null,
                 custodianTeamMember: checkedOutOn.custodianTeamMember,

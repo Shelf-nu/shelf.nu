@@ -183,6 +183,9 @@ describe("POST /api/mobile/bookings/checkout", () => {
       to: BOOKING_TO,
       // "Check Out All Assets" is the phone's one tap; the server states it.
       provenance: { surface: "phone", method: "quick" },
+      // An app that sends no `sourceLocations` reaches the service with no
+      // answers, so every pool gets the default source.
+      sourceLocations: new Map(),
     });
   });
 

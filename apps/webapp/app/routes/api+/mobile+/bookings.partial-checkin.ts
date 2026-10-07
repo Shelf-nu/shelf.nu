@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -12,13 +11,13 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import { partialCheckinBooking } from "~/modules/booking/service.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canPartialCheckInOut } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -27,10 +26,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Partial check-in: checks in specific assets from an ONGOING/OVERDUE booking.
  * If all remaining assets are checked in, the booking transitions to COMPLETE.
  *
- * Eligibility mirrors the web checkin-assets loader: self-service users may
- * check in only when the booking is ONGOING/OVERDUE AND they are its
- * custodian; everyone else goes through `canUserManageBookingAssets`
- * (rejects COMPLETE / ARCHIVED / CANCELLED).
+ * Eligibility mirrors the web checkin-assets loader through
+ * `canPartialCheckInOut`: the manage-items rule (rejects COMPLETE / ARCHIVED /
+ * CANCELLED), or, for roles whose policy has `bookings.partialScanAsCustodian`,
+ * an ONGOING/OVERDUE booking the caller is the custodian of.
  *
  * Body: { bookingId: string, assetIds: string[], checkins?: [...],
  *   method?: "scanned" | "selected", timeZone?: string }
@@ -113,16 +112,17 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    const isCheckinEligible =
-      booking.status === "ONGOING" || booking.status === "OVERDUE";
-    const isCustodian = booking.custodianUserId === user.id;
-    const canCheckin =
-      isSelfService && isCheckinEligible && isCustodian
-        ? true
-        : canUserManageBookingAssets(booking, isSelfService);
+    const canCheckin = canPartialCheckInOut({
+      access,
+      booking: {
+        status: booking.status,
+        custodianUserId: booking.custodianUserId,
+      },
+      userId: user.id,
+      direction: "checkin",
+    });
 
     if (!canCheckin) {
       throw new ShelfError({

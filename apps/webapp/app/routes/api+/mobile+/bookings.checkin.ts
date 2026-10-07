@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -12,16 +11,14 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/checkin
@@ -79,15 +76,12 @@ export async function action({ request }: ActionFunctionArgs) {
     // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
     // `booking:checkin`, so the role gate above passes for ANY booking id in
     // the organization, and `checkinBooking` does not check ownership itself.
-    // No-op for ADMIN/OWNER.
-    const { roles, effectiveRole } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    // No-op when `access.bookings.writeAll`.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check in",
     });
 
@@ -96,18 +90,19 @@ export async function action({ request }: ActionFunctionArgs) {
     // all" path is forbidden — they must scan / select the assets (the
     // partial-checkin path). The mobile app must NEVER be more permissive than
     // the web / a workspace's settings, so we enforce the same policy
-    // server-side here. Judged by the most privileged role, as the loader's
-    // `canQuickCheckin` is, so the app never offers a button this refuses.
+    // server-side here. Judged by the caller's access (its effective role), as
+    // the loader's `canQuickCheckin` is, so the app never offers a button this
+    // refuses.
     // Decided after the booking and ownership checks, so a missing or foreign
     // booking answers 404 as before and the settings are only read for a
     // booking the caller may act on.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-    const explicitCheckinRequired =
-      (effectiveRole === OrganizationRoles.ADMIN &&
-        bookingSettings.requireExplicitCheckinForAdmin) ||
-      (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-        bookingSettings.requireExplicitCheckinForSelfService);
+    const explicitCheckinRequired = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkin",
+    });
     if (explicitCheckinRequired) {
       throw new ShelfError({
         cause: null,

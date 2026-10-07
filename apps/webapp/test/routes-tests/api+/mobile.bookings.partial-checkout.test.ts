@@ -1,4 +1,6 @@
 import { action } from "~/routes/api+/mobile+/bookings.partial-checkout";
+import { OrganizationRoles } from "@prisma/client";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -112,10 +114,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
     // Default: the caller owns the booking, so the ownership guard is a
     // no-op and the pre-existing cases still test what they were written for.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "user-1",
       custodianUserId: null,
@@ -165,6 +166,8 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       hints: { timeZone: "UTC", locale: "en-US" },
       // Legacy clients omit `method` too; it is recorded as null, never guessed.
       provenance: { surface: "phone", method: null },
+      // No `sourceLocations` in the body: no answers, so the default applies.
+      sourceLocations: new Map(),
     });
   });
 
@@ -255,6 +258,7 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       // Body-supplied timeZone overrides the Accept-Language/cookie hints.
       hints: expect.objectContaining({ timeZone: "Europe/Berlin" }),
       provenance: { surface: "phone", method: null },
+      sourceLocations: new Map(),
     });
   });
 
@@ -302,10 +306,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
   it("refuses a SELF_SERVICE user checking out someone else's booking", async () => {
     // SELF_SERVICE holds `booking:checkout`, so the role gate above passes for
     // ANY booking id in the organization. Only the ownership guard stops this.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "SELF_SERVICE",
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",
@@ -324,10 +327,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
 
   it("still lets ADMIN check out a booking they do not own", async () => {
     // The guard is a no-op for ADMIN/OWNER — it must not break admin workflows.
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      roles: ["ADMIN"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+    );
     (db.booking.findFirst as any).mockResolvedValue({
       creatorId: "someone-else",
       custodianUserId: "someone-else",

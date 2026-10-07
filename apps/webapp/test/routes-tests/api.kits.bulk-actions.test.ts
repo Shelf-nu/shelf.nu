@@ -1,6 +1,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { action } from "~/routes/api+/kits.bulk-actions";
 import { requirePermission } from "~/utils/roles.server";
@@ -114,6 +115,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     // Custodian not found due to org filter
@@ -153,6 +155,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     // Valid team member from same org
@@ -198,6 +201,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
     } as any);
 
     // Valid team member from same org, but different user
@@ -234,6 +238,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor(["SELF_SERVICE"]),
     } as any);
 
     // Valid team member from same org, same user
@@ -273,6 +278,7 @@ describe("api/kits/bulk-actions - bulk-assign-custody", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor(["ADMIN"]),
     } as any);
 
     const formData = new FormData();

@@ -9,7 +9,7 @@
  * Mocks:
  * - `react-router`'s `useFetcher`: a plain `<form>` plus a captured `submit`,
  *   so the tests need no data router.
- * - `~/hooks/user-user-role-helper`: picks owner or non-owner per test.
+ * - `~/hooks/use-role-access`: picks owner or non-owner per test.
  *
  * @see {@link file://./explicit-requirement-settings-card.tsx}
  */
@@ -22,7 +22,7 @@ import { ExplicitCheckinSettings } from "./explicit-checkin-settings";
 import { ExplicitCheckoutSettings } from "./explicit-checkout-settings";
 
 const mockSubmit = vi.fn();
-const mockUseUserRoleHelper = vi.fn(() => ({ isOwner: true }));
+const mockUseRoleAccess = vi.fn(() => ({ ownsWorkspace: true }));
 
 /** What the fetcher reports; a test changes it and re-renders to play the action's answer. */
 const fetcherState: { state: "idle" | "submitting"; data: unknown } = {
@@ -55,10 +55,11 @@ vi.mock("react-router", async () => {
   };
 });
 
-// why: the role helper reads the layout route's loader data; the tests pick
-// the viewer's role directly instead of building a data router.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => mockUseUserRoleHelper(),
+// why: the card reads workspace ownership from the layout route's loader
+// data; each test picks owner or non-owner directly instead of building a
+// data router.
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => mockUseRoleAccess(),
 }));
 
 const checkoutHeader = { title: EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.TITLE };
@@ -71,7 +72,7 @@ function submittedFormData() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseUserRoleHelper.mockReturnValue({ isOwner: true });
+  mockUseRoleAccess.mockReturnValue({ ownsWorkspace: true });
   fetcherState.state = "idle";
   fetcherState.data = undefined;
 });
@@ -173,7 +174,7 @@ describe("ExplicitCheckoutSettings", () => {
   });
 
   it("keeps the switches read-only for anyone but the owner", () => {
-    mockUseUserRoleHelper.mockReturnValue({ isOwner: false });
+    mockUseRoleAccess.mockReturnValue({ ownsWorkspace: false });
 
     render(
       <ExplicitCheckoutSettings

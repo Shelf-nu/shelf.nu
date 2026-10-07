@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import { createAuditAssetImagesAddedNote } from "~/modules/audit/helpers.server";
 import { uploadAuditImage } from "~/modules/audit/image.service.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import { requireAuditAssigneeForScopedViewer } from "~/modules/audit/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getParams, payload, error } from "~/utils/http.server";
@@ -19,7 +19,7 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -30,7 +30,8 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       additionalData: { userId },
     });
 
-    // Enforce assignee access for BASE/SELF_SERVICE roles on audit mutations.
+    // Enforce assignee access on audit mutations for callers limited to
+    // assigned audits.
     // Scope the lookup by organizationId so a cross-org auditId can never
     // resolve a record (defense-in-depth alongside the explicit check below).
     const audit = await db.auditSession.findFirst({
@@ -54,10 +55,10 @@ export async function action({ request, params, context }: ActionFunctionArgs) {
       });
     }
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
