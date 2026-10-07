@@ -31,6 +31,7 @@ import {
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { findKitsHeldByOtherBookings } from "~/modules/booking/kit-conflicts.server";
 import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
@@ -2520,28 +2521,39 @@ export async function getPaginatedAndFilterableKits<
       };
 
       if (bookingFrom && bookingTo) {
-        // Apply booking conflict logic similar to assets, but through kit assets
+        /**
+         * Two questions decide whether another booking keeps a kit off this
+         * one, and each member type answers only one of them.
+         *
+         * An INDIVIDUAL member is one physical item, so any overlapping
+         * booking of that asset takes it, whichever kit or standalone row
+         * booked it (Rules 1 and 2).
+         *
+         * A QUANTITY_TRACKED member is a pool shared by several kits and the
+         * free stock. Each kit owns its own units (`AssetKit.quantity`), which
+         * no other slice draws on, so another kit's slice of the same pool says
+         * nothing about this kit. Its units are taken only when this kit's own
+         * slice is, which is the kit-level rule below. Check-out applies the
+         * same split: kit-driven slices are never measured against the pool.
+         */
+        const overlapsWindow: Prisma.BookingWhereInput["OR"] = [
+          { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+          { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+        ];
+
         const kitWhere: Prisma.KitWhereInput[] = [
-          // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
+          // Rule 1: an INDIVIDUAL member on an overlapping RESERVED booking
           {
             assetKits: {
               none: {
                 asset: {
+                  type: AssetType.INDIVIDUAL,
                   bookingAssets: {
                     some: {
                       booking: {
                         id: { not: currentBookingId },
                         status: BookingStatus.RESERVED,
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
+                        OR: overlapsWindow,
                       },
                     },
                   },
@@ -2549,16 +2561,17 @@ export async function getPaginatedAndFilterableKits<
               },
             },
           },
-          // Rule 2: For ONGOING/OVERDUE bookings, allow kits that are AVAILABLE or have no conflicting assets
+          // Rule 2: an INDIVIDUAL member on an overlapping ONGOING/OVERDUE
+          // booking, unless the kit is AVAILABLE (checked in from a partial
+          // check-in)
           {
             OR: [
-              // Either kit is AVAILABLE (checked in from partial check-in)
               { status: KitStatus.AVAILABLE },
-              // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
               {
                 assetKits: {
                   none: {
                     asset: {
+                      type: AssetType.INDIVIDUAL,
                       bookingAssets: {
                         some: {
                           booking: {
@@ -2569,16 +2582,7 @@ export async function getPaginatedAndFilterableKits<
                                 BookingStatus.OVERDUE,
                               ],
                             },
-                            OR: [
-                              {
-                                from: { lte: bookingTo },
-                                to: { gte: bookingFrom },
-                              },
-                              {
-                                from: { gte: bookingFrom },
-                                to: { lte: bookingTo },
-                              },
-                            ],
+                            OR: overlapsWindow,
                           },
                         },
                       },
@@ -2590,7 +2594,24 @@ export async function getPaginatedAndFilterableKits<
           },
         ];
 
-        // Combine the basic filters with booking conflict filters
+        /**
+         * The kit-level rule: another booking holds this kit through its own
+         * slices. Judged by `findKitsHeldByOtherBookings`, the same rule the
+         * booking writes refuse on and the row's availability label shows.
+         * `AssetKit` has no Prisma relation to its booking slices, so the held
+         * kits are resolved first and excluded here, keeping the page and the
+         * count on one `where`.
+         */
+        const heldKits = await findKitsHeldByOtherBookings({
+          bookingId: currentBookingId,
+          from: bookingFrom,
+          to: bookingTo,
+          organizationId,
+        });
+        if (heldKits.length > 0) {
+          kitWhere.push({ id: { notIn: heldKits.map((kit) => kit.id) } });
+        }
+
         where.AND = kitWhere;
       }
     }

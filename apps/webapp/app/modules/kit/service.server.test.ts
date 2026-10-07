@@ -31,6 +31,7 @@ import {
   getKitCurrentBooking,
   bulkRemoveAssetsFromKits,
   moveAssetKitUnits,
+  getPaginatedAndFilterableKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
@@ -7871,5 +7872,107 @@ describe("removeDestroyedUnitsFromKits", () => {
       shrunkMemberships: [],
       detachmentImpact: [],
     });
+  });
+});
+
+describe("getPaginatedAndFilterableKits: booking kit picker availability", () => {
+  const BOOKING_ID = "booking-current";
+  const FROM = "2026-10-08T09:00:00.000Z";
+  const TO = "2026-10-08T17:00:00.000Z";
+
+  /** A picker request for this booking's window, hiding unavailable kits. */
+  function pickerRequest() {
+    const params = new URLSearchParams({
+      hideUnavailable: "true",
+      bookingFrom: FROM,
+      bookingTo: TO,
+    });
+    return new Request(`https://app.shelf.nu/kits?${params}`);
+  }
+
+  async function runPicker() {
+    await getPaginatedAndFilterableKits({
+      request: pickerRequest(),
+      organizationId: "org-1",
+      currentBookingId: BOOKING_ID,
+      canSeeAllCustody: true,
+      userId: "user-1",
+    });
+    // why: the db is mocked module-wide; the `where` handed to it is the
+    // picker's whole availability decision, so it is what these tests read.
+    return vitest.mocked(db.kit.findMany).mock.calls.at(-1)![0]!.where!;
+  }
+
+  /** Every `asset` filter in the where that judges the asset's own bookings. */
+  function assetBookingFilters(node: unknown): Record<string, unknown>[] {
+    if (!node || typeof node !== "object") return [];
+    const found: Record<string, unknown>[] = [];
+    for (const [key, value] of Object.entries(node)) {
+      if (
+        key === "asset" &&
+        value &&
+        typeof value === "object" &&
+        "bookingAssets" in value
+      ) {
+        found.push(value as Record<string, unknown>);
+      }
+      found.push(...assetBookingFilters(value));
+    }
+    return found;
+  }
+
+  beforeEach(() => {
+    vitest.mocked(db.kit.findMany).mockResolvedValue([]);
+    vitest.mocked(db.kit.count).mockResolvedValue(0);
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+    vitest.mocked(db.assetKit.findMany).mockResolvedValue([]);
+  });
+
+  it("judges only INDIVIDUAL members by their asset's bookings, so a shared quantity pool hides no sibling kit", async () => {
+    const where = await runPicker();
+
+    // Rule 1 (RESERVED) and Rule 2 (ONGOING/OVERDUE) both read member assets'
+    // bookings. A QUANTITY_TRACKED member's bookings include every other
+    // kit's slice of the same pool, so they must never decide this kit.
+    const filters = assetBookingFilters(where);
+    expect(filters).toHaveLength(2);
+    for (const filter of filters) {
+      expect(filter.type).toBe(AssetType.INDIVIDUAL);
+    }
+  });
+
+  it("leaves out a kit whose own slice another booking holds in the window", async () => {
+    // Kit A is reserved for an overlapping window through its own membership.
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        assetKitId: "ak-a",
+        checkedOutAt: null,
+        checkedInAt: null,
+        booking: { id: "other-booking", status: BookingStatus.RESERVED },
+      },
+    ] as never);
+    vitest
+      .mocked(db.assetKit.findMany)
+      .mockResolvedValue([
+        { id: "ak-a", kitId: "kit-a", kit: { name: "Kit A" } },
+      ] as never);
+
+    const where = await runPicker();
+
+    expect(where.AND).toEqual(
+      expect.arrayContaining([{ id: { notIn: ["kit-a"] } }])
+    );
+    // The count must agree with the page, or pagination drifts.
+    expect(
+      vitest
+        .mocked(db.kit.count)
+        .mock.calls.some(([args]) => args?.where === where)
+    ).toBe(true);
+  });
+
+  it("adds no exclusion when no other booking holds a kit", async () => {
+    const where = await runPicker();
+
+    expect(JSON.stringify(where)).not.toContain("notIn");
   });
 });
