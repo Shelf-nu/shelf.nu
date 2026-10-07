@@ -185,30 +185,33 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      *    needs no redaction.
      */
     const qtyTracked = isQuantityTracked(asset);
-    const [stillOutByBooking, { teamMembers, totalTeamMembers }, custodySources] =
-      qtyTracked
-        ? await Promise.all([
-            computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
-            getTeamMembersForQuantityCustody({
-              organizationId,
-              request,
-              userId,
-              // The rule, not a role check: BASE cannot assign custody, so it
-              // must not receive the roster (emails, Stripe ids) either.
-              role,
-              canSeeAllCustody,
-            }),
-            getCustodySourceSummary({
-              assetId: asset.id,
-              organizationId,
-              total: asset.quantity ?? 0,
-            }),
-          ])
-        : [
-            null,
-            { teamMembers: [], totalTeamMembers: 0 },
-            { multiSource: false, options: [], poolAvailable: 0 },
-          ];
+    const [
+      stillOutByBooking,
+      { teamMembers, totalTeamMembers },
+      custodySources,
+    ] = qtyTracked
+      ? await Promise.all([
+          computeCheckedOutByBookingForAsset(db, asset.id, organizationId),
+          getTeamMembersForQuantityCustody({
+            organizationId,
+            request,
+            userId,
+            // The rule, not a role check: BASE cannot assign custody, so it
+            // must not receive the roster (emails, Stripe ids) either.
+            role,
+            canSeeAllCustody,
+          }),
+          getCustodySourceSummary({
+            assetId: asset.id,
+            organizationId,
+            total: asset.quantity ?? 0,
+          }),
+        ])
+      : [
+          null,
+          { teamMembers: [], totalTeamMembers: 0 },
+          { multiSource: false, options: [], poolAvailable: 0 },
+        ];
 
     const assetWithEffectiveBookingAssets = stillOutByBooking
       ? {
