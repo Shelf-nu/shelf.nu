@@ -50,16 +50,3 @@ export function isBarcodeType(
 ): type is BarcodeType {
   return type !== undefined && Object.hasOwn(BWIP_FORMAT, type);
 }
-
-/**
- * Whether a display-code type is a linear (1D) barcode: Code 128, Code 39 or
- * EAN-13. These print at a width set by their module count, not square.
- *
- * @param type - The `type` of a resolved display code
- * @returns `true` only for the linear barcode types
- */
-export function isLinearBarcodeType(
-  type: QrIdDisplayPreference | undefined
-): type is BarcodeType {
-  return isBarcodeType(type) && !IS_TWO_DIMENSIONAL[type];
-}

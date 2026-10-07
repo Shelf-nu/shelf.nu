@@ -17,6 +17,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ASSET_IMAGE_PLACEHOLDER } from "~/modules/asset/image-resolution";
+import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import type {
   DateFormatOptions,
@@ -55,7 +56,12 @@ vi.mock("~/hooks/use-date-formatter", async () => {
   };
 });
 
-const QR_IMAGE = "data:image/png;base64,iVBORw0KGgo=";
+/** The Shelf QR picture, printed square in the Code cell. */
+const QR_IMAGE: PdfCodeImage = {
+  src: "data:image/svg+xml;base64,PHN2Zy8+",
+  shape: "square",
+  placement: "cell",
+};
 
 /**
  * A one-row `PdfDbResult`. Cast rather than spelled out: the real shape is a
@@ -64,14 +70,14 @@ const QR_IMAGE = "data:image/png;base64,iVBORw0KGgo=";
  */
 function pdfMetaWith({
   displayCode,
-  qrImage = QR_IMAGE,
+  codeImage = QR_IMAGE,
   showQrCodesOnPdfs = true,
   description = null,
   asset = {},
 }: {
   displayCode: PdfDbResult["assetIdToDisplayCodeMap"][string] | undefined;
   /** The row's code picture; `null` for a row with none. */
-  qrImage?: string | null;
+  codeImage?: PdfCodeImage | null;
   showQrCodesOnPdfs?: boolean;
   description?: string | null;
   /** Fields to override on the one asset row. */
@@ -120,7 +126,7 @@ function pdfMetaWith({
       },
     ],
     totalValue: "$100",
-    assetIdToCodeImageMap: qrImage ? { "asset-1": qrImage } : {},
+    assetIdToCodeImageMap: codeImage ? { "asset-1": codeImage } : {},
     assetIdToDisplayCodeMap: displayCode ? { "asset-1": displayCode } : {},
     modelRequests: [],
   } as unknown as PdfDbResult;
@@ -224,7 +230,7 @@ describe("booking checklist PDF — Code column", () => {
         entityKind: "asset",
         workspacePreference: "SAM_ID",
       },
-      qrImage: null,
+      codeImage: null,
     });
 
     expect(codeCell()).toHaveTextContent("SAM-0001");
@@ -301,25 +307,37 @@ const CODE128_CODE = {
   workspacePreference: "Code128",
 } as PdfDbResult["assetIdToDisplayCodeMap"][string];
 
-const BARCODE_PICTURE = "data:image/svg+xml;base64,PHN2Zy8+";
+/** A Code 128 picture that fits the Code cell. */
+const CELL_BARCODE: PdfCodeImage = {
+  src: "data:image/svg+xml;base64,PHN2ZyBpZD0iY2VsbCIvPg==",
+  shape: "linear",
+  placement: "cell",
+};
+
+/** A Code 128 picture too wide for the Code cell, printed on its own line. */
+const LINE_BARCODE: PdfCodeImage = {
+  src: "data:image/svg+xml;base64,PHN2ZyBpZD0ibGluZSIvPg==",
+  shape: "linear",
+  placement: "line",
+};
 
 describe("booking checklist PDF: the code picture", () => {
   it("prints a linear barcode at the size its picture declares", () => {
     // why: the server sized the SVG so each bar is exactly one module wide. A
     // square box (the QR's size-14) would squash the bars or crop the quiet
     // zones, and the printed barcode would stop scanning.
-    renderPreview({ displayCode: CODE128_CODE, qrImage: BARCODE_PICTURE });
+    renderPreview({ displayCode: CODE128_CODE, codeImage: CELL_BARCODE });
 
     const picture = codeCell().querySelector("img")!;
-    expect(picture).toHaveAttribute("src", BARCODE_PICTURE);
+    expect(picture).toHaveAttribute("src", CELL_BARCODE.src);
     expect(picture).toHaveAttribute("data-code-shape", "linear");
-    expect(picture.className).not.toMatch(/size-|object-cover/);
+    expect(picture.className).not.toMatch(/size-|object-cover|mb-/);
   });
 
   it("prints a 2D barcode square, at the QR's size", () => {
     renderPreview({
       displayCode: { ...CODE128_CODE, type: "DataMatrix" },
-      qrImage: BARCODE_PICTURE,
+      codeImage: { ...CELL_BARCODE, shape: "square" },
     });
 
     const picture = codeCell().querySelector("img")!;
@@ -327,7 +345,9 @@ describe("booking checklist PDF: the code picture", () => {
     expect(picture).toHaveClass("size-14");
   });
 
-  it("prints the Shelf QR square", () => {
+  it("prints the Shelf QR square, clear of the code text under it", () => {
+    // why: the Shelf QR has no quiet zone of its own, so the space under it
+    // has to come from the sheet or the code text sits in the scanner's way.
     renderPreview({
       displayCode: {
         value: "SAM-0001",
@@ -338,16 +358,75 @@ describe("booking checklist PDF: the code picture", () => {
       },
     });
 
-    expect(codeCell().querySelector("img")).toHaveClass("size-14");
+    const picture = codeCell().querySelector("img")!;
+    expect(picture).toHaveClass("size-14");
+    expect(picture).toHaveClass("mb-[2.5mm]");
   });
 
   it("prints no picture, only the code, when the row has no picture", () => {
-    // why: a barcode too wide for the column, or one its format refuses, gets
-    // no entry. A QR in its place would be a picture of a DIFFERENT code.
-    renderPreview({ displayCode: CODE128_CODE, qrImage: null });
+    // why: a barcode too wide even for the full-width line, or one its format
+    // refuses, gets no entry. A QR in its place would be a picture of a
+    // DIFFERENT code.
+    renderPreview({ displayCode: CODE128_CODE, codeImage: null });
 
     expect(codeCell().querySelector("img")).toBeNull();
     expect(codeCell()).toHaveTextContent("AB-12345678");
+  });
+
+  it("prints a code too wide for the cell on a full-width line under its row", () => {
+    // why: squeezed into the cell the bars would print thinner than a scanner
+    // reads, so the picture gets the whole width of the table instead. The
+    // tick box and the code text stay in the Code cell, where the picker
+    // looks for them.
+    const { container } = renderPreview({
+      displayCode: CODE128_CODE,
+      codeImage: LINE_BARCODE,
+    });
+
+    const assetRow = screen.getByText("Tripod").closest("tr")!;
+    const picture = screen.getByAltText("Code of Tripod");
+    const line = picture.closest("tr")!;
+    const lineCell = picture.closest("td")!;
+    const columnCount = container.querySelectorAll(
+      "table.booking-assets-table thead th"
+    ).length;
+
+    expect(codeCell().querySelector("img")).toBeNull();
+    expect(codeCell()).toHaveTextContent("AB-12345678");
+    expect(
+      screen.getByRole("checkbox", { name: "Mark Tripod as picked" })
+    ).toBeInTheDocument();
+    expect(assetRow.nextElementSibling).toBe(line);
+    expect(line.parentElement).toBe(assetRow.parentElement);
+    expect(lineCell).toHaveAttribute("colspan", String(columnCount));
+    expect(picture).toHaveAttribute("src", LINE_BARCODE.src);
+    expect(picture.className).not.toMatch(/size-/);
+  });
+
+  it("puts the code line before the asset's description", () => {
+    renderPreview({
+      displayCode: CODE128_CODE,
+      codeImage: LINE_BARCODE,
+      asset: { description: "Carbon legs, 1.5 m" },
+    });
+
+    const line = screen.getByAltText("Code of Tripod").closest("tr")!;
+    const description = screen.getByText("Carbon legs, 1.5 m").closest("tr")!;
+
+    expect(line.nextElementSibling).toBe(description);
+  });
+
+  it("prints no code line when the workspace turned the pictures off", () => {
+    renderPreview({
+      displayCode: CODE128_CODE,
+      codeImage: LINE_BARCODE,
+      showQrCodesOnPdfs: false,
+    });
+
+    expect(screen.queryByAltText("Code of Tripod")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Tripod").closest("tbody")!.querySelectorAll("tr")
+    ).toHaveLength(1);
   });
 });
 

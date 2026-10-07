@@ -3,10 +3,12 @@
  *
  * Serves `/api/bookings/:bookingId/generate-pdf`: everything the printable
  * booking checklist renders, loaded when its preview opens. Dates are
- * formatted in the acting user's format, lapsed asset photos are re-signed so
- * every photo prints, and one `pdf_preview_opened` event is sent per preview.
+ * formatted in the acting user's format, lapsed asset photos are signed for
+ * print (read-only, no row cap) so every photo prints, and one
+ * `pdf_preview_opened` event is sent per preview.
  *
  * @see {@link file://./../../modules/booking/pdf-helpers.ts}
+ * @see {@link file://./../../modules/asset/print-images.server.ts}
  * @see {@link file://./../../components/booking/booking-overview-pdf.tsx}
  */
 
@@ -14,10 +16,7 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
-import {
-  ASSET_IMAGE_RESIGN_LIMITS,
-  refreshExpiredAssetImages,
-} from "~/modules/asset/service.server";
+import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getClientHint } from "~/utils/client-hints";
@@ -79,20 +78,16 @@ export const loader = async ({
     );
 
     // Asset photos are signed URLs that stop loading once they lapse, and a
-    // photo that does not load prints as the placeholder. Re-signed here, in
-    // the loader of the sheet that prints photos, rather than in the shared
-    // data helper: the check-in receipt reuses that helper and prints none.
-    pdfMeta.assets = await refreshExpiredAssetImages(pdfMeta.assets, {
-      organizationId,
-      ...ASSET_IMAGE_RESIGN_LIMITS,
-    });
-
-    // Resolve the acting user's format preferences so booking PDF dates render
-    // per their settings rather than the request locale.
-    const prefs = await resolveUserFormatPrefsById(
-      userId,
-      getClientHint(request)
-    );
+    // photo that does not load prints as the placeholder. Signed here, in the
+    // loader of the sheet that prints photos, rather than in the shared data
+    // helper: the check-in receipt reuses that helper and prints none.
+    // The acting user's format preferences are resolved alongside, so booking
+    // PDF dates render per their settings rather than the request locale.
+    const [signedAssets, prefs] = await Promise.all([
+      signAssetPhotosForPrint(pdfMeta.assets, { organizationId }),
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+    ]);
+    pdfMeta.assets = signedAssets;
 
     // Preserve the existing `.format(date)` call shape used below.
     const dateTimeFormat = {
@@ -120,6 +115,8 @@ export const loader = async ({
         sheet: "booking_checklist",
         organizationId,
         rowCount: pdfMeta.assets.length,
+        // Rows are booking slices: one asset can print in several of them.
+        assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
       },
     });
 

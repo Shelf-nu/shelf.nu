@@ -345,14 +345,15 @@ describe("audit receipt — the printed asset code", () => {
     });
 
     const picture = result.assetIdToCodeImageMap["asset-1"];
-    expect(picture).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(picture).toMatchObject({ shape: "linear", placement: "cell" });
+    expect(picture.src).toMatch(/^data:image\/svg\+xml;base64,/);
     expect(
-      Buffer.from(picture.split(",")[1], "base64").toString("utf8")
+      Buffer.from(picture.src.split(",")[1], "base64").toString("utf8")
     ).toContain('preserveAspectRatio="none"');
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
   });
 
-  it("prints text only for a barcode too wide for the Code column", async () => {
+  it("moves a barcode too wide for the Code column onto the line under its row", async () => {
     const result = await run(
       { qrIdDisplayPreference: "Code128", barcodesEnabled: true },
       {
@@ -365,7 +366,12 @@ describe("audit receipt — the printed asset code", () => {
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
       "ABCDEFGHIJKLMNOPQRST"
     );
-    expect(result.assetIdToCodeImageMap).not.toHaveProperty("asset-1");
+    // why: shrinking it into the cell would make the bars too thin to scan,
+    // and a QR instead would be a picture of a DIFFERENT code.
+    expect(result.assetIdToCodeImageMap["asset-1"]).toMatchObject({
+      shape: "linear",
+      placement: "line",
+    });
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
   });
 

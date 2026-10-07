@@ -3,8 +3,8 @@
  * The check-in receipt's data loader,
  * `api+/bookings.$bookingId.generate-checkin-receipt`.
  *
- * The receipt prints no photos, so unlike the checklist's loader it re-signs
- * none: that is a storage call per lapsed photo for nothing. It does count the
+ * The receipt prints no photos, so unlike the checklist's loader it signs
+ * none: that would be a storage call for nothing. It does count the
  * preview being opened, like every printable sheet.
  *
  * @see {@link file://./../../../app/routes/api+/bookings.$bookingId.generate-checkin-receipt.tsx}
@@ -13,6 +13,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import { refreshExpiredAssetImages } from "~/modules/asset/service.server";
 import { fetchCheckinReceiptData } from "~/modules/booking/checkin-receipt.server";
 import { loader } from "~/routes/api+/bookings.$bookingId.generate-checkin-receipt";
@@ -47,10 +48,12 @@ vi.mock("~/modules/booking/checkin-receipt.server", () => ({
   fetchCheckinReceiptData: vi.fn(),
 }));
 
-// why: stands in for storage, so the test can prove the receipt never asks it
-// to re-sign anything.
+// why: both photo signers stand in for storage, so the test can prove the
+// receipt never asks it to sign anything.
+vi.mock("~/modules/asset/print-images.server", () => ({
+  signAssetPhotosForPrint: vi.fn(),
+}));
 vi.mock("~/modules/asset/service.server", () => ({
-  ASSET_IMAGE_RESIGN_LIMITS: { maxRefreshes: 100, timeBudgetMs: 2_500 },
   refreshExpiredAssetImages: vi.fn(),
 }));
 
@@ -69,10 +72,11 @@ vi.mock("~/integrations/posthog/client.server", () => ({
   captureServerEvent: vi.fn(),
 }));
 
-/** One receipt row, as the data helper returns it. */
-function receiptRow(bookingAssetId: string) {
+/** One receipt row (a booking slice), as the data helper returns it. */
+function receiptRow(bookingAssetId: string, assetId: string) {
   return {
     bookingAssetId,
+    assetId,
     title: "Tripod",
     checkedInAt: null,
     checkedInByIds: [],
@@ -109,7 +113,12 @@ beforeEach(() => {
       imageId: null,
       updatedAt: new Date("2026-01-01T00:00:00.000Z"),
     },
-    rows: [receiptRow("ba-1"), receiptRow("ba-2")],
+    // Two slices of one asset plus another asset: three rows, two assets.
+    rows: [
+      receiptRow("ba-1", "asset-1"),
+      receiptRow("ba-2", "asset-1"),
+      receiptRow("ba-3", "asset-2"),
+    ],
     totals: {},
     stamp: "COMPLETE",
     plannedFrom: null,
@@ -123,7 +132,7 @@ beforeEach(() => {
 });
 
 describe("check-in receipt loader", () => {
-  it("counts one opened preview, with the sheet and its row count", async () => {
+  it("counts one opened preview, with its printed rows and distinct assets", async () => {
     await loader(buildArgs());
 
     expect(captureServerEvent).toHaveBeenCalledTimes(1);
@@ -133,14 +142,16 @@ describe("check-in receipt loader", () => {
       properties: {
         sheet: "checkin_receipt",
         organizationId: "org-1",
-        rowCount: 2,
+        rowCount: 3,
+        assetCount: 2,
       },
     });
   });
 
-  it("re-signs no photos, because the receipt prints none", async () => {
+  it("signs no photos, because the receipt prints none", async () => {
     await loader(buildArgs());
 
+    expect(signAssetPhotosForPrint).not.toHaveBeenCalled();
     expect(refreshExpiredAssetImages).not.toHaveBeenCalled();
   });
 });

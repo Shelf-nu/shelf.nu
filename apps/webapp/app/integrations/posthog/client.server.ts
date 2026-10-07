@@ -103,8 +103,19 @@ export type ServerAnalyticsEvent =
       properties: {
         sheet: PdfPreviewSheet;
         organizationId: string;
-        /** Rows in the sheet's main table. */
+        /** Rows printed in the sheet's main table. */
         rowCount: number;
+        /**
+         * Distinct assets across those rows, for `booking_checklist`,
+         * `audit_receipt` and `checkin_receipt`. Booking sheets print one row
+         * per booking slice, so one asset can fill several rows.
+         */
+        assetCount?: number;
+        /**
+         * Rows that matched the report's filters, for `sheet: "report"` only.
+         * Can exceed `rowCount` when the printed table is capped.
+         */
+        totalCount?: number;
         /** Which report, for `sheet: "report"` only. */
         reportId?: string;
       };

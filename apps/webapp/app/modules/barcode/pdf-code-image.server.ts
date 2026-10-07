@@ -1,21 +1,26 @@
 /**
  * PDF Code Pictures (server)
  *
- * Draws the picture printed in each row's Code cell on the booking checklist
- * and the audit receipt. The picture is always the SAME code as the text under
- * it, which `resolveDisplayCode` has already chosen:
+ * Draws the picture printed for each row's code on the booking checklist and
+ * the audit receipt, following the code `resolveDisplayCode` has already
+ * chosen for the row's text:
  *
  * - a barcode (Code 128, Code 39, EAN-13, DataMatrix, External QR) is drawn
- *   here from its value, as an SVG, with bwip-js;
- * - anything else (the QR id, a SAM ID, or a fallback to the QR) prints the
- *   asset's Shelf QR, rendered by `getQrCodeMaps`.
+ *   here from its value, as an SVG, with bwip-js, so the picture is the same
+ *   code as the text;
+ * - the QR id prints the asset's Shelf QR, rendered by `getQrCodeMaps`, which
+ *   is the same code as the text;
+ * - a SAM ID row (or a fallback to the QR) also prints the asset's Shelf QR.
+ *   It resolves to the same asset, but it encodes the asset's QR link, not the
+ *   SAM ID.
  *
- * A barcode that would not fit its space at a scannable module width (a linear
- * code wider than the Code column, a 2D code too dense for its square), or a
- * value its symbology refuses (an EAN-13 that is not 12 or 13 digits), gets no
- * picture at all. The sheet then prints the code as text only,
- * which is still matchable by eye; a picture that does not scan is worse than
- * none.
+ * Every picture is fitted to a scannable module width. It prints in the Code
+ * cell at {@link PDF_CODE_MODULE_MM} per module when it fits, shrunk toward
+ * {@link PDF_CODE_MIN_MODULE_MM} when that makes it fit, and otherwise on a
+ * full-width line under its row, again preferred width first, then shrunk. A
+ * row's code prints with no picture only when its symbology refuses the value
+ * (an EAN-13 that is not 12 or 13 digits); a picture that does not scan is
+ * worse than none.
  *
  * bwip-js is loaded on first use: the package pulls a 2 MB encoder that no
  * other server path needs.
@@ -33,10 +38,13 @@ import { BWIP_FORMAT, IS_TWO_DIMENSIONAL, isBarcodeType } from "./bwip-format";
 import type { ResolvedDisplayCode } from "./display";
 import {
   PDF_CODE_IMAGE_MAX_WIDTH_MM,
+  PDF_CODE_LINE_MAX_WIDTH_MM,
+  PDF_CODE_MIN_MODULE_MM,
   PDF_CODE_MODULE_MM,
   PDF_LINEAR_CODE_HEIGHT_MM,
-  PDF_SQUARE_CODE_MAX_MODULES,
+  PDF_SQUARE_CODE_SIDE_MM,
 } from "./pdf-code-image";
+import type { PdfCodeImage } from "./pdf-code-image";
 import { getQrCodeMaps } from "../qr/service.server";
 
 type BwipJs = typeof BwipJsModule;
@@ -74,6 +82,69 @@ function quietZoneModules(type: BarcodeType): number {
  */
 const MATRIX_UNITS_PER_MODULE = 2;
 
+/**
+ * Quiet zone on each side of a 2D code, in modules: the 4 modules the QR
+ * specification asks for, and 2 for DataMatrix, whose specification asks for
+ * at least 1.
+ */
+function matrixQuietZoneModules(type: BarcodeType): number {
+  return type === "DataMatrix" ? 2 : 4;
+}
+
+/**
+ * The bwip-js padding options that draw a code's quiet zone. bwip-js measures
+ * padding in `viewBox` units, not modules, so a matrix code's quiet zone is
+ * doubled to match its two units per module.
+ */
+function quietZoneOptions(type: BarcodeType): {
+  paddingwidth: number;
+  paddingheight?: number;
+} {
+  if (!IS_TWO_DIMENSIONAL[type]) {
+    return { paddingwidth: quietZoneModules(type) };
+  }
+  const units = matrixQuietZoneModules(type) * MATRIX_UNITS_PER_MODULE;
+  return { paddingwidth: units, paddingheight: units };
+}
+
+/** Where a code prints and how wide each of its modules prints. */
+type CodeFit = { placement: PdfCodeImage["placement"]; moduleMm: number };
+
+/**
+ * Picks the module width for a code in one space: the preferred
+ * {@link PDF_CODE_MODULE_MM} when the code fits at it, otherwise the width
+ * that makes it fit exactly, as long as that is no thinner than
+ * {@link PDF_CODE_MIN_MODULE_MM}.
+ *
+ * @param modules - The code's extent in modules, quiet zone included
+ * @param maxMm - The widest the code may print in this space
+ * @returns The module width in millimetres, or `null` when the code does not
+ *   fit this space at a scannable width
+ */
+function fitModuleMm(modules: number, maxMm: number): number | null {
+  if (modules * PDF_CODE_MODULE_MM <= maxMm) return PDF_CODE_MODULE_MM;
+  const shrunk = maxMm / modules;
+  return shrunk >= PDF_CODE_MIN_MODULE_MM ? shrunk : null;
+}
+
+/**
+ * Fits a code to the sheet: the Code cell first, then the full-width line
+ * under the row.
+ *
+ * @param modules - The code's extent in modules, quiet zone included (its
+ *   width for a linear code, its side for a 2D one)
+ * @param cellMaxMm - The widest the code may print in the Code cell
+ * @returns Where the code prints and at what module width, or `null` when it
+ *   does not fit even the line at {@link PDF_CODE_MIN_MODULE_MM}
+ */
+function fitCode(modules: number, cellMaxMm: number): CodeFit | null {
+  const inCell = fitModuleMm(modules, cellMaxMm);
+  if (inCell !== null) return { placement: "cell", moduleMm: inCell };
+  const onLine = fitModuleMm(modules, PDF_CODE_LINE_MAX_WIDTH_MM);
+  if (onLine !== null) return { placement: "line", moduleMm: onLine };
+  return null;
+}
+
 /** Reads the `viewBox` width and height bwip-js writes on its SVG root. */
 function readViewBox(svg: string): { width: number; height: number } | null {
   const match = svg.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/);
@@ -93,26 +164,32 @@ function mm(value: number): string {
   return `${Number(value.toFixed(3))}mm`;
 }
 
+/** Writes extra attributes onto an SVG document's root element. */
+function withRootAttributes(svg: string, attributes: string): string {
+  return svg.replace("<svg ", `<svg ${attributes} `);
+}
+
 /**
- * Draws one barcode as an SVG data URL for a printed sheet.
+ * Draws one barcode as a picture for a printed sheet.
  *
- * Drawn at bwip-js scale 1, where one `viewBox` unit is one module. A linear
- * code's SVG declares its printed size on its root (`width` = modules x
- * {@link PDF_CODE_MODULE_MM}, `height` = {@link PDF_LINEAR_CODE_HEIGHT_MM}) and
- * `preserveAspectRatio="none"`, so the sheet prints it at exactly that size
- * without knowing its module count. A 2D code carries no size: the sheet prints
- * it square, at the size of the Shelf QR, on its natural aspect ratio.
+ * Drawn at bwip-js scale 1 with its quiet zone, then fitted by
+ * {@link fitCode}. A linear code's SVG declares its printed size on its root
+ * (`width` = modules x the fitted module width, `height` =
+ * {@link PDF_LINEAR_CODE_HEIGHT_MM}) and `preserveAspectRatio="none"`, so the
+ * sheet prints it at exactly that size without knowing its module count. A 2D
+ * code in the cell carries no size: the sheet prints it in its square, the
+ * size of the Shelf QR. A 2D code on the line declares its side
+ * (modules x the fitted module width) as both `width` and `height`.
  *
  * @param code - The barcode type and the value to encode
  * @param bwipjs - The loaded bwip-js module
- * @returns The picture, or `null` when the value cannot be drawn, a linear
- *   code would be wider than {@link PDF_CODE_IMAGE_MAX_WIDTH_MM}, or a 2D code
- *   spans more than {@link PDF_SQUARE_CODE_MAX_MODULES} modules
+ * @returns The picture, or `null` when the symbology refuses the value or the
+ *   code does not fit even the full-width line at a scannable module width
  */
 export function encodeBarcodeImage(
   { type, value }: { type: BarcodeType; value: string },
   bwipjs: Pick<BwipJs, "toSVG">
-): string | null {
+): PdfCodeImage | null {
   const isTwoDimensional = IS_TWO_DIMENSIONAL[type];
 
   let svg: string;
@@ -123,12 +200,8 @@ export function encodeBarcodeImage(
       scale: 1,
       includetext: false,
       backgroundcolor: "ffffff",
-      ...(isTwoDimensional
-        ? {}
-        : {
-            height: PDF_LINEAR_CODE_HEIGHT_MM,
-            paddingwidth: quietZoneModules(type),
-          }),
+      ...quietZoneOptions(type),
+      ...(isTwoDimensional ? {} : { height: PDF_LINEAR_CODE_HEIGHT_MM }),
     });
   } catch {
     // The symbology refused the value (wrong length, character outside its
@@ -142,22 +215,49 @@ export function encodeBarcodeImage(
   if (isTwoDimensional) {
     const modules =
       Math.max(viewBox.width, viewBox.height) / MATRIX_UNITS_PER_MODULE;
-    return modules > PDF_SQUARE_CODE_MAX_MODULES ? null : toSvgDataUrl(svg);
+    const fit = fitCode(modules, PDF_SQUARE_CODE_SIDE_MM);
+    if (!fit) return null;
+    if (fit.placement === "cell") {
+      return { src: toSvgDataUrl(svg), shape: "square", placement: "cell" };
+    }
+    const side = mm(modules * fit.moduleMm);
+    return {
+      src: toSvgDataUrl(
+        withRootAttributes(svg, `width="${side}" height="${side}"`)
+      ),
+      shape: "square",
+      placement: "line",
+    };
   }
 
-  const widthMm = viewBox.width * PDF_CODE_MODULE_MM;
-  if (widthMm > PDF_CODE_IMAGE_MAX_WIDTH_MM) {
-    return null;
-  }
+  // A linear code is drawn one `viewBox` unit per module.
+  const fit = fitCode(viewBox.width, PDF_CODE_IMAGE_MAX_WIDTH_MM);
+  if (!fit) return null;
 
-  return toSvgDataUrl(
-    svg.replace(
-      "<svg ",
-      `<svg width="${mm(widthMm)}" height="${mm(
-        PDF_LINEAR_CODE_HEIGHT_MM
-      )}" preserveAspectRatio="none" `
-    )
-  );
+  return {
+    src: toSvgDataUrl(
+      withRootAttributes(
+        svg,
+        `width="${mm(viewBox.width * fit.moduleMm)}" height="${mm(
+          PDF_LINEAR_CODE_HEIGHT_MM
+        )}" preserveAspectRatio="none"`
+      )
+    ),
+    shape: "linear",
+    placement: fit.placement,
+  };
+}
+
+/**
+ * Barcodes drawn between yields to the event loop. A sheet of a few hundred
+ * barcodes encodes synchronously; yielding every batch lets other requests on
+ * the same server process run in between.
+ */
+const ENCODES_PER_YIELD = 25;
+
+/** Lets queued I/O and other requests run before the next batch of encodes. */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /** An asset as `getQrCodeMaps` reads it: full columns plus its QR rows. */
@@ -171,15 +271,16 @@ type CodeImageAsset = Prisma.AssetGetPayload<{ include: { qrCodes: true } }>;
  * `getQrCodeMaps` is called only for the assets whose picture is a QR, and not
  * at all when there are none.
  *
- * An asset without an entry prints its code as text only. That happens when a
- * barcode cannot be drawn or does not fit (see {@link encodeBarcodeImage}), when
- * a QR could not be rendered, and for every barcode if bwip-js fails to load.
+ * An asset without an entry prints its code as text only. That happens when
+ * its symbology refuses the value (see {@link encodeBarcodeImage}), when a QR
+ * could not be rendered, and for every barcode if bwip-js fails to load. The
+ * Shelf QR always prints in the cell.
  *
  * @param args.assets - Each asset once (deduped by id), with its `qrCodes`
  * @param args.displayCodes - The resolved display code per asset id
  * @param args.userId - The acting user, forwarded to `getQrCodeMaps`
  * @param args.organizationId - The workspace, forwarded to `getQrCodeMaps`
- * @returns A data URL per asset id
+ * @returns The picture per asset id
  */
 export async function buildPdfCodeImageMap({
   assets,
@@ -191,8 +292,8 @@ export async function buildPdfCodeImageMap({
   displayCodes: Record<string, ResolvedDisplayCode>;
   userId: string;
   organizationId: string;
-}): Promise<Record<string, string>> {
-  const images: Record<string, string> = {};
+}): Promise<Record<string, PdfCodeImage>> {
+  const images: Record<string, PdfCodeImage> = {};
   const qrAssets: CodeImageAsset[] = [];
   const barcodeAssets: { id: string; type: BarcodeType; value: string }[] = [];
 
@@ -208,7 +309,10 @@ export async function buildPdfCodeImageMap({
   if (barcodeAssets.length > 0) {
     try {
       const bwipjs = await loadBwipjs();
-      for (const { id, type, value } of barcodeAssets) {
+      for (const [index, { id, type, value }] of barcodeAssets.entries()) {
+        if (index > 0 && index % ENCODES_PER_YIELD === 0) {
+          await yieldToEventLoop();
+        }
         const image = encodeBarcodeImage({ type, value }, bwipjs);
         if (image) images[id] = image;
       }
@@ -227,15 +331,15 @@ export async function buildPdfCodeImageMap({
   }
 
   if (qrAssets.length > 0) {
-    Object.assign(
-      images,
-      await getQrCodeMaps({
-        assets: qrAssets,
-        userId,
-        organizationId,
-        size: "small",
-      })
-    );
+    const qrImages = await getQrCodeMaps({
+      assets: qrAssets,
+      userId,
+      organizationId,
+      size: "small",
+    });
+    for (const [id, src] of Object.entries(qrImages)) {
+      images[id] = { src, shape: "square", placement: "cell" };
+    }
   }
 
   return images;

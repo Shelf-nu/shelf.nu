@@ -14,6 +14,7 @@ import {
   QR_CODES_ORDER_BY,
   resolveDisplayCode,
 } from "~/modules/barcode/display";
+import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
@@ -104,12 +105,13 @@ export interface PdfDbResult {
     | "showQrCodesOnPdfs"
   >;
   /**
-   * The picture printed in each row's Code cell, as a data URL, keyed by
-   * `Asset.id`. It is a picture of the code in `assetIdToDisplayCodeMap`: an SVG
-   * of the barcode when that code is one, otherwise the Shelf QR. An asset with
-   * no entry prints its code as text only. Built by `buildPdfCodeImageMap`.
+   * The picture printed for each row's code, keyed by `Asset.id`, with where
+   * it prints (the Code cell or a full-width line under the row). It is a
+   * picture of the code in `assetIdToDisplayCodeMap`: an SVG of the barcode
+   * when that code is one, otherwise the Shelf QR. An asset with no entry
+   * prints its code as text only. Built by `buildPdfCodeImageMap`.
    */
-  assetIdToCodeImageMap: Record<string, string>;
+  assetIdToCodeImageMap: Record<string, PdfCodeImage>;
   /**
    * The code to PRINT in each row's Code cell, the same one the workspace's
    * on-screen asset lists show: the QR id, the SAM id, or a barcode value,

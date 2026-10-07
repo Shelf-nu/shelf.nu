@@ -2,8 +2,8 @@
 /**
  * The audit receipt's data loader, `api+/audits.$auditId.generate-pdf`.
  *
- * Like the booking checklist's loader, it re-signs lapsed asset photos so the
- * receipt prints every photo, and counts the preview being opened: printing
+ * Like the booking checklist's loader, it signs lapsed asset photos for print
+ * so the receipt prints every photo, and counts the preview being opened: printing
  * happens in the browser, so this loader is the only place the server sees it.
  *
  * @see {@link file://./../../../app/routes/api+/audits.$auditId.generate-pdf.tsx}
@@ -12,6 +12,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import { refreshExpiredAssetImages } from "~/modules/asset/service.server";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
 import { loader } from "~/routes/api+/audits.$auditId.generate-pdf";
@@ -46,10 +47,15 @@ vi.mock("~/modules/audit/pdf-helpers", () => ({
   fetchAllAuditPdfRelatedData: vi.fn(),
 }));
 
-// why: re-signing talks to storage. The stub stands in for storage handing
-// back a fresh URL, so the test can see the fresh rows reach the response.
+// why: signing talks to storage. The stub stands in for storage handing back
+// a fresh URL, so the test can see the fresh rows reach the response.
+vi.mock("~/modules/asset/print-images.server", () => ({
+  signAssetPhotosForPrint: vi.fn(),
+}));
+
+// why: stands in for the persisting re-sign, so the test can prove the
+// loader never uses it (it writes back and bumps `Asset.updatedAt`).
 vi.mock("~/modules/asset/service.server", () => ({
-  ASSET_IMAGE_RESIGN_LIMITS: { maxRefreshes: 100, timeBudgetMs: 2_500 },
   refreshExpiredAssetImages: vi.fn(),
 }));
 
@@ -95,7 +101,7 @@ beforeEach(() => {
     conditionNotes: [],
     activityNotes: [],
   } as never);
-  vi.mocked(refreshExpiredAssetImages).mockImplementation(
+  vi.mocked(signAssetPhotosForPrint).mockImplementation(
     async (rows) =>
       rows.map((row) =>
         row.mainImage ? { ...row, mainImage: "https://storage/fresh.jpg" } : row
@@ -104,19 +110,18 @@ beforeEach(() => {
 });
 
 describe("audit receipt loader", () => {
-  it("re-signs lapsed photos, scoped to the workspace, before the receipt gets them", async () => {
+  it("signs lapsed photos for print, without the persisting re-sign, before the receipt gets them", async () => {
     const response = (await loader(buildArgs())) as unknown as Response;
     const body = await response.json();
 
-    expect(refreshExpiredAssetImages).toHaveBeenCalledWith(ROWS, {
+    expect(signAssetPhotosForPrint).toHaveBeenCalledWith(ROWS, {
       organizationId: "org-1",
-      maxRefreshes: 100,
-      timeBudgetMs: 2_500,
     });
+    expect(refreshExpiredAssetImages).not.toHaveBeenCalled();
     expect(body.pdfMeta.assets[0].mainImage).toBe("https://storage/fresh.jpg");
   });
 
-  it("counts one opened preview, with the sheet and its row count", async () => {
+  it("counts one opened preview, with its printed rows and distinct assets", async () => {
     await loader(buildArgs());
 
     expect(captureServerEvent).toHaveBeenCalledTimes(1);
@@ -127,6 +132,7 @@ describe("audit receipt loader", () => {
         sheet: "audit_receipt",
         organizationId: "org-1",
         rowCount: 3,
+        assetCount: 3,
       },
     });
   });

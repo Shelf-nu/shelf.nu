@@ -1,5 +1,5 @@
 import type React from "react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
 import {
   AUDIT_ASSET_STATUS_LABELS,
@@ -25,6 +25,7 @@ import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
 import { Image } from "../shared/image";
+import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -294,47 +295,14 @@ export const AuditPDFContent = ({
       ref={componentRef}
     >
       {/* Print-specific styles for A4 layout */}
+      <PrintTableStyles tableClassName="audit-assets-table" />
+      {/* On paper the receipt sits in the normal page flow, whatever
+          positioning the page hosting it gives the wrapper. */}
       <style>
         {`@media print {
-          @page {
-            margin: 10mm;
-            size: A4;
-          }
-          /* The printable width IS the sheet: A4 minus the page margins. A
-             fixed width wider than that makes Chrome shrink the whole page. */
           .pdf-wrapper {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: auto !important;
             position: static !important;
             left: auto !important;
-          }
-          /* The cells draw every line. The table's own border would run
-             down into the space a whole row leaves at the foot of a page. */
-          .audit-assets-table {
-            border: 0 !important;
-            border-collapse: separate !important;
-            border-spacing: 0 !important;
-          }
-          .audit-assets-table th,
-          .audit-assets-table td {
-            border-right: 1px solid #d1d5db !important;
-            border-bottom: 1px solid #d1d5db !important;
-          }
-          .audit-assets-table thead th {
-            border-top: 1px solid #d1d5db !important;
-          }
-          .audit-assets-table th:first-child,
-          .audit-assets-table td:first-child {
-            border-left: 1px solid #d1d5db !important;
-          }
-          /* A row never splits across a page break; the header repeats on
-             every page. */
-          .audit-assets-table tr {
-            break-inside: avoid;
-          }
-          .audit-assets-table thead {
-            display: table-header-group;
           }
         }`}
       </style>
@@ -573,14 +541,7 @@ export const AuditPDFContent = ({
         <section className="mb-5">
           <h2 className="mb-2 text-lg font-medium">Assets</h2>
           <table className="audit-assets-table w-full table-fixed border border-gray-300">
-            <colgroup>
-              {ASSET_TABLE_COLUMNS.map((column) => (
-                <col
-                  key={column.name}
-                  style={{ width: `${column.percent}%` }}
-                />
-              ))}
-            </colgroup>
+            <PrintColGroup columns={ASSET_TABLE_COLUMNS} />
             <thead>
               <tr>
                 <th className="border border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
@@ -608,9 +569,18 @@ export const AuditPDFContent = ({
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {assets.map((asset, index) => (
-                <Fragment key={asset.id}>
+            {assets.map((asset, index) => {
+              const codeImage = showCodeImages
+                ? assetIdToCodeImageMap[asset.id]
+                : undefined;
+              // A code too wide or dense to scan inside the Code cell prints
+              // on its own full-width line under the row instead.
+              const printsCodeOnLine = codeImage?.placement === "line";
+
+              return (
+                // One row group per asset, so its row and its code line print
+                // on the same page.
+                <tbody key={asset.id}>
                   <tr>
                     <td className="border border-gray-300 px-1 py-2.5 align-top text-xs">
                       {index + 1}
@@ -643,9 +613,7 @@ export const AuditPDFContent = ({
                     <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
                       {/* Convert AuditAssetStatus to AuditStatusLabel for badge
                           display. Pass the audit's completion state so these
-                          rows agree with the Statistics tile above them — the
-                          two used to read "Not scanned" and "Missing" for the
-                          same assets in the same PDF. */}
+                          rows agree with the Statistics tile above them. */}
                       <AuditAssetStatusBadge
                         status={getAuditStatusLabel(
                           asset.auditData.auditStatus
@@ -660,10 +628,9 @@ export const AuditPDFContent = ({
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
                       <div className="flex flex-col items-start gap-1">
-                        <When truthy={showCodeImages}>
+                        <When truthy={!printsCodeOnLine}>
                           <AssetCodePrintImage
-                            src={assetIdToCodeImageMap[asset.id]}
-                            displayCode={assetIdToDisplayCodeMap[asset.id]}
+                            image={codeImage}
                             alt={`Code for ${asset.title}`}
                             squareClassName="size-16"
                           />
@@ -677,9 +644,23 @@ export const AuditPDFContent = ({
                       </div>
                     </td>
                   </tr>
-                </Fragment>
-              ))}
-            </tbody>
+                  <When truthy={printsCodeOnLine}>
+                    <tr>
+                      <td
+                        colSpan={ASSET_TABLE_COLUMNS.length}
+                        className="border border-gray-300 p-2.5 text-left align-top"
+                      >
+                        <AssetCodePrintImage
+                          image={codeImage}
+                          alt={`Code for ${asset.title}`}
+                          squareClassName="size-16"
+                        />
+                      </td>
+                    </tr>
+                  </When>
+                </tbody>
+              );
+            })}
           </table>
         </section>
       </When>

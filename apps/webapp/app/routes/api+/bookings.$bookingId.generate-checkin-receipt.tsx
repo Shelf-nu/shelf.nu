@@ -138,6 +138,8 @@ export const loader = async ({
         sheet: "checkin_receipt",
         organizationId,
         rowCount: pdfMeta.rows.length,
+        // Rows are booking slices: one asset can print in several of them.
+        assetCount: new Set(receipt.rows.map((row) => row.assetId)).size,
       },
     });
 

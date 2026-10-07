@@ -34,6 +34,7 @@ import { AssetCodePrintText } from "../assets/asset-code-print-text";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
+import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -396,46 +397,7 @@ export const BookingCheckinReceiptPreview = ({
 
   return (
     <div className="border bg-gray-200 py-4">
-      <style>
-        {`@media print {
-          @page {
-            margin: 10mm;
-            size: A4;
-          }
-          /* The printable width IS the sheet: A4 minus the page margins. A
-             fixed width wider than that makes Chrome shrink the whole page. */
-          .pdf-wrapper {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: auto !important;
-          }
-          /* The cells draw every line. The table's own border would run
-             down into the space a whole row leaves at the foot of a page. */
-          .checkin-receipt-table {
-            border: 0 !important;
-            border-collapse: separate !important;
-            border-spacing: 0 !important;
-          }
-          .checkin-receipt-table th,
-          .checkin-receipt-table td {
-            border-right: 1px solid #d1d5db !important;
-            border-bottom: 1px solid #d1d5db !important;
-          }
-          .checkin-receipt-table thead th {
-            border-top: 1px solid #d1d5db !important;
-          }
-          .checkin-receipt-table th:first-child,
-          .checkin-receipt-table td:first-child {
-            border-left: 1px solid #d1d5db !important;
-          }
-          .checkin-receipt-table tr {
-            break-inside: avoid;
-          }
-          .checkin-receipt-table thead {
-            display: table-header-group;
-          }
-        }`}
-      </style>
+      <PrintTableStyles tableClassName="checkin-receipt-table" />
       <div
         // On screen the sheet is an A4 page with its 10mm margins as padding,
         // so the preview's table is the same 190mm wide as the printed one.
@@ -529,11 +491,7 @@ export const BookingCheckinReceiptPreview = ({
         </section>
 
         <table className="checkin-receipt-table w-full table-fixed border border-gray-300">
-          <colgroup>
-            {RECEIPT_TABLE_COLUMNS.map((column) => (
-              <col key={column.name} style={{ width: `${column.percent}%` }} />
-            ))}
-          </colgroup>
+          <PrintColGroup columns={RECEIPT_TABLE_COLUMNS} />
           <thead>
             <tr>
               <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">

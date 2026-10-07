@@ -405,7 +405,9 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
     expect(result.assetIdToDisplayCodeMap["with-barcode"].value).toBe(
       "AB-12345678"
     );
-    const svg = svgOf(result.assetIdToCodeImageMap["with-barcode"]);
+    const image = result.assetIdToCodeImageMap["with-barcode"];
+    expect(image).toMatchObject({ shape: "linear", placement: "cell" });
+    const svg = svgOf(image?.src);
     expect(svg).toContain('preserveAspectRatio="none"');
     expect(svg).toMatch(/<svg[^>]* width="[\d.]+mm"/);
   });
@@ -420,9 +422,11 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
       type: "QR_ID",
       isFallback: true,
     });
-    expect(result.assetIdToCodeImageMap["without-barcode"]).toBe(
-      "qr-image:without-barcode"
-    );
+    expect(result.assetIdToCodeImageMap["without-barcode"]).toEqual({
+      src: "qr-image:without-barcode",
+      shape: "square",
+      placement: "cell",
+    });
   });
 
   it("prints the Shelf QR in a SAM ID workspace", async () => {
@@ -434,9 +438,11 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
     );
 
     expect(result.assetIdToDisplayCodeMap["sam-asset"].type).toBe("SAM_ID");
-    expect(result.assetIdToCodeImageMap["sam-asset"]).toBe(
-      "qr-image:sam-asset"
-    );
+    expect(result.assetIdToCodeImageMap["sam-asset"]).toEqual({
+      src: "qr-image:sam-asset",
+      shape: "square",
+      placement: "cell",
+    });
   });
 
   it("sends only the assets whose picture is a QR to the QR renderer", async () => {
@@ -465,8 +471,9 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
   });
 
-  it("prints text only for a barcode too wide for the Code column", async () => {
-    // 20 letters of Code 128: 263 modules, 66 mm at 0.25 mm per module.
+  it("moves a barcode too wide for the Code column onto the line under its row", async () => {
+    // 20 letters of Code 128: well over 250 modules, so even at the 0.19 mm
+    // floor it needs more than the cell's ~44.7 mm.
     const result = await runWithAssets(CODE128_ORG, [
       {
         id: "long-barcode",
@@ -476,12 +483,15 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
       },
     ]);
 
-    // why: shrinking it would make the bars too thin to scan, and printing a
-    // QR instead would put a picture of a DIFFERENT code above the text.
+    // why: shrinking it into the cell would make the bars too thin to scan,
+    // and printing a QR instead would put a picture of a DIFFERENT code beside
+    // the text. The full-width line fits it at the preferred module width.
     expect(result.assetIdToDisplayCodeMap["long-barcode"].value).toBe(
       "ABCDEFGHIJKLMNOPQRST"
     );
-    expect(result.assetIdToCodeImageMap).not.toHaveProperty("long-barcode");
+    const image = result.assetIdToCodeImageMap["long-barcode"];
+    expect(image).toMatchObject({ shape: "linear", placement: "line" });
+    expect(svgOf(image?.src)).toMatch(/<svg[^>]* width="[\d.]+mm"/);
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
   });
 
@@ -514,7 +524,9 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
     );
 
     expect(result.assetIdToDisplayCodeMap["override"].type).toBe("DataMatrix");
-    expect(svgOf(result.assetIdToCodeImageMap["override"])).toContain("<svg");
+    expect(svgOf(result.assetIdToCodeImageMap["override"]?.src)).toContain(
+      "<svg"
+    );
   });
 
   it("draws no pictures for a sheet that prints none", async () => {

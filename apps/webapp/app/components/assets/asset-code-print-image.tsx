@@ -1,63 +1,72 @@
 /**
  * AssetCodePrintImage
  *
- * The picture in a printed sheet's Code cell: a picture of the same code
- * `AssetCodePrintText` prints under it. Shared by the booking checklist and the
- * audit receipt.
+ * A picture of the same code `AssetCodePrintText` prints in a sheet's Code
+ * cell. Shared by the booking checklist and the audit receipt, which print it
+ * either in the row's Code cell or on a full-width line under the row, as the
+ * picture's `placement` says.
  *
- * The server draws the picture (`buildPdfCodeImageMap`) and this component
- * only decides its shape on paper:
+ * The server draws the picture (`buildPdfCodeImageMap`) and decides its shape
+ * and placement. This component only sizes it on paper:
  *
- * - a linear barcode (Code 128, Code 39, EAN-13) prints at the size its SVG
- *   declares, which the server set from the code's module count so every bar
- *   is exactly one module wide. It must NOT be given a size or `object-cover`
- *   here: a square box would squash the bars or crop the quiet zones, and
- *   either stops it scanning;
- * - the Shelf QR and the 2D barcodes (DataMatrix, External QR) print square,
- *   at the size the caller passes.
+ * - a linear barcode (Code 128, Code 39, EAN-13), and any picture on the
+ *   full-width line, prints at the size its SVG declares, which the server set
+ *   from the code's module count so every module prints at a scannable width.
+ *   It must NOT be given a size or `object-cover` here: a square box would
+ *   squash the bars or crop the quiet zones, and either stops it scanning;
+ * - a 2D code in the cell (the Shelf QR, DataMatrix, External QR) prints
+ *   square, at the size the caller passes.
  *
  * @see {@link file://./../../modules/barcode/pdf-code-image.server.ts}
+ * @see {@link file://./../../modules/barcode/pdf-code-image.ts}
  * @see {@link file://./asset-code-print-text.tsx}
  */
 
-import { isLinearBarcodeType } from "~/modules/barcode/bwip-format";
-import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { tw } from "~/utils/tw";
 
 /**
  * Renders one row's code picture, or nothing when the row has none.
  *
- * @param props.src - The row's entry in the sheet's code picture map; absent
+ * @param props.image - The row's entry in the sheet's code picture map; absent
  *   when the sheet prints the code as text only
- * @param props.displayCode - The code the picture shows; its type decides the
- *   picture's shape
  * @param props.alt - Alternative text for the picture
- * @param props.squareClassName - Size classes for a QR or 2D code
+ * @param props.squareClassName - Size classes for a 2D code printed in the
+ *   Code cell
  * @returns The `<img>`, or `null` without a picture
  */
 export function AssetCodePrintImage({
-  src,
-  displayCode,
+  image,
   alt,
   squareClassName,
 }: {
-  src: string | undefined;
-  displayCode: ResolvedDisplayCode | undefined;
+  image: PdfCodeImage | undefined;
   alt: string;
   squareClassName: string;
 }) {
-  if (!src) {
+  if (!image) {
     return null;
   }
 
-  const isLinear = isLinearBarcodeType(displayCode?.type);
+  // The SVG declares its own printed size for a linear code and for every
+  // picture on the full-width line; only an in-cell square takes the sheet's.
+  const declaresOwnSize =
+    image.shape === "linear" || image.placement === "line";
 
   return (
     <img
-      src={src}
+      src={image.src}
       alt={alt}
-      data-code-shape={isLinear ? "linear" : "square"}
-      className={tw(isLinear ? "block" : squareClassName)}
+      data-code-shape={image.shape}
+      data-code-placement={image.placement}
+      className={tw(
+        declaresOwnSize ? "block" : squareClassName,
+        // The Shelf QR carries no quiet zone of its own, and a scanner needs
+        // clear space on every side to find it. The cell's padding clears the
+        // top, left and right; this keeps the code text or tick box under the
+        // picture out of the bottom of that space.
+        !declaresOwnSize && "mb-[2.5mm]"
+      )}
     />
   );
 }

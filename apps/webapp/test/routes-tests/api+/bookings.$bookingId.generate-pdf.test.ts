@@ -2,8 +2,8 @@
 /**
  * The booking checklist's data loader, `api+/bookings.$bookingId.generate-pdf`.
  *
- * Two things happen here and nowhere else. Lapsed asset photos are re-signed,
- * so the sheet prints every photo instead of a placeholder. And the preview is
+ * Two things happen here and nowhere else. Lapsed asset photos are signed for
+ * print, so the sheet prints every photo instead of a placeholder. And the preview is
  * counted: printing happens in the browser, so the loader, which runs when the
  * preview opens, is the only place the server sees the sheet being used.
  *
@@ -13,6 +13,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { captureServerEvent } from "~/integrations/posthog/client.server";
+import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import { refreshExpiredAssetImages } from "~/modules/asset/service.server";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { loader } from "~/routes/api+/bookings.$bookingId.generate-pdf";
@@ -47,10 +48,15 @@ vi.mock("~/modules/booking/pdf-helpers", () => ({
   fetchAllPdfRelatedData: vi.fn(),
 }));
 
-// why: re-signing talks to storage. The stub stands in for storage handing
-// back a fresh URL, so the test can see the fresh rows reach the response.
+// why: signing talks to storage. The stub stands in for storage handing back
+// a fresh URL, so the test can see the fresh rows reach the response.
+vi.mock("~/modules/asset/print-images.server", () => ({
+  signAssetPhotosForPrint: vi.fn(),
+}));
+
+// why: stands in for the persisting re-sign, so the test can prove the
+// loader never uses it (it writes back and bumps `Asset.updatedAt`).
 vi.mock("~/modules/asset/service.server", () => ({
-  ASSET_IMAGE_RESIGN_LIMITS: { maxRefreshes: 100, timeBudgetMs: 2_500 },
   refreshExpiredAssetImages: vi.fn(),
 }));
 
@@ -69,7 +75,10 @@ vi.mock("~/integrations/posthog/client.server", () => ({
   captureServerEvent: vi.fn(),
 }));
 
-/** Two rows of the sheet, the first with a lapsed photo. */
+/**
+ * Three rows of the sheet, the first with a lapsed photo. Rows are booking
+ * slices, so `asset-1` prints twice: three rows, two assets.
+ */
 const ROWS = [
   {
     id: "asset-1",
@@ -77,6 +86,7 @@ const ROWS = [
     mainImage: "https://storage/lapsed.jpg",
   },
   { id: "asset-2", bookingAssetId: "ba-2", mainImage: null },
+  { id: "asset-1", bookingAssetId: "ba-3", mainImage: null },
 ];
 
 function buildArgs(): LoaderFunctionArgs {
@@ -99,7 +109,7 @@ beforeEach(() => {
     booking: { from: null, to: null, originalFrom: null, originalTo: null },
     assets: ROWS,
   } as never);
-  vi.mocked(refreshExpiredAssetImages).mockImplementation(
+  vi.mocked(signAssetPhotosForPrint).mockImplementation(
     async (rows) =>
       rows.map((row) =>
         row.mainImage ? { ...row, mainImage: "https://storage/fresh.jpg" } : row
@@ -108,20 +118,19 @@ beforeEach(() => {
 });
 
 describe("booking checklist loader", () => {
-  it("re-signs lapsed photos, scoped to the workspace, before the sheet gets them", async () => {
+  it("signs lapsed photos for print, without the persisting re-sign, before the sheet gets them", async () => {
     const response = (await loader(buildArgs())) as unknown as Response;
     const body = await response.json();
 
-    expect(refreshExpiredAssetImages).toHaveBeenCalledWith(ROWS, {
+    expect(signAssetPhotosForPrint).toHaveBeenCalledWith(ROWS, {
       organizationId: "org-1",
-      maxRefreshes: 100,
-      timeBudgetMs: 2_500,
     });
-    // why: re-signing is only useful if the fresh URL is what gets printed.
+    expect(refreshExpiredAssetImages).not.toHaveBeenCalled();
+    // why: signing is only useful if the fresh URL is what gets printed.
     expect(body.pdfMeta.assets[0].mainImage).toBe("https://storage/fresh.jpg");
   });
 
-  it("counts one opened preview, with the sheet and its row count", async () => {
+  it("counts one opened preview, with its printed rows and distinct assets", async () => {
     await loader(buildArgs());
 
     expect(captureServerEvent).toHaveBeenCalledTimes(1);
@@ -131,7 +140,8 @@ describe("booking checklist loader", () => {
       properties: {
         sheet: "booking_checklist",
         organizationId: "org-1",
-        rowCount: 2,
+        rowCount: 3,
+        assetCount: 2,
       },
     });
   });

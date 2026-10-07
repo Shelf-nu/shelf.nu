@@ -384,6 +384,7 @@ export const loader = async ({
         sheet: "report",
         organizationId,
         rowCount: pdfMeta.rows.length,
+        totalCount: pdfMeta.totalCount,
         reportId,
       },
     });

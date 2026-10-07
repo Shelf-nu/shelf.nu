@@ -2,7 +2,8 @@
 /**
  * The report PDFs' data loader, `api+/reports.$reportId.generate-pdf`, as far
  * as usage counting goes: every printable sheet sends one `pdf_preview_opened`
- * event when its preview is generated, and a report's names which report.
+ * event when its preview is generated, and a report's names which report and
+ * how many rows matched beside how many printed.
  *
  * @see {@link file://./../../../app/routes/api+/reports.$reportId.generate-pdf.tsx}
  */
@@ -111,12 +112,13 @@ beforeEach(() => {
   } as never);
   vi.mocked(custodySnapshotReport).mockResolvedValue({
     rows: [custodyRow("asset-1"), custodyRow("asset-2"), custodyRow("asset-3")],
-    totalRows: 3,
+    // More rows matched than the printed table holds.
+    totalRows: 12,
   } as never);
 });
 
 describe("report PDF loader", () => {
-  it("counts one opened preview, naming the report and its row count", async () => {
+  it("counts one opened preview, naming the report, its printed rows and the rows that matched", async () => {
     const response = (await loader(buildArgs())) as unknown as Response;
     expect(response.status).toBe(200);
 
@@ -128,6 +130,7 @@ describe("report PDF loader", () => {
         sheet: "report",
         organizationId: "org-1",
         rowCount: 3,
+        totalCount: 12,
         reportId: "custody-snapshot",
       },
     });

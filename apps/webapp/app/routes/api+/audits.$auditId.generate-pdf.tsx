@@ -2,10 +2,7 @@ import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { captureServerEvent } from "~/integrations/posthog/client.server";
-import {
-  ASSET_IMAGE_RESIGN_LIMITS,
-  refreshExpiredAssetImages,
-} from "~/modules/asset/service.server";
+import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
 import { getClientHint } from "~/utils/client-hints";
@@ -23,8 +20,10 @@ import { requirePermission } from "~/utils/roles.server";
 /**
  * API endpoint for generating audit receipt PDF data.
  * Returns all necessary data for rendering an audit receipt PDF, with lapsed
- * asset photos re-signed so every photo prints. Sends one
- * `pdf_preview_opened` event per preview.
+ * asset photos signed for print (read-only, no row cap) so every photo
+ * prints. Sends one `pdf_preview_opened` event per preview.
+ *
+ * @see {@link file://./../../modules/asset/print-images.server.ts}
  *
  * @route GET /api/audits/:auditId/generate-pdf
  * @returns AuditPdfDbResult - Complete audit data with formatted dates
@@ -68,19 +67,15 @@ export const loader = async ({
     );
 
     // Asset photos are signed URLs that stop loading once they lapse, and a
-    // photo that does not load prints as the placeholder.
-    pdfMeta.assets = await refreshExpiredAssetImages(pdfMeta.assets, {
-      organizationId,
-      ...ASSET_IMAGE_RESIGN_LIMITS,
-    });
-
-    // Resolve the acting user's format preferences (date order, time format,
-    // timezone) so PDF dates render per their settings rather than the request
-    // locale.
-    const prefs = await resolveUserFormatPrefsById(
-      userId,
-      getClientHint(request)
-    );
+    // photo that does not load prints as the placeholder. The acting user's
+    // format preferences (date order, time format, timezone) are resolved
+    // alongside, so PDF dates render per their settings rather than the
+    // request locale.
+    const [signedAssets, prefs] = await Promise.all([
+      signAssetPhotosForPrint(pdfMeta.assets, { organizationId }),
+      resolveUserFormatPrefsById(userId, getClientHint(request)),
+    ]);
+    pdfMeta.assets = signedAssets;
 
     // Preserve the existing `.format(date)` call shape used below.
     const dateTimeFormat = {
@@ -121,6 +116,7 @@ export const loader = async ({
         sheet: "audit_receipt",
         organizationId,
         rowCount: pdfMeta.assets.length,
+        assetCount: new Set(pdfMeta.assets.map((asset) => asset.id)).size,
       },
     });
 

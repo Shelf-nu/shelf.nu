@@ -19,6 +19,7 @@ import { AssetPrintImage } from "../assets/asset-print-image";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
+import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -247,50 +248,7 @@ export const BookingPDFPreview = ({
 
   return (
     <div className="border bg-gray-200 py-4">
-      <style>
-        {`@media print {
-          @page {
-            margin: 10mm;
-            size: A4;
-          }
-          /* The printable width IS the sheet: A4 minus the page margins. A
-             fixed width wider than that makes Chrome shrink the whole page. */
-          .pdf-wrapper {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: auto !important;
-          }
-          /* The cells draw every line. The table's own border would run
-             down into the space a whole row leaves at the foot of a page. */
-          .booking-assets-table {
-            border: 0 !important;
-            border-collapse: separate !important;
-            border-spacing: 0 !important;
-          }
-          .booking-assets-table th,
-          .booking-assets-table td {
-            border-right: 1px solid #d1d5db !important;
-            border-bottom: 1px solid #d1d5db !important;
-          }
-          .booking-assets-table thead th {
-            border-top: 1px solid #d1d5db !important;
-          }
-          .booking-assets-table th:first-child,
-          .booking-assets-table td:first-child {
-            border-left: 1px solid #d1d5db !important;
-          }
-          /* A row never splits across a page break, and each asset's group
-             (its row plus its description row) moves to the next page whole.
-             The header repeats on every page. */
-          .booking-assets-table tr,
-          .booking-assets-table tbody {
-            break-inside: avoid;
-          }
-          .booking-assets-table thead {
-            display: table-header-group;
-          }
-        }`}
-      </style>
+      <PrintTableStyles tableClassName="booking-assets-table" />
       <div
         // On screen the sheet is an A4 page with its 10mm margins as padding,
         // so the preview's table is the same 190mm wide as the printed one.
@@ -387,11 +345,7 @@ export const BookingPDFPreview = ({
         </section>
 
         <table className="booking-assets-table w-full table-fixed border border-gray-300">
-          <colgroup>
-            {ASSET_TABLE_COLUMNS.map((column) => (
-              <col key={column.name} style={{ width: `${column.percent}%` }} />
-            ))}
-          </colgroup>
+          <PrintColGroup columns={ASSET_TABLE_COLUMNS} />
           <thead>
             <tr>
               <th className="border-b border-r border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
@@ -423,42 +377,52 @@ export const BookingPDFPreview = ({
               </th>
             </tr>
           </thead>
-          {assets.map((asset, index) => (
-            // One row group per asset, so its row and its description row
-            // print on the same page. Per-slice rows: a QT asset booked
-            // standalone + via multiple kits appears once per slice, so key on
-            // the unique `bookingAssetId` (asset.id would collide across
-            // slices).
-            <tbody key={asset.bookingAssetId}>
-              <tr
-                className={tw(
-                  "align-top",
-                  !asset.description && "border-b border-gray-300"
-                )}
-              >
-                <td className="border-r border-gray-300 px-1 py-2.5 text-sm text-gray-600">
-                  {index + 1}
-                </td>
-                <td className="border-r border-gray-300 px-1.5 py-2.5 text-sm text-gray-600">
-                  <AssetPrintImage
-                    asset={asset}
-                    alt={`Image of ${asset.title}`}
-                    className="size-14"
-                  />
-                </td>
-                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
-                  {asset?.title}
-                </td>
-                <td className="break-words border-r border-gray-300 px-1 py-2.5 text-center text-sm text-gray-600">
-                  {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
-                  {asset.quantity ?? 1}
-                </td>
-                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
-                  {/* why: out of this rule: the checklist prints the kit's
+          {assets.map((asset, index) => {
+            const codeImage = showCodeImages
+              ? assetIdToCodeImageMap[asset.id]
+              : undefined;
+            // A code too wide or dense to scan inside the Code cell prints on
+            // its own full-width line under the row instead.
+            const printsCodeOnLine = codeImage?.placement === "line";
+
+            return (
+              // One row group per asset, so its row, its code line and its
+              // description row print on the same page. Per-slice rows: a QT
+              // asset booked standalone + via multiple kits appears once per
+              // slice, so key on the unique `bookingAssetId` (asset.id would
+              // collide across slices).
+              <tbody key={asset.bookingAssetId}>
+                <tr
+                  className={tw(
+                    "align-top",
+                    !asset.description &&
+                      !printsCodeOnLine &&
+                      "border-b border-gray-300"
+                  )}
+                >
+                  <td className="border-r border-gray-300 px-1 py-2.5 text-sm text-gray-600">
+                    {index + 1}
+                  </td>
+                  <td className="border-r border-gray-300 px-1.5 py-2.5 text-sm text-gray-600">
+                    <AssetPrintImage
+                      asset={asset}
+                      alt={`Image of ${asset.title}`}
+                      className="size-14"
+                    />
+                  </td>
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                    {asset?.title}
+                  </td>
+                  <td className="break-words border-r border-gray-300 px-1 py-2.5 text-center text-sm text-gray-600">
+                    {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
+                    {asset.quantity ?? 1}
+                  </td>
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                    {/* why: out of this rule: the checklist prints the kit's
                         name only. Kits carry no `sequentialId`, so a SAM_ID
                         workspace has no kit code to print here. */}
-                  {asset?.kit?.name}
-                  {/* Print-medium equivalent of the overview's
+                    {asset?.kit?.name}
+                    {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
                         paper, so the explanation is printed inline. Without
                         it a detached row is indistinguishable from a live kit
@@ -466,61 +430,86 @@ export const BookingPDFPreview = ({
                         actual contents with nothing explaining the gap.
                         Status-neutral wording: CANCELLED bookings keep these
                         rows too and may never have gone out. */}
-                  <When truthy={!!asset.isRemovedFromKit}>
-                    <span className="mt-1 block text-xs text-gray-500">
-                      Removed from kit, kept as a record of what was booked
-                    </span>
-                  </When>
-                </td>
-                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
-                  {asset?.category?.name}
-                </td>
-                <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
-                  {asset?.location?.name}
-                </td>
-                <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                  <div className="flex flex-col items-start gap-1">
-                    {/* The picture is optional; the tick box and the code are
+                    <When truthy={!!asset.isRemovedFromKit}>
+                      <span className="mt-1 block text-xs text-gray-500">
+                        Removed from kit, kept as a record of what was booked
+                      </span>
+                    </When>
+                  </td>
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                    {asset?.category?.name}
+                  </td>
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                    {asset?.location?.name}
+                  </td>
+                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                    <div className="flex flex-col items-start gap-1">
+                      {/* The picture is optional; the tick box and the code are
                           not. Keeping the picture on its own line means the cell
                           reads the same with it and without it, and gives the
                           code the whole cell to wrap in. */}
-                    <When truthy={showCodeImages}>
-                      <AssetCodePrintImage
-                        src={assetIdToCodeImageMap[asset.id]}
-                        displayCode={assetIdToDisplayCodeMap[asset.id]}
-                        alt={`Code of ${asset.title}`}
-                        squareClassName="size-14"
-                      />
-                    </When>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        aria-label={`Mark ${asset.title} as picked`}
-                        className="block size-5 border"
-                      />
-                      {/* Printed even when there is no picture: the code is
+                      <When truthy={!printsCodeOnLine}>
+                        <AssetCodePrintImage
+                          image={codeImage}
+                          alt={`Code of ${asset.title}`}
+                          squareClassName="size-14"
+                        />
+                      </When>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Mark ${asset.title} as picked`}
+                          className="block size-5 border"
+                        />
+                        {/* Printed even when there is no picture: the code is
                             the part a picker matches against the physical
                             label. */}
-                      <AssetCodePrintText
-                        displayCode={assetIdToDisplayCodeMap[asset.id]}
-                      />
-                    </div>
-                  </div>
-                </td>
-              </tr>
-
-              <When truthy={!!asset.description}>
-                <tr className="border-b border-gray-300 align-top">
-                  <td colSpan={8} className="m-2 p-2">
-                    <div className="flex items-start gap-4 bg-gray-100 p-4">
-                      <div className="w-20 text-xs">Asset Description</div>
-                      <div className="flex-1 text-sm">{asset.description}</div>
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        />
+                      </div>
                     </div>
                   </td>
                 </tr>
-              </When>
-            </tbody>
-          ))}
+
+                <When truthy={printsCodeOnLine}>
+                  <tr
+                    className={tw(
+                      "align-top",
+                      !asset.description && "border-b border-gray-300"
+                    )}
+                  >
+                    <td
+                      colSpan={ASSET_TABLE_COLUMNS.length}
+                      className="p-2.5 text-left"
+                    >
+                      <AssetCodePrintImage
+                        image={codeImage}
+                        alt={`Code of ${asset.title}`}
+                        squareClassName="size-14"
+                      />
+                    </td>
+                  </tr>
+                </When>
+
+                <When truthy={!!asset.description}>
+                  <tr className="border-b border-gray-300 align-top">
+                    <td
+                      colSpan={ASSET_TABLE_COLUMNS.length}
+                      className="m-2 p-2"
+                    >
+                      <div className="flex items-start gap-4 bg-gray-100 p-4">
+                        <div className="w-20 text-xs">Asset Description</div>
+                        <div className="flex-1 text-sm">
+                          {asset.description}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </When>
+              </tbody>
+            );
+          })}
         </table>
 
         {/*
