@@ -168,6 +168,7 @@ import {
   checkoutSessionsToLogsByAsset,
   compareSlicesForGreedyFill,
   computeDispatchedUnitsTotalByAsset,
+  computeSlicesRemainingToCheckOut,
 } from "./checkout-attribution";
 import type { SourceLocationSubmission } from "./checkout-source-location";
 import {
@@ -4613,14 +4614,15 @@ export async function computeBookingAssetsRemainingToCheckOut(
   const [pivots, sessions, booking] = await Promise.all([
     tx.bookingAsset.findMany({
       where: { bookingId, assetId: { in: uniqueAssetIds } },
-      // `checkedOutAt` is the per-asset half of the all-at-once fallback
-      // below: that checkout stamps it on every slice it sends out, so the
-      // marker, not merely "this booking is ONGOING", is what says a slice
-      // already left on THIS booking.
+      // Each slice with its markers: the all-at-once fallback below is
+      // decided per slice (see `computeSlicesRemainingToCheckOut`).
       select: {
+        id: true,
         assetId: true,
         quantity: true,
+        assetKitId: true,
         checkedOutAt: true,
+        checkedInAt: true,
       },
     }),
     tx.partialBookingCheckout.findMany({
@@ -4637,47 +4639,45 @@ export async function computeBookingAssetsRemainingToCheckOut(
     }),
   ]);
 
-  /**
-   * Whether every slice of a requested asset on this booking has left
-   * (`checkedOutAt` set). Feeds the per-asset half of the all-at-once fallback
-   * below. A missing marker reads as not left, the safe direction: the asset
-   * keeps its real `booked − claimed` remaining rather than being zeroed.
-   */
-  const allSlicesLeftByAsset = new Map<string, boolean>();
-
-  // Booked total per requested asset (Σ pivot quantities across its slices).
+  type PivotSlice = {
+    id: string;
+    quantity: number;
+    assetKitId: string | null;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  };
+  // Booked total and slices per requested asset.
   const bookedByAsset = new Map<string, number>();
-  if (uniqueAssetIds.length === 1) {
-    // The pivot query is filtered to this single asset via `assetId: { in }`,
-    // so every returned row provably belongs to it — sum them directly. This
-    // keeps parity with the singular helper's original "sum all returned
-    // pivots" and does not depend on each row projecting its own `assetId`.
-    const rows = pivots as Array<{
-      quantity: number;
-      checkedOutAt?: Date | null;
-    }>;
-    const booked = rows.reduce((sum, p) => sum + (p.quantity ?? 0), 0);
-    bookedByAsset.set(uniqueAssetIds[0], booked);
-    allSlicesLeftByAsset.set(
-      uniqueAssetIds[0],
-      rows.length > 0 && rows.every((p) => p.checkedOutAt != null)
+  const slicesByAsset = new Map<string, PivotSlice[]>();
+  const pivotRows = pivots as Array<{
+    id?: string;
+    assetId?: string;
+    quantity: number;
+    assetKitId?: string | null;
+    checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
+  }>;
+  pivotRows.forEach((p, index) => {
+    // The query is filtered to the requested assets. With a single one, every
+    // row provably belongs to it, so a row need not project its own `assetId`.
+    const assetId =
+      uniqueAssetIds.length === 1 ? uniqueAssetIds[0] : p.assetId ?? "";
+    bookedByAsset.set(
+      assetId,
+      (bookedByAsset.get(assetId) ?? 0) + (p.quantity ?? 0)
     );
-  } else {
-    for (const p of pivots as Array<{
-      assetId: string;
-      quantity: number;
-      checkedOutAt?: Date | null;
-    }>) {
-      bookedByAsset.set(
-        p.assetId,
-        (bookedByAsset.get(p.assetId) ?? 0) + (p.quantity ?? 0)
-      );
-      allSlicesLeftByAsset.set(
-        p.assetId,
-        (allSlicesLeftByAsset.get(p.assetId) ?? true) && p.checkedOutAt != null
-      );
-    }
-  }
+    const list = slicesByAsset.get(assetId) ?? [];
+    list.push({
+      // `id` is always selected; the fallback only keeps rows distinct when a
+      // caller's client omits it.
+      id: p.id ?? `${assetId}:${index}`,
+      quantity: p.quantity ?? 0,
+      assetKitId: p.assetKitId ?? null,
+      checkedOutAt: p.checkedOutAt ?? null,
+      checkedInAt: p.checkedInAt ?? null,
+    });
+    slicesByAsset.set(assetId, list);
+  });
 
   const sessionsArr = sessions as Array<{
     assetIds: string[];
@@ -4703,42 +4703,37 @@ export async function computeBookingAssetsRemainingToCheckOut(
 
   for (const assetId of uniqueAssetIds) {
     const booked = bookedByAsset.get(assetId) ?? 0;
-    const claimed = (logsByAsset.get(assetId) ?? []).reduce(
-      (sum, log) => sum + log.quantity,
-      0
-    );
+    const checkoutClaims = logsByAsset.get(assetId) ?? [];
+    const claimed = checkoutClaims.reduce((sum, log) => sum + log.quantity, 0);
 
-    // Legacy all-at-once fallback, decided entirely PER ASSET:
-    //   - `booked > 0`: an asset that isn't on the booking (no pivots) falls
-    //     through to the normal math rather than synthesizing "fully out".
-    //   - `claimed === 0`: nothing was ever progressively checked out for this
-    //     asset, so its zeroed counters are the all-at-once flow's silence
-    //     rather than a real "still on the shelf" reading. An asset WITH claims
-    //     needs no fallback — `booked − claimed` is already exact.
-    //   - every slice carries `checkedOutAt`: the marker the all-at-once flow
-    //     stamps on what it sends out. An asset ADDED to the booking afterwards
-    //     carries none (updateBookingAssets deliberately does not
-    //     auto-check-out on an ONGOING booking), so it keeps its real remaining
-    //     (GitHub #2815). Never `Asset.status`: it is global, so an asset
-    //     another booking has out reads CHECKED_OUT while nothing of it left
-    //     on this one.
+    // Decided per SLICE, through the same helper the per-slice reader uses, so
+    // this total and the sum over the asset's slices cannot disagree. A slice
+    // the all-at-once checkout sent out (out by its markers, no claim of its
+    // own) has nothing left; a slice added afterwards, or one that fully came
+    // back, keeps its real remaining (GitHub #2815). Never `Asset.status`: it
+    // is global, so an asset another booking has out reads CHECKED_OUT while
+    // nothing of it left on this one.
     //
-    // Keying on the ASSET rather than "the booking has zero sessions" is what
-    // makes this survive a later batch: once "check out remaining" records the
-    // first session for a newly-added asset, a booking-level test would flip
-    // every already-out asset back to "fully remaining" and allow a duplicate
+    // Per slice rather than "the booking has zero sessions" is what makes this
+    // survive a later batch: once "check out remaining" records the first
+    // session for a newly-added asset, a booking-level test would flip every
+    // already-out slice back to "fully remaining" and allow a duplicate
     // checkout of stock that is already in the field.
-    if (
-      booked > 0 &&
-      claimed === 0 &&
-      isActiveBooking &&
-      allSlicesLeftByAsset.get(assetId) === true
-    ) {
-      remainingByAsset.set(assetId, 0);
-      continue;
+    let sliceTotal = 0;
+    for (const units of computeSlicesRemainingToCheckOut({
+      slices: slicesByAsset.get(assetId) ?? [],
+      checkoutClaims,
+      isActiveBooking,
+    }).values()) {
+      sliceTotal += units;
     }
 
-    remainingByAsset.set(assetId, Math.max(0, booked - claimed));
+    // `booked − claimed` stays the ceiling: a tagged claim larger than its
+    // slice still comes off the asset's total.
+    remainingByAsset.set(
+      assetId,
+      Math.min(sliceTotal, Math.max(0, booked - claimed))
+    );
   }
 
   return remainingByAsset;
@@ -4926,14 +4921,13 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
   // than relying only on the downstream assetCap to neutralize it.
   const requestedRows = (await tx.bookingAsset.findMany({
     where: { bookingId, id: { in: uniqueSliceIds } },
-    // `checkedOutAt` feeds the all-at-once fallback below; see the asset-level
-    // sibling for the full rationale.
     select: {
       id: true,
       assetId: true,
       quantity: true,
       assetKitId: true,
       checkedOutAt: true,
+      checkedInAt: true,
     },
   })) as Array<{
     id: string;
@@ -4941,6 +4935,7 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
     quantity: number;
     assetKitId: string | null;
     checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
   }>;
 
   // Keep only genuinely-requested rows (a widened query or a static test mock
@@ -4948,7 +4943,13 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
   const requestedSet = new Set(uniqueSliceIds);
   const requestedById = new Map<
     string,
-    { assetId: string; quantity: number; hasLeft: boolean }
+    {
+      assetId: string;
+      quantity: number;
+      assetKitId: string | null;
+      checkedOutAt: Date | null;
+      checkedInAt: Date | null;
+    }
   >();
   const involvedAssetIds = new Set<string>();
   for (const row of requestedRows) {
@@ -4956,7 +4957,9 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
     requestedById.set(row.id, {
       assetId: row.assetId,
       quantity: row.quantity,
-      hasLeft: row.checkedOutAt != null,
+      assetKitId: row.assetKitId,
+      checkedOutAt: row.checkedOutAt ?? null,
+      checkedInAt: row.checkedInAt ?? null,
     });
     involvedAssetIds.add(row.assetId);
   }
@@ -4976,7 +4979,14 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
   const [allSlices, sessions, booking] = await Promise.all([
     tx.bookingAsset.findMany({
       where: { bookingId, assetId: { in: involvedAssetIdList } },
-      select: { id: true, assetId: true, quantity: true, assetKitId: true },
+      select: {
+        id: true,
+        assetId: true,
+        quantity: true,
+        assetKitId: true,
+        checkedOutAt: true,
+        checkedInAt: true,
+      },
     }),
     tx.partialBookingCheckout.findMany({
       where: { bookingId },
@@ -5009,18 +5019,28 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
   // Group each involved asset's slices so the attributor sees its full set.
   const slicesByAsset = new Map<
     string,
-    Array<{ id: string; quantity: number; assetKitId: string | null }>
+    Array<{
+      id: string;
+      quantity: number;
+      assetKitId: string | null;
+      checkedOutAt: Date | null;
+      checkedInAt: Date | null;
+    }>
   >();
   for (const row of allSlices as Array<{
     id: string;
     assetId: string;
     quantity: number;
     assetKitId: string | null;
+    checkedOutAt?: Date | null;
+    checkedInAt?: Date | null;
   }>) {
     const entry = {
       id: row.id,
       quantity: row.quantity,
       assetKitId: row.assetKitId,
+      checkedOutAt: row.checkedOutAt ?? null,
+      checkedInAt: row.checkedInAt ?? null,
     };
     const list = slicesByAsset.get(row.assetId);
     if (list) {
@@ -5038,43 +5058,36 @@ export async function computeBookingAssetsSliceRemainingToCheckOut(
     involvedAssetIds.has(id)
   );
 
-  // Attribute each involved asset's claims across its full slice set ONCE, then
-  // fold the per-asset maps into a single slice → claimed lookup.
-  const claimedBySliceId = new Map<string, number>();
+  // Remaining for every slice of each involved asset, computed over its FULL
+  // slice set (the greedy standalone-first fill needs every sibling) through
+  // the same helper the asset-level reader sums, so the two cannot disagree.
+  const remainingBySliceId = new Map<string, number>();
   for (const assetId of involvedAssetIdList) {
-    const attributed = attributeDispositionsByBookingAsset({
-      bookingAssetRows: slicesByAsset.get(assetId) ?? [],
-      consumptionLogs: logsByAsset.get(assetId) ?? [],
-    });
-    for (const [sliceId, claimed] of attributed) {
-      claimedBySliceId.set(sliceId, claimed);
+    for (const [sliceId, units] of computeSlicesRemainingToCheckOut({
+      slices: slicesByAsset.get(assetId) ?? [],
+      checkoutClaims: logsByAsset.get(assetId) ?? [],
+      isActiveBooking,
+    })) {
+      remainingBySliceId.set(sliceId, units);
     }
   }
 
-  // Remaining per requested slice = its own booked quantity − claims attributed
-  // to it, floored at 0.
   for (const sliceId of uniqueSliceIds) {
     const requested = requestedById.get(sliceId);
     // Unknown slice (not on the booking) → keep the seeded 0.
     if (!requested) continue;
-    const claimed = claimedBySliceId.get(sliceId) ?? 0;
-    // All-at-once fallback, decided per SLICE: mirror of the asset-level
-    // sibling. A slice with claims needs no fallback (`quantity − claimed` is
-    // exact). One the all-at-once checkout sent out carries `checkedOutAt`
-    // and no claims, so nothing of it remains. A slice added after that
-    // checkout carries no marker and keeps its real remaining (GitHub #2815).
-    // Never `Asset.status`: it is global, so an asset another booking has out
-    // reads CHECKED_OUT while this slice has not left.
-    if (
-      isActiveBooking &&
-      requested.quantity > 0 &&
-      claimed === 0 &&
-      requested.hasLeft
-    ) {
-      remainingBySlice.set(sliceId, 0);
-      continue;
-    }
-    remainingBySlice.set(sliceId, Math.max(0, requested.quantity - claimed));
+    remainingBySlice.set(
+      sliceId,
+      remainingBySliceId.get(sliceId) ??
+        // The full read always includes a requested slice; this only covers a
+        // client that returned it from the first read alone.
+        computeSlicesRemainingToCheckOut({
+          slices: [{ id: sliceId, ...requested }],
+          checkoutClaims: logsByAsset.get(requested.assetId) ?? [],
+          isActiveBooking,
+        }).get(sliceId) ??
+        0
+    );
   }
 
   return remainingBySlice;
