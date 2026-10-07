@@ -406,8 +406,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           additionalData: { userId, organizationId: id },
         });
 
-        const { selfServiceGroupId, adminGroupId, baseUserGroupId } =
-          parsedData;
+        const {
+          selfServiceGroupId,
+          adminGroupId,
+          custodyManagerGroupId,
+          baseUserGroupId,
+        } = parsedData;
 
         /**
          * Group mappings are optional per-role (only one is required overall),
@@ -426,6 +430,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ssoDetails: {
             selfServiceGroupId: normalizeGroupId(selfServiceGroupId),
             adminGroupId: normalizeGroupId(adminGroupId),
+            custodyManagerGroupId: normalizeGroupId(custodyManagerGroupId),
             baseUserGroupId: normalizeGroupId(baseUserGroupId),
           },
         });

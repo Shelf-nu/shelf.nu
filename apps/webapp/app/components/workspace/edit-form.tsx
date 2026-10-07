@@ -17,6 +17,7 @@ import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
@@ -561,18 +562,22 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
   z
     .object({
       id: z.string(),
+      adminGroupId: z.string().optional(),
+      custodyManagerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
-      adminGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
 
-      const hasAtLeastOneGroup = [
-        data.adminGroupId,
-        data.selfServiceGroupId,
-        data.baseUserGroupId,
-      ].some((value) => value != null && value.trim().length > 0);
+      /* Every group-id column counts, so a workspace that maps only one role
+         (whichever it is) passes. */
+      const hasAtLeastOneGroup = (
+        Object.keys(SSO_GROUP_ROLE) as SsoGroupField[]
+      ).some((field) => {
+        const value = data[field];
+        return value != null && value.trim().length > 0;
+      });
 
       if (!hasAtLeastOneGroup) {
         ctx.addIssue({
@@ -679,6 +684,31 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
               zo.errors.adminGroupId()?.message
             }
             defaultValue={organization.ssoDetails.adminGroupId || undefined}
+          />
+        </FormRow>
+
+        <FormRow
+          rowLabel={`Custody manager role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the{" "}
+              <b>Custody manager</b> role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Custody manager role group"}
+            hideLabel
+            className="w-full"
+            name={zo.fields.custodyManagerGroupId()}
+            error={
+              validationErrors?.custodyManagerGroupId?.message ||
+              zo.errors.custodyManagerGroupId()?.message
+            }
+            defaultValue={
+              organization.ssoDetails.custodyManagerGroupId || undefined
+            }
           />
         </FormRow>
 

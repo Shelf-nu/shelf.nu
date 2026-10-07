@@ -2,10 +2,10 @@
  * Tests for the workspace SSO settings form schema.
  *
  * These lock in the security-relevant invariant that an SSO-enabled workspace
- * can never persist an empty group→role mapping: at least one of the three
+ * can never persist an empty group→role mapping: at least one of the role
  * group identifiers must be provided. The auth-side role resolver
  * (`getRoleFromGroupId`) treats an all-empty mapping as a hard deny, but the
- * schema is the first line of defence — it rejects the all-blank submission
+ * schema is the first line of defence: it rejects the all-blank submission
  * server-side (the action parses with this same schema before saving).
  *
  * @see {@link file://./edit-form.tsx}
@@ -59,10 +59,32 @@ describe("EditWorkspaceSSOSettingsFormSchema", () => {
       expect(result.success).toBe(true);
     });
 
-    it("accepts a submission with all three groups mapped", () => {
+    it("accepts a submission whose only mapping is the Custody manager group", () => {
+      const result = schema.safeParse({
+        id: "org-1",
+        custodyManagerGroupId: "cm",
+      });
+
+      expect(result.success).toBe(true);
+    });
+
+    it("rejects a submission whose Custody manager group is whitespace only", () => {
+      const result = schema.safeParse({
+        id: "org-1",
+        adminGroupId: "",
+        custodyManagerGroupId: "  ",
+        selfServiceGroupId: "",
+        baseUserGroupId: "",
+      });
+
+      expect(result.success).toBe(false);
+    });
+
+    it("accepts a submission with every group mapped", () => {
       const result = schema.safeParse({
         id: "org-1",
         adminGroupId: "shelf-admins",
+        custodyManagerGroupId: "shelf-custody-managers",
         selfServiceGroupId: "shelf-self-service",
         baseUserGroupId: "shelf-base",
       });

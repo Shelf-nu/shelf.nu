@@ -208,11 +208,25 @@ export const action = async ({
         });
       }
       case "updateSsoDetails": {
-        const { adminGroupId, selfServiceGroupId, domain } = parseData(
+        /** A blank optional group field stores `null`: that role is not mapped. */
+        const optionalGroupId = z
+          .string()
+          .optional()
+          .transform((value) => value?.trim() || null);
+
+        const {
+          adminGroupId,
+          custodyManagerGroupId,
+          selfServiceGroupId,
+          baseUserGroupId,
+          domain,
+        } = parseData(
           await request.formData(),
           z.object({
             adminGroupId: z.string(),
+            custodyManagerGroupId: optionalGroupId,
             selfServiceGroupId: z.string(),
+            baseUserGroupId: optionalGroupId,
             domain: z
               .string()
               .transform((domains) => domains.toLowerCase())
@@ -241,12 +255,16 @@ export const action = async ({
                 create: {
                   domain,
                   adminGroupId,
+                  custodyManagerGroupId,
                   selfServiceGroupId,
+                  baseUserGroupId,
                 },
                 update: {
                   domain,
                   adminGroupId,
+                  custodyManagerGroupId,
                   selfServiceGroupId,
+                  baseUserGroupId,
                 },
               },
             },
@@ -489,6 +507,30 @@ export default function OrgPage() {
                   </FormRow>
 
                   <FormRow
+                    rowLabel={`Custody manager role group id`}
+                    subHeading={
+                      <div>
+                        Place the Id of the group that should be mapped to the{" "}
+                        <b>Custody manager</b> role. Accepts one or more group
+                        IDs, separated by commas. Leave blank if the role is not
+                        mapped.
+                      </div>
+                    }
+                    className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+                  >
+                    <Input
+                      label={"Custody manager role group id"}
+                      hideLabel
+                      name={"custodyManagerGroupId"}
+                      defaultValue={
+                        organization?.ssoDetails?.custodyManagerGroupId ||
+                        undefined
+                      }
+                      className="w-full"
+                    />
+                  </FormRow>
+
+                  <FormRow
                     rowLabel={`Self service role group id`}
                     subHeading={
                       <div>
@@ -508,6 +550,29 @@ export default function OrgPage() {
                       defaultValue={
                         organization?.ssoDetails?.selfServiceGroupId ||
                         undefined
+                      }
+                      className="w-full"
+                    />
+                  </FormRow>
+
+                  <FormRow
+                    rowLabel={`Base user role group id`}
+                    subHeading={
+                      <div>
+                        Place the Id of the group that should be mapped to the{" "}
+                        <b>Base</b> role. Accepts one or more group IDs,
+                        separated by commas. Leave blank if the role is not
+                        mapped.
+                      </div>
+                    }
+                    className="block border-b-0 pb-0 [&>div]:lg:basis-auto"
+                  >
+                    <Input
+                      label={"Base user role group id"}
+                      hideLabel
+                      name={"baseUserGroupId"}
+                      defaultValue={
+                        organization?.ssoDetails?.baseUserGroupId || undefined
                       }
                       className="w-full"
                     />

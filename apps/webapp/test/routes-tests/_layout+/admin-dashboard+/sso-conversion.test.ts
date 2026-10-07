@@ -66,6 +66,7 @@ import {
 import { setRequireSsoLogin } from "~/modules/organization/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { requireAdmin } from "~/utils/roles.server";
+import type { SsoGroupField } from "~/utils/sso-group-roles";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 
 /** The admin driving the page. */
@@ -118,9 +119,7 @@ function forbidden() {
 /** A linked organization as `checkDomainSSOStatus` returns it. */
 function linkedOrg(
   id: string,
-  groups: Partial<
-    Record<"adminGroupId" | "selfServiceGroupId" | "baseUserGroupId", string>
-  > = {},
+  groups: Partial<Record<SsoGroupField, string>> = {},
   requireSsoLogin = true,
   enabledSso = true
 ) {
@@ -132,6 +131,7 @@ function linkedOrg(
       id: `sso-${id}`,
       domain: "acme.com",
       adminGroupId: groups.adminGroupId ?? null,
+      custodyManagerGroupId: groups.custodyManagerGroupId ?? null,
       selfServiceGroupId: groups.selfServiceGroupId ?? null,
       baseUserGroupId: groups.baseUserGroupId ?? null,
       requireSsoLogin,
@@ -226,6 +226,30 @@ describe("admin sso-conversion route", () => {
           ],
           // "mapped" has SSO enabled and the switch on.
           ssoLoginRequired: true,
+        })
+      );
+    });
+
+    it("counts a workspace whose only mapping is the Custody manager group as mapped", async () => {
+      vi.mocked(checkDomainSSOStatus).mockResolvedValue({
+        isConfiguredForSSO: true,
+        linkedOrganizations: [
+          linkedOrg("custody-only", { custodyManagerGroupId: "grp-cm" }),
+        ],
+        ssoProviderId: "provider-1",
+      } as never);
+      vi.mocked(findEligibleAccountsForSsoConversion).mockResolvedValue([]);
+
+      const result = await loader(loaderArgs("?domain=acme.com"));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          linkedWorkspaces: [
+            expect.objectContaining({
+              id: "custody-only",
+              hasGroupMappings: true,
+            }),
+          ],
         })
       );
     });
