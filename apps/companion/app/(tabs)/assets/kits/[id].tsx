@@ -19,9 +19,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Modal,
-  Platform,
-  Dimensions,
 } from "react-native";
 import { useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,6 +40,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { InfoRow } from "@/components/shared/info-row";
 import { CodeSection } from "@/components/shared/code-section";
+import { FullScreenImageViewer } from "@/components/full-screen-image-viewer";
 import { KitActions } from "@/components/kit-detail/kit-actions";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -395,31 +393,12 @@ export default function KitDetailScreen() {
         </ScrollView>
       )}
 
-      {/* ── Image zoom modal ─────────────────────────────── */}
-      {kit?.image ? (
-        <Modal
-          visible={showImageZoom}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowImageZoom(false)}
-        >
-          <View style={styles.zoomOverlay} accessibilityViewIsModal={true}>
-            <TouchableOpacity
-              style={styles.zoomCloseBtn}
-              onPress={() => setShowImageZoom(false)}
-              accessibilityLabel="Close image viewer"
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={28} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={{ uri: kit.image }}
-              style={styles.zoomImage}
-              contentFit="contain"
-            />
-          </View>
-        </Modal>
-      ) : null}
+      {/* ── Image zoom ───────────────────────────────────── */}
+      <FullScreenImageViewer
+        uri={showImageZoom ? kit?.image ?? null : null}
+        onClose={() => setShowImageZoom(false)}
+        accessibilityLabel={kit ? `Image of ${kit.name}` : undefined}
+      />
 
       {/* ── Custody + Location pickers ───────────────────── */}
       {currentOrg ? (
@@ -539,28 +518,6 @@ const useStyles = createStyles((colors, shadows) => ({
   assetMeta: {
     fontSize: fontSize.sm,
     color: colors.muted,
-  },
-  zoomOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomCloseBtn: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 60 : 40,
-    right: 20,
-    zIndex: 10,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  zoomImage: {
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height * 0.7,
   },
   centered: {
     flex: 1,
