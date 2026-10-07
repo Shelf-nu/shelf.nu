@@ -939,6 +939,10 @@ export function stillOutOnOverdueKitSlice({
   organizationId?: string;
 }): Prisma.BookingAssetWhereInput {
   return {
+    // Kit-driven only. Callers place this directly under an asset's
+    // `bookingAssets`, so without it a member's overdue standalone slice would
+    // reach the asset rules, which stay date-windowed.
+    assetKitId: { not: null },
     checkedOutAt: { not: null },
     checkedInAt: null,
     booking: {

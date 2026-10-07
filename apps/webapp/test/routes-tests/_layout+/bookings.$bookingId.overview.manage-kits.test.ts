@@ -1094,7 +1094,10 @@ describe("manage-kits loader — Models tab payload", () => {
     ).mock.calls[0] as any;
     const sliceWhere =
       extraInclude.assetKits.select.asset.select.bookingAssets.where;
+    // Kit-driven only: an overdue standalone slice of a member is the asset
+    // rules' business, which stay date-windowed.
     expect(sliceWhere.OR).toContainEqual({
+      assetKitId: { not: null },
       checkedOutAt: { not: null },
       checkedInAt: null,
       booking: {

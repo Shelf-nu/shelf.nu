@@ -70,6 +70,7 @@ function expectWindowOrStillOverdue(where: {
     id: { not: "booking-current" },
   });
   expect(stillOverdue).toEqual({
+    assetKitId: { not: null },
     checkedOutAt: { not: null },
     checkedInAt: null,
     booking: {
