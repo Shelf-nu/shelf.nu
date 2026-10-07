@@ -69,6 +69,12 @@ vi.mock("~/modules/booking/fulfil-and-checkout.server", () => ({
   fulfilAndCheckOut: fulfilMock,
 }));
 
+// why: the loader asks where each multi-location pool's units leave from,
+// a database read with its own suite; these tests pin who the loader admits.
+vi.mock("~/modules/booking/checkout-source-location.server", () => ({
+  getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
+}));
+
 // why: the emitter pushes to a live SSE stream keyed to a real session; there
 // is none in a route-level test. The mock records what the user is told.
 vi.mock("~/utils/emitter/send-notification.server", () => ({

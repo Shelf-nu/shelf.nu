@@ -12,6 +12,8 @@ const dbMocks = vi.hoisted(() => {
     teamMember: {},
     kit: {
       update: vi.fn(),
+      // The holder guard's read of kits that are checked out.
+      findMany: vi.fn(),
     },
     asset: {
       update: vi.fn(),
@@ -54,7 +56,12 @@ vi.mock("~/database/db.server", () => ({
     // via tx.custody.createMany + tx.asset.updateMany.
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
-        kit: { update: dbMocks.kit.update },
+        // why: the holder guard locks the kit row with raw SQL, then reads
+        // memberships and other bookings' slices still out. None by default.
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        assetKit: { findMany: vi.fn().mockResolvedValue([]) },
+        bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
+        kit: { update: dbMocks.kit.update, findMany: dbMocks.kit.findMany },
         asset: {
           update: dbMocks.asset.update,
           findMany: dbMocks.asset.findMany,
@@ -150,6 +157,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetTeamMember.mockReset();
   mockKitUpdate.mockReset();
+  // No kit is out on a booking unless a test says so.
+  dbMocks.kit.findMany.mockReset().mockResolvedValue([]);
   mockAssetUpdate.mockReset();
   mockNoteCreateMany.mockReset();
   requirePermissionMock.mockReset();
@@ -214,6 +223,39 @@ describe("kits/$kitId/assets/assign-custody", () => {
       },
     });
 
+    expect(mockKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("refuses to put a kit that is checked out on a booking in custody", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      role: OrganizationRoles.ADMIN,
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+      name: "Valid Team Member",
+      user: { id: "user-456", firstName: "Valid", lastName: "Member" },
+    });
+    // why: the kit is a database row reading CHECKED_OUT; the guard asks for
+    // the requested kits that are out.
+    dbMocks.kit.findMany.mockResolvedValue([
+      { id: "kit-123", name: "Test Kit" },
+    ]);
+
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    const request = new Request(
+      "https://example.com/kits/kit-123/assets/assign-custody",
+      { method: "POST", body: formData }
+    );
+
+    const response = await action(createActionArgs({ request }));
+
+    expect((response as Response).status).not.toBe(302);
     expect(mockKitUpdate).not.toHaveBeenCalled();
   });
 

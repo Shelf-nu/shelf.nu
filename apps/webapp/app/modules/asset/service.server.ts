@@ -49,6 +49,7 @@ import {
 import type { ReleaseLine } from "~/modules/asset/custody-source";
 import {
   UNPLACED_SOURCE,
+  bookedOutFromSource,
   custodyFromSource,
   custodySourceKey,
   hasMultipleSources,
@@ -8949,6 +8950,7 @@ export async function checkOutQuantity({
               sourceName,
               placedCount,
               inCustody: custodyFromSource(sources.state, source.locationId),
+              onBooking: bookedOutFromSource(sources.state, source.locationId),
             }),
             label,
             status: 400,

@@ -88,6 +88,7 @@ import { Form } from "~/components/custom-form";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import type {
   ScannedAssetRow,
   ScannedKitRow,
@@ -147,6 +148,12 @@ type FulfilReservationsDrawerProps = {
   isLoading?: boolean;
   /** Forwarded through to `ConfigurableDrawer`. */
   defaultExpanded?: boolean;
+  /**
+   * Pools already on the booking that sit at two or more locations and have
+   * not gone out yet. The check-out confirmation asks where each one's units
+   * leave from, for the ones this submit sends out.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
@@ -168,6 +175,7 @@ export default function FulfilReservationsDrawer({
   style,
   isLoading,
   defaultExpanded = false,
+  sourceQuestions,
 }: FulfilReservationsDrawerProps) {
   const session = useAtomValue(fulfilSessionAtom);
   const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
@@ -294,6 +302,18 @@ export default function FulfilReservationsDrawer({
     }
     return ids;
   }, [scannedBuckets.rows]);
+
+  /**
+   * The "From location" questions for what this submit sends out: every pool
+   * on the booking when the whole booking goes out, only the scanned ones
+   * when only scanned items leave.
+   */
+  const sourceQuestionsToAsk = useMemo(() => {
+    if (!sourceQuestions?.length) return [];
+    if (!session?.checksOutScannedOnly) return sourceQuestions;
+    const scanned = new Set(assetIdsToSubmit);
+    return sourceQuestions.filter((question) => scanned.has(question.assetId));
+  }, [sourceQuestions, session?.checksOutScannedOnly, assetIdsToSubmit]);
 
   /**
    * Kit ids to submit: every resolved kit scan. Unresolved scans are excluded
@@ -569,6 +589,7 @@ export default function FulfilReservationsDrawer({
           disableSubmit={shouldDisableSubmit || hasBlockers}
           notice={notice}
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestionsToAsk}
           // Only a RESERVED booking's first check-out can move its start date.
           suppressEarlyCheckoutPrompt={session.bookingStatus !== "RESERVED"}
         />
@@ -944,6 +965,8 @@ type FulfilCheckoutFormProps = {
   unassignedUnits: UnassignedModelUnits[];
   /** Skips the early check-out prompt; see `CheckoutDialog`. */
   suppressEarlyCheckoutPrompt: boolean;
+  /** Pools to ask "From location" for; see `CheckoutDialog`. */
+  sourceQuestions: CheckoutSourceQuestion[];
 };
 
 /**
@@ -975,6 +998,7 @@ function FulfilCheckoutForm({
   notice,
   unassignedUnits,
   suppressEarlyCheckoutPrompt,
+  sourceQuestions,
 }: FulfilCheckoutFormProps) {
   /**
    * Form DOM node ref — used as the portal container for the
@@ -1034,6 +1058,7 @@ function FulfilCheckoutForm({
           portalContainer={formElement || undefined}
           formId="fulfil-and-checkout-form"
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
           // `grow` (the CheckoutDialog default) makes the button stretch
           // across the drawer — with the disabled primary-300 tint this

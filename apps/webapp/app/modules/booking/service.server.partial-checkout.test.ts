@@ -137,6 +137,20 @@ vitest.mock("~/database/db.server", () => {
       },
       kit: {
         updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+        // why: a kit slice going out records its kit's location as its
+        // source. No fixture here places a kit, so none has a location.
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      // why: a pool slice going out for the first time records which manual
+      // placement its units leave from. No fixture here places a pool, so
+      // every slice records none, as before sources existed.
+      assetLocation: {
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      // why: a location's units left to give subtract the custody taken from
+      // it. No fixture here places a pool, so custody is never read for one.
+      custody: {
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // why: post-pivot the bookingAsset pivot is read by both
       // checkoutBooking's delegate-path enumeration AND
@@ -203,6 +217,9 @@ vitest.mock("~/database/db.server", () => {
       // "Something went wrong while partially checking out booking" error.
       consumptionLog: {
         aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+        // why: units out on other bookings from a location are read with
+        // their check-in logs; nothing has come back in these fixtures.
+        findMany: vitest.fn().mockResolvedValue([]),
       },
       // Escape hatch for `beforeEach` to clear the in-memory PBC session log
       // between tests so a prior test's writes can't leak into the next one's
@@ -321,6 +338,18 @@ type PbcTestHooks = {
 
 /** The mocked `db` viewed through its test-only hooks. */
 const pbcHooks = db as unknown as PbcTestHooks;
+
+/**
+ * A `bookingAsset.findMany` answer for this booking's own reads only. The kit
+ * check-out guard's read of OTHER live bookings' slices (`bookingId: { notIn }`)
+ * gets none, so no kit reads as out elsewhere unless a test sets that up.
+ *
+ * @param rows - What every other pivot read returns
+ */
+function ownSlicesOnly(rows: unknown[]) {
+  return (args?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+    Promise.resolve(args?.where?.bookingId?.notIn ? [] : rows);
+}
 
 /**
  * The slice of a `bookingAsset.findMany` argument the #2815 mocks read. Both
@@ -1821,20 +1850,22 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       // + kit slices of the same asset. Booked total = 22 + 100 = 122.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([
-        {
-          id: "ba-standalone",
-          assetId: "asset-gloves",
-          quantity: 22,
-          assetKitId: null,
-        },
-        {
-          id: "ba-kit",
-          assetId: "asset-gloves",
-          quantity: 100,
-          assetKitId: "ak-kittington",
-        },
-      ]);
+      ).mockImplementation(
+        ownSlicesOnly([
+          {
+            id: "ba-standalone",
+            assetId: "asset-gloves",
+            quantity: 22,
+            assetKitId: null,
+          },
+          {
+            id: "ba-kit",
+            assetId: "asset-gloves",
+            quantity: 100,
+            assetKitId: "ak-kittington",
+          },
+        ])
+      );
       // Per-slice cap reads (`computeBookingAssetSliceRemaining`) resolve each
       // slice's booked quantity by id; no prior consumption → full cap.
       (
@@ -2037,6 +2068,43 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       );
     });
 
+    it("refuses to send any unit of a kit out while the kit is in custody", async () => {
+      expect.assertions(2);
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(makeGlovesBooking());
+      mockKittingtonProvenance();
+      const kitFindMany = db.kit.findMany as ReturnType<typeof vitest.fn>;
+      const priorKitFindMany = kitFindMany.getMockImplementation();
+      onTestFinished(() => {
+        if (priorKitFindMany) kitFindMany.mockImplementation(priorKitFindMany);
+        else kitFindMany.mockResolvedValue([]);
+      });
+      // why: Kittington's custodian is a KitCustody row in the database; the
+      // guard asks for kits carrying one.
+      kitFindMany.mockImplementation(
+        (args?: { where?: { custody?: unknown } }) =>
+          Promise.resolve(
+            args?.where?.custody
+              ? [{ id: "kit-kittington", name: "Kittington" }]
+              : []
+          )
+      );
+
+      // A partial batch: 10 of the kit slice's 100 boxes.
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            { assetId: "asset-gloves", bookingAssetId: "ba-kit", quantity: 10 },
+          ],
+        })
+      ).rejects.toThrow("Some kits are in custody: Kittington");
+      expect(db.kit.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: KitStatus.CHECKED_OUT } })
+      );
+    });
+
     it("names a standalone qty slice per-slice and drops the redundant asset mention", async () => {
       expect.assertions(3);
 
@@ -2137,7 +2205,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       });
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([{ quantity: 50 }]);
+      ).mockImplementation(ownSlicesOnly([{ quantity: 50 }]));
       (
         quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
       ).mockResolvedValue({
@@ -2235,20 +2303,22 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       // slice and pools prior claims across the two same-asset slices.
       (
         db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
-      ).mockResolvedValue([
-        {
-          id: "ba-standalone",
-          assetId: "asset-gloves",
-          quantity: 22,
-          assetKitId: null,
-        },
-        {
-          id: "ba-kit",
-          assetId: "asset-gloves",
-          quantity: 100,
-          assetKitId: "ak-kittington",
-        },
-      ]);
+      ).mockImplementation(
+        ownSlicesOnly([
+          {
+            id: "ba-standalone",
+            assetId: "asset-gloves",
+            quantity: 22,
+            assetKitId: null,
+          },
+          {
+            id: "ba-kit",
+            assetId: "asset-gloves",
+            quantity: 100,
+            assetKitId: "ak-kittington",
+          },
+        ])
+      );
 
       await expect(
         partialCheckoutBooking({

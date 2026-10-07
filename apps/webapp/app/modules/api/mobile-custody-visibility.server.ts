@@ -22,6 +22,7 @@
  * filtering logic while whole-module-mocking `mobile-auth.server`.
  *
  * @see {@link file://./mobile-auth.server.ts} — getMobileUserContext / getMobileAssetForViewer
+ * @see {@link file://./mobile-code-resolve.server.ts} the scanned-code resolve consumer
  * @see {@link file://./../../routes/api+/mobile+/assets.$assetId.ts} — detail endpoint consumer
  */
 
@@ -33,9 +34,9 @@
  * custody-view permission only see their OWN entries; everyone else's are
  * replaced by a hidden-holders count so the client can render "+N others".
  *
- * The shaped list entries carry no `custodian.userId` (legacy contract), so
- * ownership is resolved from the raw custody rows (which the caller selects
- * WITH `custodian.userId`) and matched back by custodian id.
+ * Ownership is read from `custodyRows`, the rows carrying `custodian.userId`,
+ * and matched back to the list by custodian id. A list whose entries carry
+ * `custodian.userId` themselves can be passed as its own `custodyRows`.
  *
  * @param args.custodyList - The shaped, per-custodian aggregated list
  * @param args.custodyRows - Raw custody rows carrying `custodian.userId`
@@ -110,4 +111,65 @@ export function viewerCanSeeLegacyCustody({
   }
 
   return canSeeAllCustody;
+}
+
+/**
+ * The custody fields of a shaped mobile asset (`MobileAssetResponse`) that
+ * depend on who is asking. Both carry `custodian.userId`, which is what the
+ * viewer's own entries are recognized by.
+ */
+type ViewerScopedCustodyFields = {
+  custody: { custodian: { userId: string | null } } | null;
+  custodyList: Array<{ custodian: { id: string; userId: string | null } }>;
+};
+
+/**
+ * Applies the viewer's custody visibility to a shaped mobile asset.
+ *
+ * - `custodyList` keeps only the viewer's own entries unless they may see all
+ *   custody ({@link filterMobileCustodyListForViewer}).
+ * - `custodyListOthersCount` is the number of holders left out (0 when none
+ *   are).
+ * - The legacy single `custody` is null unless the viewer may see all custody
+ *   or is that custodian ({@link viewerCanSeeLegacyCustody}).
+ *
+ * Used wherever a `MOBILE_ASSET_SELECT` asset is returned to a caller: the
+ * scanned-code resolve and the asset returned after a quantity or custody
+ * change. The asset detail and list routes apply the same two rules to their
+ * own selects, so a holder hidden on one screen is hidden on all of them.
+ *
+ * @param asset - The asset as `shapeMobileAssetResponse` returns it
+ * @param viewer.viewerUserId - The authenticated caller's user id
+ * @param viewer.canSeeAllCustody - The caller's `access.custody.seeAll` in the
+ *   workspace that owns the asset
+ * @returns The asset with its custody fields scoped to the viewer
+ */
+export function scopeMobileAssetCustodyToViewer<
+  TAsset extends ViewerScopedCustodyFields,
+>(
+  asset: TAsset,
+  {
+    viewerUserId,
+    canSeeAllCustody,
+  }: { viewerUserId: string; canSeeAllCustody: boolean }
+): TAsset & { custodyListOthersCount: number } {
+  const { custodyList, custodyListOthersCount } =
+    filterMobileCustodyListForViewer({
+      custodyList: asset.custodyList,
+      custodyRows: asset.custodyList,
+      viewerUserId,
+      canSeeAllCustody,
+    });
+
+  const custody =
+    asset.custody &&
+    viewerCanSeeLegacyCustody({
+      custodianUserId: asset.custody.custodian.userId,
+      viewerUserId,
+      canSeeAllCustody,
+    })
+      ? asset.custody
+      : null;
+
+  return { ...asset, custody, custodyList, custodyListOthersCount };
 }

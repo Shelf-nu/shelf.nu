@@ -56,6 +56,11 @@ const dbMocks = vi.hoisted(() => ({
   custody: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  // why: the same read also counts units out on bookings per location; none
+  // are out in these tests.
+  bookingAsset: {
+    findMany: vi.fn().mockResolvedValue([]),
+  },
   $transaction: vi.fn(),
 }));
 

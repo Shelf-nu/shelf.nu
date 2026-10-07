@@ -221,6 +221,18 @@ export async function assertAssignableQuantities({
         assetId,
         total: asset.quantity ?? 0,
       });
+      // A location the pool has no manual placement at (a stale pick, or an
+      // id from elsewhere) has nothing to hand out. Name that, rather than
+      // reporting it as a location with 0 units left.
+      if (
+        locationId !== null &&
+        !state.placements.some((p) => p.locationId === locationId)
+      ) {
+        unavailable.push(
+          `"${asset.title}" (not placed at the chosen location)`
+        );
+        continue;
+      }
       const left = unitsLeftAtSource(state, locationId);
       if (quantities[assetId] > left) {
         const where = locationId

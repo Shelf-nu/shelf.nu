@@ -107,6 +107,8 @@ type BookingFlags = {
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
   hasAssetsInCustody: boolean;
+  /** A kit on the booking has a custodian, so the booking cannot check out. */
+  hasKitsInCustody?: boolean;
 };
 
 type BookingFormData = {
@@ -155,6 +157,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     currentOrganization,
     booking: loaderBooking,
     lifecycleProgress,
+    checkoutSourceQuestions,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
@@ -448,10 +451,13 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   bookingFlags?.hasUnavailableAssets ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasCheckedOutAssets ||
-                  bookingFlags?.hasAssetsInCustody
+                  bookingFlags?.hasAssetsInCustody ||
+                  bookingFlags?.hasKitsInCustody
                     ? {
                         reason: bookingFlags?.hasAssetsInCustody
                           ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                          : bookingFlags?.hasKitsInCustody
+                          ? "Some kits in this booking are currently in custody. Release their custody before you can check-out"
                           : bookingFlags?.hasAlreadyBookedAssets
                           ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can check-out"
                           : isProcessing || isLoadingWorkingHours
@@ -483,6 +489,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
+                    sourceQuestions={checkoutSourceQuestions}
                     booking={{ id, name: name!, from: startDateAsDate }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}

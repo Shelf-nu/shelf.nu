@@ -7,9 +7,14 @@
  * NOT recorded on 404/403/401; the user-agent fallback; and that a
  * provenance failure is non-fatal (asset still resolves, error logged once).
  *
+ * Also pins the custody the resolved asset carries: the same per-viewer
+ * filter as the asset detail (`/api/mobile/assets/:assetId`), read for the
+ * workspace that owns the code.
+ *
  * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
 import { loader } from "~/routes/api+/mobile+/qr.$qrId";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -41,47 +46,22 @@ vitest.mock("react-router", async () => {
   };
 });
 
-// why: external auth — we don't want to hit Supabase in tests. The pure shape
-// helpers are provided in its place, and the photo re-sign step only shapes,
-// since it has its own tests.
-vitest.mock("~/modules/api/mobile-auth.server", () => {
-  /** The pivot fields the shaper flattens; every other field passes through. */
-  type ShapeableAsset = Record<string, unknown> & {
-    assetKits: Array<{ kit: { id: string } | null }>;
-    assetLocations: Array<{ location: unknown }>;
-    custody: unknown[];
-  };
-  const shapeAsset = (asset: ShapeableAsset) => {
-    const { assetKits, assetLocations, custody, ...rest } = asset;
-    const kit = assetKits[0]?.kit ?? null;
-    return {
-      ...rest,
-      kitId: kit?.id ?? null,
-      kit,
-      location: assetLocations[0]?.location ?? null,
-      custody: custody[0] ?? null,
-    };
-  };
+// why: external auth, we don't want to hit Supabase in tests. Only the auth,
+// org-access and viewer-context lookups are stubbed; the real shape helpers
+// run, so the custody assertions below see the actual flattening and the
+// actual viewer filter, not a hand-mirrored stub. The photo re-sign step is a
+// no-op for these fixtures (no photo to re-sign).
+vitest.mock("~/modules/api/mobile-auth.server", async () => {
+  const actual = await vitest.importActual<
+    typeof import("~/modules/api/mobile-auth.server")
+  >("~/modules/api/mobile-auth.server");
   return {
+    ...actual,
     requireMobileAuth: vitest.fn(),
-    // why: SAM/sequential resolution (added on main) scopes by the caller's org
+    // why: SAM/sequential resolution scopes by the caller's org
     requireOrganizationAccess: vitest.fn(),
-    MOBILE_ASSET_SELECT: {
-      id: true,
-      title: true,
-      status: true,
-      mainImage: true,
-      category: { select: { name: true } },
-      location: { select: { name: true } },
-    },
-    MOBILE_KIT_SELECT: { id: true, name: true },
-    // why: the whole module is mocked to keep Supabase out of these tests, so the
-    // pure shape helpers must be provided too. These mirror the real ones (flatten
-    // the quantities pivot shape into the flat shape the companion expects).
-    shapeMobileAssetResponse: shapeAsset,
-    resignAndShapeMobileAsset: (asset: ShapeableAsset) =>
-      Promise.resolve(shapeAsset(asset)),
-    shapeMobileKitResponse: (kit: unknown) => kit ?? null,
+    // why: reads the caller's membership; the tests set custody visibility
+    getMobileUserContext: vitest.fn(),
   };
 });
 
@@ -127,7 +107,10 @@ vitest.mock("~/utils/error", () => ({
   },
 }));
 
-import { requireMobileAuth } from "~/modules/api/mobile-auth.server";
+import {
+  getMobileUserContext,
+  requireMobileAuth,
+} from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { createScan } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
@@ -162,6 +145,47 @@ const mockQr = {
   kitId: null,
   organizationId: "org-1",
 };
+
+/** One operator-assigned custody row, as `MOBILE_ASSET_SELECT` returns it. */
+function custodyRow(
+  custodianId: string,
+  name: string,
+  userId: string | null,
+  quantity: number
+) {
+  return {
+    quantity,
+    kitCustodyId: null,
+    custodian: { id: custodianId, name, userId },
+  };
+}
+
+/**
+ * A quantity-tracked asset held by three people, oldest custody first: a
+ * colleague, the caller (`user-1`), and a team member without an account.
+ */
+const sharedAsset = {
+  ...mockAsset,
+  type: "QUANTITY_TRACKED",
+  quantity: 20,
+  custody: [
+    custodyRow("tm-colleague", "Colleague One", "user-2", 3),
+    custodyRow("tm-caller", "Test User", "user-1", 2),
+    custodyRow("tm-no-account", "Warehouse Shelf", null, 4),
+  ],
+};
+
+/** Sets whether the caller may see every holder's custody in the workspace. */
+function asViewer({ canSeeAllCustody }: { canSeeAllCustody: boolean }) {
+  const context = mobileUserContext();
+  vitest.mocked(getMobileUserContext).mockResolvedValue({
+    ...context,
+    access: {
+      ...context.access,
+      custody: { ...context.access.custody, seeAll: canSeeAllCustody },
+    },
+  } as Awaited<ReturnType<typeof getMobileUserContext>>);
+}
 
 /**
  * Builds an authenticated GET request for the QR endpoint.
@@ -203,6 +227,90 @@ describe("GET /api/mobile/qr/:qrId", () => {
     (db.userOrganization.findUnique as any).mockResolvedValue({ id: "uo-1" });
     (db.asset.findFirst as any).mockResolvedValue(mockAsset);
     (createScan as any).mockResolvedValue({ id: "scan-1" });
+    asViewer({ canSeeAllCustody: true });
+  });
+
+  describe("custody visibility", () => {
+    beforeEach(() => {
+      (db.asset.findFirst as any).mockResolvedValue(sharedAsset);
+    });
+
+    it("sends a caller without custody visibility only their own holding and a count of the others", async () => {
+      asViewer({ canSeeAllCustody: false });
+
+      const result = await run(createQrRequest());
+
+      const body = await (result as unknown as Response).json();
+      expect(body.qr.asset.custodyList).toEqual([
+        {
+          custodian: { id: "tm-caller", name: "Test User", userId: "user-1" },
+          quantity: 2,
+          releasableQuantity: 2,
+        },
+      ]);
+      expect(body.qr.asset.custodyListOthersCount).toBe(2);
+      // The single custody is the oldest holder's, and that is the colleague.
+      expect(body.qr.asset.custody).toBeNull();
+      const payload = JSON.stringify(body);
+      expect(payload).not.toContain("Colleague One");
+      expect(payload).not.toContain("user-2");
+      expect(payload).not.toContain("Warehouse Shelf");
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-1");
+    });
+
+    it("keeps the single custody for a caller without custody visibility who is its holder", async () => {
+      asViewer({ canSeeAllCustody: false });
+      (db.asset.findFirst as any).mockResolvedValue({
+        ...sharedAsset,
+        custody: [
+          custodyRow("tm-caller", "Test User", "user-1", 2),
+          custodyRow("tm-colleague", "Colleague One", "user-2", 3),
+        ],
+      });
+
+      const result = await run(createQrRequest());
+
+      const body = await (result as unknown as Response).json();
+      expect(body.qr.asset.custody).toEqual({
+        custodian: { id: "tm-caller", name: "Test User", userId: "user-1" },
+      });
+      expect(body.qr.asset.custodyList).toHaveLength(1);
+      expect(body.qr.asset.custodyListOthersCount).toBe(1);
+    });
+
+    it("sends every holder to a caller who may see all custody", async () => {
+      asViewer({ canSeeAllCustody: true });
+
+      const result = await run(createQrRequest());
+
+      const body = await (result as unknown as Response).json();
+      expect(
+        body.qr.asset.custodyList.map(
+          (entry: { custodian: { id: string } }) => entry.custodian.id
+        )
+      ).toEqual(["tm-colleague", "tm-caller", "tm-no-account"]);
+      expect(body.qr.asset.custodyListOthersCount).toBe(0);
+      expect(body.qr.asset.custody).toEqual({
+        custodian: {
+          id: "tm-colleague",
+          name: "Colleague One",
+          userId: "user-2",
+        },
+      });
+    });
+
+    it("reads custody visibility in the workspace that owns the code", async () => {
+      // A QR id is global, so the code can belong to another of the caller's
+      // workspaces, where their role and that workspace's settings apply.
+      (db.qr.findUnique as any).mockResolvedValue({
+        ...mockQr,
+        organizationId: "org-2",
+      });
+
+      await run(createQrRequest());
+
+      expect(getMobileUserContext).toHaveBeenCalledWith("user-1", "org-2");
+    });
   });
 
   it("resolves a QR to its linked asset and records scan provenance", async () => {

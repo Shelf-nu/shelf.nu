@@ -10,6 +10,7 @@
  */
 import {
   filterMobileCustodyListForViewer,
+  scopeMobileAssetCustodyToViewer,
   viewerCanSeeLegacyCustody,
 } from "./mobile-custody-visibility.server";
 
@@ -99,5 +100,71 @@ describe("viewerCanSeeLegacyCustody", () => {
         canSeeAllCustody: false,
       })
     ).toBe(false);
+  });
+});
+
+describe("scopeMobileAssetCustodyToViewer", () => {
+  const colleague = { id: "tm-colleague", name: "Colleague", userId: "user-2" };
+  const viewer = { id: "tm-viewer", name: "Viewer", userId: "user-1" };
+
+  /** A shaped asset whose oldest custody is the first holder given. */
+  function shapedAsset(...holders: (typeof colleague)[]) {
+    return {
+      id: "asset-1",
+      custody: holders[0] ? { custodian: holders[0] } : null,
+      custodyList: holders.map((custodian) => ({
+        custodian,
+        quantity: 2,
+        releasableQuantity: 2,
+      })),
+    };
+  }
+
+  it("leaves every holder in place for a viewer who can see all custody", () => {
+    const asset = shapedAsset(colleague, viewer);
+
+    expect(
+      scopeMobileAssetCustodyToViewer(asset, {
+        viewerUserId: "user-1",
+        canSeeAllCustody: true,
+      })
+    ).toEqual({ ...asset, custodyListOthersCount: 0 });
+  });
+
+  it("keeps only the viewer's own entry and hides someone else's single custody", () => {
+    const scoped = scopeMobileAssetCustodyToViewer(
+      shapedAsset(colleague, viewer),
+      { viewerUserId: "user-1", canSeeAllCustody: false }
+    );
+
+    expect(scoped.custodyList.map((entry) => entry.custodian.id)).toEqual([
+      "tm-viewer",
+    ]);
+    expect(scoped.custodyListOthersCount).toBe(1);
+    expect(scoped.custody).toBeNull();
+  });
+
+  it("keeps the single custody when the viewer holds it", () => {
+    const scoped = scopeMobileAssetCustodyToViewer(
+      shapedAsset(viewer, colleague),
+      { viewerUserId: "user-1", canSeeAllCustody: false }
+    );
+
+    expect(scoped.custody).toEqual({ custodian: viewer });
+    expect(scoped.custodyListOthersCount).toBe(1);
+  });
+
+  it("returns a null single custody for an asset nobody holds", () => {
+    const scoped = scopeMobileAssetCustodyToViewer(shapedAsset(), {
+      viewerUserId: "user-1",
+      canSeeAllCustody: false,
+    });
+
+    expect(scoped).toEqual({
+      id: "asset-1",
+      custody: null,
+      custodyList: [],
+      custodyListOthersCount: 0,
+    });
   });
 });

@@ -65,6 +65,8 @@ import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.ser
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
+import { loadMultiPlacedPoolIds } from "~/modules/booking/checkout-source-location.server";
+import { countUnitsOnBookingsFromLocation } from "~/modules/booking/units-out-by-source.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { resolveLocationAssetIds } from "~/modules/location/bulk-select.server";
 import {
@@ -165,19 +167,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(totalAssetsWithinLocation / perPage);
 
     /**
-     * For pools placed at two or more locations, how many of this location's units
-     * are out with people ("· 2 in custody"). Counts only, never a name.
+     * For pools placed at two or more locations, how many of this location's
+     * units are out with people ("· 2 in custody"), and how many are out on a
+     * booking having left from here ("· 10 on a booking"). Counts only,
+     * never a name, and neither changes the location's placed count.
      */
-    const custodyFromHere = await getCustodyFromLocationByPool({
-      locationId,
-      organizationId,
-      pools: assets
-        .filter((asset) => isQuantityTracked(asset))
-        .map((asset) => ({ id: asset.id, total: asset.quantity ?? 0 })),
-    });
+    const pools = assets.filter((asset) => isQuantityTracked(asset));
+    const [custodyFromHere, onBookingByAssetId] = await Promise.all([
+      getCustodyFromLocationByPool({
+        locationId,
+        organizationId,
+        pools: pools.map((asset) => ({
+          id: asset.id,
+          total: asset.quantity ?? 0,
+        })),
+      }),
+      // Only pools at two or more placements say where booked units came
+      // from; a pool at one location shows nothing new.
+      loadMultiPlacedPoolIds({
+        organizationId,
+        assetIds: pools.map((asset) => asset.id),
+      }).then((multiPlaced) =>
+        countUnitsOnBookingsFromLocation({
+          organizationId,
+          locationId,
+          assetIds: [...multiPlaced],
+        })
+      ),
+    ]);
     const items = assets.map((asset) => ({
       ...asset,
       inCustodyHere: custodyFromHere[asset.id] ?? 0,
+      onBookingFromHere: onBookingByAssetId.get(asset.id) ?? 0,
     }));
 
     const header: HeaderData = {
@@ -458,6 +479,12 @@ const ListAssetContent = ({
     qrCodes: { id: string }[];
     barcodes: { id: string; type: BarcodeType; value: string }[];
     /**
+     * Units of this pool out on an ONGOING or OVERDUE booking that left from
+     * this location (see `countUnitsOnBookingsFromLocation`). 0 for
+     * individual assets and for pools with nothing out from here.
+     */
+    onBookingFromHere?: number;
+    /**
      * Custody rows for this asset, one per holder — quantity-tracked stock can
      * be held by several people at once. The list column shows one badge, so
      * it renders the primary holder via `getPrimaryCustody`.
@@ -590,6 +617,9 @@ const ListAssetContent = ({
                           · {atLocation} {unit} at this location
                           {item.inCustodyHere
                             ? ` · ${item.inCustodyHere} in custody`
+                            : null}
+                          {item.onBookingFromHere
+                            ? ` · ${item.onBookingFromHere} on a booking`
                             : null}
                           {kitEntries.length > 0 ? (
                             <TooltipProvider delayDuration={150}>

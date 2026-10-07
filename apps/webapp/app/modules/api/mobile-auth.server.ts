@@ -32,10 +32,7 @@ import {
   canUseAudits,
   canUseBarcodes,
 } from "~/utils/subscription.server";
-import {
-  filterMobileCustodyListForViewer,
-  viewerCanSeeLegacyCustody,
-} from "./mobile-custody-visibility.server";
+import { scopeMobileAssetCustodyToViewer } from "./mobile-custody-visibility.server";
 import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
@@ -798,10 +795,10 @@ export async function resignAndShapeMobileAsset(
 }
 
 /**
- * `MobileAssetResponse` plus the custody-visibility metadata added by
- * {@link getMobileAssetForViewer}: `custodyListOthersCount` is the number of
+ * `MobileAssetResponse` with its custody scoped to one viewer by
+ * `scopeMobileAssetCustodyToViewer`: `custodyListOthersCount` is the number of
  * holders hidden from the viewer (0 when the viewer can see all custody), so
- * the companion can render "+N others" — mirroring the web's
+ * the companion can render "+N others", mirroring the web's
  * `QuantityCustodyList` hidden-count (quantity-custody-list.tsx:126).
  */
 export type MobileAssetForViewer = MobileAssetResponse & {
@@ -850,27 +847,8 @@ export async function getMobileAssetForViewer({
 
   const shaped = await resignAndShapeMobileAsset(asset, organizationId);
 
-  const { custodyList, custodyListOthersCount } =
-    filterMobileCustodyListForViewer({
-      custodyList: shaped.custodyList,
-      custodyRows: asset.custody,
-      viewerUserId,
-      canSeeAllCustody,
-    });
-
-  // Legacy single `custody` follows the web's specific-custody rule (see
-  // viewerCanSeeLegacyCustody): hidden unless the viewer can see all custody
-  // or IS the (primary) custodian.
-  const primaryCustody = asset.custody[0] ?? null;
-  const custody =
-    primaryCustody &&
-    viewerCanSeeLegacyCustody({
-      custodianUserId: primaryCustody.custodian.userId,
-      viewerUserId,
-      canSeeAllCustody,
-    })
-      ? shaped.custody
-      : null;
-
-  return { ...shaped, custody, custodyList, custodyListOthersCount };
+  return scopeMobileAssetCustodyToViewer(shaped, {
+    viewerUserId,
+    canSeeAllCustody,
+  });
 }
