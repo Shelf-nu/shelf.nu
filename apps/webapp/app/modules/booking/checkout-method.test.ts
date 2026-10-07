@@ -188,6 +188,22 @@ describe("scannedRowPredicate", () => {
     ).toBe(true);
     expect(scannedRowPredicate(noNames)(camera)).toBe(false);
   });
+
+  it("marks an INDIVIDUAL kit member already on the booking when its kit is scanned again", () => {
+    // The kit is already on the booking, so the scan adds no slice and names
+    // its members only through the kit id.
+    const kitCamera = {
+      asset: { id: "camera", type: "INDIVIDUAL" as const },
+      assetKitId: "ak-cam",
+      sourceKitId: "kit-1",
+    };
+    expect(
+      scannedRowPredicate({ ...noNames, kitIds: ["kit-1"] })(kitCamera)
+    ).toBe(true);
+    expect(
+      scannedRowPredicate({ ...noNames, kitIds: ["kit-2"] })(kitCamera)
+    ).toBe(false);
+  });
 });
 
 describe("readBookingMethodMeta", () => {

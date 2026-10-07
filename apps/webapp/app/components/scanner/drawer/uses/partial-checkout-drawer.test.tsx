@@ -33,10 +33,10 @@ import {
   QUICK_CHECKOUT_QR_PREFIX,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
-import { partialCheckoutAssetsSchema } from "./partial-checkout-drawer";
-
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
-import PartialCheckoutDrawer from "./partial-checkout-drawer";
+import PartialCheckoutDrawer, {
+  partialCheckoutAssetsSchema,
+} from "./partial-checkout-drawer";
 
 // why: react-router's `useLoaderData` runs outside a real Remix route
 // context here — we stub it with deterministic data per test. `Link` /

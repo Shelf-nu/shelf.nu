@@ -5594,6 +5594,9 @@ export async function checkinBooking({
               // Whether the slice left, which bounds what the auto-default may
               // consume on it.
               checkedOutAt: true,
+              // Whether the slice already came back, so its check-in event does
+              // not claim the method of this check-in.
+              checkedInAt: true,
               // Where the slice's units left from at check-out: consumed, lost
               // and damaged units come off that placement below.
               sourceLocationId: true,
@@ -6408,7 +6411,16 @@ export async function checkinBooking({
               assetId: ba.asset.id,
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
-                ...bookingMethodMeta(provenance, [ba.id]),
+                // Only a slice this check-in reconciles (out, not yet back:
+                // the same scope as the marker write below) came back by this
+                // method. A slice returned earlier, or one that never left,
+                // keeps its event with the method not said.
+                ...bookingMethodMeta(
+                  provenance && !(ba.checkedOutAt && !ba.checkedInAt)
+                    ? { ...provenance, method: null }
+                    : provenance,
+                  [ba.id]
+                ),
               },
             })),
             tx

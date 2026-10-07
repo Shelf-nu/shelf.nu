@@ -7081,6 +7081,106 @@ describe("checkinBooking", () => {
     );
   });
 
+  it("records the check-in's method only on the slice it brings back, not on one returned earlier", async () => {
+    expect.assertions(1);
+
+    // The pens sit on two slices: ba-q0 came back in an earlier partial
+    // check-in, ba-q1 is still out. The one-click check-in brings back ba-q1;
+    // ba-q0 keeps its event, but this check-in's method is not its method.
+    const pens = {
+      id: "asset-pens",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+      title: "Pens",
+      assetKits: [],
+      status: AssetStatus.CHECKED_OUT,
+      bookingAssets: [
+        { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+      ],
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: pens,
+          assetId: "asset-pens",
+          quantity: 5,
+          id: "ba-q0",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        },
+        {
+          asset: pens,
+          assetId: "asset-pens",
+          quantity: 10,
+          id: "ba-q1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(mockBooking);
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    // why: the pool row the quantity loop locks.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pens",
+      title: "Pens",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 100,
+      unitOfMeasure: null,
+    });
+    // why: the remaining helpers read the pens' booked units by asset; the
+    // completion gate reads by booking and is kept empty, as in the test below.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args: { where?: { assetId?: string } }) =>
+      args?.where?.assetId
+        ? Promise.resolve([{ quantity: 15 }])
+        : Promise.resolve([])
+    );
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // why: the five pens of ba-q0 are already logged back.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 5 } });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await checkinBooking({
+      ...mockCheckinParams,
+      userId: "user-1",
+      provenance: { surface: "web", method: "quick" },
+    });
+
+    const checkedIn = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_IN")
+      .map((event) => {
+        const meta = event.meta as Record<string, unknown>;
+        return { method: meta.method, surface: meta.surface };
+      });
+    expect(checkedIn).toEqual([
+      { method: null, surface: "web" },
+      { method: "quick", surface: "web" },
+    ]);
+  });
+
   it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {
     expect.assertions(1);
 

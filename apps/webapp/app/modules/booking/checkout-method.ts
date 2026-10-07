@@ -171,12 +171,14 @@ export type ScannedRow = {
  * Builds the test for "did this scan go through this booking row".
  *
  * An INDIVIDUAL asset is one unit with one row per booking, so naming the
- * asset in any way names its row. A quantity-tracked asset can hold a
- * standalone slice and kit slices on the same booking at once, so its rows are
- * matched by slice: the standalone slice by a direct scan (or a claim of that
- * row), a kit slice by its exact `AssetKit` membership or by its kit's label.
- * Matching a quantity row by asset id would mark a sibling slice the scan
- * never touched as scanned.
+ * asset in any way names its row, and so does scanning the kit that row came
+ * from (a kit already on the booking adds no slice, so only its kit id names
+ * its members). A quantity-tracked asset can hold a standalone slice and kit
+ * slices on the same booking at once, so its rows are matched by slice: the
+ * standalone slice by a direct scan (or a claim of that row), a kit slice by
+ * its exact `AssetKit` membership or by its kit's label. Matching a quantity
+ * row by asset id would mark a sibling slice the scan never touched as
+ * scanned.
  *
  * @param names - What the scan submitted and what the scan helper reported
  * @returns A predicate over the booking's rows after the scan
@@ -199,17 +201,19 @@ export function scannedRowPredicate(
   );
   const scannedKitIds = new Set(names.kitIds);
 
+  /** Whether the row is a slice of a kit the scan named. */
+  const fromScannedKit = (row: ScannedRow) =>
+    (row.assetKitId !== null && scannedAssetKitIds.has(row.assetKitId)) ||
+    (row.sourceKitId !== null && scannedKitIds.has(row.sourceKitId));
+
   return (row) => {
     if (row.asset.type !== "QUANTITY_TRACKED") {
-      return anyNamedAssetIds.has(row.asset.id);
+      return anyNamedAssetIds.has(row.asset.id) || fromScannedKit(row);
     }
     if (row.assetKitId === null) {
       return directlyScannedAssetIds.has(row.asset.id);
     }
-    return (
-      scannedAssetKitIds.has(row.assetKitId) ||
-      (row.sourceKitId !== null && scannedKitIds.has(row.sourceKitId))
-    );
+    return fromScannedKit(row);
   };
 }
 
