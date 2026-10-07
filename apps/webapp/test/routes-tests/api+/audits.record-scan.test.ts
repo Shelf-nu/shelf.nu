@@ -15,7 +15,9 @@
  * @see {@link file://../../../app/routes/api+/audits.record-scan.ts}
  * @see {@link file://../../../app/routes/api+/mobile+/audits.record-scan.ts} the sibling
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { action } from "~/routes/api+/audits.record-scan";
 import { ShelfError } from "~/utils/error";
@@ -28,7 +30,7 @@ const { recordAuditScan, requireAuditAssignee, requirePermission } = vi.hoisted(
   })
 );
 
-// why: the gate under test consumes `isSelfServiceOrBase` from here; mocking
+// why: the gate under test consumes `access` from here; mocking
 // lets each test act as a different role without touching auth or the DB.
 vi.mock("~/utils/roles.server", () => ({ requirePermission }));
 
@@ -86,8 +88,8 @@ describe("POST /api/audits/record-scan", () => {
   it("requires assignee status for a BASE caller before recording anything", async () => {
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
       role: "BASE",
+      access: accessFor([OrganizationRoles.BASE]),
     });
 
     await callAction();
@@ -96,7 +98,7 @@ describe("POST /api/audits/record-scan", () => {
       auditSessionId: "audit-1",
       organizationId: "org-1",
       userId: expect.any(String),
-      isSelfServiceOrBase: true,
+      assignedOnly: true,
     });
   });
 
@@ -106,8 +108,8 @@ describe("POST /api/audits/record-scan", () => {
     // real start can correct.
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
       role: "BASE",
+      access: accessFor([OrganizationRoles.BASE]),
     });
     // why: a real ShelfError, not a plain Error with a `status` property —
     // `makeShelfError` only preserves the status of a ShelfError, so a plain
@@ -130,8 +132,8 @@ describe("POST /api/audits/record-scan", () => {
   it("lets an ADMIN scan any audit in the workspace", async () => {
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
       role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await callAction();
@@ -139,7 +141,7 @@ describe("POST /api/audits/record-scan", () => {
     // The gate short-circuits to allow-all for ADMIN/OWNER, mirroring the
     // permissions resolver — but it must still be CALLED with the right flag.
     expect(requireAuditAssignee).toHaveBeenCalledWith(
-      expect.objectContaining({ isSelfServiceOrBase: false })
+      expect.objectContaining({ assignedOnly: false })
     );
     expect(recordAuditScan).toHaveBeenCalledTimes(1);
   });
@@ -150,8 +152,8 @@ describe("POST /api/audits/record-scan", () => {
     // compatibility and ignored — the service reads the AuditAsset row instead.
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
       role: "ADMIN",
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     await callAction();

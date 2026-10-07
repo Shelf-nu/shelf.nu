@@ -30,7 +30,7 @@ export const loader = async ({
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllBookings } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -56,7 +56,7 @@ export const loader = async ({
       request,
       bookingsIds: bookingsIds.split(","),
       userId,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
     });
 

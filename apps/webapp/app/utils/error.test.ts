@@ -929,3 +929,31 @@ describe(isHandledClientError.name, () => {
     expect(isHandledClientError({ status: 400 })).toBe(false);
   });
 });
+
+describe(`${makeShelfError.name} with a thrown data response`, () => {
+  it("keeps the 400 getParams throws for a missing param", async () => {
+    const { getParams } = await import("./http.server");
+    const { z } = await import("zod");
+
+    let caught: unknown;
+    try {
+      getParams({}, z.object({ excludeUserId: z.string() }));
+    } catch (cause) {
+      caught = cause;
+    }
+
+    const reason = makeShelfError(caught);
+
+    expect(reason.status).toBe(400);
+    expect(reason.shouldBeCaptured).toBe(false);
+  });
+
+  it("leaves a 5xx data response to the unknown-error default", async () => {
+    const { data } = await import("react-router");
+
+    const reason = makeShelfError(data({ error: null }, { status: 502 }));
+
+    expect(reason.status).toBe(500);
+    expect(reason.label).toBe("Unknown");
+  });
+});

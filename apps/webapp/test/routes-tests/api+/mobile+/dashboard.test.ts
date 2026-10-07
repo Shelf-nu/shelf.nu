@@ -99,10 +99,11 @@ const ORG_ID = "org-1";
  * Points the stubbed mobile-auth helpers at a caller holding `role`.
  *
  * @param role - The caller's role in `ORG_ID`
+ * @param options.canSeeAllBookings - Switch on both booking visibility toggles
  */
 function actAs(
   role: OrganizationRoles,
-  overrides: { canSeeAllBookings?: boolean } = {}
+  { canSeeAllBookings = false }: { canSeeAllBookings?: boolean } = {}
 ) {
   requireMobileAuthMock.mockResolvedValue({
     user: {
@@ -119,8 +120,15 @@ function actAs(
     // The guard reads the full array, not roles[0].
     mobileUserContext({
       roles: [role],
-      canSeeAllCustody: role !== OrganizationRoles.SELF_SERVICE,
-      ...overrides,
+      workspace: {
+        // Custody visibility on for every role but SELF_SERVICE.
+        ...(role !== OrganizationRoles.SELF_SERVICE
+          ? { selfServiceCanSeeCustody: true, baseUserCanSeeCustody: true }
+          : {}),
+        ...(canSeeAllBookings
+          ? { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true }
+          : {}),
+      },
     })
   );
 }
@@ -242,6 +250,45 @@ describe("GET /api/mobile/dashboard — booking visibility", () => {
           custodianUserId: CALLER_USER_ID,
         });
       }
+    }
+  );
+});
+
+describe("GET /api/mobile/dashboard — active audits", () => {
+  /** Runs the loader and returns the `where` handed to the audit query. */
+  async function captureAuditWhere() {
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/dashboard?orgId=${ORG_ID}`
+        ),
+      })
+    );
+    const call = vi.mocked(db.auditSession.findMany).mock.calls[0];
+    return (call[0] as { where: Prisma.AuditSessionWhereInput }).where;
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lists only the audits assigned to %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toEqual({
+        some: { userId: CALLER_USER_ID },
+      });
+    }
+  );
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lists every active audit for %s",
+    async (role) => {
+      actAs(role);
+
+      const where = await captureAuditWhere();
+
+      expect(where.assignments).toBeUndefined();
     }
   );
 });

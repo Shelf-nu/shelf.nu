@@ -16,6 +16,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import {
   bulkCheckInAssets,
@@ -161,12 +162,12 @@ function holder(
 
 beforeEach(() => {
   vi.clearAllMocks();
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
-    canUseBarcodes: false,
-    canSeeAllCustody: true,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  requirePermissionMock.mockResolvedValue(
+    permissionContext({
+      organizationId: "org-1",
+      roles: [OrganizationRoles.ADMIN],
+    }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+  );
 });
 
 describe("api/assets/bulk-release-custody", () => {

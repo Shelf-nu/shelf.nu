@@ -282,7 +282,10 @@ describe("GET /api/mobile/bookings/calendar", () => {
         vi.mocked(getMobileUserContext).mockResolvedValue(
           mobileUserContext({
             roles: [role as OrganizationRoles],
-            canSeeAllBookings: true,
+            workspace: {
+              selfServiceCanSeeBookings: true,
+              baseUserCanSeeBookings: true,
+            },
           })
         );
 
@@ -295,7 +298,10 @@ describe("GET /api/mobile/bookings/calendar", () => {
 
     it("keeps drafts private even when the override is on", async () => {
       vi.mocked(getMobileUserContext).mockResolvedValue(
-        mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
+        mobileUserContext({
+          roles: ["BASE"],
+          workspace: { baseUserCanSeeBookings: true },
+        })
       );
 
       await loader(createLoaderArgs({ request: calendarRequest(RANGE) }));

@@ -138,6 +138,7 @@ import {
 import { db } from "~/database/db.server";
 import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { accessFor } from "@helpers/role-access";
 
 /**
  * Typed handles for the mocks every suite below drives. Auth fixtures are cast
@@ -408,11 +409,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     requireOrganizationAccessMock.mockResolvedValue("org-1");
 
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     assetFindUniqueMock.mockResolvedValue(buildAsset());
@@ -467,11 +466,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
 
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
-      canSeeAllBookings: false,
+      access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const result = await loader(
@@ -510,11 +507,9 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
 
   it("keeps the legacy custody visible when the restricted caller IS the primary custodian", async () => {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: false,
-      canSeeAllBookings: false,
+      access: accessFor(["SELF_SERVICE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     // Reorder so the caller's row is the primary (oldest) one
     const asset = buildAsset();
@@ -631,11 +626,9 @@ describe("GET /api/mobile/assets/:assetId — payload projection", () => {
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildAsset());
   });
@@ -710,11 +703,9 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: false,
       canUseAudits: false,
-      canSeeAllCustody: true,
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     assetFindUniqueMock.mockResolvedValue(buildCheckedOutAsset());
   });
@@ -775,10 +766,12 @@ describe("GET /api/mobile/assets/:assetId — custody through a booking", () => 
     canSeeAllBookings: boolean;
   }) {
     getMobileUserContextMock.mockResolvedValue({
-      role: "SELF_SERVICE",
       canUseBarcodes: false,
       canUseAudits: false,
-      ...overrides,
+      access: accessFor(["SELF_SERVICE"], {
+        selfServiceCanSeeBookings: overrides.canSeeAllBookings,
+        selfServiceCanSeeCustody: overrides.canSeeAllCustody,
+      }),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
   }
 
@@ -973,10 +966,9 @@ describe("GET /api/mobile/assets/:assetId — display code", () => {
     } as Awaited<ReturnType<typeof requireMobileAuth>>);
     requireOrganizationAccessMock.mockResolvedValue("org-1");
     getMobileUserContextMock.mockResolvedValue({
-      role: "ADMIN",
       canUseBarcodes: true,
       canUseAudits: false,
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
     canUseBarcodesMock.mockReturnValue(true);
   });

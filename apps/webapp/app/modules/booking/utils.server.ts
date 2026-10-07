@@ -1,9 +1,4 @@
-import {
-  AssetStatus,
-  AssetType,
-  BookingStatus,
-  OrganizationRoles,
-} from "@prisma/client";
+import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
 import type {
   Asset,
   Booking,
@@ -16,67 +11,47 @@ import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 
 const label: ErrorLabel = "Booking";
 
 /**
- * Restricts a bulk booking query to the rows the caller is allowed to act on.
+ * Restricts a bulk booking query to the rows the caller may act on.
  *
- * Mirrors `validateBookingOwnership`, the gate the SINGULAR write paths use:
- * a BASE or SELF_SERVICE caller may only act on bookings they created or hold
- * custody of. ADMIN and OWNER are unrestricted.
+ * Mirrors `validateBookingOwnership`, the gate the singular write paths
+ * use: a caller whose access does not write every booking may only act on
+ * bookings they created or hold. Read from `access.bookings.writeAll`, not from
+ * booking visibility: the workspace see-toggles show a restricted user every
+ * booking but never grant writing them, so scoping a destructive bulk action by
+ * what the user can SEE would hand them org-wide deletion.
  *
- * Deliberately keyed on the ROLE, not on `canSeeAllBookings`. Those differ:
- * `selfServiceCanSeeBookings` / `baseUserCanSeeBookings` make the *list* show a
- * restricted user every booking in the workspace, but they do not grant write
- * access — singular delete still refuses. Scoping a destructive bulk action by
- * what the user can SEE would hand those workspaces org-wide deletion.
+ * Team-member custody links are absent, matching `validateBookingOwnership`.
  *
- * Team-member custody links are intentionally absent, matching
- * `validateBookingOwnership`. The read path is wider (it also matches
- * `custodianTeamMemberId`), and that asymmetry is a known, separately tracked
- * inconsistency — widening it here would be a silent authorization change
- * bundled into a security fix.
- *
- * @param role - The caller's effective role in this organization
+ * @param access - The caller's access
  * @param userId - The caller
- * @returns An ownership predicate, or `null` when the role is unrestricted
+ * @returns An ownership predicate, or `null` when the caller writes every booking
+ * @throws {ShelfError} when a restricted caller has no user to scope to
  */
 export function getBookingOwnershipScope({
-  role,
+  access,
   userId,
 }: {
-  role: OrganizationRoles;
+  access: RoleAccess;
   /** Absent for system-initiated calls, which have no acting user */
   userId?: User["id"];
 }): Prisma.BookingWhereInput | null {
-  /**
-   * ALLOW-list, not a deny-list on SELF_SERVICE/BASE. A role added to
-   * `OrganizationRoles` later lands in the RESTRICTED branch by default, so it
-   * gets scoped to its own rows rather than silently inheriting org-wide
-   * delete. Matches `bookingWriteScopeClause`, which is the other query-side
-   * clause and documents the same reasoning; the submit-time gate
-   * (`validateBookingOwnership`) deny-lists by deliberate, separate design.
-   */
-  const canActOnEveryBooking =
-    role === OrganizationRoles.ADMIN || role === OrganizationRoles.OWNER;
-
-  if (canActOnEveryBooking) {
+  if (access.bookings.writeAll) {
     return null;
   }
 
   if (!userId) {
-    /**
-     * A restricted role with nobody to scope to. Returning `null` here would
-     * silently hand the caller every booking in the workspace, so fail closed:
-     * this can only be a wiring mistake, and it must not degrade into an
-     * org-wide destructive query.
-     */
+    // A restricted caller with nobody to scope to. Returning `null` would hand
+    // the caller every booking in the workspace, so fail closed.
     throw new ShelfError({
       cause: null,
       message:
         "Cannot resolve which bookings this user may act on. Please contact support.",
-      additionalData: { role },
+      additionalData: { role: access.role },
       label,
     });
   }
@@ -98,7 +73,7 @@ export function getBookingOwnershipScope({
  * @param bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
  * @param organizationId - The caller's (validated) organization
  * @param currentSearchParams - The list filters, for the select-all branch
- * @param role - The caller's effective role
+ * @param access - The caller's access
  * @param userId - The caller
  * @returns A `Prisma.BookingWhereInput` scoped to org, filters and ownership
  */
@@ -106,13 +81,13 @@ export function getBulkBookingsWhereInput({
   bookingIds,
   organizationId,
   currentSearchParams,
-  role,
+  access,
   userId,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
-  role: OrganizationRoles;
+  access: RoleAccess;
   /** Absent for system-initiated calls, which have no acting user */
   userId?: User["id"];
 }): Prisma.BookingWhereInput {
@@ -120,7 +95,7 @@ export function getBulkBookingsWhereInput({
     ? getBookingWhereInput({ currentSearchParams, organizationId })
     : { id: { in: bookingIds }, organizationId };
 
-  const ownership = getBookingOwnershipScope({ role, userId });
+  const ownership = getBookingOwnershipScope({ access, userId });
 
   if (!ownership) {
     return base;
@@ -129,6 +104,48 @@ export function getBulkBookingsWhereInput({
   // AND rather than a spread: `base` may carry its own OR, and merging the two
   // would union them — widening a destructive action instead of narrowing it.
   return { AND: [base, ownership] };
+}
+
+/**
+ * Refuses a bulk action whose explicit selection reaches outside the caller's
+ * own bookings.
+ *
+ * {@link getBulkBookingsWhereInput} already narrows the query to what the
+ * caller may act on, so a foreign id is simply not found. Without this check
+ * the action then succeeds on the rest and reports success for a selection it
+ * partly ignored. Select-all is scoped by its filters and is not checked here.
+ *
+ * @param bookingIds - The submitted ids, or `[ALL_SELECTED_KEY]`
+ * @param foundIds - The ids the scoped query returned
+ * @param access - The caller's access
+ * @param action - Verb for the refusal message ("delete", "archive", ...)
+ * @throws {ShelfError} 403 when an explicitly selected booking was filtered out by ownership
+ */
+export function assertBulkSelectionWithinOwnership({
+  bookingIds,
+  foundIds,
+  access,
+  action,
+}: {
+  bookingIds: Booking["id"][];
+  foundIds: Booking["id"][];
+  access: RoleAccess;
+  action: string;
+}): void {
+  if (access.bookings.writeAll || bookingIds.includes(ALL_SELECTED_KEY)) {
+    return;
+  }
+  const found = new Set(foundIds);
+  if (bookingIds.every((id) => found.has(id))) {
+    return;
+  }
+  throw new ShelfError({
+    cause: null,
+    message: `You can only ${action} bookings you created or hold.`,
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
 }
 
 export function getBookingWhereInput({
@@ -946,10 +963,8 @@ export const IN_FLIGHT_BOOKING_STATUSES: BookingStatus[] = [
  * reading the status from a row loaded in that transaction. Routes checking
  * the status themselves is not equivalent, for two reasons:
  *
- * 1. A route that forgets is simply unguarded. The scan-assets action had no
- *    status check of any kind, so a direct POST could add assets to a
- *    COMPLETE booking; its loader computed `canUserManageBookingAssets`, but
- *    that only decided what to RENDER.
+ * 1. A route that forgets is simply unguarded, and a loader's rule only
+ *    decides what to render: a direct POST skips it.
  * 2. A route that checks before calling the service leaves a window open. The
  *    four `updateBookingAssets` callers all validated the status, but each did
  *    so in a read of its own — so a booking completed in between was still

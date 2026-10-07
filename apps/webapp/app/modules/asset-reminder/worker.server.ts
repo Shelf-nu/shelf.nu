@@ -5,6 +5,7 @@ import { sendEmail } from "~/emails/mail.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { assetAlertEmailHtmlString, assetAlertEmailText } from "./emails";
 import type { AssetsEventType, AssetsSchedulerData } from "./scheduler.server";
@@ -84,7 +85,9 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           userOrganizations: {
             some: {
               organizationId: reminder.organizationId,
-              roles: { has: "OWNER" },
+              roles: {
+                hasSome: rolesWhere((p) => p.membership.ownsWorkspace),
+              },
             },
           },
         },

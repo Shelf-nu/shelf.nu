@@ -74,13 +74,10 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Custody visibility is permission-gated (web parity): viewers without
     // custody-view permission (SELF_SERVICE/BASE, unless the org overrides
     // allow) must not receive other holders' custody. Resolve the flags once
-    // here; the filtering happens below, after shaping. `canSeeAllBookings`
+    // here; the filtering happens below, after shaping. `access.bookings.seeAll`
     // is the booking screen's own read gate, which `activeBooking.canOpen`
     // answers in advance.
-    const { canSeeAllCustody, canSeeAllBookings } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
       where: {
@@ -459,7 +456,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         custodyList: flattened.custodyList,
         custodyRows: detailCustody,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
 
     /**
@@ -492,7 +489,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       viewerCanSeeLegacyCustody({
         custodianUserId: primaryCustody.custodian.userId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       })
         ? primaryCustody
         : null;
@@ -517,7 +514,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const activeBooking =
       checkedOutOn &&
       canSeeBookingCustodian({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: checkedOutOn,
         userId: user.id,
       })
@@ -527,7 +524,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             from: checkedOutOn.from,
             // The resolver every mobile booking surface names a holder with.
             custodianName: resolveBookingCustodianName({
-              canSeeAllCustody,
+              canSeeAllCustody: access.custody.seeAll,
               booking: checkedOutOn,
               userId: user.id,
             }),
@@ -536,7 +533,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
             // the booking screen. This is that screen's own gate, answered here
             // so the app only offers a tap that will open.
             canOpen: canSeeBooking({
-              canSeeAllBookings,
+              access,
               booking: {
                 custodianUserId: checkedOutOn.custodianUser?.id ?? null,
                 custodianTeamMember: checkedOutOn.custodianTeamMember,

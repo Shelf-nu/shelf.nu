@@ -10,6 +10,7 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { computeCustodyAvailability } from "~/modules/asset/availability-primitives.server";
 import { loadCustodySources } from "~/modules/asset/custody-source.server";
 import type * as CustodySourceServer from "~/modules/asset/custody-source.server";
@@ -172,7 +173,7 @@ describe("assertAssignableQuantities", () => {
         quantities: { q1: 5, q2: 1 },
         organizationId: "org-1",
         custodian,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       })
     ).resolves.toBeUndefined();
@@ -186,7 +187,7 @@ describe("assertAssignableQuantities", () => {
         quantities: { q1: 6, q2: 1, q3: 10 },
         organizationId: "org-1",
         custodian,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       })
     ).rejects.toMatchObject({
@@ -204,7 +205,7 @@ describe("assertAssignableQuantities", () => {
         quantities: { elsewhere: 1, camera: 1, q1: 2 },
         organizationId: "org-1",
         custodian,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       })
     ).rejects.toMatchObject({
@@ -240,7 +241,7 @@ describe("assertAssignableQuantities", () => {
         sourceLocations: { q1: locationId },
         organizationId: "org-1",
         custodian,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       });
     }
@@ -286,7 +287,8 @@ describe("assertAssignableQuantities", () => {
           quantities: { q1: 2 },
           organizationId: "org-1",
           custodian: custodianFor("user-self"),
-          role: OrganizationRoles.SELF_SERVICE,
+          custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody
+            .assign,
           userId: "user-self",
         })
       ).resolves.toBeUndefined();
@@ -305,7 +307,8 @@ describe("assertAssignableQuantities", () => {
             quantities: { q1: 2 },
             organizationId: "org-1",
             custodian: custodianFor(receiver),
-            role: OrganizationRoles.SELF_SERVICE,
+            custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody
+              .assign,
             userId: "user-self",
           })
         ).rejects.toMatchObject({
@@ -325,7 +328,8 @@ describe("assertAssignableQuantities", () => {
           quantities: {},
           organizationId: "org-1",
           custodian: custodianFor("user-other"),
-          role: OrganizationRoles.SELF_SERVICE,
+          custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody
+            .assign,
           userId: "user-self",
         })
       ).resolves.toBeUndefined();
@@ -354,7 +358,7 @@ describe("resolveQuantityReleases", () => {
         quantityAssetIds: [],
         quantities: {},
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       })
     ).resolves.toEqual([]);
@@ -372,7 +376,7 @@ describe("resolveQuantityReleases", () => {
       quantityAssetIds: ["q1"],
       quantities: { q1: 5 },
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
       userId: "user-1",
     });
 
@@ -388,7 +392,7 @@ describe("resolveQuantityReleases", () => {
       quantityAssetIds: ["q1"],
       quantities: { q1: 8 },
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
       userId: "user-1",
     });
 
@@ -436,7 +440,7 @@ describe("resolveQuantityReleases", () => {
         quantityAssetIds: ["q1"],
         quantities: { q1: 3 },
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
         userId: "user-1",
       })
     ).rejects.toMatchObject({ status: 400, message });
@@ -466,7 +470,8 @@ describe("resolveQuantityReleases for a self-service user", () => {
         quantityAssetIds: ["q1"],
         quantities: { q1: 2 },
         organizationId: "org-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody
+          .assign,
         userId: "user-self",
       })
     ).resolves.toHaveLength(1);
@@ -482,7 +487,8 @@ describe("resolveQuantityReleases for a self-service user", () => {
         quantityAssetIds: ["q1"],
         quantities: { q1: 2 },
         organizationId: "org-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody
+          .assign,
         userId: "user-self",
       })
     ).rejects.toMatchObject({ status: 403 });
@@ -523,7 +529,7 @@ describe("assignQuantities and releaseQuantities", () => {
       custodian,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
     });
 
     expect(checkOutQuantity).toHaveBeenCalledTimes(3);
@@ -547,7 +553,7 @@ describe("assignQuantities and releaseQuantities", () => {
       quantities: { q1: 1, q2: 2 },
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
     });
     expect(refusals).toEqual([]);
     expect(releaseQuantity).toHaveBeenCalledTimes(2);
@@ -560,7 +566,7 @@ describe("assignQuantities and releaseQuantities", () => {
       quantities: { q1: 1 },
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
     });
     expect(refusals).toEqual([
       {
@@ -589,7 +595,7 @@ describe("assignQuantityToCustodian", () => {
     quantity: 3,
     userId: "user-1",
     organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
+    custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
   };
 
   it("assigns, writes one audit note, and runs the low-stock check", async () => {
@@ -601,7 +607,7 @@ describe("assignQuantityToCustodian", () => {
       quantity: 3,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
       note: undefined,
     });
     expect(createNote).toHaveBeenCalledTimes(1);
@@ -623,7 +629,7 @@ describe("assignQuantityToCustodian", () => {
   it("words a self-service hand-over as taking custody, with the operator's text", async () => {
     await assignQuantityToCustodian({
       ...args,
-      role: OrganizationRoles.SELF_SERVICE,
+      custodyAssign: accessFor([OrganizationRoles.SELF_SERVICE]).custody.assign,
       note: "For the night shoot",
     });
 
@@ -658,7 +664,7 @@ describe("releaseQuantityFromCustodian", () => {
     quantity: 3,
     userId: "user-1",
     organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
+    custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
   };
 
   it.each([
@@ -701,7 +707,7 @@ describe("releaseQuantityFromCustodian", () => {
       consumed: 1,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: accessFor([OrganizationRoles.ADMIN]).custody.assign,
       note: undefined,
     });
   });

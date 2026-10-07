@@ -9,8 +9,9 @@ interface UseCustodyActionsParams {
   currentOrg: { id: string } | null;
   fetchAsset: () => Promise<void>;
   /**
-   * SELF_SERVICE users can only ever take custody for themselves, so their
-   * confirm says "Take" rather than naming a custodian to assign to.
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the confirm says "Take" rather
+   * than naming a custodian to assign to.
    */
   isSelfService?: boolean;
 }

@@ -22,6 +22,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   requireAuditAssignee: vi.fn(),
 }));
 
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { db } from "~/database/db.server";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { requireAuditAssetInSession } from "~/modules/audit/mobile-evidence.server";
@@ -39,7 +40,9 @@ describe("requireAuditAssetInSession", () => {
     vi.clearAllMocks();
     (db.auditSession.findFirst as any).mockResolvedValue({ id: "session-1" });
     (db.auditAsset.findFirst as any).mockResolvedValue({ id: "audit-asset-1" });
-    (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     (requireAuditAssignee as any).mockResolvedValue(undefined);
   });
 
@@ -69,53 +72,54 @@ describe("requireAuditAssetInSession", () => {
     });
   });
 
-  it("passes isSelfServiceOrBase=true to the assignee guard for BASE", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ roles: ["BASE"] });
+  it("passes assignedOnly=true to the assignee guard for BASE", async () => {
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE"] })
+    );
     await requireAuditAssetInSession(args);
     expect(requireAuditAssignee).toHaveBeenCalledWith(
       expect.objectContaining({
         auditSessionId: "session-1",
         organizationId: "org-1",
         userId: "user-1",
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
       })
     );
   });
 
   it("treats a member holding BOTH SELF_SERVICE and ADMIN as an admin", async () => {
-    // `getMobileUserContext` returns `role = roles[0]`, and its own JSDoc warns
-    // that this is wrong for an authorization decision. Deriving from it meant
-    // a membership ordered `[SELF_SERVICE, ADMIN]` resolved to SELF_SERVICE,
-    // so a real admin who is not an assignee was refused.
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["SELF_SERVICE", "ADMIN"],
-    });
+    // The scope comes from the effective role, never from the first role the
+    // membership lists, so `[SELF_SERVICE, ADMIN]` is not limited to assigned
+    // audits.
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+    );
 
     await requireAuditAssetInSession(args);
 
     expect(requireAuditAssignee).toHaveBeenCalledWith(
-      expect.objectContaining({ isSelfServiceOrBase: false })
+      expect.objectContaining({ assignedOnly: false })
     );
   });
 
   it("still restricts a member holding only SELF_SERVICE and BASE", async () => {
     // The inverse: resolving "most privileged" must not accidentally promote
     // someone who holds no privileged role at all.
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["BASE", "SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE", "SELF_SERVICE"] })
+    );
 
     await requireAuditAssetInSession(args);
 
     expect(requireAuditAssignee).toHaveBeenCalledWith(
-      expect.objectContaining({ isSelfServiceOrBase: true })
+      expect.objectContaining({ assignedOnly: true })
     );
   });
 
   it("propagates the assignee guard rejection", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["SELF_SERVICE"],
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE"] })
+    );
     const err = Object.assign(new Error("Not an assignee"), { status: 403 });
     (requireAuditAssignee as any).mockRejectedValue(err);
     await expect(requireAuditAssetInSession(args)).rejects.toMatchObject({

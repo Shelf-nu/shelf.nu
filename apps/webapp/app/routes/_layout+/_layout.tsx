@@ -48,6 +48,7 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
+import { announcementRole } from "~/modules/update/audience";
 import { getUnreadCountForUser } from "~/modules/update/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
@@ -63,6 +64,12 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 
 import {
@@ -219,14 +226,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (userOrg) => userOrg.organization.id === organizationId
     )?.roles;
 
-    // Check if current user has OWNER or ADMIN role in the organization
-    const isOwner = currentOrganizationUserRoles?.includes("OWNER");
-    const isOrgAdmin = currentOrganizationUserRoles?.includes("ADMIN");
-
-    // Check if sequential ID migration is needed
-    const needsSequentialIdMigration =
-      (isOwner || isOrgAdmin) && !currentOrganization.hasSequentialIdsMigrated;
-
     if (!organizations.length || !currentOrganization) {
       throw new ShelfError({
         cause: null,
@@ -238,18 +237,39 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
+    // The migration prompt is for members who may edit assets.
+    const needsSequentialIdMigration =
+      !currentOrganization.hasSequentialIdsMigrated &&
+      (await hasPermission({
+        organizationId,
+        userId,
+        roles: currentOrganizationUserRoles ?? [],
+        entity: PermissionEntity.asset,
+        action: PermissionAction.update,
+      }));
+
+    // The caller's reach in the current organization: the one object every
+    // client component reads (via useRoleAccess), instead of re-deriving a
+    // role decision the server already resolved.
+    const roleAccess = resolveRoleAccess({
+      roles: currentOrganizationUserRoles,
+      workspace: currentOrganization,
+    });
+
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
     const [bookingSettings, workingHours, unreadUpdatesCount] =
       await Promise.all([
         getBookingSettingsForOrganization(currentOrganization.id),
         getWorkingHoursForOrganization(currentOrganization.id),
-        currentOrganizationUserRoles?.[0]
-          ? getUnreadCountForUser({
-              userId: authSession.userId,
-              userRole: currentOrganizationUserRoles[0],
-            })
-          : Promise.resolve(0),
+        (() => {
+          // Same audience rule as the updates page (announcementRole), so the
+          // badge counts exactly what the list shows.
+          const userRole = announcementRole(currentOrganizationUserRoles);
+          return userRole
+            ? getUnreadCountForUser({ userId: authSession.userId, userRole })
+            : Promise.resolve(0);
+        })(),
       ]);
 
     return data(
@@ -261,6 +281,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         workingHours,
         currentOrganization,
         currentOrganizationUserRoles,
+        roleAccess,
         subscription,
         enablePremium: config.enablePremiumFeatures,
         hideNoticeCard: userPrefsCookie.hideNoticeCard,

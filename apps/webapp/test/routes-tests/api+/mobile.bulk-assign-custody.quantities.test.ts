@@ -46,11 +46,13 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vitest.fn().mockResolvedValue("org-1"),
   requireMobilePermission: vitest.fn().mockResolvedValue(undefined),
-  getMobileUserContext: vitest.fn().mockResolvedValue({
-    role: "ADMIN",
-    canUseBarcodes: false,
-    canSeeAllCustody: true,
-  }),
+  // why: the caller's access is what the route reads; build it from the real
+  // policy for an Administrator.
+  getMobileUserContext: vitest.fn(async () =>
+    (await import("@helpers/mobile-user-context")).mobileUserContext({
+      roles: ["ADMIN"] as never,
+    })
+  ),
 }));
 
 // why: the rate limiter keeps in-process counters across tests
@@ -179,7 +181,7 @@ describe("POST /api/mobile/bulk-assign-custody with quantities", () => {
         teamMemberId: "custodian-1",
         quantity: 3,
         organizationId: "org-1",
-        role: "ADMIN",
+        custodyAssign: "anyone",
       })
     );
     expect(bulkCheckOutAssets).toHaveBeenCalledWith(

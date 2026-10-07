@@ -50,14 +50,16 @@ import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import useApiQuery from "~/hooks/use-api-query";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { CreateBookingForModelsSchema } from "~/modules/asset-model/model-reservations-schema";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import type { AssetModelWindowAvailabilityResponse } from "~/routes/api+/asset-models.availability";
 import type { BookingModelAvailabilityRow } from "~/routes/api+/bookings.$bookingId.model-availability";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { ModelQuantityRow } from "./model-quantity-rows";
@@ -199,8 +201,10 @@ export default function CreateBookingForModelsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
+  /** Roles that may only book for themselves get the picker locked to them. */
+  const custodianIsSelf = bookingCustodianIsSelf(roleAccess);
   // Client-side date validation reads the RESOLVED preference zone, the same
   // one the display and the server parse use.
   const prefs = useFormatPrefs();
@@ -212,7 +216,7 @@ export default function CreateBookingForModelsDialog() {
       action: "new",
       workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -220,17 +224,17 @@ export default function CreateBookingForModelsDialog() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner,
+      roleAccess.policy.bookings.bypassTimeLimits,
       prefs
     );
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
 
   const user = useUserData();
-  // BASE/SELF_SERVICE users get their own team member, which the picker is
-  // locked to.
+  // Members who may only book for themselves get their own team member, which
+  // the picker is locked to.
   const teamMembersToUse = teamMembersForForm || teamMembers;
-  const defaultTeamMember = isBaseOrSelfService
+  const defaultTeamMember = custodianIsSelf
     ? teamMembersToUse.find((tm) => tm.userId === user!.id)
     : undefined;
 
@@ -449,7 +453,7 @@ export default function CreateBookingForModelsDialog() {
             <Card className="m-0 mb-2">
               <CustodianField
                 defaultTeamMember={defaultTeamMember}
-                disabled={disabled || isBaseOrSelfService}
+                disabled={disabled || custodianIsSelf}
                 userCanSeeCustodian={userCanSeeCustodian}
                 isNewBooking
                 error={fieldErrors.custodian}

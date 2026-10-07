@@ -3,10 +3,15 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import {
   getMobileUserContext,
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { getAuditsForOrganization } from "~/modules/audit/service.server";
 import { makeShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /**
  * GET /api/mobile/audits
@@ -20,9 +25,9 @@ import { makeShelfError } from "~/utils/error";
  *   - perPage (optional): items per page (default 20, max 50)
  *   - search (optional): search string
  *   - assignedToMe (optional): "true" → restrict to audits the caller is
- *     assigned to. Admins/owners normally see every org audit; this lets
- *     them opt into "just my work" via the companion's filter chip.
- *     For BASE/SELF_SERVICE users the filter is already implicit in the
+ *     assigned to. Callers who see every audit (`audits.seeAll`) use it to
+ *     opt into "just my work" via the companion's filter chip. For callers
+ *     limited to assigned audits the filter is already implicit in the
  *     service layer; passing the flag is a no-op for them.
  *
  * Mobile-only sort: results are always ordered by `dueDate asc nulls last,
@@ -35,13 +40,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    // why: BASE/SELF_SERVICE users must NEVER see audits they're not
-    // assigned to — passing these two params makes
-    // `getAuditsForOrganization` apply its role-based assignee filter
-    // server-side. Without them, the service skips the auto-filter and
-    // a client sending `assignedToMe=false` (or just omitting the flag)
-    // sees the whole org. Mirrors how `audits.complete.ts` does it.
-    const { role, canUseAudits } = await getMobileUserContext(
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.read,
+    });
+
+    // why: callers limited to assigned audits must never list others:
+    // `assignedOnly` makes the service filter server-side, whatever the
+    // client's `assignedToMe` flag says.
+    const { access, canUseAudits } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -56,8 +65,6 @@ export async function loader({ request }: LoaderFunctionArgs) {
         { status: 403 }
       );
     }
-    const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
-
     const url = new URL(request.url);
     const statusParam = url.searchParams.get("status");
     const searchParam = url.searchParams.get("search");
@@ -94,7 +101,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       await getAuditsForOrganization({
         organizationId,
         userId: user.id,
-        isSelfServiceOrBase,
+        assignedOnly: !access.audits.seeAll,
         page: isSingleStatus || isAllOrNone ? page : 1,
         perPage: isSingleStatus || isAllOrNone ? perPage : 200,
         search: searchParam || null,

@@ -29,6 +29,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   api,
   type BookingDetail,
+  type BookingDetailResponse,
   type BookingAsset,
   type CheckoutDisposition,
   type CheckoutSourceQuestion,
@@ -37,6 +38,13 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
+import {
+  canAddItemsToBooking,
+  canRemoveItemsFromBooking,
+  mayRemoveBookingItemsAsCustodian,
+  mayWriteBookingItems,
+} from "@/lib/role-access";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
@@ -141,7 +149,9 @@ export default function BookingDetailScreen() {
   } | null>(null);
   // Per-booking lifecycle-action availability (cancel/archive/duplicate/delete),
   // computed server-side mirroring the web ActionsDropdown gating.
-  const [bookingActions, setBookingActions] = useState({
+  const [bookingActions, setBookingActions] = useState<
+    BookingDetailResponse["bookingActions"]
+  >({
     canCancel: false,
     canArchive: false,
     canDuplicate: false,
@@ -151,17 +161,11 @@ export default function BookingDetailScreen() {
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   /**
-   * Mirrors the web's `canUserManageBookingAssets`: closed statuses reject, and
-   * a RESTRICTED role may only build its own DRAFT booking.
-   *
-   * BASE as well as SELF_SERVICE: the web passes both roles into that helper
-   * (its parameter is named `isSelfService`, but every caller hands it
-   * `isBaseOrSelfService`). The add, browse, remove and fulfil affordances
-   * below therefore turn off past DRAFT for both roles.
+   * The member's access; booking item rules below read
+   * `canAddItemsToBooking` / `canRemoveItemsFromBooking`, the same rules the
+   * server applies.
    */
-  const isRestrictedRole = Boolean(
-    currentOrg?.roles?.some((r) => r === "SELF_SERVICE" || r === "BASE")
-  );
+  const access = useRoleAccess();
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isActioning, setIsActioning] = useState(false);
@@ -1446,19 +1450,8 @@ export default function BookingDetailScreen() {
     hasUnitsLeftToCheckOut &&
     ["RESERVED", "ONGOING", "OVERDUE"].includes(booking.status);
 
-  /**
-   * Whether the server would scope this user's booking writes to their own
-   * bookings.
-   *
-   * Roles are a set, and the server judges a request by the most privileged
-   * one it contains, so someone holding both SELF_SERVICE and ADMIN writes to
-   * any booking. `isRestrictedRole` asks the opposite question — whether ANY
-   * restricted role is present — which is the right test for the DRAFT-only
-   * editing rules above but would hide controls from a multi-role admin here.
-   */
-  const isRestrictedToOwnBookings =
-    isRestrictedRole &&
-    !currentOrg?.roles?.some((r) => r === "OWNER" || r === "ADMIN");
+  /** Whether the server scopes this member's booking writes to their own bookings. */
+  const isRestrictedToOwnBookings = !access.bookings.writeAll;
 
   /**
    * Whether to offer the progressive check-out affordances (scan and select).
@@ -1481,11 +1474,33 @@ export default function BookingDetailScreen() {
         (booking.creator.id === user.id ||
           booking.custodianUser?.id === user.id)));
 
-  // Same gate the manage buttons use: an editable booking, and self-service
-  // users only on their own DRAFTs (server re-checks ownership + status).
-  const canManageModels =
-    !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-    (!isRestrictedRole || booking.status === "DRAFT");
+  /**
+   * Whether the server accepts this member changing this booking's items. A
+   * role whose writes are scoped must be the custodian: the add and
+   * model-request endpoints check the direct custodian user only, while the
+   * remove endpoint also accepts the custodian team member's user. Every item
+   * affordance below requires its own check, so none of them leads to a 403.
+   */
+  const mayAddItems = mayWriteBookingItems({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+  });
+  const mayRemoveItems = mayRemoveBookingItemsAsCustodian({
+    access,
+    userId: user?.id,
+    custodianUserId: booking.custodianUser?.id,
+    custodianTeamMemberUserId: booking.custodianTeamMember?.userId,
+  });
+  const canAddItems =
+    mayAddItems &&
+    canAddItemsToBooking(access, booking.status, currentOrg?.roles);
+  const canRemoveItems =
+    mayRemoveItems &&
+    canRemoveItemsFromBooking(access, booking.status, currentOrg?.roles);
+
+  // Model reservations are item changes, so they share the add gate.
+  const canManageModels = canAddItems;
 
   /**
    * Open the model-reservation manager (the picker's Models tab) for this
@@ -1768,21 +1783,26 @@ export default function BookingDetailScreen() {
               booking.status
             ) && (
               <View style={styles.manageRow}>
-                <TouchableOpacity
-                  style={[styles.actionButtonOutline, styles.manageRowItem]}
-                  onPress={() =>
-                    router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
-                  }
-                  accessibilityLabel="Edit booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="create-outline"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>Edit</Text>
-                </TouchableOpacity>
+                {/* Only on a booking this caller writes; a booking the
+                    workspace only lets them see offers no edit the save would
+                    refuse. Servers without the flag keep offering it. */}
+                {bookingActions.canEdit !== false && (
+                  <TouchableOpacity
+                    style={[styles.actionButtonOutline, styles.manageRowItem]}
+                    onPress={() =>
+                      router.push(`/(tabs)/bookings/edit?id=${booking.id}`)
+                    }
+                    accessibilityLabel="Edit booking"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons
+                      name="create-outline"
+                      size={18}
+                      color={colors.buttonSecondaryText}
+                    />
+                    <Text style={styles.actionButtonOutlineText}>Edit</Text>
+                  </TouchableOpacity>
+                )}
 
                 {booking.status === "DRAFT" && (
                   <TouchableOpacity
@@ -1834,102 +1854,97 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
-            {booking &&
-              !["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/scanner?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&bookingAction=add`
-                    )
-                  }
-                  accessibilityLabel="Scan assets or kits to add to this booking"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="scan"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Scan to Add Assets
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {canAddItems && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/scanner?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&bookingAction=add`
+                  )
+                }
+                accessibilityLabel="Scan assets or kits to add to this booking"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="scan"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Scan to Add Assets
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Browse available assets/kits to add (date-aware picker) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") && (
-                <TouchableOpacity
-                  style={styles.actionButtonOutline}
-                  onPress={() =>
-                    router.push(
-                      `/(tabs)/bookings/add-assets?bookingId=${
-                        booking.id
-                      }&bookingName=${encodeURIComponent(
-                        booking.name
-                      )}&from=${encodeURIComponent(
-                        booking.from
-                      )}&to=${encodeURIComponent(booking.to)}`
-                    )
-                  }
-                  accessibilityLabel="Browse available assets and kits to add"
-                  accessibilityRole="button"
-                >
-                  <Ionicons
-                    name="search"
-                    size={18}
-                    color={colors.buttonSecondaryText}
-                  />
-                  <Text style={styles.actionButtonOutlineText}>
-                    Browse to Add
-                  </Text>
-                </TouchableOpacity>
-              )}
+            {canAddItems && (
+              <TouchableOpacity
+                style={styles.actionButtonOutline}
+                onPress={() =>
+                  router.push(
+                    `/(tabs)/bookings/add-assets?bookingId=${
+                      booking.id
+                    }&bookingName=${encodeURIComponent(
+                      booking.name
+                    )}&from=${encodeURIComponent(
+                      booking.from
+                    )}&to=${encodeURIComponent(booking.to)}`
+                  )
+                }
+                accessibilityLabel="Browse available assets and kits to add"
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name="search"
+                  size={18}
+                  color={colors.buttonSecondaryText}
+                />
+                <Text style={styles.actionButtonOutlineText}>
+                  Browse to Add
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Select assets to remove (editable bookings with assets) */}
-            {!["COMPLETE", "ARCHIVED", "CANCELLED"].includes(booking.status) &&
-              (!isRestrictedRole || booking.status === "DRAFT") &&
-              booking.assetCount > 0 && (
-                <TouchableOpacity
-                  style={[
-                    styles.actionButtonOutline,
-                    selectMode === "remove" && styles.actionButtonOutlineActive,
-                  ]}
-                  onPress={() => {
-                    toggleSelectMode("remove");
-                  }}
-                  accessibilityLabel={
+            {canRemoveItems && booking.assetCount > 0 && (
+              <TouchableOpacity
+                style={[
+                  styles.actionButtonOutline,
+                  selectMode === "remove" && styles.actionButtonOutlineActive,
+                ]}
+                onPress={() => {
+                  toggleSelectMode("remove");
+                }}
+                accessibilityLabel={
+                  selectMode === "remove"
+                    ? "Cancel selection"
+                    : "Select assets to remove"
+                }
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={selectMode === "remove" ? "close" : "trash-outline"}
+                  size={18}
+                  color={
                     selectMode === "remove"
-                      ? "Cancel selection"
-                      : "Select assets to remove"
+                      ? colors.error
+                      : colors.buttonSecondaryText
                   }
-                  accessibilityRole="button"
+                />
+                <Text
+                  style={[
+                    styles.actionButtonOutlineText,
+                    selectMode === "remove" && { color: colors.error },
+                  ]}
                 >
-                  <Ionicons
-                    name={selectMode === "remove" ? "close" : "trash-outline"}
-                    size={18}
-                    color={
-                      selectMode === "remove"
-                        ? colors.error
-                        : colors.buttonSecondaryText
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.actionButtonOutlineText,
-                      selectMode === "remove" && { color: colors.error },
-                    ]}
-                  >
-                    {selectMode === "remove" ? "Cancel" : "Select to Remove"}
-                  </Text>
-                </TouchableOpacity>
-              )}
+                  {selectMode === "remove" ? "Cancel" : "Select to Remove"}
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Full check-out is RESERVED-only (web parity); the loader's
                 canCheckout reflects that. It is hidden when the workspace
@@ -2035,13 +2050,13 @@ export default function BookingDetailScreen() {
                 booking, and the scanner confirms that before submitting.
                 Scan-first IS the point of book-by-model: reserve the count
                 now, scan the items when you grab them, no browse picker.
-                (Browse to Add above stays for hand-picking.) Gated
-                `!isRestrictedRole` to match the add/browse affordances above:
-                a restricted custodian can only edit a DRAFT booking, so on a
-                RESERVED booking the assign+checkout flow can't succeed for
-                them — showing the CTA would just lead to a rejected submit. */}
-            {!isRestrictedRole &&
-              booking.status === "RESERVED" &&
+                (Browse to Add above stays for hand-picking.) Gated on adding
+                items past DRAFT, like the add/browse affordances above: a
+                member who may not add items to a RESERVED booking cannot
+                complete the assign and check-out flow, so showing the CTA
+                would only lead to a rejected submit. */}
+            {booking.status === "RESERVED" &&
+              canAddItems &&
               hasOutstandingModelRequests && (
                 <TouchableOpacity
                   style={styles.actionButton}

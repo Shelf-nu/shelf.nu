@@ -41,7 +41,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
@@ -180,7 +180,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     custodianName: "",
   });
   const disabled = useDisabled();
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { teamMembers } = useLoaderData<ScannerLoader>();
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
@@ -357,14 +357,14 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             <h5 className="mb-1">Assign custody to:</h5>
             <DynamicSelect
               defaultValue={
-                isSelfService && teamMembers?.length > 0
+                assignsSelfOnly && teamMembers?.length > 0
                   ? JSON.stringify({
                       id: teamMembers[0].id,
                       name: resolveTeamMemberName(teamMembers[0]),
                     })
                   : undefined
               }
-              disabled={disabled || isSelfService}
+              disabled={disabled || assignsSelfOnly}
               model={{
                 name: "teamMember",
                 queryKey: "name",
@@ -401,7 +401,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
+          <div className={tw("mb-4 flex gap-3", assignsSelfOnly && "-mt-4")}>
             <Button
               type="submit"
               variant="primary"

@@ -4,7 +4,6 @@ import {
   BookingStatus,
   KitStatus,
   NoteType,
-  OrganizationRoles,
 } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -23,7 +22,7 @@ import { UserIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
@@ -73,14 +72,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    const { organizationId, access, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.kit,
         action: PermissionAction.custody,
-      }
-    );
+      });
 
     const kit = await getKit({
       id: kitId,
@@ -153,7 +151,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const where = {
       deletedAt: null,
       organizationId,
-      userId: role === OrganizationRoles.SELF_SERVICE ? userId : undefined,
+      userId: access.custody.assign === "self" ? userId : undefined,
     } satisfies Prisma.TeamMemberWhereInput;
 
     const teamMembers = await db.teamMember
@@ -172,13 +170,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         });
       });
 
-    // A self-service user can only take custody for themselves. If they have
-    // no team-member profile in this workspace there is nothing to assign, so
-    // short-circuit instead of rendering a dead-end modal whose POST would then
-    // fail validation. Normally unreachable (a self-service user has their own
-    // member row), but guards the empty-teamMembers anomaly behind the
-    // SHELF-WEBAPP-1MM crash class.
-    if (role === OrganizationRoles.SELF_SERVICE && teamMembers.length === 0) {
+    // A caller whose custody scope is `self` can only take custody for
+    // themselves. With no team-member profile in this workspace there is
+    // nothing to assign, so short-circuit instead of rendering a dead-end modal
+    // whose POST would then fail validation. Normally unreachable (such a
+    // caller has their own member row), but an empty team-member list must not
+    // crash the modal.
+    if (access.custody.assign === "self" && teamMembers.length === 0) {
       sendNotification({
         title: "Cannot take custody",
         message:
@@ -214,13 +212,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { role, organizationId } = await requirePermission({
+    const { access, organizationId } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.custody,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const { custodian } = parseData(
       await request.formData(),
@@ -270,7 +268,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     });
 
-    if (isSelfService && custodianTeamMember.userId !== user.id) {
+    if (assignsSelfOnly && custodianTeamMember.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -449,7 +447,7 @@ export default function GiveKitCustody() {
   const actionData = useActionData<typeof action>();
   const { kit, teamMembers } = useLoaderData<typeof loader>();
 
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
 
   const hasBookings = kit.assetKits.some(
     (ak) => ak.asset.bookingAssets.length > 0
@@ -465,21 +463,21 @@ export default function GiveKitCustody() {
         </div>
 
         <div className="mb-5">
-          <h4>{isSelfService ? "Take" : "Assign"} custody of kit</h4>
+          <h4>{assignsSelfOnly ? "Take" : "Assign"} custody of kit</h4>
           <p>
             This kit is currently available. You're about to assign custody to{" "}
-            {isSelfService ? "yourself" : "one of your team members"}. All the
+            {assignsSelfOnly ? "yourself" : "one of your team members"}. All the
             assets in this kit will also be assigned the same custody.
           </p>
         </div>
 
         <div className="relative z-50 mb-8">
           <DynamicSelect
-            hidden={isSelfService}
-            showSearch={!isSelfService}
-            disabled={disabled || isSelfService}
+            hidden={assignsSelfOnly}
+            showSearch={!assignsSelfOnly}
+            disabled={disabled || assignsSelfOnly}
             defaultValue={
-              isSelfService && teamMembers?.length > 0
+              assignsSelfOnly && teamMembers?.length > 0
                 ? JSON.stringify({
                     id: teamMembers[0].id,
                     name: resolveTeamMemberName(teamMembers[0]),
@@ -490,9 +488,9 @@ export default function GiveKitCustody() {
               name: "teamMember",
               queryKey: "name",
               deletedAt: null,
-              // ASSET custody: SELF_SERVICE may only take custody itself and
-              // BASE never. Stated explicitly so the behaviour survives a
-              // change to the endpoint's fallback.
+              // Custody assignment: the picker follows the caller's custody
+              // scope (only themselves, or nobody). Stated explicitly so the
+              // behaviour survives a change to the endpoint's fallback.
               custodyPurpose: "custody-assignment",
             }}
             fieldName="custodian"

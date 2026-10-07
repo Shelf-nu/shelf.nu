@@ -171,47 +171,45 @@ const MyComponent = () => {
 - `useNavigation`: A hook that provides the current navigation state.
 - `isFormProcessing`: A function that checks if the form is currently processing based on the state.
 
-## useUserRoleHelper
+## useRoleAccess
 
-The `useUserRoleHelper` hook is helps you to always know the roles of the current user and also returns some helper boolean values to make it easier to check for specific roles.
+`useRoleAccess()` returns the signed-in member's `RoleAccess` for the current
+workspace, as the server resolved it in the `_layout` loader: the effective
+role, whether they see and write every booking, whether they see every
+custodian and whom they may assign custody to, whether they see every audit,
+and whether they own the workspace. Before the layout data loads it returns
+Base access with every toggle off, so gates stay closed.
 
-The useUserRoleHelper function returns an object(roles) and helper boolean attributes:
+```tsx
+import { useRoleAccess } from "~/hooks/use-role-access";
 
-- `roles`: enum that provides role of the current user
-- `isAdministrator`: A boolean value indicating whether the user has the 'ADMIN' role.
-- `isOwner`: A boolean value indicating whether the user has the OWNER role.
-- `isAdministratorOrOwner`: A boolean value indicating whether the user has either the 'ADMIN' or 'OWNER'role.
-- `isSelfService`: A boolean value indicating whether the user has the 'SELF_SERVICE' role.
-- `isBase`: A boolean value indicating whether the user has the 'BASE' role.
-- `isBaseOrSelfService`: A boolean value indicating whether the user has either the BASE or 'SELF_SERVICE' role.
-
-**Usage:**
-The "New Asset" button is rendered only if isAdministratorOrOwner is true.
-
-```typescript
-import React from 'react';
-import { useUserRoleHelper } from '~/hooks/user-user-role-helper';
-
-export default function AssetIndexPage() {
-  const { isAdministratorOrOwner } = useUserRoleHelper();
-
+export function AssignCustodyButton() {
+  const access = useRoleAccess();
+  if (access.custody.assign === "none") return null;
   return (
-    <div>
-      <header>
-        {isAdministratorOrOwner && (
-          <button>
-            New Asset
-          </button>
-        )}
-      </header>
-    </div>
+    <Button type="button">
+      {access.custody.assign === "self" ? "Take custody" : "Assign custody"}
+    </Button>
   );
 }
 ```
 
-**Dependencies:**
+## useOrganizationRoles
 
-- `useRouteLoaderData`: hook from `react-router` that returns the loader data for a given route by ID.
+`useOrganizationRoles()` returns every role the member holds in the current
+workspace. Use it only for permission-matrix checks, which union grants across
+held roles:
+
+```tsx
+const roles = useOrganizationRoles();
+const canCreateAsset = userHasPermission({
+  roles,
+  entity: PermissionEntity.asset,
+  action: PermissionAction.create,
+});
+```
+
+Never compare the roles yourself. See [Roles & Permissions](./roles-and-permissions.md).
 
 ## `useUserData`
 

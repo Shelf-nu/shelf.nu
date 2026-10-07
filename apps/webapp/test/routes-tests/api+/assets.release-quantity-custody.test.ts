@@ -14,6 +14,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import { releaseQuantity } from "~/modules/asset/service.server";
 import { createNote } from "~/modules/note/service.server";
@@ -95,10 +96,12 @@ const base = { assetId: "asset-1", teamMemberId: "tm-1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  vi.mocked(requirePermission).mockResolvedValue(
+    permissionContext({
+      roles: [OrganizationRoles.ADMIN],
+      organizationId: "org-1",
+    }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+  );
   vi.mocked(getTeamMember).mockResolvedValue({
     id: "tm-1",
     name: "Ahmed",

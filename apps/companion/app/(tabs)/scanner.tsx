@@ -96,6 +96,7 @@ import {
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
@@ -267,9 +268,10 @@ function ScannerContent() {
     [currentOrg?.roles]
   );
 
-  // Self-service users may only assign custody to themselves (mirrors the
+  const access = useRoleAccess();
+  // Custody this member may only take for themselves: no picker (mirrors the
   // web scanner, which pre-selects self and disables the custodian picker).
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
 
   // Native claim / link-existing is gated on qr:update — effectively
   // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
@@ -1814,8 +1816,8 @@ function ScannerContent() {
     if (scannedItems.length === 0 || blockers.length > 0) return;
 
     if (action === "assign_custody") {
-      if (isSelfService) {
-        // Self-service: no picker. Resolve own team-member record and assign.
+      if (takesCustodyForSelfOnly) {
+        // Self-only custody: no picker; resolve own team-member record and assign.
         void assignCustodyToSelf();
       } else {
         setShowCustodyPicker(true);
@@ -1824,7 +1826,9 @@ function ScannerContent() {
       // Blockers guarantee every whole asset and kit here is in custody, and
       // every quantity row has exactly one holder with units to give back.
       const plan = planCustodySubmit("release_custody", scannedItems);
-      const audience: CustodyAudience = { isSelfService };
+      const audience: CustodyAudience = {
+        isSelfService: takesCustodyForSelfOnly,
+      };
       const confirm = describeCustodyConfirm("release_custody", plan, audience);
       Alert.alert(confirm.title, confirm.message, [
         { text: "Cancel", style: "cancel" },
@@ -1841,9 +1845,9 @@ function ScannerContent() {
   };
 
   /**
-   * Self-service custody assignment: the mobile team-members endpoint returns
-   * only the caller's own record for SELF_SERVICE roles, so resolve it and go
-   * straight to the confirm dialog, with no picker.
+   * Self-only custody assignment: the mobile team-members endpoint returns
+   * only the caller's own record when their custody scope is self, so resolve
+   * it and go straight to the confirm dialog, with no picker.
    */
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
@@ -1870,7 +1874,7 @@ function ScannerContent() {
     const plan = planCustodySubmit("assign_custody", scannedItems);
     const audience: CustodyAudience = {
       custodianName: displayName,
-      isSelfService,
+      isSelfService: takesCustodyForSelfOnly,
     };
     const confirm = describeCustodyConfirm("assign_custody", plan, audience);
     Alert.alert(confirm.title, confirm.message, [
@@ -2757,7 +2761,9 @@ function ScannerContent() {
   const submitLabelMap: Record<ScannerAction, string> = {
     view: "",
     // Self-service users can only take custody themselves — no picker step.
-    assign_custody: isSelfService ? "Take Custody" : "Choose Custodian",
+    assign_custody: takesCustodyForSelfOnly
+      ? "Take Custody"
+      : "Choose Custodian",
     release_custody: "Release All",
     update_location: "Choose Location",
   };

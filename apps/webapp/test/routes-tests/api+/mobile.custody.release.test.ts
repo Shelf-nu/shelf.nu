@@ -1,5 +1,6 @@
 import { action } from "~/routes/api+/mobile+/custody.release";
 import { createActionArgs } from "@mocks/remix";
+import { accessFor } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -135,11 +136,11 @@ describe("POST /api/mobile/custody/release", () => {
 
     (requireMobilePermission as any).mockResolvedValue(undefined);
 
-    // Caller's role is read to enforce the SELF_SERVICE self-restriction inside
-    // releaseCustody. ADMIN here so the release is permitted.
+    // The caller's custody scope is forwarded to releaseCustody, which
+    // enforces it. ADMIN here so the release is permitted.
     (getMobileUserContext as any).mockResolvedValue({
-      role: OrganizationRoles.ADMIN,
       canUseBarcodes: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     });
 
     (releaseCustody as any).mockResolvedValue({
@@ -181,7 +182,7 @@ describe("POST /api/mobile/custody/release", () => {
       assetId: "asset-1",
       organizationId: "org-1",
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
       activityEvent: {
         actorUserId: "user-1",
         teamMemberId: "team-member-1",

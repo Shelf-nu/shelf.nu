@@ -1,7 +1,7 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
-import { requireAuditAssigneeForBaseSelfService } from "~/modules/audit/service.server";
+import { requireAuditAssigneeForScopedViewer } from "~/modules/audit/service.server";
 import { csvResponse } from "~/utils/csv-utf8";
 import { exportAuditNotesToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
@@ -40,7 +40,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { organizationId, isSelfServiceOrBase } = permissionResult;
+    const { organizationId, access } = permissionResult;
 
     await requirePermission({
       userId,
@@ -59,10 +59,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       },
     });
 
-    requireAuditAssigneeForBaseSelfService({
+    requireAuditAssigneeForScopedViewer({
       audit,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 
