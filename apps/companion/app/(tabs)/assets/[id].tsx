@@ -56,6 +56,8 @@ import { InfoRow } from "@/components/shared/info-row";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
+import { useRoleAccess } from "@/hooks/use-role-access";
+import { mayReleaseAssetCustody } from "@/lib/role-access";
 import { useImageUpload } from "@/hooks/use-image-upload";
 import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 
@@ -82,10 +84,16 @@ export default function AssetDetailScreen() {
     entity: "asset",
     action: "custody",
   });
-  // Self-service users may only release their OWN quantity-custody rows.
-  // The server enforces this with a 403 guard on the release endpoint; the
-  // client check only controls affordance visibility. Mirrors scanner.tsx.
-  const isSelfService = roles?.includes("SELF_SERVICE") ?? false;
+  const canCreateNote = userHasPermission({
+    roles,
+    entity: "note",
+    action: "create",
+  });
+  // Members whose custody scope is self may only take custody for themselves
+  // and release their OWN quantity-custody rows; the server enforces both.
+  // The client check only controls affordance visibility. Mirrors scanner.tsx.
+  const access = useRoleAccess();
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
   // Current auth user — used to recognize the caller's own custody row via
   // the server-provided custodian.userId (bearer-auth session user id).
   const { user } = useAuth();
@@ -115,7 +123,12 @@ export default function AssetDetailScreen() {
     handleReleaseCustody,
     performAssignQuantity,
     performReleaseQuantity,
-  } = useCustodyActions({ asset, currentOrg, fetchAsset, isSelfService });
+  } = useCustodyActions({
+    asset,
+    currentOrg,
+    fetchAsset,
+    isSelfService: takesCustodyForSelfOnly,
+  });
 
   // The placements and stock sheets submit through this: each stays open,
   // showing the save in progress, until the server accepts its change.
@@ -582,13 +595,18 @@ export default function AssetDetailScreen() {
           <QuickActions
             asset={asset}
             onAssignCustody={() => {
-              if (isSelfService) {
+              if (takesCustodyForSelfOnly) {
                 void handleTakeCustodySelf();
               } else {
                 setShowCustodyPicker(true);
               }
             }}
             onReleaseCustody={handleReleaseCustody}
+            canReleaseCustody={mayReleaseAssetCustody({
+              access,
+              userId: user?.id,
+              custodianUserId: asset.custody?.custodian?.userId,
+            })}
             onLocationPress={() =>
               isQtyTracked
                 ? setShowPlacementsSheet(true)
@@ -607,7 +625,7 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
-            isSelfService={isSelfService}
+            isSelfService={takesCustodyForSelfOnly}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
           />
@@ -714,7 +732,8 @@ export default function AssetDetailScreen() {
                 const canReleaseRow =
                   canCustody &&
                   releasableQty > 0 &&
-                  (!isSelfService || entry.custodian.userId === user?.id);
+                  (!takesCustodyForSelfOnly ||
+                    entry.custodian.userId === user?.id);
                 return (
                   <InfoRow
                     key={entry.custodian.id}
@@ -896,10 +915,10 @@ export default function AssetDetailScreen() {
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
             // why: composer shows only when the workspace is resolved AND
-            // the role can update the asset (server requires asset:update
-            // to add a note). BASE/SELF_SERVICE get a read-only activity
-            // feed instead of a box that 403s on Post.
-            canPostNote={!!currentOrg?.id && canUpdateAsset}
+            // the member holds note:create, because the server gates adding a
+            // note on that same permission; members without it get a
+            // read-only activity feed instead of a box that 403s on Post.
+            canPostNote={!!currentOrg?.id && canCreateNote}
           />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1016,10 +1035,12 @@ export default function AssetDetailScreen() {
               />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
-                title={isSelfService ? "Take Quantity" : "Assign Quantity"}
+                title={
+                  takesCustodyForSelfOnly ? "Take Quantity" : "Assign Quantity"
+                }
                 subtitle={
                   assignQtyMember
-                    ? isSelfService
+                    ? takesCustodyForSelfOnly
                       ? "How many units are you taking?"
                       : `Assign to ${memberDisplayName(assignQtyMember)}`
                     : undefined
@@ -1027,7 +1048,7 @@ export default function AssetDetailScreen() {
                 max={assignMax}
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel={isSelfService ? "Take" : "Assign"}
+                confirmLabel={takesCustodyForSelfOnly ? "Take" : "Assign"}
                 isSubmitting={isActionLoading}
                 onSubmit={(quantity) => {
                   if (!assignQtyMember) return;

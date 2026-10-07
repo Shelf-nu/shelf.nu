@@ -101,7 +101,10 @@ import {
 } from "~/modules/kit/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import {
+  bookingAddableStatusClause,
   bookingWriteScopeClause,
+  assertCanAddBookingItems,
+  assertCanDuplicateBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
 import { canUserRemoveBookingAssets } from "~/utils/bookings";
@@ -150,6 +153,12 @@ import {
   assertTeamMemberBelongsToOrg,
   assertUserBelongsToOrg,
 } from "~/utils/org-validation.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { resolveUserDisplayName } from "~/utils/user";
 import type { MergeInclude } from "~/utils/utils";
@@ -217,6 +226,7 @@ import type {
 import {
   assertBookingIsCheckinable,
   assertBookingIsOpen,
+  assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
   getBulkBookingsWhereInput,
@@ -2019,7 +2029,7 @@ export async function reserveBooking({
   description,
   organizationId,
   hints,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
   tags,
   userId,
 }: Partial<
@@ -2037,7 +2047,11 @@ export async function reserveBooking({
 > &
   Pick<Booking, "id" | "organizationId"> & {
     hints: ClientHint;
-    isSelfServiceOrBase: boolean;
+    /**
+     * Whether this reservation triggers the workspace booking broadcast: the
+     * caller's `notifications.reservationAlertsAdmins`.
+     */
+    alertsOrgOnReservation: boolean;
     tags: { id: string }[];
     userId?: User["id"];
   }) {
@@ -2526,14 +2540,14 @@ export async function reserveBooking({
     }
 
     // Resolve notification recipients and send emails.
-    // Pass isSelfServiceOrBase so admin broadcast only fires for
-    // reservations made by base/self-service users (pickup requests).
+    // Forwarded so the broadcast fires only for reservations whose maker's
+    // role triggers it.
     const recipients = await getBookingNotificationRecipients({
       booking: bookingFound,
       eventType: "RESERVATION",
       organizationId,
       editorUserId: userId,
-      isSelfServiceOrBase,
+      alertsOrgOnReservation,
     });
 
     if (recipients.length > 0) {
@@ -10728,7 +10742,14 @@ export async function updateBookingAssets({
   quantities,
   kitSlices,
   skipBookingNote,
+  access,
 }: Pick<Booking, "id" | "organizationId"> & {
+  /**
+   * The adding caller's access. Its add-items rule is checked against the
+   * booking status read under the row lock below, so a booking that leaves
+   * the caller's add statuses after the route's own check still refuses.
+   */
+  access: RoleAccess;
   /**
    * Standalone assets to add (no kit attribution). Kit-driven rows are
    * supplied separately via `kitSlices` so the same asset can be both
@@ -10795,15 +10816,13 @@ export async function updateBookingAssets({
         },
       });
 
-      // The four callers each validate the status before getting here, but
-      // every one of them does so in a read of its own, so a booking closed in
-      // between was still written to. (detail.dev D055)
-      //
-      // Re-reading inside this transaction is NOT sufficient on its own: under
-      // READ COMMITTED the `findUniqueOrThrow` above takes no lock, so a
-      // concurrent check-in or cancellation can still commit between it and
-      // the writes below. The row lock is what actually closes the window —
-      // it is held until this transaction commits.
+      // Every caller checks the status in a read of its own first, so the
+      // status these writes depend on is decided here, under a row lock held
+      // until the transaction commits. A plain re-read is not enough: under
+      // READ COMMITTED it takes no lock, and a concurrent check-in,
+      // cancellation or reservation could still commit before the writes.
+      // The closed-booking refusal applies to everyone; the add-items rule is
+      // the caller's own (restricted roles add only to drafts).
       const lockedStatus = await lockBookingForStatusCheck(
         tx,
         id,
@@ -10814,6 +10833,7 @@ export async function updateBookingAssets({
         operation: "change the items on",
         bookingId: id,
       });
+      assertCanAddBookingItems({ access, bookingStatus: lockedStatus });
 
       const slices = kitSlices ?? [];
 
@@ -11980,18 +12000,36 @@ export async function revertBookingToDraft({
   }
 }
 
+/**
+ * Extends an ongoing or overdue booking to a new end date.
+ *
+ * @param params.id - The booking to extend
+ * @param params.organizationId - The caller's workspace; the lookup is scoped to it
+ * @param params.newEndDate - The new live end (`to`); the planned end is left alone
+ * @param params.hints - Client hints, for the note's dates, the check-in
+ *   reminder and the scheduled overdue job
+ * @param params.userId - The caller
+ * @param params.access - The caller's access, for the ownership gate
+ * @param params.roles - Every role on the caller's membership, for the
+ *   `booking:extend` grant
+ * @returns The updated booking
+ * @throws {ShelfError} 403 when the caller lacks `booking:extend` or does not
+ *   own the booking
+ */
 export async function extendBooking({
   id,
   organizationId,
   newEndDate,
   hints,
   userId,
-  role,
+  access,
+  roles,
 }: Pick<Booking, "id" | "organizationId"> & {
   newEndDate: Date;
   hints: ClientHint;
   userId: string;
-  role: OrganizationRoles;
+  access: RoleAccess;
+  roles: OrganizationRoles[];
 }) {
   try {
     const booking = await db.booking
@@ -12033,13 +12071,26 @@ export async function extendBooking({
         });
       });
 
-    validateBookingOwnership({
-      booking,
+    // `booking:extend` is its own grant (BASE does not hold it). The route
+    // gates on it too; this keeps the service safe for any other caller.
+    const canExtend = await hasPermission({
       userId,
-      role,
-      action: "extend",
-      blockBaseEntirely: true,
+      organizationId,
+      roles,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.extend,
     });
+    if (!canExtend) {
+      throw new ShelfError({
+        cause: null,
+        label: "Booking",
+        message: "You are not authorized to extend this booking.",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
+
+    validateBookingOwnership({ booking, userId, access, action: "extend" });
 
     /** Extending booking is allowed only for these status */
     const allowedStatus: BookingStatus[] = [
@@ -12692,10 +12743,10 @@ export async function getBookings(params: {
    * an action gated by `validateBookingOwnership`; omit for read-only lists.
    *
    * ONE object rather than two sibling params on purpose: a half-set pair
-   * (id without role, or role without id) would silently skip the restriction
-   * entirely. Both halves are required together or not at all.
+   * (id without access, or access without id) would silently skip the
+   * restriction entirely. Both halves are required together or not at all.
    */
-  writableBy?: { userId: string; role: OrganizationRoles } | null;
+  writableBy?: { userId: string; access: RoleAccess } | null;
   excludeBookingIds?: Booking["id"][] | null;
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
@@ -12865,6 +12916,15 @@ export async function getBookings(params: {
 
       if (writeScope) {
         andClauses.push(writeScope);
+      }
+
+      // The picker also offers only the statuses the add action accepts.
+      const addableStatus = bookingAddableStatusClause({
+        access: writableBy.access,
+      });
+
+      if (addableStatus) {
+        andClauses.push(addableStatus);
       }
     }
 
@@ -13648,15 +13708,21 @@ export async function removeAssets({
  * @param booking - Org-scoped booking identifier
  * @param hints - Client hints used to format email subject lines and times
  * @param userId - Optional editor user id, used to skip notifying the actor
+ * @param options.onlyIfDraft - The caller's policy allows deleting drafts only
+ *          (`access.policy.bookings.deleteOnlyDrafts`). The delete then
+ *          matches a DRAFT row only, so a booking reserved after the caller's
+ *          check is refused instead of deleted.
  * @returns The deleted booking row (with the includes needed for email
  *          rendering and the post-tx caller).
- * @throws {ShelfError} 404 if the booking does not exist; otherwise wraps
- *          any underlying Prisma/email failure.
+ * @throws {ShelfError} 404 if the booking does not exist; 403 when
+ *          `onlyIfDraft` is set and the booking is no longer a draft; otherwise
+ *          wraps any underlying Prisma/email failure.
  */
 export async function deleteBooking(
   booking: Pick<Booking, "id" | "organizationId">,
   hints: ClientHint,
-  userId?: string
+  userId?: string,
+  options: { onlyIfDraft?: boolean } = {}
 ) {
   const { id, organizationId } = booking;
   const currentBooking = await db.booking.findUnique({
@@ -13721,18 +13787,40 @@ export async function deleteBooking(
      * atomicity rationale.
      */
     const b = await db.$transaction(async (tx) => {
-      const deleted = await tx.booking.delete({
-        where: { id, organizationId },
-        include: {
-          ...BOOKING_COMMON_INCLUDE,
-          ...BOOKING_INCLUDE_FOR_EMAIL,
-          bookingAssets: {
-            include: {
-              asset: { select: { id: true } },
+      const deleted = await tx.booking
+        .delete({
+          where: {
+            id,
+            organizationId,
+            ...(options.onlyIfDraft ? { status: BookingStatus.DRAFT } : {}),
+          },
+          include: {
+            ...BOOKING_COMMON_INCLUDE,
+            ...BOOKING_INCLUDE_FOR_EMAIL,
+            bookingAssets: {
+              include: {
+                asset: { select: { id: true } },
+              },
             },
           },
-        },
-      });
+        })
+        .catch((cause: unknown) => {
+          // With `onlyIfDraft`, no matching row means the booking stopped
+          // being a draft after the caller's check.
+          if (options.onlyIfDraft && isNotFoundError(cause)) {
+            // `cause: null`: a not-found cause would set the status to 404.
+            throw new ShelfError({
+              cause: null,
+              label,
+              message:
+                "You are not authorized to delete this booking. Only draft bookings can be deleted.",
+              status: 403,
+              shouldBeCaptured: false,
+              additionalData: { id, organizationId },
+            });
+          }
+          throw cause;
+        });
 
       /** Assets that were checked out on an ONGOING/OVERDUE booking need
        * terminal-status reconciliation, NOT a blanket flip to AVAILABLE.
@@ -13812,8 +13900,9 @@ export async function deleteBooking(
   } catch (cause) {
     throw new ShelfError({
       cause,
-      message:
-        "Something went wrong while deleting the booking. Please try again or contact support.",
+      message: isLikeShelfError(cause)
+        ? cause.message
+        : "Something went wrong while deleting the booking. Please try again or contact support.",
       additionalData: { booking, hints },
       label,
     });
@@ -14854,21 +14943,39 @@ export async function getBookingFlags(
   };
 }
 
+/**
+ * Deletes a selection of bookings in one request.
+ *
+ * The selection is the explicit ids, or with select-all every booking matching
+ * the list's status filter (the only filter select-all carries), and in both
+ * cases only the bookings the caller may act on. Roles whose policy limits
+ * delete to drafts are refused the whole
+ * request when the selection contains any non-draft booking, the same rule
+ * `assertCanDeleteBooking` applies to a single delete.
+ *
+ * @param params.bookingIds - Selected booking ids, or the select-all key
+ * @param params.organizationId - The caller's workspace
+ * @param params.userId - The caller
+ * @param params.hints - Client hints for the notification emails
+ * @param params.currentSearchParams - The list filters, used with select-all
+ * @param params.access - The caller's access
+ * @throws {ShelfError} 403 when the caller may not delete every selected booking
+ */
 export async function bulkDeleteBookings({
   bookingIds,
   organizationId,
   userId,
   hints,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -14880,7 +14987,7 @@ export async function bulkDeleteBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -14914,6 +15021,33 @@ export async function bulkDeleteBookings({
       }),
     ]);
 
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "delete",
+    });
+
+    // Roles whose policy limits delete to drafts may not delete a selection
+    // that contains anything else. The whole request is refused rather than
+    // silently deleting part of it.
+    if (
+      access.policy.bookings.deleteOnlyDrafts &&
+      bookings.some((booking) => booking.status !== BookingStatus.DRAFT)
+    ) {
+      throw new ShelfError({
+        cause: null,
+        label,
+        message:
+          "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
+        status: 403,
+        shouldBeCaptured: false,
+        additionalData: { bookingIds, organizationId },
+      });
+    }
+
     /** If some booking was OVERDUE or ONGOING, we have to make their assets and kits available */
     const overdueOrOngoingBookings = bookings.filter(
       (booking) => booking.status === "OVERDUE" || booking.status === "ONGOING"
@@ -14925,13 +15059,36 @@ export async function bulkDeleteBookings({
     );
 
     await db.$transaction(async (tx) => {
-      /** Deleting all selected bookings */
-      await tx.booking.deleteMany({
+      /**
+       * Deleting all selected bookings. For a drafts-only role the write
+       * re-checks the status itself: a booking reserved after the read above
+       * matches nothing, and a short count refuses the whole request so the
+       * transaction rolls back before any note, reconciliation or email.
+       */
+      const { count } = await tx.booking.deleteMany({
         where: {
           id: { in: bookings.map((booking) => booking.id) },
           organizationId,
+          ...(access.policy.bookings.deleteOnlyDrafts
+            ? { status: BookingStatus.DRAFT }
+            : {}),
         },
       });
+
+      if (
+        access.policy.bookings.deleteOnlyDrafts &&
+        count !== bookings.length
+      ) {
+        throw new ShelfError({
+          cause: null,
+          label,
+          message:
+            "You are not authorized to delete these bookings. Only draft bookings can be deleted.",
+          status: 403,
+          shouldBeCaptured: false,
+          additionalData: { bookingIds, organizationId },
+        });
+      }
 
       /** Making assets and kits available */
       if (overdueOrOngoingBookings.length > 0) {
@@ -15053,7 +15210,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -15065,8 +15222,8 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -15078,7 +15235,7 @@ export async function bulkArchiveBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -15091,6 +15248,17 @@ export async function bulkArchiveBookings({
         custodianUserId: true,
         activeSchedulerReference: true,
       },
+    });
+
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success. Checked
+    // against every row found, archived ones included, so a re-archive of an
+    // owned booking is never mistaken for a foreign id.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: selectedBookings.map((booking) => booking.id),
+      access,
+      action: "archive",
     });
 
     // A booking that is already archived needs nothing more, so archiving is
@@ -15268,15 +15436,15 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
-  role,
+  access,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** Caller's effective role — decides whether ownership scoping applies */
-  role: OrganizationRoles;
+  /** Caller's access, which decides whether ownership scoping applies */
+  access: RoleAccess;
 }) {
   try {
     /**
@@ -15288,7 +15456,7 @@ export async function bulkCancelBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
-      role,
+      access,
       userId,
     });
 
@@ -15321,6 +15489,15 @@ export async function bulkCancelBookings({
         } satisfies Prisma.UserSelect,
       }),
     ]);
+
+    // A foreign id is filtered out by the ownership scope above; refuse the
+    // selection instead of acting on the rest and reporting success.
+    assertBulkSelectionWithinOwnership({
+      bookingIds,
+      foundIds: bookings.map((booking) => booking.id),
+      access,
+      action: "cancel",
+    });
 
     /** Bookings with any of these statuses cannot be cancelled */
     const unavailableBookingStatus: BookingStatus[] = [
@@ -15787,6 +15964,7 @@ async function addScannedAssetsToBookingWithinTx(
     userId,
     quantities = {},
     kitSlices = [],
+    callerAccess,
   }: {
     /** Directly-scanned (standalone) asset IDs — written with `assetKitId = null`. */
     assetIds: Asset["id"][];
@@ -15817,6 +15995,13 @@ async function addScannedAssetsToBookingWithinTx(
      * `AssetKit.quantity` when omitted.
      */
     kitSlices?: ScannedKitSliceSpec[];
+    /**
+     * The adding caller's access. When given, its add-items rule is checked
+     * against the status read under the row lock, so a booking that leaves
+     * the caller's add statuses after the route's check still refuses. The
+     * fulfil-and-checkout flow omits it: it runs the check-out rule instead.
+     */
+    callerAccess?: RoleAccess;
   }
 ) {
   // The deduped union of standalone + kit-slice asset ids. Model-request
@@ -15849,10 +16034,9 @@ async function addScannedAssetsToBookingWithinTx(
     tx
   );
 
-  // This path had NO booking-status check anywhere — not in the route action,
-  // not here. The scan-assets loader computes `canUserManageBookingAssets`,
-  // but that only decides what to render, so a direct POST could add assets to
-  // a COMPLETE, ARCHIVED or CANCELLED booking. (detail.dev D097)
+  // Closed bookings refuse every caller, and only a read inside this
+  // transaction sees the status the write lands on. The routes gate the
+  // caller's ownership and role-specific add rule; this is the backstop.
   //
   // Locked rather than merely re-read: this runs inside the caller's
   // transaction, and a plain SELECT there takes no lock under READ COMMITTED.
@@ -15866,6 +16050,12 @@ async function addScannedAssetsToBookingWithinTx(
     operation: "add scanned items to",
     bookingId,
   });
+  if (callerAccess) {
+    assertCanAddBookingItems({
+      access: callerAccess,
+      bookingStatus: scanTargetStatus,
+    });
+  }
 
   /**
    * The window every overlap guard below measures against, read once through
@@ -16498,12 +16688,21 @@ export async function addScannedAssetsToBooking({
   userId,
   quantities = {},
   kitSlices = [],
+  access,
 }: {
   assetIds: Asset["id"][];
   kitIds?: string[];
   bookingId: Booking["id"];
   organizationId: Booking["organizationId"];
   userId: string;
+  /**
+   * The caller's access. Its add-items rule is enforced inside the write
+   * transaction against the locked booking status. `null` only for a flow
+   * that has already authorized the add under a different rule: fulfil and
+   * check out, which runs the check-out rule. Required so no caller skips the
+   * check by forgetting it.
+   */
+  access: RoleAccess | null;
   /**
    * Per-asset quantity for standalone QUANTITY_TRACKED scans. Missing
    * entries default `BookingAsset.quantity` to 1.
@@ -16546,6 +16745,7 @@ export async function addScannedAssetsToBooking({
         userId,
         quantities,
         kitSlices,
+        callerAccess: access ?? undefined,
       })
     );
 
@@ -16738,10 +16938,10 @@ export async function getAvailableAssetsIdsForBooking(
  * @param organizationId - The caller's validated organization ID. Forwarded to
  *   {@link getAvailableAssetsIdsForBooking} so foreign-org assets cannot be
  *   added to the booking (cross-org IDOR protection).
- * @param auth - The acting user's id and org role. Used to enforce per-user
- *   booking ownership: `booking:create/update` is granted org-wide to
- *   SELF_SERVICE/BASE, so without this a non-owner could add items to another
- *   user's booking (cross-user IDOR). ADMIN/OWNER are unrestricted.
+ * @param auth - The acting user's id and access. Enforces per-user booking
+ *   ownership for callers that do not write every booking: `booking:update`
+ *   is granted org-wide, so without this a non-owner could add items to
+ *   another user's booking (cross-user IDOR).
  * @returns The resolved (org-scoped) asset IDs and the booking details
  * @throws {ShelfError} If no assets are available, the booking lookup fails, or
  *   the caller does not own the booking
@@ -16750,7 +16950,7 @@ export async function processBooking(
   bookingId: string,
   assetIds: string[],
   organizationId: string,
-  auth: { userId: string; role: OrganizationRoles }
+  auth: { userId: string; access: RoleAccess }
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
@@ -16758,8 +16958,8 @@ export async function processBooking(
       getExistingBookingDetails(bookingId, organizationId),
     ]);
 
-    // Cross-user IDOR guard: SELF_SERVICE/BASE may only add to bookings they
-    // created or are custodian of. No-op for ADMIN/OWNER. Runs before any
+    // Cross-user IDOR guard: a caller who does not write every booking may
+    // only add to bookings they created or are custodian of. Runs before any
     // mutation-shaping logic below.
     validateBookingOwnership({
       booking: {
@@ -16767,8 +16967,15 @@ export async function processBooking(
         custodianUserId: bookingInfo.custodianUserId,
       },
       userId: auth.userId,
-      role: auth.role,
+      access: auth.access,
       action: "add items to",
+    });
+
+    // Restricted roles add items only while the booking is a draft; the
+    // booking page applies the same rule to its manage-assets flow.
+    assertCanAddBookingItems({
+      access: auth.access,
+      bookingStatus: bookingInfo.status,
     });
 
     if (!finalAssetIds.length) {
@@ -16960,26 +17167,18 @@ export async function loadBookingsData({
   request,
   organizationId,
   userId,
-  role,
-  canSeeAllBookings,
+  access,
   ids,
 }: {
   request: Request;
   organizationId: string;
   userId: string;
   /**
-   * Effective role, from `requirePermission`. Drives the WRITE restriction —
-   * these pickers choose a mutation target, so they may only offer bookings
-   * the submitting action will accept.
+   * The caller's access: `bookings.seeAll` drives the READ scope,
+   * `bookings.writeAll` the WRITE scope. The pickers choose a mutation target,
+   * so they offer only bookings the submitting action accepts.
    */
-  role: OrganizationRoles;
-  /**
-   * Standard booking READ visibility, from `requirePermission`. Gating on the
-   * role alone ignored the workspace's `selfServiceCanSeeBookings` /
-   * `baseUserCanSeeBookings` overrides, so these pickers stayed restricted even
-   * when the workspace had switched the setting on.
-   */
-  canSeeAllBookings: boolean;
+  access: RoleAccess;
   ids?: string[];
 }): Promise<BookingLoaderResponse> {
   // Get search parameters and pagination settings
@@ -16998,7 +17197,7 @@ export async function loadBookingsData({
   // 1. READ — the standard booking-visibility rule. Resolve the FULL custodian
   //    scope (user link + every team-member link) so legacy rows aren't hidden
   //    here while showing on the index.
-  const custodianScope = !canSeeAllBookings
+  const custodianScope = !access.bookings.seeAll
     ? await resolveCustodianScope({ userId, organizationId })
     : undefined;
 
@@ -17014,7 +17213,7 @@ export async function loadBookingsData({
     //    separate from the read rule because the workspace visibility toggle
     //    does NOT grant write: without this, enabling it offers a restricted
     //    user bookings the action then rejects with a 403.
-    writableBy: { userId, role },
+    writableBy: { userId, access },
   });
 
   // Set up header and model name
@@ -17355,9 +17554,13 @@ export async function computeBookingKitDrift({
  * @param args.from - Start date for the new booking
  * @param args.to - End date for the new booking
  * @param args.request - The incoming request, forwarded to `getBooking` for
- *   client-hint resolution and ownership checks
+ *   client-hint resolution
+ * @param args.access - The caller's access. The duplicate guard runs on the
+ *   same source row the copy is built from, so a custodian reassigned after
+ *   any earlier read cannot slip into the copy unchecked.
  * @returns The newly created booking row
- * @throws {ShelfError} If anything in the transaction fails
+ * @throws {ShelfError} 403 if the caller may not duplicate the source
+ *   (`assertCanDuplicateBooking`), or if anything in the transaction fails
  */
 export async function duplicateBooking({
   bookingId,
@@ -17366,6 +17569,7 @@ export async function duplicateBooking({
   from,
   to,
   request,
+  access,
 }: {
   bookingId: Booking["id"];
   organizationId: Organization["id"];
@@ -17373,6 +17577,7 @@ export async function duplicateBooking({
   from: Date;
   to: Date;
   request: Request;
+  access: RoleAccess;
 }) {
   try {
     const bookingToDuplicate = await getBooking({
@@ -17383,6 +17588,9 @@ export async function duplicateBooking({
         notificationRecipients: { select: { id: true } },
       },
     });
+
+    // Authorize the exact row every field of the copy is read from below.
+    assertCanDuplicateBooking({ booking: bookingToDuplicate, userId, access });
 
     // Three-way split of the source's snapshot:
     //  - genuine standalone (BOTH pointers null) -> copied verbatim. A user

@@ -109,8 +109,8 @@ describe("asset page loader: header badge booking rows", () => {
     requirePermission.mockResolvedValue({
       organizationId: "org-1",
       userOrganizations: [],
-      role: "ADMIN",
-      canSeeAllCustody: true,
+      // why: the slice of the role policy this loader reads (custody redaction).
+      access: { custody: { seeAll: true } },
     });
     getTeamMembersForQuantityCustody.mockResolvedValue({
       teamMembers: [],

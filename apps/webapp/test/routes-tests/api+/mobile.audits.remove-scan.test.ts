@@ -7,7 +7,7 @@
  * here: the Audits add-on gate, the `audit: update` permission, the assignee
  * gate, and the role resolution that decides whether the assignee gate binds.
  *
- * `parseMobileBody`, `resolveMostPrivilegedRole` and the error helpers are the
+ * `parseMobileBody`, the role policy and the error helpers are the
  * REAL implementations. They are the logic under test — mocking them would
  * leave the route's own wiring unexercised. Only the two boundaries that reach
  * Supabase and Postgres are stubbed.
@@ -15,6 +15,7 @@
  * @see {@link file://./../../../app/routes/api+/mobile+/audits.remove-scan.ts}
  */
 import { action } from "~/routes/api+/mobile+/audits.remove-scan";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -98,10 +99,9 @@ describe("POST /api/mobile/audits/remove-scan", () => {
       authUser: { id: "auth-user-1", email: mockUser.email },
     } as never);
     vi.mocked(requireOrganizationAccess).mockResolvedValue("org-1" as never);
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      roles: ["ADMIN"],
-      canUseAudits: true,
-    } as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] }) as never
+    );
     vi.mocked(requireMobilePermission).mockResolvedValue(undefined as never);
     vi.mocked(requireAuditAssignee).mockResolvedValue(undefined as never);
     vi.mocked(removeAuditScan).mockResolvedValue({
@@ -144,49 +144,45 @@ describe("POST /api/mobile/audits/remove-scan", () => {
       auditSessionId: "session-1",
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
     });
   });
 
   it("resolves the most privileged role, not the first one on the membership", async () => {
-    // A membership carries roles as an array in no guaranteed order. Reading
-    // roles[0] would treat this genuine admin as restricted and gate them to
-    // audits they are assigned to. Pinned because the sibling record-scan
-    // endpoint still reads the bare `role`, so this is easy to "simplify" back.
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      roles: ["SELF_SERVICE", "ADMIN"],
-      canUseAudits: true,
-    } as never);
+    // A membership carries roles as an array in no guaranteed order. The scope
+    // follows the effective role, so this genuine admin is not limited to
+    // audits they are assigned to.
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] }) as never
+    );
 
     await action(
       createActionArgs({ request: createRemoveScanRequest(VALID_BODY) })
     );
 
     expect(requireAuditAssignee).toHaveBeenCalledWith(
-      expect.objectContaining({ isSelfServiceOrBase: false })
+      expect.objectContaining({ assignedOnly: false })
     );
   });
 
   it("binds the assignee gate for a SELF_SERVICE user", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      roles: ["SELF_SERVICE"],
-      canUseAudits: true,
-    } as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE"] }) as never
+    );
 
     await action(
       createActionArgs({ request: createRemoveScanRequest(VALID_BODY) })
     );
 
     expect(requireAuditAssignee).toHaveBeenCalledWith(
-      expect.objectContaining({ isSelfServiceOrBase: true })
+      expect.objectContaining({ assignedOnly: true })
     );
   });
 
   it("403s when the workspace has no Audits add-on, without touching the audit", async () => {
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      roles: ["ADMIN"],
-      canUseAudits: false,
-    } as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"], canUseAudits: false }) as never
+    );
 
     const result = (await action(
       createActionArgs({ request: createRemoveScanRequest(VALID_BODY) })
@@ -200,10 +196,9 @@ describe("POST /api/mobile/audits/remove-scan", () => {
   it("surfaces the assignee rejection and never reaches the service", async () => {
     // Removing a scan rewrites audit data, so a non-assignee must not be able
     // to hollow out an audit they are not part of.
-    vi.mocked(getMobileUserContext).mockResolvedValue({
-      roles: ["BASE"],
-      canUseAudits: true,
-    } as never);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE"] }) as never
+    );
     // The real guard throws a ShelfError carrying its own status; a bare
     // Error with a `status` property would be wrapped into a 500 by
     // makeShelfError, which is not what this path does in production.

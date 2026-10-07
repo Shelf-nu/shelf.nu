@@ -42,7 +42,6 @@
  * @see {@link file://./../../utils/sso.server.ts} resolveUserAndOrgForSsoCallback
  * @see {@link file://./../../routes/_layout+/admin-dashboard+/sso-conversion.tsx}
  */
-import { OrganizationRoles } from "@prisma/client";
 import type { AuthSession } from "@server/session";
 import { db } from "~/database/db.server";
 import { getAuthUserById } from "~/modules/auth/service.server";
@@ -54,6 +53,7 @@ import { caseInsensitiveEmailFilter } from "~/modules/invite/helpers";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 
 const label = "SSO" as const;
@@ -657,7 +657,7 @@ export async function findEligibleAccountsForSsoConversion(
       db.userOrganization.findMany({
         where: {
           userId: { in: userIds },
-          roles: { has: OrganizationRoles.OWNER },
+          roles: { hasSome: rolesWhere((p) => p.membership.ownsWorkspace) },
           organizationId: { in: linkedOrgIds },
         },
         select: { userId: true },

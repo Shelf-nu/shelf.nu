@@ -42,7 +42,8 @@ export const Notes = () => {
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
 
-  const notes = items as NoteWithUser[];
+  /** `userId` is the author, which decides who may delete the note */
+  const notes = items as (NoteWithUser & { userId: string | null })[];
 
   /** Whether a search term or note-type filter is currently narrowing the list */
   const noteTypeFilter = searchParams.get("noteType");
@@ -128,12 +129,17 @@ export const Notes = () => {
                 actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
               />
             )}
-            {/* Render the current page of notes */}
+            {/* Render the current page of notes. Deleting only ever removes
+                the caller's own note, so the menu shows on those alone. */}
             {notes.map((note) => (
               <Note
                 key={note.id}
                 note={note}
-                actionsDropdown={<ActionsDropdown noteId={note.id} />}
+                actionsDropdown={
+                  user && note.userId === user.id ? (
+                    <ActionsDropdown noteId={note.id} />
+                  ) : undefined
+                }
               />
             ))}
           </ul>

@@ -13,10 +13,14 @@
  * @see {@link file://./../../routes/_layout+/calendar.tsx}
  */
 import { randomBytes } from "node:crypto";
-import { OrganizationRoles } from "@prisma/client";
+import type { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import {
+  resolveRole,
+  resolveRoleAccess,
+} from "~/utils/permissions/role-access";
 import {
   assertCanUseBookings,
   canUseBookings,
@@ -187,6 +191,7 @@ export async function assertMemberCanManageCalendar({
 export type MemberCalendarFeed = {
   organizationId: string;
   name: string;
+  /** The member's effective role in that workspace. */
   role: OrganizationRoles;
   /** Absolute feed URL, or null when the member hasn't generated one yet. */
   feedUrl: string | null;
@@ -229,7 +234,7 @@ export async function getMemberCalendarFeeds({
       .map((m) => ({
         organizationId: m.organization.id,
         name: m.organization.name,
-        role: m.roles[0] ?? OrganizationRoles.BASE,
+        role: resolveRole(m.roles),
         feedUrl: m.calendarTokenId
           ? buildCalendarFeedUrl(m.calendarTokenId)
           : null,
@@ -287,9 +292,9 @@ export type CalendarFeedContext = NonNullable<
 >;
 
 /**
- * Derives booking + custody visibility from a member's role and workspace
- * settings. Mirrors the logic in `requirePermission` (roles.server.ts) so the
- * feed shows exactly what the member sees in the in-app calendar.
+ * Derives feed visibility from the member's effective role and the workspace
+ * toggles via `resolveRoleAccess`, the same resolution the in-app calendar
+ * uses, so a member sees exactly the same thing on the feed and in the app.
  *
  * @returns `canSeeAllBookings` (whole workspace vs. own only) and
  *   `canSeeAllCustody` (whether custodian names may be shown)
@@ -306,21 +311,9 @@ export function resolveCalendarVisibility({
     baseUserCanSeeCustody: boolean;
   };
 }): { canSeeAllBookings: boolean; canSeeAllCustody: boolean } {
-  const role = roles[0] ?? OrganizationRoles.BASE;
-  const isSelfServiceOrBase =
-    role === OrganizationRoles.SELF_SERVICE || role === OrganizationRoles.BASE;
-
-  const canSeeAllBookings =
-    !isSelfServiceOrBase ||
-    (role === OrganizationRoles.SELF_SERVICE &&
-      organization.selfServiceCanSeeBookings) ||
-    (role === OrganizationRoles.BASE && organization.baseUserCanSeeBookings);
-
-  const canSeeAllCustody =
-    !isSelfServiceOrBase ||
-    (role === OrganizationRoles.SELF_SERVICE &&
-      organization.selfServiceCanSeeCustody) ||
-    (role === OrganizationRoles.BASE && organization.baseUserCanSeeCustody);
-
-  return { canSeeAllBookings, canSeeAllCustody };
+  const access = resolveRoleAccess({ roles, workspace: organization });
+  return {
+    canSeeAllBookings: access.bookings.seeAll,
+    canSeeAllCustody: access.custody.seeAll,
+  };
 }

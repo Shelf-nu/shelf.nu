@@ -8,93 +8,13 @@
  *
  * @see {@link file://./mobile-custody-visibility.server.ts}
  */
-import { OrganizationRoles } from "@prisma/client";
 import {
-  computeCanSeeAllCustody,
   filterMobileCustodyListForViewer,
   scopeMobileAssetCustodyToViewer,
   viewerCanSeeLegacyCustody,
 } from "./mobile-custody-visibility.server";
 
 // @vitest-environment node
-
-const noOverrides = {
-  selfServiceCanSeeCustody: false,
-  baseUserCanSeeCustody: false,
-};
-
-describe("computeCanSeeAllCustody", () => {
-  it("always allows ADMIN and OWNER", () => {
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.ADMIN,
-        organization: noOverrides,
-      })
-    ).toBe(true);
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.OWNER,
-        organization: noOverrides,
-      })
-    ).toBe(true);
-  });
-
-  it("denies SELF_SERVICE and BASE without their org override", () => {
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.SELF_SERVICE,
-        organization: noOverrides,
-      })
-    ).toBe(false);
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.BASE,
-        organization: noOverrides,
-      })
-    ).toBe(false);
-  });
-
-  it("allows SELF_SERVICE/BASE only via their MATCHING org override", () => {
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.SELF_SERVICE,
-        organization: {
-          selfServiceCanSeeCustody: true,
-          baseUserCanSeeCustody: false,
-        },
-      })
-    ).toBe(true);
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.BASE,
-        organization: {
-          selfServiceCanSeeCustody: false,
-          baseUserCanSeeCustody: true,
-        },
-      })
-    ).toBe(true);
-    // Cross-override must NOT leak: the base override doesn't cover
-    // self-service and vice versa
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.SELF_SERVICE,
-        organization: {
-          selfServiceCanSeeCustody: false,
-          baseUserCanSeeCustody: true,
-        },
-      })
-    ).toBe(false);
-    expect(
-      computeCanSeeAllCustody({
-        role: OrganizationRoles.BASE,
-        organization: {
-          selfServiceCanSeeCustody: true,
-          baseUserCanSeeCustody: false,
-        },
-      })
-    ).toBe(false);
-  });
-});
 
 describe("filterMobileCustodyListForViewer", () => {
   const custodyRows = [

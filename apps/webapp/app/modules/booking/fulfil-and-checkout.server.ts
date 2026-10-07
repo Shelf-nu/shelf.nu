@@ -333,6 +333,9 @@ async function checkOutScannedUnits(
       bookingId,
       organizationId,
       userId,
+      // The route authorized this flow under the check-out rule, which lets a
+      // caller fulfil a RESERVED booking; the add-items rule would refuse it.
+      access: null,
     });
   }
 

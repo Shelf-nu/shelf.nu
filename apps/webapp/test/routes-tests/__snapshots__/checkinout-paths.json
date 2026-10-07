@@ -1,0 +1,5018 @@
+{
+  "web:overview:checkOut": {
+    "specRow": "Web quick check-out / check-in",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "checkoutBooking",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "web:overview:checkIn": {
+    "specRow": "Web quick check-out / check-in",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkin",
+    "sentinel": "checkinBooking",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "web:overview:checkOutRemaining": {
+    "specRow": "Web checkOutRemaining",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "checkoutRemainingAssets",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "web:overview:partial-checkin": {
+    "specRow": "Web overview partial-checkin intent",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkin",
+    "sentinel": "checkinAssets",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "web:overview:partial-checkout": {
+    "specRow": "Web overview partial-checkout intent",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "checkoutAssets",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "web:checkout-assets:loader": {
+    "specRow": "Web partial check-out page (loader)",
+    "surface": "web",
+    "kind": "loader",
+    "direction": "checkout",
+    "sentinel": "getDetailedPartialCheckoutData",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "web:checkout-assets:action": {
+    "specRow": "Web partial check-out page (action)",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "checkoutAssets",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "web:checkin-assets:loader": {
+    "specRow": "Web partial check-in page (loader)",
+    "surface": "web",
+    "kind": "loader",
+    "direction": "checkin",
+    "sentinel": "getDetailedPartialCheckinData",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "web:checkin-assets:action": {
+    "specRow": "Web partial check-in page (action)",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkin",
+    "sentinel": "checkinAssets",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "web:fulfil-and-checkout:loader": {
+    "specRow": "Web fulfil-and-checkout (loader)",
+    "surface": "web",
+    "kind": "loader",
+    "direction": "checkout",
+    "sentinel": "getOutstandingModelRequests",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "web:fulfil-and-checkout:action": {
+    "specRow": "Web fulfil-and-checkout (action)",
+    "surface": "web",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "fulfilAndCheckOut",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      }
+    }
+  },
+  "mobile:checkin": {
+    "specRow": "Mobile quick check-in / check-out",
+    "surface": "mobile",
+    "kind": "action",
+    "direction": "checkin",
+    "sentinel": "checkinBooking",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "mobile:checkout": {
+    "specRow": "Mobile quick check-in / check-out",
+    "surface": "mobile",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "checkoutBooking",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "mobile:partial-checkin": {
+    "specRow": "Mobile partial check-in",
+    "surface": "mobile",
+    "kind": "action",
+    "direction": "checkin",
+    "sentinel": "partialCheckinBooking",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        }
+      }
+    }
+  },
+  "mobile:partial-checkout": {
+    "specRow": "Mobile partial check-out",
+    "surface": "mobile",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "partialCheckoutBooking",
+    "cases": 168,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          },
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed",
+            "RESERVED": "allowed",
+            "ONGOING": "allowed",
+            "OVERDUE": "allowed",
+            "COMPLETE": "allowed",
+            "ARCHIVED": "allowed",
+            "CANCELLED": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "mobile:fulfil-and-checkout": {
+    "specRow": "Mobile fulfil-and-checkout",
+    "surface": "mobile",
+    "kind": "action",
+    "direction": "checkout",
+    "sentinel": "fulfilAndCheckOut",
+    "cases": 252,
+    "outcomes": {
+      "toggles-off|explicit-off": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          },
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "creatorNotCustodian": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          },
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      },
+      "toggles-on|explicit-off": {
+        "OWNER": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "BASE": {
+          "neither": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "neither": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      },
+      "toggles-off|explicit-admin": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        }
+      },
+      "toggles-off|explicit-selfService": {
+        "OWNER": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=true)",
+            "RESERVED": "allowed (requireExplicitCheckout=true)",
+            "ONGOING": "allowed (requireExplicitCheckout=true)",
+            "OVERDUE": "allowed (requireExplicitCheckout=true)",
+            "COMPLETE": "allowed (requireExplicitCheckout=true)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=true)",
+            "CANCELLED": "allowed (requireExplicitCheckout=true)"
+          }
+        },
+        "BASE": {
+          "custodianNotCreator": {
+            "DRAFT": "denied",
+            "RESERVED": "denied",
+            "ONGOING": "denied",
+            "OVERDUE": "denied",
+            "COMPLETE": "denied",
+            "ARCHIVED": "denied",
+            "CANCELLED": "denied"
+          }
+        },
+        "SELF_SERVICE+ADMIN": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        },
+        "ADMIN+SELF_SERVICE": {
+          "custodianNotCreator": {
+            "DRAFT": "allowed (requireExplicitCheckout=false)",
+            "RESERVED": "allowed (requireExplicitCheckout=false)",
+            "ONGOING": "allowed (requireExplicitCheckout=false)",
+            "OVERDUE": "allowed (requireExplicitCheckout=false)",
+            "COMPLETE": "allowed (requireExplicitCheckout=false)",
+            "ARCHIVED": "allowed (requireExplicitCheckout=false)",
+            "CANCELLED": "allowed (requireExplicitCheckout=false)"
+          }
+        }
+      }
+    }
+  }
+}

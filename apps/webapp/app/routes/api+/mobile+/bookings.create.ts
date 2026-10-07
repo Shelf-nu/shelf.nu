@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { BookingFormSchema } from "~/components/booking/forms/forms-schema";
@@ -14,6 +13,7 @@ import { createBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { isValidTimeZone } from "~/utils/date-format";
 import { prefsForDeclaredZone } from "~/utils/date-format.server";
@@ -38,8 +38,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - Business validation runs through the shared {@link BookingFormSchema}
  *   (future-date + buffer + working-hours + max-length + required-tags),
  *   parameterised by the org's working hours / booking settings and whether the
- *   caller is admin/owner (admins bypass buffer + max-length).
- * - SELF_SERVICE / BASE users may only assign a booking to themselves.
+ *   caller's policy sets `bypassTimeLimits` (buffer and max-length skipped).
+ * - Members whose booking custodian is fixed to themselves
+ *   (`bookings.custodianPicker`) may only assign a booking to themselves.
  * - Bookings are a TEAM-plan feature (`assertCanUseBookings`).
  *
  * Cookie-less native clients can't send the client-hint timezone cookie, so the
@@ -102,12 +103,9 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const body = await parseMobileBody(BodySchema, request);
 
-    // Resolve the caller's role to branch self-service rules + admin bypass.
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-    const isAdminOrOwner = !isSelfServiceOrBase;
+    // The caller's access, judged by the membership's effective role: it
+    // decides the custodian self-lock and the time-limit bypass.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Validate + org-scope the custodian team member. `getTeamMember` is
     // org-scoped, so a foreign-org team member id 404s here (cross-org IDOR
@@ -130,8 +128,9 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    // Self-service / base users may only assign a booking to themselves.
-    if (isSelfServiceOrBase && custodian.userId !== user.id) {
+    // A member whose booking custodian is fixed to themself may only assign
+    // a booking to themself.
+    if (bookingCustodianIsSelf(access) && custodian.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "Self user can assign booking to themselves only.",
@@ -167,7 +166,7 @@ export async function action({ request }: ActionFunctionArgs) {
         action: "new",
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }).parse({
         name: body.name,
         description: body.description,

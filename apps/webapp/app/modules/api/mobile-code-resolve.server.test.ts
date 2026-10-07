@@ -52,8 +52,9 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   // why: custody visibility is read per owning workspace; the route tests pin
   // the filtering itself, so here every caller may see all custody and the
   // assertions check which workspace was asked.
-  getMobileUserContext: vi.fn(() =>
-    Promise.resolve({ canSeeAllCustody: true })
+  // An Administrator's context: sees every holder's custody.
+  getMobileUserContext: vi.fn(async () =>
+    (await import("@helpers/mobile-user-context")).mobileUserContext()
   ),
   MOBILE_ASSET_SELECT: {},
   MOBILE_KIT_SELECT: {},

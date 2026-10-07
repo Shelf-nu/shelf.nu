@@ -29,7 +29,7 @@ import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveLocationKitIds } from "~/modules/location/bulk-select.server";
@@ -73,7 +73,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -110,7 +110,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           selectedTeamMembers: teamMemberIds,
-          filterByUserId: !canSeeAllCustody, // When the user cannot see all custody, only return their own team member
+          filterByUserId: !access.custody.seeAll, // When the user cannot see all custody, only return their own team member
           userId,
         }),
       ]);
@@ -133,7 +133,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // whether the UI draws them, so a viewer without custody visibility can
       // read them straight out of the route's data payload. Redact here, not
       // in the component.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       page,
       totalItems: totalKits,
       perPage,
@@ -242,7 +245,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 }
 
 export default function LocationKits() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { locationId } = useParams<z.infer<typeof paramsSchema>>();
   const userRoleCanManageKits = userHasPermission({
     roles,

@@ -1,5 +1,7 @@
 import { action } from "~/routes/api+/mobile+/bookings.partial-checkin";
+import { OrganizationRoles } from "@prisma/client";
 import { createActionArgs } from "@mocks/remix";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
@@ -49,9 +51,9 @@ vi.mock("~/utils/rate-limit.server", () => ({
   enforceUserRateLimit: vi.fn(),
 }));
 
-// Note: canUserManageBookingAssets (~/utils/bookings) is intentionally NOT
-// mocked — it is the real authorization gate, exercised via the booking
-// status / role / custodian fixtures below.
+// Note: canPartialCheckInOut (~/utils/permissions/role-access) is
+// intentionally NOT mocked: it is the real authorization gate, exercised via
+// the booking status / role / custodian fixtures below.
 
 // why: we need to control error formatting in the catch block
 vi.mock("~/utils/error", () => ({
@@ -103,6 +105,9 @@ function createPartialCheckinRequest(
 describe("POST /api/mobile/bookings/partial-checkin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations; reset the one some tests install
+    // so it cannot answer a later test.
+    vi.mocked(makeShelfError).mockReset();
 
     (requireMobileAuth as any).mockResolvedValue({
       user: mockUser,
@@ -113,11 +118,12 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
     (requireMobilePermission as any).mockResolvedValue(undefined);
     (assertMobileCanUseBookings as any).mockResolvedValue(undefined);
 
-    // Org-scoped booking lookup + eligibility added by the check-in hardening.
-    (getMobileUserContext as any).mockResolvedValue({ role: "OWNER" });
-    // ONGOING + non-self-service role => the real canUserManageBookingAssets
-    // returns true (it only blocks COMPLETE/ARCHIVED/CANCELLED, and
-    // self-service on non-DRAFT bookings).
+    // Org-scoped booking lookup that feeds the eligibility check.
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.OWNER] })
+    );
+    // ONGOING + OWNER => the real canPartialCheckInOut allows it: the
+    // manage-items rule only blocks COMPLETE/ARCHIVED/CANCELLED for OWNER.
     (db.booking.findFirst as any).mockResolvedValue({
       id: "booking-1",
       status: "ONGOING",
@@ -187,5 +193,71 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
     expect(body.error.message).toContain("Permission denied");
 
     expect(partialCheckinBooking).not.toHaveBeenCalled();
+  });
+  /**
+   * Who may check in. The caller's `access` decides: a SELF_SERVICE custodian
+   * may check in their own live booking, and a membership holding ADMIN beside
+   * SELF_SERVICE is judged as ADMIN whatever order the roles are stored in.
+   */
+  describe("eligibility", () => {
+    /** The booking under test, held by `custodianUserId`, in `status`. */
+    function bookingIs(status: string, custodianUserId: string) {
+      vi.mocked(db.booking.findFirst).mockResolvedValue({
+        id: "booking-1",
+        status,
+        from: new Date(),
+        to: new Date(),
+        custodianUserId,
+      } as never);
+    }
+
+    /** Posts a check-in as a caller holding `roles`. */
+    async function postAs(roles: OrganizationRoles[]) {
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileUserContext({ roles })
+      );
+      vi.mocked(makeShelfError).mockImplementation(
+        (cause) => cause as ReturnType<typeof makeShelfError>
+      );
+      vi.mocked(partialCheckinBooking).mockResolvedValue({
+        checkedInAssetCount: 1,
+        remainingAssetCount: 0,
+        isComplete: true,
+        booking: { id: "booking-1", name: "Test Booking", status: "COMPLETE" },
+      } as never);
+
+      const request = createPartialCheckinRequest({
+        bookingId: "booking-1",
+        assetIds: ["asset-1"],
+      });
+      return (await action(
+        createActionArgs({ request })
+      )) as unknown as Response;
+    }
+
+    it("lets a SELF_SERVICE custodian check in their own live booking", async () => {
+      bookingIs("ONGOING", "user-1");
+
+      await postAs([OrganizationRoles.SELF_SERVICE]);
+
+      expect(partialCheckinBooking).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses SELF_SERVICE on someone else's live booking with a 403", async () => {
+      bookingIs("ONGOING", "someone-else");
+
+      const response = await postAs([OrganizationRoles.SELF_SERVICE]);
+
+      expect(response.status).toBe(403);
+      expect(partialCheckinBooking).not.toHaveBeenCalled();
+    });
+
+    it("lets a SELF_SERVICE-then-ADMIN membership check in someone else's live booking", async () => {
+      bookingIs("ONGOING", "someone-else");
+
+      await postAs([OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]);
+
+      expect(partialCheckinBooking).toHaveBeenCalledTimes(1);
+    });
   });
 });

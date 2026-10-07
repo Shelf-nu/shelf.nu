@@ -18,6 +18,8 @@ import {
   bulkCheckInAssets,
   releaseQuantity,
 } from "~/modules/asset/service.server";
+import { OrganizationRoles } from "@prisma/client";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/bulk-release-custody";
@@ -47,11 +49,13 @@ vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vitest.fn().mockResolvedValue("org-1"),
   requireMobilePermission: vitest.fn().mockResolvedValue(undefined),
-  getMobileUserContext: vitest.fn().mockResolvedValue({
-    role: "ADMIN",
-    canUseBarcodes: false,
-    canSeeAllCustody: true,
-  }),
+  // why: the caller's access is what the route reads; build it from the real
+  // policy for an Administrator.
+  getMobileUserContext: vitest.fn(async () =>
+    (await import("@helpers/mobile-user-context")).mobileUserContext({
+      roles: ["ADMIN"] as never,
+    })
+  ),
 }));
 
 // why: the rate limiter keeps in-process counters across tests
@@ -171,7 +175,7 @@ describe("POST /api/mobile/bulk-release-custody with quantities", () => {
         teamMemberId: "tm-1",
         quantity: 3,
         organizationId: "org-1",
-        role: "ADMIN",
+        custodyAssign: "anyone",
       })
     );
     expect(bulkCheckInAssets).toHaveBeenCalledWith(
@@ -253,11 +257,11 @@ describe("POST /api/mobile/bulk-release-custody with quantities", () => {
   });
 
   it("refuses before any write when a self-service user names someone else's units", async () => {
-    vitest.mocked(getMobileUserContext).mockResolvedValueOnce({
-      role: "SELF_SERVICE",
-      canUseBarcodes: false,
-      canSeeAllCustody: false,
-    } as never);
+    vitest
+      .mocked(getMobileUserContext)
+      .mockResolvedValueOnce(
+        mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] }) as never
+      );
     dbMocks.custodyFindMany.mockResolvedValue([
       holder("qty-1", "tm-self", 5, "user-1"),
       holder("qty-2", "tm-other", 5, "user-other"),

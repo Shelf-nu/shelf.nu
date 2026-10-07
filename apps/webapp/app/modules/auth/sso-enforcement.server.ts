@@ -55,7 +55,6 @@
  * @see {@link file://./sso-conversion.server.ts} account conversion, which uses `userOwnsLinkedSsoWorkspace`
  * @see {@link file://./../../utils/sso.server.ts} checkDomainSSOStatus
  */
-import { OrganizationRoles } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
   caseInsensitiveEmailFilter,
@@ -63,6 +62,7 @@ import {
 } from "~/modules/invite/helpers";
 import { DISABLE_SSO } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
+import { rolesWhere } from "~/utils/permissions/role-access";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 
 /**
@@ -108,7 +108,7 @@ export async function userOwnsLinkedSsoWorkspace(
   const ownerMembership = await db.userOrganization.count({
     where: {
       userId,
-      roles: { has: OrganizationRoles.OWNER },
+      roles: { hasSome: rolesWhere((p) => p.membership.ownsWorkspace) },
       organizationId: { in: organizationIds },
     },
   });

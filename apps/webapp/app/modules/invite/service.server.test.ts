@@ -5,6 +5,8 @@
  *   invite that already exists, so an invite granting a non-invitable role is
  *   refused when it is accepted.
  * - SCIM-managed domains refuse invites.
+ * - Only the workspace owner can grant an owner-only role (Administrator),
+ *   checked before any read or write.
  * - Email letter case: invitee emails are stored lowercased, and every match
  *   against a stored email (invites, users, the signed-in user) ignores case,
  *   because stored rows can still hold capitals.
@@ -274,6 +276,7 @@ describe("createInvite: earlier invites of the same person", () => {
       roles: [OrganizationRoles.BASE],
       teamMemberName: "first.last",
       userId: "user-1",
+      actorOwnsWorkspace: true,
     });
 
     expect(dbMock.invite.findFirst).toHaveBeenCalledWith({
@@ -303,6 +306,7 @@ describe("createInvite: earlier invites of the same person", () => {
       roles: [OrganizationRoles.BASE],
       teamMemberName: "First.Last",
       userId: "user-1",
+      actorOwnsWorkspace: true,
     });
 
     expect(createTeamMember).toHaveBeenCalledTimes(1);
@@ -343,7 +347,12 @@ describe("bulkInviteUsers", () => {
 
   /** Runs the import for `org-1` as `user-1`. */
   const importRows = (users: BulkUsers) =>
-    bulkInviteUsers({ users, userId: "user-1", organizationId: "org-1" });
+    bulkInviteUsers({
+      users,
+      userId: "user-1",
+      organizationId: "org-1",
+      actorOwnsWorkspace: true,
+    });
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -624,6 +633,7 @@ describe("createInvite — SCIM-managed domains", () => {
       roles: [OrganizationRoles.BASE],
       teamMemberName: "Jane",
       userId: "user-1",
+      actorOwnsWorkspace: true,
     };
   }
 
@@ -660,5 +670,78 @@ describe("createInvite — SCIM-managed domains", () => {
     await expect(createInvite(invitePayload("org-other"))).rejects.toThrow(
       "The user needs to sign up via SSO"
     );
+  });
+});
+
+describe("createInvite / bulkInviteUsers: who may grant Administrator", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ssoMock.checkDomainSSOStatus.mockResolvedValue({
+      isConfiguredForSSO: false,
+      linkedOrganizations: [],
+    });
+  });
+
+  it("createInvite refuses an ADMIN granting ADMIN before touching the database", async () => {
+    await expect(
+      createInvite({
+        organizationId: "org-1",
+        inviteeEmail: "new@school.org",
+        inviterId: "admin-1",
+        roles: [OrganizationRoles.ADMIN],
+        teamMemberName: "new",
+        userId: "admin-1",
+        actorOwnsWorkspace: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
+    expect(dbMock.user.findFirst).not.toHaveBeenCalled();
+    expect(createTeamMember).not.toHaveBeenCalled();
+    expect(dbMock.invite.create).not.toHaveBeenCalled();
+  });
+
+  it("createInvite lets an ADMIN grant a role that does not need the owner", async () => {
+    dbMock.user.findFirst.mockResolvedValue(null);
+    dbMock.invite.findFirst.mockResolvedValue(null);
+    vi.mocked(createTeamMember).mockResolvedValue({
+      id: "tm-new",
+    } as Awaited<ReturnType<typeof createTeamMember>>);
+    dbMock.invite.create.mockResolvedValue({
+      id: "invite-new",
+      inviteeEmail: "new@school.org",
+      organization: { name: "Workspace", customEmailFooter: null },
+      inviter: { firstName: "Admin", lastName: "Person", displayName: null },
+    });
+
+    await createInvite({
+      organizationId: "org-1",
+      inviteeEmail: "new@school.org",
+      inviterId: "admin-1",
+      roles: [OrganizationRoles.SELF_SERVICE],
+      teamMemberName: "new",
+      userId: "admin-1",
+      actorOwnsWorkspace: false,
+    });
+
+    expect(dbMock.invite.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("bulkInviteUsers refuses a CSV with an ADMIN row from an ADMIN and writes nothing", async () => {
+    await expect(
+      bulkInviteUsers({
+        users: [
+          { email: "a@school.org", role: "BASE" },
+          { email: "b@school.org", role: "ADMIN" },
+        ] as Parameters<typeof bulkInviteUsers>[0]["users"],
+        userId: "admin-1",
+        organizationId: "org-1",
+        actorOwnsWorkspace: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(ssoMock.checkDomainSSOStatus).not.toHaveBeenCalled();
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
   });
 });

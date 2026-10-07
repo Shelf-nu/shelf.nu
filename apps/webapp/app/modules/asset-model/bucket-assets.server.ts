@@ -8,7 +8,7 @@
  *
  * It lives here rather than in either route because almost everything around
  * that predicate is a guard: the permission gate, the organization scope, the
- * `availableToBookOnly` narrowing a SELF_SERVICE viewer gets, and the custodian
+ * `availableToBookOnly` narrowing a viewer limited to bookable assets gets, and the custodian
  * redaction applied before the payload leaves. Two routes each carrying their
  * own copy of that stack is how one of them ends up missing a guard, which on
  * this endpoint exposes data rather than merely looking wrong.
@@ -24,7 +24,7 @@
  * @see {@link file://./../../routes/api+/asset-models.unassigned-assets.ts}
  * @see {@link file://./../../components/assets/assets-index/asset-model-assets-sheet.tsx}
  */
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
@@ -142,7 +142,7 @@ export async function loadAssetModelBucketAssets({
   request: Request;
 }) {
   try {
-    const { organizationId, role, canUseBarcodes, canSeeAllCustody } =
+    const { organizationId, role, canUseBarcodes, access } =
       await requirePermission({
         userId,
         request,
@@ -205,10 +205,11 @@ export async function loadAssetModelBucketAssets({
       getClientHint(request)
     );
 
-    // Matches the index loader (data.server.ts) so a SELF_SERVICE viewer sees
-    // the same restricted set here as on the page that opened the sheet. Both
-    // endpoints are reachable directly, not only through it.
-    const availableToBookOnly = role === OrganizationRoles.SELF_SERVICE;
+    // Matches the index loader (data.server.ts) so a viewer whose list is
+    // limited to bookable assets sees the same set here as on the page that
+    // opened the sheet. Both endpoints are reachable directly, not only
+    // through it.
+    const availableToBookOnly = access.policy.assets.listScope === "bookable";
 
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
@@ -240,7 +241,7 @@ export async function loadAssetModelBucketAssets({
     // role's "private" badge in the UI is cosmetic: the raw response already
     // carries the name and email.
     const redactedAssets = redactCustodianForViewer(assets, {
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       userId,
     });
 

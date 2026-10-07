@@ -25,7 +25,6 @@
  * @see {@link file://./mobile+/custody.release-quantity.ts} — the mirrored mobile route
  */
 
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -107,7 +106,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.asset,
@@ -133,11 +132,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       select: { ...QUANTITY_CUSTODIAN_SELECT, userId: true },
     });
 
-    /** Self-service users can only release their own custody */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== userId
-    ) {
+    /** A caller whose custody scope is `self` may release only their own custody */
+    if (access.custody.assign === "self" && teamMember.userId !== userId) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -162,7 +158,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         consumed,
         userId,
         organizationId,
-        role,
+        custodyAssign: access.custody.assign,
         note,
         locationId,
         sources,

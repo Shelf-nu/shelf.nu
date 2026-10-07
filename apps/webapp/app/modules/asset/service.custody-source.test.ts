@@ -14,7 +14,6 @@
  */
 
 /* eslint-disable @typescript-eslint/require-await -- the in-memory stand-in mirrors Prisma's promise-returning delegates without awaiting anything itself */
-import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { adjustQuantity } from "~/modules/consumption-log/service.server";
 import type { ShelfError } from "~/utils/error";
@@ -446,7 +445,7 @@ const assign = (
     teamMemberId: AHMED,
     userId: "user-1",
     organizationId: ORG,
-    role: OrganizationRoles.ADMIN,
+    custodyAssign: "anyone",
     ...args,
   });
 
@@ -458,7 +457,7 @@ const release = (
     teamMemberId: AHMED,
     userId: "user-1",
     organizationId: ORG,
-    role: OrganizationRoles.ADMIN,
+    custodyAssign: "anyone",
     ...args,
   });
 

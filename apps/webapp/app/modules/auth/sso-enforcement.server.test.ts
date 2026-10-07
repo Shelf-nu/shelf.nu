@@ -258,7 +258,7 @@ describe("getLegacyLoginDecision", () => {
     expect(db.userOrganization.count).toHaveBeenCalledWith({
       where: {
         userId: standardUser.id,
-        roles: { has: "OWNER" },
+        roles: { hasSome: ["OWNER"] },
         organizationId: { in: ["org-a", "org-b"] },
       },
     });

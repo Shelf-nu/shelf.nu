@@ -33,7 +33,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -47,9 +47,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     // Scanning writes audit data, so it is gated exactly like note, photo and
-    // complete: ADMIN/OWNER act on any audit, BASE/SELF_SERVICE must be
-    // assignees. `audit: update` alone is not enough — BASE and SELF_SERVICE
-    // both hold it, so without this gate any member could record a scan on any
+    // complete: callers who see every audit act on any audit, everyone else
+    // must be an assignee. `audit: update` alone is not enough: BASE and
+    // SELF_SERVICE both hold it, so without this gate any member could record a scan on any
     // audit in the workspace and win its permanent first-start claim, stamping
     // the wrong actor and time on an AUDIT_STARTED that is never rewritten.
     // Mirrors the mobile sibling at api+/mobile+/audits.record-scan.ts.
@@ -57,7 +57,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       auditSessionId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     const result = await recordAuditScan({
