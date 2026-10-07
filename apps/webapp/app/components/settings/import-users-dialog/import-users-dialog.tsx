@@ -4,6 +4,7 @@ import { UploadIcon } from "lucide-react";
 import { useNavigate } from "react-router";
 import type { z } from "zod";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { INVITABLE_ROLES } from "~/modules/invite/roles";
 import { isFormProcessing } from "~/utils/form";
 import { readImportRowErrors } from "~/utils/import-row-errors";
 import { tw } from "~/utils/tw";
@@ -137,8 +138,9 @@ export default function ImportUsersDialog({
                   You must use <b>, (comma)</b> as a delimiter in your CSV file.
                 </li>
                 <li>
-                  Only valid roles are <b>ADMIN</b>, <b>BASE</b> and{" "}
-                  <b>SELF_SERVICE</b>.
+                  {/* Derived from the invitable roles: exactly the values the
+                      CSV role column accepts, most privileged first. */}
+                  Only valid roles are <b>{INVITABLE_ROLES.join(", ")}</b>.
                 </li>
                 <li>
                   Each row represents a new user to be invited. Every email must

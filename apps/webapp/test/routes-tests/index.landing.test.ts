@@ -45,6 +45,15 @@ describe("/ landing", () => {
     }
   );
 
+  it.each([["CUSTODY_MANAGER", "/bookings"]])(
+    "%s lands on %s",
+    async (role, landing) => {
+      state.roles = [role];
+      state.fail = false;
+      expect((await run(true)).headers.get("Location")).toBe(landing);
+    }
+  );
+
   it("falls back to /assets when the membership cannot be read (onboarding)", async () => {
     state.fail = true;
     expect((await run(true)).headers.get("Location")).toBe("/assets");
