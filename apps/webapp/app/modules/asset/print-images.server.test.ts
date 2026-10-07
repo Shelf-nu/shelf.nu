@@ -117,6 +117,63 @@ describe("signAssetPhotosForPrint", () => {
     expect(createSignedUrlsMock).not.toHaveBeenCalled();
   });
 
+  it("signs a photo that expires before a print could finish", async () => {
+    // Still valid now, but gone a few minutes into the print dialog.
+    const soon = new Date(Date.now() + 60 * 1000);
+
+    const [signed] = await signAssetPhotosForPrint(
+      [row("a1", { expiration: soon, thumbnail: false })],
+      { organizationId: "org-1" }
+    );
+
+    expect(signed.mainImage).toBe("https://signed/org-1/a1/main.jpg");
+  });
+
+  it("leaves a photo alone when it outlives a print signature", async () => {
+    const later = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const rows = [row("a1", { expiration: later })];
+
+    const result = await signAssetPhotosForPrint(rows, {
+      organizationId: "org-1",
+    });
+
+    expect(result).toBe(rows);
+    expect(createSignedUrlsMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the decoded storage key for a file name the URL percent-encodes", async () => {
+    const encoded = {
+      ...row("a1", { thumbnail: false }),
+      mainImage: `${STORAGE}/org-1/a1/photo%20one%C3%A9.jpg?token=old`,
+    };
+
+    const [signed] = await signAssetPhotosForPrint([encoded], {
+      organizationId: "org-1",
+    });
+
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(
+      ["org-1/a1/photo one\u00e9.jpg"],
+      3600
+    );
+    expect(signed.mainImage).toBe(
+      "https://signed/org-1/a1/photo one\u00e9.jpg"
+    );
+  });
+
+  it("uses a bare storage key as written, a % in it being part of the name", async () => {
+    const bareKey = {
+      ...row("a1", { thumbnail: false }),
+      mainImage: "org-1/a1/100%25.jpg",
+    };
+
+    await signAssetPhotosForPrint([bareKey], { organizationId: "org-1" });
+
+    expect(createSignedUrlsMock).toHaveBeenCalledWith(
+      ["org-1/a1/100%25.jpg"],
+      3600
+    );
+  });
+
   it("signs a repeated asset once and applies it to every row carrying it", async () => {
     // One asset across two booking slices.
     const result = await signAssetPhotosForPrint([row("a1"), row("a1")], {

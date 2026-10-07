@@ -48,15 +48,38 @@ function normalizeStoragePath(path: string): string {
 }
 
 /**
+ * Decodes a path read out of a URL's pathname, which carries the storage key
+ * percent-encoded (`photo%20one.jpg`). Bulk signing sends paths in the request
+ * body, where storage matches them literally, so the key must be decoded first.
+ * A malformed escape is left as it is, and storage then refuses that one path.
+ *
+ * @param path - A pathname segment taken from a URL.
+ * @returns The decoded storage key.
+ */
+function decodeUrlPath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
  * Extracts and normalizes the storage path of a photo URL.
  *
- * @param url - A stored photo URL, or null.
+ * Only a path read out of a URL is decoded. A stored value that is already a
+ * bare storage key is used as written: a `%` in it is part of the file name.
+ *
+ * @param url - A stored photo URL or storage key, or null.
  * @returns The bucket-relative path, or null when there is none to sign.
  */
 function storagePathOf(url: string | null | undefined): string | null {
   if (!url) return null;
   const path = extractStoragePath(url, ASSETS_BUCKET);
-  return path ? normalizeStoragePath(path) : null;
+  if (!path) return null;
+  // The same test `extractStoragePath` uses to tell a URL from a bare key.
+  const isUrl = url.includes("://") || url.startsWith("/storage");
+  return normalizeStoragePath(isUrl ? decodeUrlPath(path) : path);
 }
 
 /**
@@ -96,9 +119,9 @@ async function signChunk(
 /**
  * Signs the lapsed photos of the rows a printable sheet renders.
  *
- * A row whose `mainImageExpiration` has passed gets a fresh signed URL for its
- * main image and, when it has one, its thumbnail. Fresh rows are returned as
- * they came in.
+ * A row whose `mainImageExpiration` has passed, or passes within one print
+ * signature's lifetime, gets a fresh signed URL for its main image and, when it
+ * has one, its thumbnail. Other rows are returned as they came in.
  *
  * Print does not use `refreshExpiredAssetImages`, for three reasons:
  * - **Read-only.** Opening a preview must not change the assets it shows.
@@ -125,12 +148,15 @@ export async function signAssetPhotosForPrint<T extends PrintableAssetImageRow>(
   assets: T[],
   { organizationId }: { organizationId: string }
 ): Promise<T[]> {
-  const now = Date.now();
+  // A link that expires while the preview is open or the print dialog is up
+  // fails just as an expired one does, so anything lapsing within one print
+  // signature's lifetime is signed again.
+  const signBefore = Date.now() + PRINT_SIGNED_URL_TTL_SECONDS * 1000;
   const lapsed = (row: T) =>
     Boolean(
       row.mainImage &&
         row.mainImageExpiration &&
-        new Date(row.mainImageExpiration).getTime() < now
+        new Date(row.mainImageExpiration).getTime() < signBefore
     );
 
   // Every distinct path any lapsed row needs, main image and thumbnail alike.
