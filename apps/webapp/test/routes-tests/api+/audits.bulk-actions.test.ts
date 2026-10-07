@@ -6,7 +6,7 @@
  *   - HTTP method / intent validation short-circuit before any permission check
  *   - `PermissionAction.archive` is requested for the `bulk-archive` intent
  *   - `organizationId`, `userId`, `currentSearchParams`, and
- *     `isSelfServiceOrBase` are forwarded to the service
+ *     `assignedOnly` are forwarded to the service
  *   - `ALL_SELECTED_KEY` sentinel values are passed through unchanged
  *   - Service + permission errors flow through `makeShelfError` and surface
  *     with the correct HTTP status on the response
@@ -20,7 +20,9 @@
  * @see {@link file://../../../app/routes/api+/audits.bulk-actions.ts}
  * @see {@link file://../../../app/modules/audit/service.server.ts}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 import { action } from "~/routes/api+/audits.bulk-actions";
 import {
@@ -141,7 +143,7 @@ describe("api/audits.bulk-actions action", () => {
   it("requests `audit.archive` permission for the `bulk-archive` intent", async () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     vi.mocked(bulkArchiveAudits).mockResolvedValue(undefined as any);
 
@@ -156,10 +158,10 @@ describe("api/audits.bulk-actions action", () => {
     );
   });
 
-  it("forwards auditIds, organizationId, userId, currentSearchParams, and isSelfServiceOrBase to the service and emits a success notification", async () => {
+  it("forwards auditIds, organizationId, userId, currentSearchParams, and assignedOnly to the service and emits a success notification", async () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     vi.mocked(bulkArchiveAudits).mockResolvedValue(undefined as any);
 
@@ -176,7 +178,7 @@ describe("api/audits.bulk-actions action", () => {
       organizationId: "org-1",
       userId: "user-1",
       currentSearchParams: "status=COMPLETED",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
     });
     expect(sendNotification).toHaveBeenCalledOnce();
 
@@ -191,7 +193,7 @@ describe("api/audits.bulk-actions action", () => {
   it("forwards the ALL_SELECTED_KEY sentinel unchanged to the service", async () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: true,
+      access: accessFor([OrganizationRoles.BASE]),
     } as any);
     vi.mocked(bulkArchiveAudits).mockResolvedValue(undefined as any);
 
@@ -206,7 +208,7 @@ describe("api/audits.bulk-actions action", () => {
     expect(bulkArchiveAudits).toHaveBeenCalledWith(
       expect.objectContaining({
         auditIds: [ALL_SELECTED_KEY],
-        isSelfServiceOrBase: true,
+        assignedOnly: true,
         currentSearchParams: "status=COMPLETED",
       })
     );
@@ -215,7 +217,7 @@ describe("api/audits.bulk-actions action", () => {
   it("surfaces a service ShelfError through the response with the matching status and message", async () => {
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
-      isSelfServiceOrBase: false,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
     vi.mocked(bulkArchiveAudits).mockRejectedValue(
       new ShelfError({
@@ -263,7 +265,7 @@ describe("api/audits.bulk-actions action", () => {
     it("requests `audit.delete` permission for the `bulk-delete` intent", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: false,
+        access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
       vi.mocked(bulkDeleteAudits).mockResolvedValue({ count: 1 } as any);
 
@@ -287,7 +289,7 @@ describe("api/audits.bulk-actions action", () => {
     it("rejects when the confirmation word is missing or wrong", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: false,
+        access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
 
       const response = (await callAction(
@@ -307,7 +309,7 @@ describe("api/audits.bulk-actions action", () => {
     it("forwards auditIds + search params to the service and reports the deleted count in the notification", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: false,
+        access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
       vi.mocked(bulkDeleteAudits).mockResolvedValue({ count: 3 } as any);
 
@@ -320,8 +322,8 @@ describe("api/audits.bulk-actions action", () => {
         })
       );
 
-      // isSelfServiceOrBase is intentionally NOT forwarded — delete is
-      // ADMIN/OWNER-only, so plumbing the flag would be dead weight. Assert
+      // assignedOnly is intentionally NOT forwarded: delete is granted only to
+      // roles that see every audit, so plumbing the flag would be dead weight. Assert
       // the explicit shape so a future re-add is caught.
       expect(bulkDeleteAudits).toHaveBeenCalledWith({
         auditIds: ["a1", "a2", "a3"],
@@ -340,7 +342,7 @@ describe("api/audits.bulk-actions action", () => {
     it("uses singular 'audit' (title + message) in the notification when count is 1", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: false,
+        access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
       vi.mocked(bulkDeleteAudits).mockResolvedValue({ count: 1 } as any);
 
@@ -363,7 +365,7 @@ describe("api/audits.bulk-actions action", () => {
     it("surfaces a service ShelfError with the matching HTTP status", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
-        isSelfServiceOrBase: false,
+        access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
       vi.mocked(bulkDeleteAudits).mockRejectedValue(
         new ShelfError({

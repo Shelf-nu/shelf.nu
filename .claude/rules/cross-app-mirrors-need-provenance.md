@@ -46,6 +46,8 @@ Existing mirrors:
 | `lib/booking-kit-rows.ts` → `unitsStillOut` + `getBookingAssetState`                        | `apps/webapp/app/routes/api+/mobile+/bookings.$bookingId.ts` → the `unitsStillOut` bound, and `combineDispatchedWithStoredUnits` | a pure `packages/*` booking module (none yet) |
 | `lib/booking-reservation-checkout.ts` → unassigned-units confirm copy                       | `apps/webapp/app/components/booking/checkout-dialog.tsx` + `summarizeUnassignedUnits`                                            | `@shelf/labels`                               |
 | `lib/booking-model-reservation.ts` → `modelReservationBounds` + `canCancelModelReservation` | `apps/webapp/app/utils/booking-model-requests.ts` + the upsert bounds in `booking-model-request/service.server.ts`               | a pure `packages/*` booking module (none yet) |
+| `lib/custody-scan-quantities.ts` → `unitsFor` + the holder counts                           | `apps/webapp/app/components/scanner/drawer/custody-scan-quantities.ts`                                                           | `@shelf/quantity-control`                     |
+| `lib/batch-blockers.ts` → the custody blockers                                              | `apps/webapp/app/components/scanner/drawer/uses/custody-blockers.tsx`                                                            | a pure `packages/*` scanner module (none yet) |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

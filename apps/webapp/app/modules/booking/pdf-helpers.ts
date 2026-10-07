@@ -5,7 +5,6 @@ import type {
   Organization,
   Prisma,
   Kit,
-  OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -16,11 +15,12 @@ import {
 } from "~/modules/barcode/display";
 import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
 import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { PdfSnapshotKit } from "./helpers";
 import {
   buildPdfAssetRows,
@@ -153,7 +153,8 @@ export async function fetchAllPdfRelatedData(
   bookingId: string,
   organizationId: string,
   userId: string,
-  role: OrganizationRoles | undefined,
+  /** The caller's access; `undefined` for system callers, which skip the check. */
+  access: RoleAccess | undefined,
   request: Request,
   sortParams?: SortParams,
   options?: PdfDataOptions
@@ -168,13 +169,12 @@ export async function fetchAllPdfRelatedData(
       extraInclude: { tags: TAG_WITH_COLOR_SELECT },
     });
 
-    if (role) {
-      validateBookingOwnership({
+    if (access) {
+      assertCanDownloadBookingDocuments({
+        access,
         booking,
         userId,
-        role,
         action: "view",
-        checkCustodianOnly: true,
       });
     }
 
@@ -442,6 +442,9 @@ export async function fetchAllPdfRelatedData(
       modelRequests,
     };
   } catch (cause) {
+    // A refusal (the caller may not see this booking or its documents) keeps
+    // its own 4xx status; only unexpected failures become a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching booking data for PDF",

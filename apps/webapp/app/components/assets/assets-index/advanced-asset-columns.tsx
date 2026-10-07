@@ -36,7 +36,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
@@ -529,7 +529,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -825,7 +825,7 @@ function UpcomingBookingsColumn({
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,

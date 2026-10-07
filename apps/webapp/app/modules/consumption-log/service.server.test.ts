@@ -223,7 +223,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
       })
-    ).resolves.toMatchObject({ id: ASSET_ID });
+    ).resolves.toMatchObject({ asset: { id: ASSET_ID } });
   });
 
   it("allows a safe subtraction that stays at or above what's committed", async () => {
@@ -238,7 +238,7 @@ describe("adjustQuantity — stock-lowering guard wiring", () => {
         userId: USER_ID,
         organizationId: ORG_ID,
       })
-    ).resolves.toMatchObject({ id: ASSET_ID });
+    ).resolves.toMatchObject({ asset: { id: ASSET_ID } });
 
     expect(db.asset.update).toHaveBeenCalled();
   });

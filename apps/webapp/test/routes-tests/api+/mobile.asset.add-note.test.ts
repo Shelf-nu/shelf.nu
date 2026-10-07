@@ -68,6 +68,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
 import { createNote } from "~/modules/note/service.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 const mockUser = {
   id: "user-1",
@@ -125,6 +129,27 @@ describe("POST /api/mobile/asset/add-note", () => {
       assetId: "asset-1",
       organizationId: "org-1",
     });
+  });
+
+  it("gates adding a note on note:create", async () => {
+    vi.mocked(db.asset.findUnique).mockResolvedValue({
+      id: "asset-1",
+    } as never);
+    vi.mocked(createNote).mockResolvedValue({ id: "note-1" } as never);
+
+    await action(
+      createActionArgs({
+        request: createRequest({ assetId: "asset-1", content: "Hello" }),
+      })
+    );
+
+    expect(requireMobilePermission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "org-1",
+        entity: PermissionEntity.note,
+        action: PermissionAction.create,
+      })
+    );
   });
 
   it("should return 404 when asset is not found (wrong org)", async () => {

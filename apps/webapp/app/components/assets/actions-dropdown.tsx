@@ -10,8 +10,9 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getPrimaryKit, isQuantityTracked } from "~/modules/asset/utils";
 import { getPrimaryCustody, hasCustody } from "~/modules/custody/utils";
 import type { loader } from "~/routes/_layout+/assets.$assetId";
@@ -34,7 +35,7 @@ import When from "../when/when";
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
 const ConditionalActionsDropdown = () => {
-  const { asset } = useLoaderData<typeof loader>();
+  const { asset, custodySources } = useLoaderData<typeof loader>();
   const [isRelinkQrDialogOpen, setIsRelinkQrDialogOpen] = useState(false);
   const [isSetReminderDialogOpen, setIsSetReminderDialogOpen] = useState(false);
   const [isQuantityCustodyDialogOpen, setIsQuantityCustodyDialogOpen] =
@@ -56,7 +57,19 @@ const ConditionalActionsDropdown = () => {
     : 0;
   const noneAvailable = isQtyTracked && quantityAvailable <= 0;
 
-  const { roles, isSelfService, isAdministratorOrOwner } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const canUpdateAsset = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.update,
+  });
+  /** Reminders are their own entity, so "Set reminder" is gated on its grant. */
+  const canSetReminder = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetReminders,
+    action: PermissionAction.create,
+  });
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
@@ -76,7 +89,7 @@ const ConditionalActionsDropdown = () => {
   }
 
   const disableReleaseForSelfService =
-    isSelfService &&
+    assignsSelfOnly &&
     getPrimaryCustody(asset.custody)?.custodian?.userId !== user?.id;
 
   return (
@@ -129,16 +142,7 @@ const ConditionalActionsDropdown = () => {
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
           >
             <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
-              <When
-                truthy={
-                  isQtyTracked &&
-                  userHasPermission({
-                    roles,
-                    entity: PermissionEntity.asset,
-                    action: PermissionAction.update,
-                  })
-                }
-              >
+              <When truthy={isQtyTracked && canUpdateAsset}>
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button
                     type="button"
@@ -191,7 +195,7 @@ const ConditionalActionsDropdown = () => {
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   ) : assetCanBeReleased ? (
@@ -224,20 +228,14 @@ const ConditionalActionsDropdown = () => {
                     >
                       <span className="flex items-center gap-2">
                         <Icon icon="assign-custody" />{" "}
-                        {isSelfService ? "Take" : "Assign"} custody
+                        {assignsSelfOnly ? "Take" : "Assign"} custody
                       </span>
                     </Button>
                   )}
                 </div>
               </When>
 
-              <When
-                truthy={userHasPermission({
-                  roles,
-                  entity: PermissionEntity.asset,
-                  action: PermissionAction.update,
-                })}
-              >
+              <When truthy={canUpdateAsset}>
                 <div
                   className="px-0 py-1 md:p-0"
                   aria-disabled={assetIsCheckedOut}
@@ -310,26 +308,31 @@ const ConditionalActionsDropdown = () => {
                     </span>
                   </Button>
                 </div>
-                <When truthy={isAdministratorOrOwner}>
-                  <div className="border-b px-0 py-1 md:p-0">
-                    <Button
-                      type="button"
-                      role="button"
-                      variant="link"
-                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
-                      width="full"
-                      onClick={() => {
-                        handleMenuClose();
-                        setIsSetReminderDialogOpen(true);
-                      }}
-                    >
-                      <span className="flex items-center gap-2">
-                        <AlarmClockIcon className="size-5" />
-                        Set reminder
-                      </span>
-                    </Button>
-                  </div>
-                </When>
+              </When>
+
+              {/* Reminders are gated on their own grant, not on `asset:update`. */}
+              <When truthy={canSetReminder}>
+                <div className="border-b px-0 py-1 md:p-0">
+                  <Button
+                    type="button"
+                    role="button"
+                    variant="link"
+                    className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                    width="full"
+                    onClick={() => {
+                      handleMenuClose();
+                      setIsSetReminderDialogOpen(true);
+                    }}
+                  >
+                    <span className="flex items-center gap-2">
+                      <AlarmClockIcon className="size-5" />
+                      Set reminder
+                    </span>
+                  </Button>
+                </div>
+              </When>
+
+              <When truthy={canUpdateAsset}>
                 <div className="px-0 py-1 md:p-0">
                   <Button
                     to="edit"
@@ -382,31 +385,33 @@ const ConditionalActionsDropdown = () => {
                     }
                   />
                 </div>
-                <div className="border-t p-4 md:hidden md:p-0">
-                  <Button
-                    type="button"
-                    role="button"
-                    variant="secondary"
-                    className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
-                    width="full"
-                    onClick={handleMenuClose}
-                  >
-                    Close
-                  </Button>
-                </div>
-                {assetIsCheckedOut ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being checked
-                    out.
-                  </div>
-                ) : null}
-                {assetIsPartOfUnavailableKit ? (
-                  <div className=" border-t p-2 text-left text-xs">
-                    Some actions are disabled due to the asset being part of a
-                    kit.
-                  </div>
-                ) : null}
               </When>
+              {/* Outside the update group: everyone who can open this menu
+                  (custody-only members included) can close it on mobile and
+                  sees why an action is disabled. */}
+              <div className="border-t p-4 md:hidden md:p-0">
+                <Button
+                  type="button"
+                  role="button"
+                  variant="secondary"
+                  className="flex items-center justify-center text-gray-700 hover:text-gray-700 "
+                  width="full"
+                  onClick={handleMenuClose}
+                >
+                  Close
+                </Button>
+              </div>
+              {assetIsCheckedOut ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being checked out.
+                </div>
+              ) : null}
+              {assetIsPartOfUnavailableKit ? (
+                <div className=" border-t p-2 text-left text-xs">
+                  Some actions are disabled due to the asset being part of a
+                  kit.
+                </div>
+              ) : null}
             </div>
           </PopoverContent>
         </PopoverPortal>
@@ -421,7 +426,7 @@ const ConditionalActionsDropdown = () => {
           }}
         />
       </When>
-      <When truthy={isSetReminderDialogOpen && isAdministratorOrOwner}>
+      <When truthy={isSetReminderDialogOpen && canSetReminder}>
         <SetOrEditReminderDialog
           action={`/assets/${asset.id}`}
           open={isSetReminderDialogOpen}
@@ -431,17 +436,13 @@ const ConditionalActionsDropdown = () => {
         />
       </When>
       <When truthy={isQuantityCustodyDialogOpen}>
+        {/* Max and sources come from the same loader summary the custody
+            card's dialog reads, so both entry points agree. */}
         <QuantityCustodyDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
-          availableQuantity={
-            (asset.quantity ?? 0) -
-            (asset.custody?.reduce(
-              (sum: number, c: { quantity?: number }) =>
-                sum + (c.quantity ?? 0),
-              0
-            ) ?? 0)
-          }
+          availableQuantity={custodySources.poolAvailable}
+          sources={custodySources}
           open={isQuantityCustodyDialogOpen}
           onOpenChange={setIsQuantityCustodyDialogOpen}
         />
@@ -450,6 +451,7 @@ const ConditionalActionsDropdown = () => {
         <QuickAdjustDialog
           assetId={asset.id}
           unitOfMeasure={asset.unitOfMeasure}
+          sources={custodySources}
           availableQuantity={
             (asset.quantity ?? 0) -
             (asset.custody?.reduce(

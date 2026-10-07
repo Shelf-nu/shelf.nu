@@ -1,6 +1,16 @@
+/**
+ * Team member row actions
+ *
+ * The actions menu on a team member row and on the member page: resend or
+ * cancel a pending invite, change a member's role and revoke access. Each
+ * control is locked, with its reason, when the signed-in member may not make
+ * that change; the server refuses the same changes in `resolveUserAction`.
+ *
+ * @see {@link file://./../../modules/user/utils.server.ts}
+ * @see {@link file://./../../utils/permissions/membership-access.ts}
+ */
 import { useState, type ReactNode } from "react";
-import type { InviteStatuses, User } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
+import type { InviteStatuses, OrganizationRoles, User } from "@prisma/client";
 import { useFetcher } from "react-router";
 import {
   PenIcon,
@@ -17,13 +27,27 @@ import {
 
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import type { UserFriendlyRoles } from "~/utils/organization-roles";
+import {
+  canAssignRole,
+  roleChangeRequiresOwner,
+} from "~/utils/permissions/membership-access";
+import { ROLE_LABELS } from "~/utils/permissions/role-access";
 import { ChangeRoleDialog } from "./change-role-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
+/**
+ * Actions menu for one team member or pending invite.
+ *
+ * @param props.userId - The member's user id, or null for an invite not yet accepted
+ * @param props.inviteStatus - Status of the member's invite
+ * @param props.role - The member's effective role label, resubmitted on resend
+ * @param props.roleEnum - The member's effective role
+ * @param props.roles - The member's full membership, for the change-role preview
+ * @param props.customTrigger - Replaces the default dots trigger
+ */
 export function TeamUsersActionsDropdown({
   userId,
   inviteStatus,
@@ -34,6 +58,7 @@ export function TeamUsersActionsDropdown({
   customTrigger,
   role,
   roleEnum,
+  roles,
 }: {
   userId: User["id"] | null;
   inviteStatus: InviteStatuses;
@@ -42,15 +67,29 @@ export function TeamUsersActionsDropdown({
   email: string;
   isSSO: boolean;
   customTrigger?: (disabled: boolean) => ReactNode;
-  role: UserFriendlyRoles;
+  /** The member's effective role label, resubmitted when an invite is resent. */
+  role: string;
+  /** The member's effective role. */
   roleEnum: OrganizationRoles;
+  /** The member's full membership, for the change-role preview. */
+  roles: OrganizationRoles[];
 }) {
   const fetcher = useFetcher();
   const disabled = useDisabled(fetcher);
   const { ref, open, setOpen } = useControlledDropdownMenu();
   const currentUser = useUserData();
   const isCurrentUser = currentUser?.id === userId;
-  const { isAdministrator } = useUserRoleHelper();
+  const { ownsWorkspace } = useRoleAccess();
+  /**
+   * Only the workspace owner may change, revoke or re-invite a member whose
+   * role needs the owner (Administrator). A member holding OWNER anywhere in
+   * their membership owns the workspace.
+   */
+  const needsOwner = !ownsWorkspace && roleChangeRequiresOwner(roleEnum);
+  const canResend = canAssignRole({
+    actorOwnsWorkspace: ownsWorkspace,
+    role: roleEnum,
+  });
 
   const [changeRoleOpen, setChangeRoleOpen] = useState(false);
 
@@ -112,7 +151,13 @@ export function TeamUsersActionsDropdown({
                   width="full"
                   name="intent"
                   value="resend"
-                  disabled={disabled}
+                  disabled={
+                    !canResend
+                      ? {
+                          reason: `Only the workspace owner can grant the ${ROLE_LABELS[roleEnum]} role.`,
+                        }
+                      : disabled
+                  }
                 >
                   <span className="flex items-center gap-2">
                     <RefreshIcon /> Resend invite
@@ -151,10 +196,9 @@ export function TeamUsersActionsDropdown({
                           reason:
                             "This user is managed via SSO. Role changes must be made through your identity provider.",
                         }
-                      : isAdministrator && roleEnum === OrganizationRoles.ADMIN
+                      : needsOwner
                       ? {
-                          reason:
-                            "Only the workspace owner can change an Administrator's role.",
+                          reason: `Only the workspace owner can change the role of a member with the ${ROLE_LABELS[roleEnum]} role.`,
                         }
                       : disabled
                   }
@@ -182,10 +226,9 @@ export function TeamUsersActionsDropdown({
                       : // Mirrors the change-role control above, and the server
                       // guard in `resolveUserAction`. Revoking is the stronger
                       // action of the two, so it cannot be the looser one.
-                      isAdministrator && roleEnum === OrganizationRoles.ADMIN
+                      needsOwner
                       ? {
-                          reason:
-                            "Only the workspace owner can revoke an Administrator's access.",
+                          reason: `Only the workspace owner can revoke access for a member with the ${ROLE_LABELS[roleEnum]} role.`,
                         }
                       : disabled
                   }
@@ -204,6 +247,7 @@ export function TeamUsersActionsDropdown({
         <ChangeRoleDialog
           userId={userId}
           currentRoleEnum={roleEnum}
+          currentRoles={roles}
           open={changeRoleOpen}
           onOpenChange={setChangeRoleOpen}
         />

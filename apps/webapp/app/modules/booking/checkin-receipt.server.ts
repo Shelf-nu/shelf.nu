@@ -17,12 +17,12 @@
  * @see {@link file://./../../routes/api+/bookings.$bookingId.generate-checkin-receipt.tsx}
  */
 
-import type { OrganizationRoles } from "@prisma/client";
 import { BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
 import type {
   CheckinLatenessNote,
@@ -107,7 +107,7 @@ export type CheckinReceiptDbResult = {
  * @param organizationId - The caller's active workspace; every lookup is scoped
  *   to it.
  * @param userId - The acting user, for the custodian-aware ownership check.
- * @param role - The acting user's role in the workspace.
+ * @param access - The acting user's access, or undefined for system callers.
  * @param request - The incoming request, for the client hint the shared helper
  *   reads.
  * @param sortParams - The booking page's active sort. The search term is
@@ -120,7 +120,7 @@ export async function fetchCheckinReceiptData(
   bookingId: string,
   organizationId: string,
   userId: string,
-  role: OrganizationRoles | undefined,
+  access: RoleAccess | undefined,
   request: Request,
   sortParams?: Pick<SortParams, "orderBy" | "orderDirection">
 ): Promise<CheckinReceiptDbResult> {
@@ -129,7 +129,7 @@ export async function fetchCheckinReceiptData(
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       request,
       {
         orderBy: sortParams?.orderBy,
@@ -470,6 +470,9 @@ export async function fetchCheckinReceiptData(
         .filter((name) => name !== ""),
     };
   } catch (cause) {
+    // A refusal (the caller may not see this booking or its documents) keeps
+    // its own 4xx status; only unexpected failures become a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching booking data for the check-in receipt",

@@ -52,6 +52,7 @@ import { db } from "~/database/db.server";
 import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getQrCodeMaps } from "~/modules/qr/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { getBooking } from "./service.server";
 
@@ -155,7 +156,7 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
     "booking-1",
     "org-1",
     "user-1",
-    // No role: the ownership check is exercised by its own tests.
+    // No access: the ownership check is exercised by its own tests.
     undefined,
     new Request("http://localhost/x")
   );
@@ -545,5 +546,47 @@ describe("booking checklist PDF: the picture in the Code cell", () => {
 
     expect(result.assetIdToCodeImageMap).toEqual({});
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+});
+
+describe("booking checklist PDF — failures", () => {
+  it("keeps a refusal's 403 instead of reporting a server error", async () => {
+    vi.clearAllMocks();
+    // why: the booking read is where the ownership refusal is raised.
+    mockOf(getBooking).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("still reports an unexpected failure as a 500", async () => {
+    vi.clearAllMocks();
+    // why: an unclassified database failure during the read.
+    mockOf(getBooking).mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 500 });
   });
 });

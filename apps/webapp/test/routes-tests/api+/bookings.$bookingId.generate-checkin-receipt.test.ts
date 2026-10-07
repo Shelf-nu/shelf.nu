@@ -12,6 +12,8 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { permissionContext } from "@helpers/role-access";
+
 import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { signAssetPhotosForPrint } from "~/modules/asset/print-images.server";
 import { refreshExpiredAssetImages } from "~/modules/asset/service.server";
@@ -95,10 +97,7 @@ function buildArgs(): LoaderFunctionArgs {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role: "ADMIN",
-  } as never);
+  vi.mocked(requirePermission).mockResolvedValue(permissionContext() as never);
   vi.mocked(fetchCheckinReceiptData).mockResolvedValue({
     booking: {
       id: "booking-1",
@@ -132,6 +131,17 @@ beforeEach(() => {
 });
 
 describe("check-in receipt loader", () => {
+  it("hands the caller's access to the data read, which runs the ownership check", async () => {
+    const context = permissionContext({ roles: ["BASE"] });
+    vi.mocked(requirePermission).mockResolvedValue(context as never);
+
+    await loader(buildArgs());
+
+    expect(vi.mocked(fetchCheckinReceiptData).mock.calls[0][3]).toBe(
+      context.access
+    );
+  });
+
   it("counts one opened preview, with its printed rows and distinct assets", async () => {
     await loader(buildArgs());
 

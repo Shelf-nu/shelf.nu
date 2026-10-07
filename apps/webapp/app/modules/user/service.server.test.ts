@@ -28,8 +28,11 @@ import {
   createUserAccountForTesting,
   createUserOrAttachOrg,
   defaultUserCategories,
+  findUserByEmail,
+  findUserById,
 } from "./service.server";
 import { defaultFields } from "../asset-index-settings/helpers";
+import { ensureAssetIndexModeForRole } from "../asset-index-settings/service.server";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -462,6 +465,37 @@ describe(createUserOrAttachOrg.name, () => {
     expect(db.user.create).not.toHaveBeenCalled();
   });
 
+  /** The seeded index mode follows the invite's highest role, whatever its order */
+  it.each([
+    [[OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN]],
+    [[OrganizationRoles.ADMIN, OrganizationRoles.SELF_SERVICE]],
+  ])("seeds the index mode from the effective role of %j", async (roles) => {
+    const existingUser = {
+      id: USER_ID,
+      email: USER_EMAIL,
+      firstName: "Existing",
+      lastName: "User",
+      sso: false,
+      userOrganizations: [],
+    };
+
+    // @ts-expect-error missing vitest type
+    db.user.findMany.mockResolvedValueOnce([existingUser]);
+
+    await createUserOrAttachOrg({
+      email: USER_EMAIL,
+      organizationId: ORGANIZATION_ID,
+      roles,
+      password: USER_PASSWORD,
+      firstName: "Existing",
+      createdWithInvite: true,
+    });
+
+    expect(ensureAssetIndexModeForRole).toHaveBeenCalledWith(
+      expect.objectContaining({ role: OrganizationRoles.ADMIN })
+    );
+  });
+
   /** An address that differs only in letter case is the same person */
   it("attaches the existing account when the email differs only in letter case", async () => {
     const authAdminRequests: string[] = [];
@@ -850,5 +884,95 @@ describe("createUser — signup attribution on the signup event", () => {
       properties: { created_with_invite: false, is_sso: false },
       setOnce: undefined,
     });
+  });
+});
+
+describe(findUserByEmail.name, () => {
+  const findManyMock = db.user.findMany as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("finds an account stored with capitals from the address as typed", async () => {
+    // why: the stored row keeps the capitals it was created with; sign-in
+    // forms lowercase what the person types.
+    findManyMock.mockResolvedValueOnce([
+      { id: "user-1", email: "Karen.Smith@School.org" },
+    ]);
+
+    const user = await findUserByEmail("karen.smith@school.org");
+
+    expect(user).toMatchObject({ id: "user-1" });
+    expect(findManyMock).toHaveBeenCalledWith({
+      where: {
+        email: { in: ["karen.smith@school.org"], mode: "insensitive" },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  });
+
+  it("prefers the row stored in lowercase when two differ only by case", async () => {
+    // why: two rows can share an address up to case; the lowercase one is
+    // what every path writes today, so it is the account to resolve to.
+    findManyMock.mockResolvedValueOnce([
+      { id: "older", email: "Karen.Smith@School.org" },
+      { id: "lowercase", email: "karen.smith@school.org" },
+    ]);
+
+    expect(await findUserByEmail("Karen.Smith@School.org")).toMatchObject({
+      id: "lowercase",
+    });
+  });
+
+  it("falls back to the oldest account when none is stored in lowercase", async () => {
+    // why: the query orders by creation, so the first row is the oldest.
+    findManyMock.mockResolvedValueOnce([
+      { id: "oldest", email: "KAREN@school.org" },
+      { id: "newer", email: "Karen@School.org" },
+    ]);
+
+    expect(await findUserByEmail("karen@school.org")).toMatchObject({
+      id: "oldest",
+    });
+  });
+
+  it("returns null when no account has the address", async () => {
+    findManyMock.mockResolvedValueOnce([]);
+
+    expect(await findUserByEmail("nobody@school.org")).toBeNull();
+  });
+});
+
+describe(findUserById.name, () => {
+  const findUniqueMock = db.user.findUnique as unknown as ReturnType<
+    typeof vitest.fn
+  >;
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("reads only what sign-in needs, by id", async () => {
+    // why: the row exists for this auth id.
+    findUniqueMock.mockResolvedValueOnce({ id: "user-1", onboarded: true });
+
+    expect(await findUserById("user-1")).toEqual({
+      id: "user-1",
+      onboarded: true,
+    });
+    expect(findUniqueMock).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: { id: true, onboarded: true },
+    });
+  });
+
+  it("returns null instead of throwing when there is no account", async () => {
+    // why: no row for this auth id yet.
+    findUniqueMock.mockResolvedValueOnce(null);
+
+    expect(await findUserById("user-new")).toBeNull();
   });
 });

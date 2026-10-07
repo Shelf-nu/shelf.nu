@@ -149,10 +149,20 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Location updated",
-      message: "Your location  has been updated successfully",
+      message: "Your location has been updated successfully",
       icon: { name: "success", variant: "success" },
       senderId: userId,
     });
+
+    /**
+     * "Add another" asks for a blank create form next, which outranks
+     * `redirectTo`: that records where the user arrived from, while this is what
+     * they have just asked to do. Matches the asset edit route and the location
+     * create route, which the same shared button posts to.
+     */
+    if (parsedData.addAnother) {
+      return redirect("/locations/new");
+    }
 
     // If redirectTo is provided, redirect back to previous page
     // Otherwise stay on current page (e.g., when opened in new tab)

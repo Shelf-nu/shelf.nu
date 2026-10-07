@@ -20,11 +20,38 @@
  *
  * detail.dev finding D070.
  *
+ * Accepting also creates an email/password account for an invitee who has
+ * none. An address the SSO decision refuses for its domain could never use
+ * that account, so it is told to use SSO before anything is created; an SSO
+ * account (refused only for being SSO) still accepts.
+ *
  * @see {@link file://./../../../app/routes/_auth+/accept-invite.$inviteId.tsx}
  */
 
-// why: preventing Prisma from trying to connect to a real database during tests
-vi.mock("~/database/db.server", () => ({ db: {} }));
+const { mockInviteFindFirst } = vi.hoisted(() => ({
+  mockInviteFindFirst: vi.fn(),
+}));
+// why: preventing Prisma from trying to connect to a real database during
+// tests; the invite lookup supplies the address the SSO decision is asked about
+vi.mock("~/database/db.server", () => ({
+  db: { invite: { findFirst: mockInviteFindFirst } },
+}));
+
+const { mockGetLegacyLoginDecision } = vi.hoisted(() => ({
+  mockGetLegacyLoginDecision: vi.fn(),
+}));
+// why: the decision has its own tests (sso-enforcement.server.test.ts); here
+// only what acceptance does with its answer matters.
+vi.mock("~/modules/auth/sso-enforcement.server", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("~/modules/auth/sso-enforcement.server")
+    >();
+  return {
+    createSsoRequiredError: actual.createSsoRequiredError,
+    getLegacyLoginDecision: mockGetLegacyLoginDecision,
+  };
+});
 
 // why: mocking Remix's data() so the action's error path returns a readable
 // Response rather than an internal payload object
@@ -95,6 +122,10 @@ function accept({ inviteId, token }: { inviteId: string; token: string }) {
 describe("accept-invite action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInviteFindFirst.mockResolvedValue({
+      inviteeEmail: "invitee@example.com",
+    });
+    mockGetLegacyLoginDecision.mockResolvedValue({ allowed: true });
     (updateInviteStatus as any).mockResolvedValue({
       status: "ACCEPTED",
       organizationId: "org-1",
@@ -163,5 +194,38 @@ describe("accept-invite action", () => {
       "invitee@example.com",
       expect.any(String)
     );
+  });
+
+  it("tells an invitee on an SSO domain to use SSO before creating anything", async () => {
+    mockGetLegacyLoginDecision.mockResolvedValue({
+      allowed: false,
+      reason: "sso_domain",
+    });
+
+    const result = (await accept({
+      inviteId: "real-invite",
+      token: tokenFor("real-invite"),
+    })) as unknown as Response;
+
+    expect(result.status).toBe(403);
+    expect(await result.text()).toContain("Please use Login with SSO.");
+    expect(mockGetLegacyLoginDecision).toHaveBeenCalledWith(
+      "invitee@example.com"
+    );
+    // The assertion that matters: no account is created, no sign-in tried.
+    expect(updateInviteStatus).not.toHaveBeenCalled();
+    expect(signInWithEmail).not.toHaveBeenCalled();
+  });
+
+  it("still accepts for an existing SSO account", async () => {
+    // An SSO user is only attached to the workspace, then signs in with SSO.
+    mockGetLegacyLoginDecision.mockResolvedValue({
+      allowed: false,
+      reason: "sso_account",
+    });
+
+    await accept({ inviteId: "real-invite", token: tokenFor("real-invite") });
+
+    expect(updateInviteStatus).toHaveBeenCalledTimes(1);
   });
 });

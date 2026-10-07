@@ -13,7 +13,7 @@ import {
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { userHasCustodyViewPermission } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import type { OrganizationPermissionSettings } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 import { resolveTeamMemberName } from "~/utils/user";
@@ -40,7 +40,7 @@ export function AssetIndexFilters({
   }
   const hasFiltersToClear = useSearchParamHasValue(...filterParams);
   const clearFilters = useClearValueFromParams(...filterParams);
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
 

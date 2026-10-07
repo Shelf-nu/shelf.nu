@@ -38,7 +38,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllCustody } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -75,7 +75,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
            */
           allowedTeamMemberIds: await scopeCustodianFilterIds({
             teamMemberIds: searchParams.getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
           }),

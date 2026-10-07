@@ -51,10 +51,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    // The same call yields `canSeeAllBookings`, which decides which bookings
-    // the sections may draw from, and `canSeeAllCustody` for their names.
-    const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // The same call yields `access.bookings.seeAll`, which decides which
+    // bookings the sections may draw from, and `access.custody.seeAll` for
+    // their names.
+    const { canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
@@ -62,10 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // in the workspace — with custodian names attached — straight off the
     // dashboard.
     //
-    // `canSeeAllBookings` is that decision: ADMIN and OWNER see every booking,
-    // SELF_SERVICE and BASE see only the ones they hold unless the workspace
-    // has switched their override on. The role alone cannot answer it — it does
-    // not know what the workspace decided — so Home reads the same flag the
+    // `access.bookings.seeAll` is that decision: ADMIN and OWNER see every
+    // booking, SELF_SERVICE and BASE see only the ones they hold unless the
+    // workspace has switched their override on. Home reads the same flag the
     // website does and lands on the same set of bookings.
     //
     // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
@@ -81,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    const custodianScope = canSeeAllBookings
+    const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
@@ -254,6 +256,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
           ...(canUseAudits ? {} : { id: { in: [] } }),
+          // Roles limited to assigned audits see only theirs, the same
+          // predicate `/api/mobile/audits` applies through `assignedOnly`.
+          ...(!access.audits.seeAll && {
+            assignments: { some: { userId: user.id } },
+          }),
         },
         select: {
           id: true,
@@ -329,7 +336,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // is what keeps Home naming a booking's holder the same way the list and
       // the calendar do.
       custodianName: resolveBookingCustodianName({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: b,
         userId: user.id,
       }),

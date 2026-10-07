@@ -25,6 +25,7 @@
  */
 import React, { useState } from "react";
 import type { ReactNode } from "react";
+import { AssetStatus } from "@prisma/client";
 import type { BookingStatus, Prisma } from "@prisma/client";
 import { ChevronDownIcon } from "lucide-react";
 import { Link, useFetcher } from "react-router";
@@ -44,6 +45,7 @@ import {
   TooltipTrigger,
 } from "~/components/shared/tooltip";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { resolveQtyStockBadgeVariant } from "~/utils/booking-assets";
@@ -52,6 +54,7 @@ import {
   getOutstandingModelRequests,
 } from "~/utils/booking-model-requests";
 import { describeBookingRows } from "~/utils/booking-rows";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import {
   InsufficientStockBadge,
@@ -452,13 +455,18 @@ function AssetTitleAndStatus({
    *     `PARTIALLY_CHECKED_OUT_QTY` (violet, "returns underway").
    *  3. Progressively checked out, NO returns yet →
    *     `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` (amber, "action
-   *     required") — new branch for the sidebar.
-   *  4. Otherwise the asset's raw status.
+   *     required").
+   *  4. Otherwise the asset's raw status, except that `IN_CUSTODY` on a
+   *     quantity-tracked asset reads `AVAILABLE`: custody covers units held
+   *     by a team member outside this booking, so it says nothing about
+   *     the units this booking took. This matches the quantity-tracked
+   *     custody rule in `getBookingContextAssetStatus`, but not its
+   *     DRAFT/RESERVED override to `AVAILABLE`, which the sidebar does not
+   *     apply.
    *
    * Order matters: the check-IN branches must win at the aggregate
    * level so a multi-slice asset with mixed in/out slices reads
-   * "checked in" rather than "still out" (matches the existing
-   * behavior before this change).
+   * "checked in" rather than "still out".
    */
   const effectiveStatus = isQtyFullyCheckedIn
     ? "PARTIALLY_CHECKED_IN"
@@ -466,6 +474,8 @@ function AssetTitleAndStatus({
     ? "PARTIALLY_CHECKED_OUT_QTY"
     : isQtyPartiallyCheckedOut
     ? "PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN"
+    : isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY
+    ? AssetStatus.AVAILABLE
     : asset.status;
 
   /**
@@ -726,6 +736,20 @@ export function BookingAssetsSidebar({
    */
   const canAssignUnits = canAssignModelUnits(booking.status);
 
+  /**
+   * Whether this member may open the scanner to assign them: the scan page
+   * takes the same add rule as every other add path, so a role that only adds
+   * items to a DRAFT gets no link on a reserved or running booking. A DRAFT is
+   * only ever listed to its creator, so the status rule also settles ownership.
+   */
+  const roleAccess = useRoleAccess();
+  const canScanToAssign =
+    canAssignUnits &&
+    canManageBookingItems({
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+
   const defaultTrigger = (
     <Button
       type="button"
@@ -765,7 +789,7 @@ export function BookingAssetsSidebar({
               canAssign={canAssignUnits}
               className="rounded-none border-x-0 border-t-0"
               renderAction={
-                canAssignUnits
+                canScanToAssign
                   ? () => (
                       <Link
                         to={`/bookings/${booking.id}/overview/scan-assets`}

@@ -18,6 +18,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: importing the route pulls in `db.server`, whose non-production
 // initialization calls `db.$connect()`; without this the test attempts a real
@@ -29,8 +30,9 @@ vi.mock("~/database/db.server", () => ({
 const { mockRequirePermission } = vi.hoisted(() => ({
   mockRequirePermission: vi.fn(),
 }));
-// why: the RBAC gate is not under test — it must pass, and it is what hands
-// the loader `canSeeAllCustody`, which each test sets.
+// why: the RBAC gate is not under test. It must pass, and it is what hands
+// the loader its custody visibility (`access.custody.seeAll`), which each test
+// sets.
 vi.mock("~/utils/roles.server", () => ({
   requirePermission: mockRequirePermission,
 }));
@@ -125,7 +127,9 @@ async function loadAs(viewerUserId: string, canSeeAllCustody: boolean) {
     organizationId: ORG,
     currentOrganization: { id: ORG },
     canUseBarcodes: false,
-    canSeeAllCustody,
+    access: accessFor([OrganizationRoles.SELF_SERVICE], {
+      selfServiceCanSeeCustody: canSeeAllCustody,
+    }),
     userOrganizations: [
       { organization: { id: ORG }, roles: [OrganizationRoles.SELF_SERVICE] },
     ],

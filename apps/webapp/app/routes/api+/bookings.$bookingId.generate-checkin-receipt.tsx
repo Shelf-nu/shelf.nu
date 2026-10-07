@@ -54,7 +54,7 @@ export const loader = async ({
   );
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: userId,
       request,
       entity: PermissionEntity.booking,
@@ -74,7 +74,7 @@ export const loader = async ({
       bookingId,
       organizationId,
       userId,
-      role,
+      access,
       request,
       { orderBy, orderDirection }
     );

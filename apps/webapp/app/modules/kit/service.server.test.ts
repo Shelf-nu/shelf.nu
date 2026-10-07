@@ -7,10 +7,12 @@ import {
   AssetStatus,
   ErrorCorrection,
 } from "@prisma/client";
+import { onTestFinished } from "vitest";
 
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { Logger } from "~/utils/logger";
 
 import {
   createKit,
@@ -29,6 +31,7 @@ import {
   getKitCurrentBooking,
   bulkRemoveAssetsFromKits,
   moveAssetKitUnits,
+  getPaginatedAndFilterableKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
@@ -83,6 +86,9 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn().mockResolvedValue(null),
       delete: vitest.fn().mockResolvedValue({}),
       upsert: vitest.fn().mockResolvedValue({}),
+      // why: `removeDestroyedUnitsFromKits` sums each asset's kit units before
+      // writing, to stay clear of the kit-sum trigger. Defaults to no rows.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // Location mutations go through this delegate instead of asset.updateMany,
     // since placement lives on the AssetLocation pivot. Includes
@@ -99,6 +105,10 @@ vitest.mock("~/database/db.server", () => ({
       // one at a time — both need single-row `update` / `delete`.
       update: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
+      // why: `removeDestroyedUnitsFromKits` sums the hand-placed units of an
+      // asset whose kit has a location, to stay clear of the location-sum
+      // trigger. Defaults to no rows.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // why: createKit/updateKit now run a cross-org ownership guard that calls
     // db.location.findFirst before connecting a location.
@@ -160,6 +170,15 @@ vitest.mock("~/database/db.server", () => ({
     // kit-driven slice's quantity.
     consumptionLog: {
       groupBy: vitest.fn().mockResolvedValue([]),
+      // why: `mergeStandaloneCollisionsForKitDetachment` re-tags a merged-away
+      // slice's dispositions onto the survivor before the delete nulls them.
+      updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+    },
+    // why: the same merge re-points session entries naming a merged-away
+    // slice that went out. No sessions by default.
+    partialBookingCheckout: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      update: vitest.fn().mockResolvedValue({}),
     },
     // why: createKit/updateKit now run cross-org ownership guards that call
     // db.category.findFirst before connecting a category. Mocked so the guard
@@ -1251,6 +1270,18 @@ describe("bulkRemoveAssetsFromKits", () => {
   });
 });
 
+/**
+ * A `kit.findMany` answer for the bulk custody tests: their kits for every
+ * read, except the holder guard's "which of these are checked out" read
+ * (the one carrying `OR`), which none of them are unless a test says so.
+ *
+ * @param kits - The kits the bulk action resolves
+ */
+function kitsUnlessHolderRead(kits: unknown[]) {
+  return (args?: { where?: { OR?: unknown[] } }) =>
+    Promise.resolve(args?.where?.OR ? [] : kits);
+}
+
 describe("bulkAssignKitCustody", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
@@ -1274,7 +1305,7 @@ describe("bulkAssignKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
 
     //@ts-expect-error missing vitest type
     db.teamMember.findFirst.mockResolvedValue({
@@ -1305,6 +1336,75 @@ describe("bulkAssignKitCustody", () => {
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function));
   });
 
+  it("refuses a kit that reads AVAILABLE while a live booking has some of its units out", async () => {
+    expect.assertions(2);
+    // A partial check-out leaves `Kit.status` alone until every unit is out,
+    // so the status check above passes; only the booking slice tells.
+    const partlyOutKits = [
+      { id: "kit-1", name: "Kit 1", status: KitStatus.AVAILABLE, assets: [] },
+    ];
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockImplementation(
+      (args?: { where?: { OR?: Array<{ id?: { in?: string[] } }> } }) =>
+        Promise.resolve(
+          args?.where?.OR
+            ? args.where.OR.some((or) => or.id?.in?.includes("kit-1"))
+              ? [{ id: "kit-1", name: "Kit 1" }]
+              : []
+            : partlyOutKits
+        )
+    );
+    const bookingAssetFindMany = db.bookingAsset.findMany as ReturnType<
+      typeof vitest.fn
+    >;
+    const priorBookingAssetFindMany =
+      bookingAssetFindMany.getMockImplementation();
+    onTestFinished(() => {
+      if (priorBookingAssetFindMany) {
+        bookingAssetFindMany.mockImplementation(priorBookingAssetFindMany);
+      } else {
+        bookingAssetFindMany.mockResolvedValue([]);
+      }
+    });
+    // why: the other booking's slice is a database row; it left and has not
+    // come back, and names kit-1 as the kit it was booked under.
+    bookingAssetFindMany.mockImplementation(
+      (args?: { where?: { bookingId?: { notIn?: string[] } } }) =>
+        Promise.resolve(
+          args?.where?.bookingId?.notIn
+            ? [
+                {
+                  id: "ba-out",
+                  assetKitId: null,
+                  sourceKitId: "kit-1",
+                  asset: { type: AssetType.QUANTITY_TRACKED, assetKits: [] },
+                },
+              ]
+            : []
+        )
+    );
+    //@ts-expect-error missing vitest type
+    db.teamMember.findFirst.mockResolvedValue({
+      id: "custodian-1",
+      name: "John Doe",
+      user: { id: "user-1", firstName: "John", lastName: "Doe" },
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await expect(
+      bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        kitIds: ["kit-1"],
+        organizationId: "org-1",
+        custodianId: "custodian-1",
+        custodianName: "John Doe",
+        userId: "user-1",
+      })
+    ).rejects.toThrow("Cannot assign custody.");
+    expect(db.kitCustody.createMany).not.toHaveBeenCalled();
+  });
+
   it("should throw error when kits are not available", async () => {
     expect.assertions(1);
     const unavailableKits = [
@@ -1316,7 +1416,7 @@ describe("bulkAssignKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(unavailableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(unavailableKits));
 
     await expect(
       bulkAssignKitCustody({
@@ -1356,7 +1456,7 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsInCustody));
 
     //@ts-expect-error missing vitest type
     db.$transaction.mockImplementation((callback) =>
@@ -1366,7 +1466,7 @@ describe("bulkReleaseKitCustody", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -1387,12 +1487,12 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
 
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "ADMIN" as const,
+        custodyAssign: "anyone" as const,
         kitIds: ["kit-1"],
         organizationId: "org-1",
         userId: "user-1",
@@ -1425,12 +1525,12 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(colleaguesKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(colleaguesKits));
 
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "SELF_SERVICE" as const,
+        custodyAssign: "self" as const,
         kitIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
         userId: "user-1",
@@ -1459,13 +1559,13 @@ describe("bulkReleaseKitCustody", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(ownKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(ownKits));
     //@ts-expect-error missing vitest type
     db.$transaction.mockImplementation((callback) => callback(db));
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "SELF_SERVICE" as const,
+      custodyAssign: "self" as const,
       kitIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
       userId: "user-1",
@@ -1480,12 +1580,12 @@ describe("bulkReleaseKitCustody", () => {
     // binary oracle for "does this custodian hold any kit".
     expect.assertions(1);
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue([]);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead([]));
 
     await expect(
       bulkReleaseKitCustody({
         allowedTeamMemberIds: "all" as const,
-        role: "ADMIN" as const,
+        custodyAssign: "anyone" as const,
         kitIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
         userId: "user-1",
@@ -1795,7 +1895,7 @@ describe("getAvailableKitAssetForBooking", () => {
       },
     ];
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsWithAssets);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsWithAssets));
 
     const result = await getAvailableKitAssetForBooking(
       ["kit-1", "kit-2"],
@@ -1843,13 +1943,27 @@ describe("updateKitsWithBookingCustodians", () => {
    */
   function mockHoldingSlices(
     memberships: { id: string; kitId: string }[],
-    slices: unknown[]
+    slices: Record<string, unknown>[]
   ) {
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue(memberships);
     //@ts-expect-error missing vitest type
-    db.bookingAsset.findMany.mockResolvedValue(slices);
+    db.bookingAsset.findMany.mockResolvedValue(
+      // Every slice carries its asset, as the lookup's `select` projects it. A
+      // kit-driven slice never reads it, so fixtures only spell it out for the
+      // standalone cases.
+      slices.map((slice) => ({
+        asset: { type: AssetType.INDIVIDUAL, assetKits: [] },
+        ...slice,
+      }))
+    );
   }
+
+  /** A booking custodian named by a team member, as the lookup projects it. */
+  const bookingHeldBy = (name: string) => ({
+    custodianTeamMember: { name },
+    custodianUser: null,
+  });
 
   it("should resolve custodian from booking for checked-out kit", async () => {
     expect.assertions(3);
@@ -1898,13 +2012,22 @@ describe("updateKitsWithBookingCustodians", () => {
         },
       },
     });
-    // Only slices booked under this kit are considered.
+    // Only slices that can hold this kit are considered: booked under it, or
+    // a standalone slice of one of its INDIVIDUAL members.
     expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           OR: [
             { sourceKitId: { in: ["kit-co"] } },
             { assetKitId: { in: ["ak-1"] } },
+            {
+              sourceKitId: null,
+              assetKitId: null,
+              asset: {
+                type: AssetType.INDIVIDUAL,
+                assetKits: { some: { kitId: { in: ["kit-co"] } } },
+              },
+            },
           ],
         }),
       })
@@ -2028,6 +2151,78 @@ describe("updateKitsWithBookingCustodians", () => {
     expect((result[0] as any).custody).toBeUndefined();
   });
 
+  it("names the booking holding an INDIVIDUAL member out on its own", async () => {
+    // One camera of the kit is out loose on a live booking. The kit is
+    // checked out because of it, so that booking's custodian holds the kit.
+    const errorSpy = vitest.spyOn(Logger, "error");
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    mockHoldingSlices(
+      [{ id: "ak-1", kitId: "kit-co" }],
+      [
+        {
+          assetKitId: null,
+          sourceKitId: null,
+          checkedOutAt: new Date("2026-09-01T09:00:00Z"),
+          checkedInAt: null,
+          asset: {
+            type: AssetType.INDIVIDUAL,
+            assetKits: [{ kitId: "kit-co" }],
+          },
+          booking: bookingHeldBy("Loose Holder"),
+        },
+      ]
+    );
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toEqual({
+      custodian: { name: "Loose Holder" },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("does not name a holder from a loose QUANTITY_TRACKED member", async () => {
+    // Free-pool units take none of the kit's own, so the kit is not held.
+    const kits = [
+      {
+        ...mockKitData,
+        locationId: null,
+        id: "kit-co",
+        status: KitStatus.CHECKED_OUT,
+      },
+    ];
+
+    mockHoldingSlices(
+      [{ id: "ak-1", kitId: "kit-co" }],
+      [
+        {
+          assetKitId: null,
+          sourceKitId: null,
+          checkedOutAt: new Date("2026-09-01T09:00:00Z"),
+          checkedInAt: null,
+          asset: {
+            type: AssetType.QUANTITY_TRACKED,
+            assetKits: [{ kitId: "kit-co" }],
+          },
+          booking: bookingHeldBy("Pool Borrower"),
+        },
+      ]
+    );
+
+    const result = await updateKitsWithBookingCustodians(kits);
+
+    expect((result[0] as any).custody).toBeUndefined();
+  });
+
   it("should handle kit with no asset having active booking gracefully", async () => {
     expect.assertions(2);
     const kits = [
@@ -2079,11 +2274,13 @@ describe("getKitCurrentBooking", () => {
       checkedOutAt?: Date | null;
       checkedInAt?: Date | null;
       booking?: typeof ongoing;
-    }[]
+    }[],
+    assetType: AssetType = AssetType.INDIVIDUAL
   ) {
     return {
       id,
       asset: {
+        type: assetType,
         bookingAssets: slices.map((slice) => ({
           ...slice,
           checkedOutAt:
@@ -2129,8 +2326,25 @@ describe("getKitCurrentBooking", () => {
     expect(result).toBeUndefined();
   });
 
-  it("ignores a standalone slice of a kit member", () => {
+  it("ignores a standalone slice of a QUANTITY_TRACKED member", () => {
     // Free-pool units leave the kit's own slice untouched.
+    const result = getKitCurrentBooking({
+      id: "kit-1",
+      assetKits: [
+        membership(
+          "ak-1",
+          [{ assetKitId: null, sourceKitId: null }],
+          AssetType.QUANTITY_TRACKED
+        ),
+      ],
+    });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("returns the booking holding an INDIVIDUAL member out on its own", () => {
+    // One physical unit of the kit is out loose, so the kit is incomplete and
+    // that booking is what holds it.
     const result = getKitCurrentBooking({
       id: "kit-1",
       assetKits: [
@@ -2138,7 +2352,7 @@ describe("getKitCurrentBooking", () => {
       ],
     });
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual(ongoing);
   });
 
   it("ignores a slice this kit already got back, on a still-ongoing booking", () => {
@@ -2657,7 +2871,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-1",
@@ -2778,7 +2992,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-nikolay",
@@ -2880,7 +3094,7 @@ describe("bulkAssignKitCustody - kit-allocated custody threading", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(availableKits);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(availableKits));
     //@ts-expect-error missing vitest type
     db.teamMember.findUnique.mockResolvedValue({
       id: "tm-1",
@@ -2961,7 +3175,7 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
     ];
 
     //@ts-expect-error missing vitest type
-    db.kit.findMany.mockResolvedValue(kitsInCustody);
+    db.kit.findMany.mockImplementation(kitsUnlessHolderRead(kitsInCustody));
     //@ts-expect-error missing vitest type
     db.kitCustody.findMany.mockResolvedValue([
       { id: "kc-1", kitId: "kit-1", custodianId: "tm-1" },
@@ -2998,7 +3212,7 @@ describe("bulkReleaseKitCustody - emit-before-cascade", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1"],
       organizationId: "org-1",
       userId: "user-1",
@@ -3116,7 +3330,7 @@ describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1", "kit-2"],
       organizationId: "org-1",
       userId: "user-1",
@@ -3219,7 +3433,7 @@ describe("bulkReleaseKitCustody - per-kit custodian in events", () => {
 
     await bulkReleaseKitCustody({
       allowedTeamMemberIds: "all" as const,
-      role: "ADMIN" as const,
+      custodyAssign: "anyone" as const,
       kitIds: ["kit-1", "kit-2"],
       organizationId: "org-1",
       userId: "user-1",
@@ -5844,6 +6058,159 @@ describe("mergeStandaloneCollisionsForKitDetachment", () => {
       data: { fulfilledQuantity: 0, fulfilledAt: null },
     });
   });
+
+  describe("on a booking that has started", () => {
+    const outAt = new Date("2026-10-01T09:00:00.000Z");
+    const kitOutAt = new Date("2026-10-01T10:00:00.000Z");
+    const kitInAt = new Date("2026-10-02T09:00:00.000Z");
+
+    /** Standalone slice: 5 booked, all 5 out, none back yet. */
+    const startedStandalone = {
+      ...standaloneRow,
+      quantity: 5,
+      checkedOutAt: outAt,
+      checkedOutById: "user-out",
+      checkedInAt: null,
+      checkedInById: null,
+      checkedOutQuantity: 5,
+    };
+    /** Kit slice: 3 booked, all 3 out and settled. */
+    const settledKitSlice = {
+      ...kitDrivenRow,
+      quantity: 3,
+      checkedOutAt: kitOutAt,
+      checkedOutById: "user-kit",
+      checkedInAt: kitInAt,
+      checkedInById: "user-in",
+      checkedOutQuantity: 3,
+    };
+
+    it("keeps the survivor out while any part of it is still out", async () => {
+      // why: the survivor now holds 8 units, 8 of which went out and 3 of which
+      // came back. Leaving `checkedOutQuantity` at 5 reads as 3 units still to
+      // check out, and stamping it checked in hides the 5 that are still out.
+      expect.assertions(1);
+
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([startedStandalone]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.bookingAsset.update).toHaveBeenCalledWith({
+        where: { id: "ba-standalone" },
+        data: {
+          quantity: 8,
+          checkedOutQuantity: 8,
+          checkedOutAt: outAt,
+          checkedOutById: "user-out",
+          checkedInAt: null,
+          checkedInById: null,
+        },
+      });
+    });
+
+    it("stamps the survivor checked in at the latest check-in once every part is back", async () => {
+      expect.assertions(1);
+
+      const standaloneInAt = new Date("2026-10-01T18:00:00.000Z");
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([
+          {
+            ...startedStandalone,
+            checkedInAt: standaloneInAt,
+            checkedInById: "user-early",
+          },
+        ]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.bookingAsset.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            checkedInAt: kitInAt,
+            checkedInById: "user-in",
+          }),
+        })
+      );
+    });
+
+    it("moves the merged-away slice's logs and session entries onto the survivor", async () => {
+      // why: `ConsumptionLog.bookingAssetId` is ON DELETE SET NULL, and a
+      // session's `bookingAssetIds` is a plain array. Left alone, the 3 units
+      // the kit slice settled become untagged and re-attribute to whichever
+      // slice the greedy fill reaches first.
+      expect.assertions(3);
+
+      sliceReads()
+        .mockResolvedValueOnce([settledKitSlice])
+        .mockResolvedValueOnce([startedStandalone]);
+      (
+        db.partialBookingCheckout.findMany as unknown as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockResolvedValueOnce([
+        { id: "pco-1", bookingAssetIds: ["ba-standalone", "ba-kit"] },
+      ]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.consumptionLog.updateMany).toHaveBeenCalledWith({
+        where: { bookingAssetId: { in: ["ba-kit"] } },
+        data: { bookingAssetId: "ba-standalone" },
+      });
+      expect(db.partialBookingCheckout.findMany).toHaveBeenCalledWith({
+        where: {
+          bookingId: { in: ["b-1"] },
+          bookingAssetIds: { hasSome: ["ba-kit"] },
+        },
+        select: { id: true, bookingAssetIds: true },
+      });
+      expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
+        where: { id: "pco-1" },
+        data: { bookingAssetIds: ["ba-standalone", "ba-standalone"] },
+      });
+    });
+
+    it("re-points session entries even when the merged-away slice has no check-out marker", async () => {
+      // why: a slice from before the marker existed can carry session claims
+      // without `checkedOutAt`. Its entries must follow its units too.
+      expect.assertions(1);
+
+      sliceReads()
+        .mockResolvedValueOnce([
+          { ...settledKitSlice, checkedOutAt: null, checkedInAt: null },
+        ])
+        .mockResolvedValueOnce([startedStandalone]);
+      (
+        db.partialBookingCheckout.findMany as unknown as ReturnType<
+          typeof vitest.fn
+        >
+      ).mockResolvedValueOnce([
+        { id: "pco-legacy", bookingAssetIds: ["ba-kit"] },
+      ]);
+
+      const { mergeStandaloneCollisionsForKitDetachment } = await import(
+        "./service.server"
+      );
+      await mergeStandaloneCollisionsForKitDetachment(db, ["ak-a"]);
+
+      expect(db.partialBookingCheckout.update).toHaveBeenCalledWith({
+        where: { id: "pco-legacy" },
+        data: { bookingAssetIds: ["ba-standalone"] },
+      });
+    });
+  });
 });
 
 /**
@@ -7024,5 +7391,588 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(lockOrder.length).toBeGreaterThan(0);
     expect(insertOrder.length).toBeGreaterThan(0);
     expect(Math.max(...lockOrder)).toBeLessThan(Math.min(...insertOrder));
+  });
+});
+
+/**
+ * A check-in that consumes, loses or damages units out of a kit slice takes
+ * them out of the kit as well as out of the stock total.
+ */
+describe("removeDestroyedUnitsFromKits", () => {
+  /** A kit membership of 5 batteries, as the helper reads it back. */
+  const membership = (
+    overrides: { quantity?: number; stock?: number } = {}
+  ) => ({
+    id: "ak-1",
+    assetId: "asset-pool",
+    kitId: "kit-1",
+    quantity: overrides.quantity ?? 5,
+    kit: { name: "Kit A" },
+    asset: {
+      title: "Batteries",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      // The stock total AFTER the check-in's decrement.
+      quantity: overrides.stock ?? 0,
+    },
+  });
+  const membershipReads = () =>
+    db.assetKit.findMany as unknown as ReturnType<typeof vitest.fn>;
+  const kitSums = () =>
+    db.assetKit.groupBy as unknown as ReturnType<typeof vitest.fn>;
+  const args = (units: number) => ({
+    destroyedUnitsByAssetKitId: new Map([["ak-1", units]]),
+    organizationId: "org-1",
+    actorUserId: "user-1",
+    bookingId: "booking-1",
+  });
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    membershipReads().mockReset().mockResolvedValue([]);
+    kitSums().mockReset().mockResolvedValue([]);
+    (db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+    (db.assetLocation.findMany as unknown as ReturnType<typeof vitest.fn>)
+      .mockReset()
+      .mockResolvedValue([]);
+  });
+
+  it("locks the memberships before it reads them", async () => {
+    expect.assertions(3);
+
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    const lock = db.$queryRaw as unknown as ReturnType<typeof vitest.fn>;
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    const [sql, ids, organizationId] = lock.mock.calls[0];
+    expect((sql as string[]).join("?")).toContain("FOR UPDATE");
+    expect([ids, organizationId]).toEqual([["ak-1"], "org-1"]);
+    expect(lock.mock.invocationCallOrder[0]).toBeLessThan(
+      membershipReads().mock.invocationCallOrder[0]
+    );
+  });
+
+  it("shrinks the membership and the kit placement that mirrors it", async () => {
+    expect.assertions(6);
+
+    // 10 in stock, 5 of them in the kit; 3 of the kit's are consumed.
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    const result = await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.assetKit.update).toHaveBeenCalledWith({
+      where: { id: "ak-1" },
+      data: { quantity: 2 },
+    });
+    expect(db.assetLocation.updateMany).toHaveBeenCalledWith({
+      where: { assetKitId: "ak-1" },
+      data: { quantity: 2 },
+    });
+    // A booking that has not started tracks the kit, so it cannot keep more
+    // of it than the kit now holds.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith({
+      where: {
+        OR: [{ assetKitId: "ak-1", quantity: { gt: 2 } }],
+        booking: {
+          organizationId: "org-1",
+          status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
+        },
+      },
+      select: { id: true, bookingId: true, assetKitId: true, quantity: true },
+    });
+    expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+    // The units that left the kit are recorded the way a partial move out of a
+    // kit records them.
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          bookingId: "booking-1",
+          fromValue: "kit-1",
+          toValue: null,
+          meta: { quantity: 3, remainingInKit: 2 },
+        }),
+      ],
+      db
+    );
+    expect(result.shrunkMemberships).toEqual([
+      {
+        assetId: "asset-pool",
+        assetTitle: "Batteries",
+        assetType: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: null,
+        kitId: "kit-1",
+        kitName: "Kit A",
+        quantity: 3,
+        remainingInKit: 2,
+      },
+    ]);
+  });
+
+  it("caps a planning booking's kit slice and records why", async () => {
+    expect.assertions(3);
+
+    membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    // A reserved booking next week holds all 5 of the kit's batteries.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-next-week",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-1",
+        quantity: 5,
+      },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.bookingAsset.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ba-next-week"] } },
+      data: { quantity: 2 },
+    });
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "BOOKING_ASSETS_REMOVED",
+          bookingId: "booking-next-week",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          meta: { viaKitRemoval: true, quantity: 3 },
+        }),
+      ],
+      db
+    );
+    expect(createSystemBookingNotes).toHaveBeenCalledWith(
+      {
+        organizationId: "org-1",
+        notes: [
+          {
+            bookingId: "booking-next-week",
+            content: expect.stringContaining(
+              "where **3 units** of **Batteries** in kit **Kit A** were not returned, so this booking now holds **2 units** of it."
+            ),
+          },
+        ],
+      },
+      db
+    );
+  });
+
+  it("removes a membership whose units are all gone, the way the kit service removes a member", async () => {
+    expect.assertions(5);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    const result = await removeDestroyedUnitsFromKits(db, args(5));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+    });
+    // Planning slices of the kit go before the membership does.
+    expect(db.bookingAsset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetKitId: { in: ["ak-1"] },
+          booking: {
+            organizationId: "org-1",
+            status: { in: [BookingStatus.DRAFT, BookingStatus.RESERVED] },
+          },
+        },
+      })
+    );
+    expect(recordEvents).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_KIT_CHANGED",
+          assetId: "asset-pool",
+          kitId: "kit-1",
+          bookingId: "booking-1",
+          fromValue: "kit-1",
+          toValue: null,
+          meta: { quantity: 5 },
+        }),
+      ],
+      db
+    );
+    expect(result.emptiedMemberships).toEqual([
+      {
+        assetId: "asset-pool",
+        assetTitle: "Batteries",
+        assetType: AssetType.QUANTITY_TRACKED,
+        unitOfMeasure: null,
+        kitId: "kit-1",
+        kitName: "Kit A",
+        quantity: 5,
+      },
+    ]);
+  });
+
+  it("writes one note per booking when several of its kit assets shrink", async () => {
+    expect.assertions(2);
+
+    // Two pools in two kits; the same reserved booking holds both kits.
+    membershipReads().mockResolvedValueOnce([
+      membership({ stock: 7 }),
+      {
+        ...membership({ stock: 8 }),
+        id: "ak-2",
+        assetId: "asset-cable",
+        kitId: "kit-2",
+        kit: { name: "Kit B" },
+        asset: { ...membership().asset, title: "Cables", quantity: 8 },
+      },
+    ]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+      { assetId: "asset-cable", _sum: { quantity: 5 } },
+    ]);
+    // One read covers both kits' planning slices.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-pool",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-1",
+        quantity: 5,
+      },
+      {
+        id: "ba-cable",
+        bookingId: "booking-next-week",
+        assetKitId: "ak-2",
+        quantity: 5,
+      },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, {
+      ...args(3),
+      destroyedUnitsByAssetKitId: new Map([
+        ["ak-1", 3],
+        ["ak-2", 2],
+      ]),
+    });
+
+    const [{ notes }] = (
+      createSystemBookingNotes as unknown as ReturnType<typeof vitest.fn>
+    ).mock.calls[0];
+    expect(notes).toHaveLength(1);
+    expect(notes[0].content).toContain(
+      "so this booking now holds less of **Batteries** in kit **Kit A** (**3 units** fewer, **2 units** left), **Cables** in kit **Kit B** (**2 units** fewer, **3 units** left)."
+    );
+  });
+
+  it("tells a planning booking the kit's last units were not returned", async () => {
+    expect.assertions(1);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+    // The planning-slice read inside the kit service's removal sequence.
+    (
+      db.bookingAsset.findMany as unknown as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        id: "ba-next-week",
+        bookingId: "booking-next-week",
+        assetId: "asset-pool",
+        quantity: 5,
+        assetKitId: "ak-1",
+        bookingModelRequestId: null,
+        booking: {
+          id: "booking-next-week",
+          name: "Next week",
+          organizationId: "org-1",
+          status: BookingStatus.RESERVED,
+        },
+        asset: {
+          id: "asset-pool",
+          title: "Batteries",
+          type: AssetType.QUANTITY_TRACKED,
+          unitOfMeasure: null,
+        },
+      },
+    ]);
+    // The same sequence resolves the kit's name from the membership.
+    membershipReads().mockResolvedValueOnce([
+      { id: "ak-1", kitId: "kit-1", kit: { name: "Kit A" } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(5));
+
+    expect(createSystemBookingNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notes: [
+          expect.objectContaining({
+            bookingId: "booking-next-week",
+            content: expect.stringContaining(
+              "checked in another booking where the last units of **Batteries** in kit **Kit A** were not returned, so it was removed from this booking."
+            ),
+          }),
+        ],
+      }),
+      db
+    );
+  });
+
+  it("never takes more than the membership holds", async () => {
+    expect.assertions(2);
+
+    membershipReads().mockResolvedValueOnce([membership()]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 5 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(8));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+    });
+  });
+
+  it("leaves the kits alone and logs it when they would still hold more than the stock", async () => {
+    expect.assertions(3);
+
+    // Two kits claim 10 units between them, but only 2 are left after the
+    // check-in. Shrinking this kit by 3 still leaves 7 claimed, and the
+    // kit-sum trigger would roll the whole check-in back at commit.
+    const loggerError = vitest
+      .spyOn(Logger, "error")
+      .mockImplementation(() => undefined);
+    onTestFinished(() => loggerError.mockRestore());
+    membershipReads().mockResolvedValueOnce([membership({ stock: 2 })]);
+    kitSums().mockResolvedValueOnce([
+      { assetId: "asset-pool", _sum: { quantity: 10 } },
+    ]);
+
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+    // Reported to Sentry: only someone fixing the data can clear the drift.
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ shouldBeCaptured: true })
+    );
+  });
+
+  describe("when the kit has a location", () => {
+    const placementReads = () =>
+      db.assetLocation.findMany as unknown as ReturnType<typeof vitest.fn>;
+    const manualSums = () =>
+      db.assetLocation.groupBy as unknown as ReturnType<typeof vitest.fn>;
+
+    beforeEach(() => {
+      manualSums().mockReset().mockResolvedValue([]);
+    });
+
+    it("leaves the kits alone when the hand-placed units exceed the stock", async () => {
+      // why: 100 in stock, 60 + 40 placed by hand and a kit of 10 at another
+      // location. Using up the kit's 10 leaves 90 in stock, and the check-in's
+      // reconcile cannot tell which location lost them, so 100 stay placed.
+      // Writing the kit's location row would fire the deferred location-sum
+      // trigger and roll the whole check-in back.
+      expect.assertions(4);
+
+      const loggerError = vitest
+        .spyOn(Logger, "error")
+        .mockImplementation(() => undefined);
+      onTestFinished(() => loggerError.mockRestore());
+      membershipReads().mockResolvedValueOnce([
+        membership({ quantity: 10, stock: 90 }),
+      ]);
+      kitSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 10 } },
+      ]);
+      placementReads().mockResolvedValueOnce([{ assetId: "asset-pool" }]);
+      manualSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 100 } },
+      ]);
+
+      const { removeDestroyedUnitsFromKits } = await import("./service.server");
+      await removeDestroyedUnitsFromKits(db, args(10));
+
+      expect(db.assetKit.deleteMany).not.toHaveBeenCalled();
+      expect(db.assetKit.update).not.toHaveBeenCalled();
+      expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
+      expect(loggerError).toHaveBeenCalledWith(
+        expect.objectContaining({ shouldBeCaptured: true })
+      );
+    });
+
+    it("shrinks the kit and its location row when the hand-placed units fit the stock", async () => {
+      expect.assertions(2);
+
+      membershipReads().mockResolvedValueOnce([membership({ stock: 7 })]);
+      kitSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 5 } },
+      ]);
+      placementReads().mockResolvedValueOnce([{ assetId: "asset-pool" }]);
+      manualSums().mockResolvedValueOnce([
+        { assetId: "asset-pool", _sum: { quantity: 4 } },
+      ]);
+
+      const { removeDestroyedUnitsFromKits } = await import("./service.server");
+      await removeDestroyedUnitsFromKits(db, args(3));
+
+      expect(manualSums()).toHaveBeenCalledWith({
+        by: ["assetId"],
+        where: { assetId: { in: ["asset-pool"] }, assetKitId: null },
+        _sum: { quantity: true },
+      });
+      expect(db.assetLocation.updateMany).toHaveBeenCalledWith({
+        where: { assetKitId: "ak-1" },
+        data: { quantity: 2 },
+      });
+    });
+  });
+
+  it("ignores a membership outside the organization", async () => {
+    expect.assertions(3);
+
+    // The org-scoped read returns nothing for a foreign membership.
+    const { removeDestroyedUnitsFromKits } = await import("./service.server");
+    const result = await removeDestroyedUnitsFromKits(db, args(3));
+
+    expect(membershipReads()).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["ak-1"] }, organizationId: "org-1" },
+      })
+    );
+    expect(db.assetKit.update).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      emptiedMemberships: [],
+      shrunkMemberships: [],
+      detachmentImpact: [],
+    });
+  });
+});
+
+describe("getPaginatedAndFilterableKits: booking kit picker availability", () => {
+  const BOOKING_ID = "booking-current";
+  const FROM = "2026-10-08T09:00:00.000Z";
+  const TO = "2026-10-08T17:00:00.000Z";
+
+  /** A picker request for this booking's window, hiding unavailable kits. */
+  function pickerRequest() {
+    const params = new URLSearchParams({
+      hideUnavailable: "true",
+      bookingFrom: FROM,
+      bookingTo: TO,
+    });
+    return new Request(`https://app.shelf.nu/kits?${params}`);
+  }
+
+  async function runPicker() {
+    await getPaginatedAndFilterableKits({
+      request: pickerRequest(),
+      organizationId: "org-1",
+      currentBookingId: BOOKING_ID,
+      canSeeAllCustody: true,
+      userId: "user-1",
+    });
+    // why: the db is mocked module-wide; the `where` handed to it is the
+    // picker's whole availability decision, so it is what these tests read.
+    return vitest.mocked(db.kit.findMany).mock.calls.at(-1)![0]!.where!;
+  }
+
+  /** Every `asset` filter in the where that judges the asset's own bookings. */
+  function assetBookingFilters(node: unknown): Record<string, unknown>[] {
+    if (!node || typeof node !== "object") return [];
+    const found: Record<string, unknown>[] = [];
+    for (const [key, value] of Object.entries(node)) {
+      if (
+        key === "asset" &&
+        value &&
+        typeof value === "object" &&
+        "bookingAssets" in value
+      ) {
+        found.push(value as Record<string, unknown>);
+      }
+      found.push(...assetBookingFilters(value));
+    }
+    return found;
+  }
+
+  beforeEach(() => {
+    vitest.mocked(db.kit.findMany).mockResolvedValue([]);
+    vitest.mocked(db.kit.count).mockResolvedValue(0);
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+    vitest.mocked(db.assetKit.findMany).mockResolvedValue([]);
+  });
+
+  it("judges only INDIVIDUAL members by their asset's bookings, so a shared quantity pool hides no sibling kit", async () => {
+    const where = await runPicker();
+
+    // Rule 1 (RESERVED) and Rule 2 (ONGOING/OVERDUE) both read member assets'
+    // bookings. A QUANTITY_TRACKED member's bookings include every other
+    // kit's slice of the same pool, so they must never decide this kit.
+    const filters = assetBookingFilters(where);
+    expect(filters).toHaveLength(2);
+    for (const filter of filters) {
+      expect(filter.type).toBe(AssetType.INDIVIDUAL);
+    }
+  });
+
+  it("leaves out a kit whose own slice another booking holds in the window", async () => {
+    // Kit A is reserved for an overlapping window through its own membership.
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        assetKitId: "ak-a",
+        checkedOutAt: null,
+        checkedInAt: null,
+        booking: { id: "other-booking", status: BookingStatus.RESERVED },
+      },
+    ] as never);
+    vitest
+      .mocked(db.assetKit.findMany)
+      .mockResolvedValue([
+        { id: "ak-a", kitId: "kit-a", kit: { name: "Kit A" } },
+      ] as never);
+
+    const where = await runPicker();
+
+    expect(where.AND).toEqual(
+      expect.arrayContaining([{ id: { notIn: ["kit-a"] } }])
+    );
+    // The count must agree with the page, or pagination drifts.
+    expect(
+      vitest
+        .mocked(db.kit.count)
+        .mock.calls.some(([args]) => args?.where === where)
+    ).toBe(true);
+  });
+
+  it("adds no exclusion when no other booking holds a kit", async () => {
+    const where = await runPicker();
+
+    expect(JSON.stringify(where)).not.toContain("notIn");
   });
 });

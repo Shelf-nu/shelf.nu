@@ -63,10 +63,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const url = new URL(request.url);
 
@@ -113,6 +110,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     const baseWhere: Prisma.AssetWhereInput = {
       organizationId,
+      // The same list scope as the web asset index: roles limited to bookable
+      // assets browse only those. Their own custody tab still lists every
+      // asset they hold, bookable or not.
+      ...(access.policy.assets.listScope === "bookable" &&
+        !myCustody && { availableToBook: true }),
       ...(myCustody
         ? {
             // Phase 2/4 widened `Asset.custody` from 1:1 to 1:many for
@@ -250,7 +252,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         db.asset.count({ where }),
       ]);
 
-    // Single query: the UNION already searches all 10 sources in one shot,
+    // Single query: the UNION already searches all 11 sources in one shot,
     // so there is no narrow/fallback two-query dance to run any more.
     const [storedAssets, totalCount] = await fetchPage({
       ...baseWhere,
@@ -316,7 +318,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           custodyList: shaped.custodyList,
           custodyRows: asset.custody,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         });
 
       const primaryCustody = asset.custody[0] ?? null;
@@ -325,7 +327,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         viewerCanSeeLegacyCustody({
           custodianUserId: primaryCustody.custodian.userId,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         })
           ? shaped.custody
           : null;

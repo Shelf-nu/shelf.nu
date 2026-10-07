@@ -135,6 +135,44 @@ describe("resolveCalendarVisibility", () => {
       resolveCalendarVisibility({ roles: [], organization: noneVisible })
     ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
   });
+
+  it("resolves a mixed membership to its highest role, not its first", () => {
+    // ADMIN outranks SELF_SERVICE whatever the order, so the toggles do not apply.
+    expect(
+      resolveCalendarVisibility({
+        roles: [OrganizationRoles.SELF_SERVICE, OrganizationRoles.ADMIN],
+        organization: noneVisible,
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
+  });
+
+  it("applies the toggle of the effective role, not of the first role", () => {
+    // SELF_SERVICE outranks BASE, so its toggles (on) decide, not BASE's (off).
+    expect(
+      resolveCalendarVisibility({
+        roles: [OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE],
+        organization: {
+          ...noneVisible,
+          selfServiceCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+        },
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: true });
+  });
+
+  it("treats an unrecognised role as BASE and follows the BASE toggles", () => {
+    // The cast models a membership row holding a role this build does not know.
+    const roles = ["UNKNOWN_ROLE" as OrganizationRoles];
+    expect(
+      resolveCalendarVisibility({ roles, organization: noneVisible })
+    ).toEqual({ canSeeAllBookings: false, canSeeAllCustody: false });
+    expect(
+      resolveCalendarVisibility({
+        roles,
+        organization: { ...noneVisible, baseUserCanSeeBookings: true },
+      })
+    ).toEqual({ canSeeAllBookings: true, canSeeAllCustody: false });
+  });
 });
 
 describe("calendar feed tokens", () => {
@@ -374,5 +412,24 @@ describe("getMemberCalendarFeeds", () => {
         feedUrl: null,
       },
     ]);
+  });
+
+  it("labels each feed with the membership's effective role", async () => {
+    vi.mocked(canUseBookings).mockReturnValue(true);
+    // A membership stored as [SELF_SERVICE, ADMIN] is an Administrator.
+    vi.mocked(db.user.findUnique).mockResolvedValue({
+      sso: false,
+      userOrganizations: [
+        {
+          roles: ["SELF_SERVICE", "ADMIN"],
+          calendarTokenId: null,
+          organization: { id: "o1", name: "Acme", type: "TEAM" },
+        },
+      ],
+    } as never);
+
+    const feeds = await getMemberCalendarFeeds({ userId: USER_ID });
+
+    expect(feeds[0].role).toBe("ADMIN");
   });
 });

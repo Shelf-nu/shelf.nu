@@ -97,6 +97,49 @@ export type PickerAssetMeta = {
  *                       QUANTITY_TRACKED ids. Callers should treat a missing
  *                       entry as "render no qty input for this row".
  */
+/**
+ * One entry per other location, holding every unit placed there.
+ *
+ * A quantity-tracked asset can hold a manual placement and several kit-driven
+ * ones at the same location: the two axes are bounded separately, so 12 units
+ * placed by hand alongside 8 arriving with a kit is a valid 20 at that location.
+ * Listing the rows as they come would name the location once per placement, so
+ * they are summed into the figure the reader is actually after.
+ *
+ * Insertion order is kept, so the list follows the order the query returned.
+ *
+ * @param placements - Placements at locations other than the one being edited
+ * @returns One aggregated entry per location
+ */
+function sumPlacementsByLocation(
+  placements: {
+    quantity: number;
+    location: { id: string; name: string };
+  }[]
+): PickerAssetMeta["inOtherLocations"] {
+  const byLocation = new Map<
+    string,
+    PickerAssetMeta["inOtherLocations"][number]
+  >();
+
+  for (const placement of placements) {
+    const existing = byLocation.get(placement.location.id);
+
+    if (existing) {
+      existing.quantity += placement.quantity;
+      continue;
+    }
+
+    byLocation.set(placement.location.id, {
+      locationId: placement.location.id,
+      locationName: placement.location.name,
+      quantity: placement.quantity,
+    });
+  }
+
+  return [...byLocation.values()];
+}
+
 export async function getLocationPickerMeta({
   locationId,
   organizationId,
@@ -171,11 +214,7 @@ export async function getLocationPickerMeta({
       const meta: PickerAssetMeta = {
         assetQuantity: totalQty,
         currentAtThisLocation,
-        inOtherLocations: otherLocations.map((al) => ({
-          locationId: al.location.id,
-          locationName: al.location.name,
-          quantity: al.quantity,
-        })),
+        inOtherLocations: sumPlacementsByLocation(otherLocations),
         maxAllowedForThisLocation,
         unitOfMeasure: row.unitOfMeasure,
       };

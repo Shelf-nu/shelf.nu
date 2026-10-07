@@ -50,7 +50,7 @@ export const loader = async ({
 
   try {
     // Check if user has permission to read audits
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: userId,
       request,
       entity: PermissionEntity.audit,
@@ -62,7 +62,7 @@ export const loader = async ({
       auditId,
       organizationId,
       userId,
-      role,
+      !access.audits.seeAll,
       request
     );
 

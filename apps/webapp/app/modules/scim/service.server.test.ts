@@ -1005,6 +1005,187 @@ describe("patchScimUser", () => {
     });
   });
 
+  // RFC 7644 Section 3.10: attribute names are case-insensitive. A title-cased
+  // path used to match nothing, so the op was dropped and the IdP answered 200.
+  it("should honour a title-cased path", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.updateMany.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "Replace", path: "Name.GivenName", value: "Janet" }],
+    });
+
+    expect(mockDb.db.user.update).toHaveBeenCalledWith({
+      where: { id: "user-abc" },
+      data: expect.objectContaining({ firstName: "Janet" }),
+    });
+  });
+
+  it("should deactivate on a title-cased active path", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping()
+    );
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValueOnce(
+      scimMapping({ userOrganizations: [] })
+    );
+    // @ts-expect-error - vitest mock type
+    mockUserService.revokeAccessToOrganization.mockResolvedValue(undefined);
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "Replace", path: "Active", value: false }],
+    });
+
+    expect(mockUserService.revokeAccessToOrganization).toHaveBeenCalled();
+  });
+
+  it("should honour title-cased keys in a path-less op", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.updateMany.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [{ op: "Replace", value: { Name: { GivenName: "Janet" } } }],
+    });
+
+    expect(mockDb.db.user.update).toHaveBeenCalledWith({
+      where: { id: "user-abc" },
+      data: expect.objectContaining({ firstName: "Janet" }),
+    });
+  });
+
+  // A non-string value used to be coerced, so String({}) stored the literal
+  // "[object Object]" as the person's name and the IdP was told it worked.
+  // RFC 7644 permits a fully qualified path. Lowercasing alone left it matching
+  // nothing, so the op was dropped and answered 200.
+  it("should honour a fully qualified core User path", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.updateMany.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [
+        {
+          op: "Replace",
+          path: "urn:ietf:params:scim:schemas:core:2.0:User:name.givenName",
+          value: "Janet",
+        },
+      ],
+    });
+
+    expect(mockDb.db.user.update).toHaveBeenCalledWith({
+      where: { id: "user-abc" },
+      data: expect.objectContaining({ firstName: "Janet" }),
+    });
+  });
+
+  // A complex attribute path carrying its sub-attributes as an object.
+  it("should honour a name path with a sub-attribute object", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+    // @ts-expect-error - vitest mock type
+    mockDb.db.teamMember.updateMany.mockResolvedValue({});
+
+    await patchScimUser(ORG_ID, SCIM_ID, {
+      schemas: PATCH_SCHEMA,
+      Operations: [
+        { op: "Replace", path: "Name", value: { GivenName: "Janet" } },
+      ],
+    });
+
+    expect(mockDb.db.user.update).toHaveBeenCalledWith({
+      where: { id: "user-abc" },
+      data: expect.objectContaining({ firstName: "Janet" }),
+    });
+  });
+
+  it("should refuse a name path whose value is not an object", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+
+    await expect(
+      patchScimUser(ORG_ID, SCIM_ID, {
+        schemas: PATCH_SCHEMA,
+        Operations: [{ op: "Replace", path: "name", value: "Janet Doe" }],
+      })
+    ).rejects.toMatchObject({ status: 400, scimType: "invalidValue" });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("should refuse a path-less name that is not an object", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+
+    await expect(
+      patchScimUser(ORG_ID, SCIM_ID, {
+        schemas: PATCH_SCHEMA,
+        Operations: [{ op: "Replace", value: { name: "Janet Doe" } }],
+      })
+    ).rejects.toMatchObject({ status: 400, scimType: "invalidValue" });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("should refuse a non-string name without writing anything", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+
+    await expect(
+      patchScimUser(ORG_ID, SCIM_ID, {
+        schemas: PATCH_SCHEMA,
+        Operations: [
+          { op: "Replace", path: "name.givenName", value: { first: "John" } },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 400, scimType: "invalidValue" });
+
+    // The refusal has to happen before any write, or the corruption lands and
+    // the error only describes it.
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+  });
+
+  it("should refuse a non-string name inside a path-less op", async () => {
+    // @ts-expect-error - vitest mock type
+    mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());
+    // @ts-expect-error - vitest mock type
+    mockDb.db.user.update.mockResolvedValue({});
+
+    await expect(
+      patchScimUser(ORG_ID, SCIM_ID, {
+        schemas: PATCH_SCHEMA,
+        Operations: [
+          { op: "Replace", value: { name: { familyName: ["Doe"] } } },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 400, scimType: "invalidValue" });
+
+    expect(mockDb.db.user.update).not.toHaveBeenCalled();
+  });
+
   it("should apply Add ops for attributes and ignore remove/unknown ops", async () => {
     // @ts-expect-error - vitest mock type
     mockDb.db.userScimExternalId.findUnique.mockResolvedValue(scimMapping());

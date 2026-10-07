@@ -4,6 +4,7 @@
  * checks, and the paid Audits add-on enforcement (403 when disabled).
  */
 import { action } from "~/routes/api+/mobile+/audits.complete";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -100,11 +101,9 @@ describe("POST /api/mobile/audits/complete", () => {
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
     (requireMobilePermission as any).mockResolvedValue(undefined);
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      canUseAudits: true,
-      canUseBarcodes: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     (requireAuditAssignee as any).mockResolvedValue(undefined);
     (completeAuditSession as any).mockResolvedValue(undefined);
   });
@@ -125,7 +124,7 @@ describe("POST /api/mobile/audits/complete", () => {
       auditSessionId: "session-1",
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
     });
 
     expect(completeAuditSession).toHaveBeenCalledWith({
@@ -178,11 +177,9 @@ describe("POST /api/mobile/audits/complete", () => {
   });
 
   it("should return 403 when the Audits add-on is disabled", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      canUseAudits: false,
-      canUseBarcodes: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"], canUseAudits: false })
+    );
 
     const request = createCompleteRequest({ sessionId: "session-1" });
     const result = await action(createActionArgs({ request }));
@@ -191,5 +188,38 @@ describe("POST /api/mobile/audits/complete", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not enabled");
     expect(completeAuditSession).not.toHaveBeenCalled();
+  });
+
+  it("limits a BASE member to audits assigned to them", async () => {
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE"] })
+    );
+
+    await action(
+      createActionArgs({
+        request: createCompleteRequest({ sessionId: "session-1" }),
+      })
+    );
+
+    expect(requireAuditAssignee).toHaveBeenCalledWith(
+      expect.objectContaining({ assignedOnly: true })
+    );
+  });
+
+  it("a [SELF_SERVICE, ADMIN] membership is not limited to assigned audits", async () => {
+    // The scope follows the effective role, not the first role listed.
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+    );
+
+    await action(
+      createActionArgs({
+        request: createCompleteRequest({ sessionId: "session-1" }),
+      })
+    );
+
+    expect(requireAuditAssignee).toHaveBeenCalledWith(
+      expect.objectContaining({ assignedOnly: false })
+    );
   });
 });

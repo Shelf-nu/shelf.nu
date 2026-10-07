@@ -49,13 +49,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.kit,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.read,
+    });
 
     const searchParams = getCurrentSearchParams(request);
     const {
@@ -72,7 +71,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Self-service / base users see only their own bookings here. Resolve the
     // full scope (user link + every team-member link) so legacy team-member-
     // linked bookings aren't hidden while showing on the index.
-    const custodianScope = !canSeeAllBookings
+    const custodianScope = !access.bookings.seeAll
       ? await resolveCustodianScope({ userId, organizationId })
       : undefined;
 
@@ -119,10 +118,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           userId,
-          // A FILTER. This passed no scoping argument at all, so a restricted
-          // user — /kits is gated on `kit:read`, which BASE holds — received
-          // the entire team roster here.
-          filterByUserId: !canSeeAllCustody,
+          // A FILTER, so custody visibility governs: only the caller's own
+          // team member unless custody is visible to them.
+          filterByUserId: !access.custody.seeAll,
         }),
         getTagsForBookingTagsFilter({
           organizationId,

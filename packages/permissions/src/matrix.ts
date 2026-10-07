@@ -15,10 +15,15 @@ import { PermissionAction, PermissionEntity } from "./vocabulary";
  * everything regardless of what their entries say (e.g. no role's entry lists
  * `qr:update`, yet both hold it), and that short-circuit lives in
  * {@link roleHasPermission}. Reading the map alone gives the wrong answer for
- * two of the four roles. Call the resolver instead.
+ * two of the four roles: ADMIN and OWNER hold more than their entries list.
+ * Call the resolver instead.
+ *
+ * The outer key is required: every role must have a complete entry, so a
+ * role missing from the map is a compile error rather than an `undefined`
+ * lookup at runtime.
  */
 export const Role2PermissionMap: {
-  [K in OrganizationRole]?: Record<PermissionEntity, PermissionAction[]>;
+  [K in OrganizationRole]: Record<PermissionEntity, PermissionAction[]>;
 } = {
   BASE: {
     [PermissionEntity.asset]: [PermissionAction.read],
@@ -64,6 +69,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [],
     [PermissionEntity.assetModel]: [PermissionAction.read],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
@@ -119,6 +125,7 @@ export const Role2PermissionMap: {
     [PermissionEntity.custody]: [],
     [PermissionEntity.assetReminders]: [],
     [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [],
     [PermissionEntity.assetModel]: [],
     [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
@@ -259,6 +266,14 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.delete,
+    ],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.import,
+      PermissionAction.export,
     ],
     [PermissionEntity.assetModel]: [
       PermissionAction.create,
@@ -410,6 +425,14 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.create,
       PermissionAction.delete,
+    ],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.import,
+      PermissionAction.export,
     ],
     [PermissionEntity.assetModel]: [
       PermissionAction.create,

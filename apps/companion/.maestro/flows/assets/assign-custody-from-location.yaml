@@ -1,0 +1,65 @@
+# Assign quantity custody from a chosen location on a pool kept at two or
+# more locations (PR: feat/companion-custody-source-location).
+#
+# Precondition: app foregrounded with a signed-in session (qa-admin1 /
+# GRANULAR WORKSPACE): the no-login pattern, so NO launchApp/clearState.
+# Test asset: a QUANTITY_TRACKED asset placed at TWO locations with units
+# left at both, named by POOL_TITLE (default "ZZQ phone spanner"), e.g.
+# 2 at "Camera Room" + 2 at "Studio". The flow takes 1 unit from
+# SOURCE_LOCATION (default "Studio") for MEMBER (default qa-admin2) and
+# releases it again, so the pool ends as it started.
+#
+# Maestro full-matches a11y labels (often composed beyond the visible text),
+# so every text matcher is regex-wrapped with .* per .maestro/LESSONS.md.
+appId: com.shelf.companion.carlos
+env:
+  POOL_TITLE: "ZZQ phone spanner"
+  SOURCE_LOCATION: "Studio"
+  MEMBER: "carlitos.virreira+qa-admin2"
+---
+- tapOn: "Assets"
+- tapOn: ".*Search assets.*"
+- inputText: ${POOL_TITLE}
+- extendedWaitUntil:
+    visible: ".*${POOL_TITLE}.*"
+    timeout: 10000
+# First tap may be consumed dismissing the keyboard, so tap twice, second optional.
+- tapOn: ".*${POOL_TITLE}.*"
+- tapOn:
+    text: ".*${POOL_TITLE}.*"
+    optional: true
+- extendedWaitUntil:
+    visible: "Assign custody of asset"
+    timeout: 10000
+
+# Pick the member, then the sheet asks "From location" (only for a pool at
+# two or more locations) and opens on the location with the most left.
+- tapOn: "Assign custody of asset"
+- extendedWaitUntil:
+    visible: ".*Search Team members.*"
+    timeout: 10000
+- inputText: ${MEMBER}
+- tapOn: ".*${MEMBER}.*"
+- extendedWaitUntil:
+    visible: "From location"
+    timeout: 10000
+- tapOn: "${SOURCE_LOCATION}.*"
+- assertVisible: "Quantity, maximum.*"
+- tapOn: "Assign .*"
+
+# The holder's row names the source (one source reads "from <location>",
+# with no count).
+- extendedWaitUntil:
+    visible: ".*from ${SOURCE_LOCATION}.*"
+    timeout: 15000
+
+# Release it from that source again (one source: no picker, the sheet says
+# where the unit goes back to).
+- tapOn: ".*Release custody from.*${MEMBER}.*"
+- extendedWaitUntil:
+    visible: ".*Goes back to ${SOURCE_LOCATION}.*"
+    timeout: 10000
+- tapOn: "Release .*"
+- extendedWaitUntil:
+    notVisible: ".*from ${SOURCE_LOCATION}.*"
+    timeout: 15000

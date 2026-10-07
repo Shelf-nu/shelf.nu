@@ -1,13 +1,14 @@
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "../helpers/role-access";
 
 /**
  * Factory for the `routes/_layout+/_layout` loader payload.
  *
  * Components under `_layout` read this through `useRouteLoaderData`-backed
- * hooks (`useUserRoleHelper`, `useIsShelfAdmin`, `useCurrentOrganization`), so
- * a test mocking that hook has to hand back a payload of this shape. Shared
- * because the ownership-transfer surfaces render on two different pages and
- * their fixtures must not drift apart.
+ * hooks (`useRoleAccess`, `useOrganizationRoles`, `useIsShelfAdmin`,
+ * `useCurrentOrganization`), so a test mocking that hook has to hand back a
+ * payload of this shape. Shared because the ownership-transfer surfaces render
+ * on two different pages and their fixtures must not drift apart.
  *
  * @see {@link file://./../../app/routes/_layout+/_layout.tsx}
  */
@@ -38,6 +39,9 @@ export function createLayoutLoaderData({
 }: CreateLayoutLoaderDataArgs = {}) {
   return {
     currentOrganizationUserRoles: roles,
+    // Resolved from the same roles with every workspace toggle off, as the
+    // loader's `resolveRoleAccess` would
+    roleAccess: accessFor(roles),
     currentOrganization: {
       id: "org-1",
       name: "Test Org",

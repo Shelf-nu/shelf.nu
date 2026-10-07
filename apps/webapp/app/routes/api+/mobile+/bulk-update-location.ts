@@ -61,7 +61,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { assetIds, locationId } = parsed.data;
 
-    const { role, canUseBarcodes } = await getMobileUserContext(
+    const { canUseBarcodes, access } = await getMobileUserContext(
       user.id,
       organizationId
     );
@@ -70,7 +70,7 @@ export async function action({ request }: ActionFunctionArgs) {
       userId: user.id,
       organizationId,
       canUseBarcodes,
-      role,
+      role: access.role,
     });
 
     await bulkUpdateAssetLocation({
