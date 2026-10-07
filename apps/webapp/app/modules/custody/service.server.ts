@@ -2,7 +2,7 @@ import type { Asset, User } from "@prisma/client";
 import { AssetType, OrganizationRoles, Prisma } from "@prisma/client";
 import {
   KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
-  kitMemberCustodyRefusal,
+  kitMembersCustodyRefusal,
 } from "@shelf/labels";
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
@@ -63,8 +63,46 @@ export async function assertNoKitDerivedCustody(
   }
 }
 
+/** Row-lock strengths {@link lockAssetRows} takes. A closed set: it is spliced into SQL. */
+type AssetRowLockMode = "FOR UPDATE" | "FOR KEY SHARE";
+
 /**
- * Refuses to put an individually tracked kit member into custody on its own.
+ * Locks the given asset rows, in id order, in the caller's workspace.
+ *
+ * The custody assign guard and the kit-membership insert both lock through
+ * this one query, so they always take their locks in the same order. That
+ * shared order is what keeps them from deadlocking: keep the `ORDER BY` and
+ * the workspace filter here, never in a copy.
+ *
+ * The ids travel as one array parameter (`= ANY`), so a "select all" over any
+ * number of assets stays within Postgres's bind-parameter limit.
+ *
+ * @param tx - the active transaction the lock is held for
+ * @param assetIds - assets to lock (request input; rows in other workspaces are skipped)
+ * @param organizationId - the caller's workspace
+ * @param mode - `FOR UPDATE` on the custody side, `FOR KEY SHARE` on the kit side
+ */
+async function lockAssetRows(
+  tx: Pick<typeof db, "$queryRaw">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"],
+  mode: AssetRowLockMode
+) {
+  if (assetIds.length === 0) return;
+
+  // Column names are literal: `Asset` declares no `@map`.
+  // @see .claude/rules/raw-sql-respects-prisma-map.md
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "Asset"
+    WHERE "id" = ANY(${assetIds}::text[]) AND "organizationId" = ${organizationId}
+    ORDER BY "id"
+    ${Prisma.raw(mode)}
+  `);
+}
+
+/**
+ * Refuses to put an individually tracked kit member into custody on its own,
+ * without taking any lock.
  *
  * Custody of an asset that belongs to a kit comes from the kit: assign custody
  * to the kit, or take the asset out of the kit first. Both scanners already
@@ -77,8 +115,66 @@ export async function assertNoKitDerivedCustody(
  * Release is not covered and must not be: custody rows written before this
  * rule existed stay releasable.
  *
- * Call it inside the assign transaction, before the custody rows are written,
- * so the refusal rolls back anything the transaction already did.
+ * This is the read on its own, for pages that only decide whether to open (the
+ * assign page's loader). Anything that goes on to write custody must call
+ * {@link assertNotKitMembers}, which locks first.
+ *
+ * @param reader - the client or transaction to read through
+ * @param assetIds - assets about to be put into custody (request input)
+ * @param organizationId - the caller's workspace; memberships in any other
+ *   workspace are ignored
+ * @throws {ShelfError} 400 giving the number of kit members and naming the
+ *   first few
+ */
+export async function refuseKitMembers(
+  reader: Pick<typeof db, "assetKit">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  if (assetIds.length === 0) return;
+
+  const memberships = await reader.assetKit.findMany({
+    where: {
+      assetId: { in: assetIds },
+      organizationId,
+      asset: { type: AssetType.INDIVIDUAL },
+    },
+    select: {
+      asset: { select: { id: true, title: true } },
+      kit: { select: { id: true, name: true } },
+    },
+    orderBy: { asset: { title: "asc" } },
+  });
+
+  if (memberships.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    title: KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
+    message: kitMembersCustodyRefusal(
+      memberships.map((m) => ({
+        assetTitle: m.asset.title,
+        kitName: m.kit.name,
+      }))
+    ),
+    additionalData: {
+      assetIds: memberships.map((m) => m.asset.id),
+      kitIds: [...new Set(memberships.map((m) => m.kit.id))],
+      organizationId,
+    },
+    label: "Custody",
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Locks the asset rows, then refuses kit members ({@link refuseKitMembers}).
+ * Every path that writes custody calls this one.
+ *
+ * Call it inside the assign transaction, before ANY write to the asset rows
+ * (the status claim included) and before the custody rows, so the refusal rolls
+ * back anything the transaction already did.
  *
  * It serialises against adding the same asset to a kit. It first takes
  * `FOR UPDATE` on the asset rows, which an `AssetKit` insert has to wait for
@@ -89,66 +185,29 @@ export async function assertNoKitDerivedCustody(
  *   `updateKitAssets` re-reads custody after its insert, so it sees the
  *   committed custody row and refuses.
  * Both halves are needed: drop either one and two operators acting at the
- * same moment can both pass. Rows are locked in id order, and
- * `updateKitAssets` locks its new members in that same order first
- * ({@link lockAssetsForKitMembership}), so neither two assignments nor an
- * assignment and a kit add over overlapping assets can deadlock. Outside a
- * transaction (the assign page's loader) the lock is released when the
- * statement ends, so the call is a plain read there.
+ * same moment can both pass. Both sides lock through {@link lockAssetRows}, in
+ * id order, so neither two assignments nor an assignment and a kit add over
+ * overlapping assets can deadlock.
+ *
+ * The lock must come before the assignment's own status write. A kit add can
+ * write the member's status after its insert (a checked-out kit marks it
+ * checked out); if the assignment already held its status-write lock, each
+ * transaction would wait on the other.
  *
  * @param tx - the active transaction the assignment runs in
  * @param assetIds - assets about to be put into custody (request input)
  * @param organizationId - the caller's workspace; memberships in any other
  *   workspace are ignored
- * @throws {ShelfError} 400 naming the first kit member found and its kit
+ * @throws {ShelfError} 400 giving the number of kit members and naming the
+ *   first few
  */
 export async function assertNotKitMembers(
   tx: Pick<typeof db, "assetKit" | "$queryRaw">,
   assetIds: Asset["id"][],
   organizationId: Asset["organizationId"]
 ) {
-  if (assetIds.length === 0) return;
-
-  // Column names are literal: `Asset` declares no `@map`.
-  // @see .claude/rules/raw-sql-respects-prisma-map.md
-  const ids = Prisma.join(assetIds);
-  await tx.$queryRaw`
-    SELECT "id" FROM "Asset"
-    WHERE "id" IN (${ids}) AND "organizationId" = ${organizationId}
-    ORDER BY "id"
-    FOR UPDATE
-  `;
-
-  const membership = await tx.assetKit.findFirst({
-    where: {
-      assetId: { in: assetIds },
-      organizationId,
-      asset: { type: AssetType.INDIVIDUAL },
-    },
-    select: {
-      asset: { select: { id: true, title: true } },
-      kit: { select: { id: true, name: true } },
-    },
-  });
-
-  if (membership) {
-    throw new ShelfError({
-      cause: null,
-      title: KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
-      message: kitMemberCustodyRefusal({
-        assetTitle: membership.asset.title,
-        kitName: membership.kit.name,
-      }),
-      additionalData: {
-        assetId: membership.asset.id,
-        kitId: membership.kit.id,
-        organizationId,
-      },
-      label: "Custody",
-      status: 400,
-      shouldBeCaptured: false,
-    });
-  }
+  await lockAssetRows(tx, assetIds, organizationId, "FOR UPDATE");
+  await refuseKitMembers(tx, assetIds, organizationId);
 }
 
 /**
@@ -178,17 +237,7 @@ export async function lockAssetsForKitMembership(
   assetIds: Asset["id"][],
   organizationId: Asset["organizationId"]
 ) {
-  if (assetIds.length === 0) return;
-
-  // Column names are literal: `Asset` declares no `@map`.
-  // @see .claude/rules/raw-sql-respects-prisma-map.md
-  const ids = Prisma.join(assetIds);
-  await tx.$queryRaw`
-    SELECT "id" FROM "Asset"
-    WHERE "id" IN (${ids}) AND "organizationId" = ${organizationId}
-    ORDER BY "id"
-    FOR KEY SHARE
-  `;
+  await lockAssetRows(tx, assetIds, organizationId, "FOR KEY SHARE");
 }
 
 /**

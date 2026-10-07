@@ -145,10 +145,10 @@ vitest.mock("~/database/db.server", () => ({
     assetKit: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       // why: `bulkCheckOutAssets` refuses an individually tracked kit member
-      // and reads kit membership here. Null = in no kit, so the bulk custody
+      // and reads kit membership here. [] = in no kit, so the bulk custody
       // suites below exercise their own guards. The refusal itself is pinned
       // through every caller in test/routes-tests/api+/custody-assign-kit-members.test.ts.
-      findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),

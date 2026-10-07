@@ -2622,20 +2622,23 @@ describe("updateKitAssets: custody committed while the asset is being added", ()
     });
 
     const rawCalls = vitest.mocked(db.$queryRaw).mock;
+    /** The SQL text of a raw call, whether a tagged template or a `Prisma.sql`. */
+    const sqlOf = (call: unknown[]) => {
+      const first = call[0] as { text?: string } | TemplateStringsArray;
+      return "text" in first && typeof first.text === "string"
+        ? first.text
+        : (first as TemplateStringsArray).join("?");
+    };
     const lockIndex = rawCalls.calls.findIndex((call) =>
-      (call[0] as unknown as TemplateStringsArray)
-        .join("?")
-        .includes("FOR KEY SHARE")
+      sqlOf(call).includes("FOR KEY SHARE")
     );
     expect(lockIndex).toBeGreaterThanOrEqual(0);
-    const sql = (
-      rawCalls.calls[lockIndex][0] as unknown as TemplateStringsArray
-    )
-      .join("?")
-      .replace(/\s+/g, " ");
+    const sql = sqlOf(rawCalls.calls[lockIndex]).replace(/\s+/g, " ");
     expect(sql).toContain('FROM "Asset"');
     expect(sql).toContain('ORDER BY "id" FOR KEY SHARE');
-    expect(rawCalls.calls[lockIndex]).toContain("org-1");
+    expect(
+      (rawCalls.calls[lockIndex][0] as unknown as { values: unknown[] }).values
+    ).toContain("org-1");
     expect(rawCalls.invocationCallOrder[lockIndex]).toBeLessThan(
       vitest.mocked(db.assetKit.createMany).mock.invocationCallOrder[0]
     );

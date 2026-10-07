@@ -205,6 +205,17 @@ export declare function kitMemberCustodyRefusal(names: {
 }): string;
 
 /**
+ * The server's refusal when an assign request names several kit members: the
+ * count plus the first few titles. One member reads exactly as
+ * {@link kitMemberCustodyRefusal}.
+ *
+ * @param members - at least one kit member, with its title and kit's name
+ */
+export declare function kitMembersCustodyRefusal(
+  members: { assetTitle: string; kitName: string }[]
+): string;
+
+/**
  * The reason a bulk "Assign custody" action is disabled when the selection
  * holds at least one kit member.
  */

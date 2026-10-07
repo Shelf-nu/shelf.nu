@@ -58,7 +58,7 @@ vi.mock("react-router", async () => {
 const dbMocks = vi.hoisted(() => ({
   assetFindMany: vi.fn(),
   assetUpdateMany: vi.fn(),
-  assetKitFindFirst: vi.fn(),
+  assetKitFindMany: vi.fn(),
   teamMemberFindFirst: vi.fn(),
   custodyDeleteMany: vi.fn(),
   custodyFindFirst: vi.fn(),
@@ -75,7 +75,7 @@ vi.mock("~/database/db.server", () => {
       findMany: dbMocks.assetFindMany,
       updateMany: dbMocks.assetUpdateMany,
     },
-    assetKit: { findFirst: dbMocks.assetKitFindFirst },
+    assetKit: { findMany: dbMocks.assetKitFindMany },
     teamMember: { findFirst: dbMocks.teamMemberFindFirst },
     custody: {
       deleteMany: dbMocks.custodyDeleteMany,
@@ -242,7 +242,7 @@ beforeEach(() => {
 
   // `mockResolvedValue`, not `...Once`, so a value one test sets can never be
   // left queued for the next test's read.
-  dbMocks.assetKitFindFirst.mockResolvedValue(null);
+  dbMocks.assetKitFindMany.mockResolvedValue([]);
   dbMocks.teamMemberFindFirst.mockResolvedValue({
     id: "custodian-1",
     name: "Jane Doe",
@@ -260,10 +260,12 @@ describe.each(ENDPOINTS)("$name", ({ send }) => {
     dbMocks.assetFindMany.mockResolvedValue([
       availableAsset("asset-tripod", "Tripod"),
     ]);
-    dbMocks.assetKitFindFirst.mockResolvedValue({
-      asset: { id: "asset-tripod", title: "Tripod" },
-      kit: { id: "kit-camera", name: "Camera Kit" },
-    });
+    dbMocks.assetKitFindMany.mockResolvedValue([
+      {
+        asset: { id: "asset-tripod", title: "Tripod" },
+        kit: { id: "kit-camera", name: "Camera Kit" },
+      },
+    ]);
 
     const { status, body } = await send("asset-tripod");
 

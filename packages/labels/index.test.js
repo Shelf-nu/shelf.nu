@@ -39,6 +39,7 @@ import {
   isAuditCompleted,
   kitMemberCustodyBlockedReason,
   kitMemberCustodyRefusal,
+  kitMembersCustodyRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -269,4 +270,23 @@ test("the kit-member custody reasons name the kit and give both ways out", () =>
     waysOut
   );
   assert.match(KIT_MEMBERS_CUSTODY_BLOCKED_REASON, waysOut);
+});
+
+test("the multi-member refusal counts the members and names the first three", () => {
+  const member = (assetTitle) => ({ assetTitle, kitName: "Camera Kit" });
+
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod")]),
+    kitMemberCustodyRefusal(member("Tripod"))
+  );
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod"), member("Gimbal")]),
+    '2 of the selected assets are part of a kit: "Tripod" and "Gimbal". Assign custody to the kit, or remove them from the kit first.'
+  );
+  assert.equal(
+    kitMembersCustodyRefusal(
+      ["Tripod", "Gimbal", "Mic", "Light", "Stand"].map(member)
+    ),
+    '5 of the selected assets are part of a kit: "Tripod", "Gimbal", "Mic" and 2 more. Assign custody to the kit, or remove them from the kit first.'
+  );
 });

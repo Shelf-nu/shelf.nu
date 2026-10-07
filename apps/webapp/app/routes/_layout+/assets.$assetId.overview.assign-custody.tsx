@@ -25,6 +25,7 @@ import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   assertNoKitDerivedCustody,
   assertNotKitMembers,
+  refuseKitMembers,
 } from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
@@ -145,8 +146,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     }
 
     // An individually tracked kit member takes custody through its kit, so the
-    // page refuses to open for one, with the same 400 the action gives.
-    await assertNotKitMembers(db, [assetId], organizationId);
+    // page refuses to open for one, with the same 400 the action gives. A plain
+    // read: opening a page must not lock the asset row.
+    await refuseKitMembers(db, [assetId], organizationId);
 
     const searchParams = getCurrentSearchParams(request);
 
@@ -325,6 +327,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
+        // Custody of an individually tracked kit member comes from its kit.
+        // First in the transaction, before the status claim below: the guard's
+        // row lock must be taken before this transaction writes the asset row,
+        // or it can deadlock with a concurrent "add to kit" (see
+        // `assertNotKitMembers`).
+        await assertNotKitMembers(tx, [assetId], organizationId);
+
         /**
          * Refuse to take custody of an asset that is checked out on a booking.
          *
@@ -376,11 +385,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: blocked ? 400 : 404,
           });
         }
-
-        // Custody of an individually tracked kit member comes from its kit.
-        // Read inside the transaction so the refusal rolls back the claim
-        // above.
-        await assertNotKitMembers(tx, [assetId], organizationId);
 
         // `kitCustodyId: null` — this assign owns only operator-assigned rows.
         // A row a kit put here belongs to the kit, and deleting it would leave

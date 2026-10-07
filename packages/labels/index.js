@@ -260,6 +260,34 @@ export function kitMemberCustodyRefusal({ assetTitle, kitName }) {
   return `"${assetTitle}" is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
 }
 
+/** How many kit members a refusal names before summarising the rest. */
+const KIT_MEMBERS_NAMED_IN_REFUSAL = 3;
+
+/**
+ * The server's refusal when an assign request names several kit members.
+ *
+ * A "select all" request can hold many, and the operator cannot see which from
+ * the menu, so the refusal gives the count and names the first few. One member
+ * reads exactly as {@link kitMemberCustodyRefusal}.
+ *
+ * @param {{ assetTitle: string; kitName: string }[]} members - at least one
+ * @returns {string}
+ */
+export function kitMembersCustodyRefusal(members) {
+  if (members.length === 1) return kitMemberCustodyRefusal(members[0]);
+
+  const named = members
+    .slice(0, KIT_MEMBERS_NAMED_IN_REFUSAL)
+    .map((m) => `"${m.assetTitle}"`);
+  const rest = members.length - named.length;
+  const list =
+    rest > 0
+      ? `${named.join(", ")} and ${rest} more`
+      : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+
+  return `${members.length} of the selected assets are part of a kit: ${list}. Assign custody to the kit, or remove them from the kit first.`;
+}
+
 // The reason a bulk "Assign custody" action is disabled when the selection
 // holds at least one kit member.
 export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =

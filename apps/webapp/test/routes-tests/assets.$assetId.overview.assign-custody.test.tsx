@@ -39,10 +39,13 @@ const dbMocks = vi.hoisted(() => {
     },
     assetKit: {
       // why: the loader and the action refuse an individually tracked kit
-      // member, and read its kit membership here. Defaults to null (in no
-      // kit) so every other case exercises the ordinary assignment path.
-      findFirst: vi.fn().mockResolvedValue(null),
+      // member, and read its kit membership here. Defaults to [] (in no kit)
+      // so every other case exercises the ordinary assignment path.
+      findMany: vi.fn().mockResolvedValue([]),
     },
+    // why: the client-level raw query, so the loader case can assert that
+    // opening the page takes no row lock.
+    queryRaw: vi.fn().mockResolvedValue([]),
     custody: {
       // why: action now clears stale custody before assignment
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -75,15 +78,15 @@ vi.mock("~/database/db.server", () => ({
       deleteMany: dbMocks.custody.deleteMany,
       findFirst: dbMocks.custody.findFirst,
     },
-    assetKit: { findFirst: dbMocks.assetKit.findFirst },
-    // why: the kit-member guard locks the asset row with a raw
-    // `SELECT ... FOR UPDATE` before reading its kit membership.
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    assetKit: { findMany: dbMocks.assetKit.findMany },
+    // why: the action's kit-member guard locks the asset row with a raw
+    // `SELECT ... FOR UPDATE`; the loader must never reach this one.
+    $queryRaw: dbMocks.queryRaw,
     // why: action wraps custody cleanup + assignment in a transaction
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
         $queryRaw: vi.fn().mockResolvedValue([]),
-        assetKit: { findFirst: dbMocks.assetKit.findFirst },
+        assetKit: { findMany: dbMocks.assetKit.findMany },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,
           findFirst: dbMocks.custody.findFirst,
@@ -209,8 +212,8 @@ beforeEach(() => {
   // — no kit custody — the same way the other mocks above are reset.
   dbMocks.custody.findFirst.mockReset();
   dbMocks.custody.findFirst.mockResolvedValue(null);
-  dbMocks.assetKit.findFirst.mockReset();
-  dbMocks.assetKit.findFirst.mockResolvedValue(null);
+  dbMocks.assetKit.findMany.mockReset();
+  dbMocks.assetKit.findMany.mockResolvedValue([]);
   dbMocks.custody.deleteMany.mockReset();
   dbMocks.custody.deleteMany.mockResolvedValue({ count: 0 });
   // The action reads the asset's `type` before the transaction and the same
@@ -912,7 +915,7 @@ describe("assign-custody: kit members", () => {
       custody: [],
       bookingAssets: [],
     } as any);
-    dbMocks.assetKit.findFirst.mockResolvedValue(TRIPOD_IN_CAMERA_KIT);
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
     // A picker to render, so the only thing standing between this request and
     // the modal is the kit-member guard.
     mockTeamMemberFindMany.mockResolvedValue([]);
@@ -925,24 +928,28 @@ describe("assign-custody: kit members", () => {
     const body = await (thrown as Response).json();
     expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
     expect(mockTeamMemberFindMany).not.toHaveBeenCalled();
+    // Opening a page reads membership without locking the asset row.
+    expect(dbMocks.queryRaw).not.toHaveBeenCalled();
   });
 
   it("refuses a direct POST for a kit member and writes nothing", async () => {
-    dbMocks.assetKit.findFirst.mockResolvedValue(TRIPOD_IN_CAMERA_KIT);
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
 
     const response = (await action(postCustodian())) as Response;
 
     expect(response.status).toBe(400);
     const body = await response.json();
     expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
-    // The guard runs inside the transaction, so its throw rolls back the
-    // status claim. What must never run is the custody row and the note.
+    // The guard runs first in the transaction, before the status claim: its
+    // row lock has to come before this transaction writes the asset, or it can
+    // deadlock with a concurrent "add to kit".
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
     expect(mockAssetUpdate).not.toHaveBeenCalled();
     expect(createNoteMock).not.toHaveBeenCalled();
   });
 
   it("still assigns an asset that is in no kit", async () => {
-    // `assetKit.findFirst` keeps its null default: the asset is in no kit.
+    // `assetKit.findMany` keeps its [] default: the asset is in no kit.
     const response = (await action(postCustodian())) as Response;
 
     expect(response.status).toBe(302);

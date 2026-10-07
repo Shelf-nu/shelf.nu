@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { AssetType, OrganizationRoles } from "@prisma/client";
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { db } from "~/database/db.server";
@@ -18,7 +19,7 @@ vitest.mock("~/database/db.server", () => ({
     // why: `assertNotKitMembers` reads kit membership through this delegate;
     // its suite answers it from a small in-memory table.
     assetKit: {
-      findFirst: vitest.fn().mockResolvedValue(null),
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: `assertNotKitMembers` locks the asset rows with a raw
     // `SELECT ... FOR UPDATE` before reading membership.
@@ -253,6 +254,14 @@ describe("assertNotKitMembers", () => {
       kitName: "Camera Kit",
     },
     {
+      assetId: "gimbal",
+      assetTitle: "Gimbal",
+      assetType: AssetType.INDIVIDUAL,
+      organizationId: "org-1",
+      kitId: "kit-video",
+      kitName: "Video Kit",
+    },
+    {
       assetId: "batteries",
       assetTitle: "Batteries",
       assetType: AssetType.QUANTITY_TRACKED,
@@ -279,26 +288,31 @@ describe("assertNotKitMembers", () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
-    vitest.mocked(db.assetKit.findFirst).mockImplementation((({
+    vitest.mocked(db.assetKit.findMany).mockImplementation((({
       where,
+      orderBy,
     }: {
       where: MembershipWhere;
-    }) => {
-      const row = MEMBERSHIPS.find(
-        (m) =>
-          (where.assetId?.in ?? []).includes(m.assetId) &&
-          m.organizationId === where.organizationId &&
-          (where.asset?.type === undefined || m.assetType === where.asset.type)
-      );
-      return Promise.resolve(
-        row
-          ? {
-              asset: { id: row.assetId, title: row.assetTitle },
-              kit: { id: row.kitId, name: row.kitName },
-            }
-          : null
-      );
-    }) as never);
+      orderBy?: { asset?: { title?: "asc" } };
+    }) =>
+      Promise.resolve(
+        MEMBERSHIPS.filter(
+          (m) =>
+            (where.assetId?.in ?? []).includes(m.assetId) &&
+            m.organizationId === where.organizationId &&
+            (where.asset?.type === undefined ||
+              m.assetType === where.asset.type)
+        )
+          .sort((x, y) =>
+            orderBy?.asset?.title === "asc"
+              ? x.assetTitle.localeCompare(y.assetTitle)
+              : 0
+          )
+          .map((row) => ({
+          asset: { id: row.assetId, title: row.assetTitle },
+          kit: { id: row.kitId, name: row.kitName },
+        }))
+      )) as never);
   });
 
   it("refuses an individually tracked kit member, naming the asset and its kit", async () => {
@@ -343,11 +357,21 @@ describe("assertNotKitMembers", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("counts every kit member in the request and names them", async () => {
+    // A "select all" can hold many members the menu could not flag. Naming
+    // only the first would send the operator through one retry per member.
+    await expect(
+      assertNotKitMembers(db, ["tripod", "gimbal", "drill"], "org-1")
+    ).rejects.toThrow(
+      '2 of the selected assets are part of a kit: "Gimbal" and "Tripod".'
+    );
+  });
+
   it("reads nothing for an empty list", async () => {
     await assertNotKitMembers(db, [], "org-1");
 
     expect(db.$queryRaw).not.toHaveBeenCalled();
-    expect(db.assetKit.findFirst).not.toHaveBeenCalled();
+    expect(db.assetKit.findMany).not.toHaveBeenCalled();
   });
 
   it("locks the asset rows in id order, in the caller's workspace, before reading membership", async () => {
@@ -358,16 +382,16 @@ describe("assertNotKitMembers", () => {
 
     const lock = vitest.mocked(db.$queryRaw).mock;
     expect(lock.calls).toHaveLength(1);
-    const [strings, ...values] = lock.calls[0] as unknown as [
-      TemplateStringsArray,
-      ...unknown[],
-    ];
-    const sql = strings.join("?").replace(/\s+/g, " ");
+    const query = lock.calls[0][0] as unknown as Prisma.Sql;
+    const sql = query.text.replace(/\s+/g, " ");
     expect(sql).toContain('FROM "Asset"');
     expect(sql).toContain('ORDER BY "id" FOR UPDATE');
-    expect(values).toContain("org-1");
+    // One array parameter, not one per id: a "select all" must stay under
+    // Postgres's bind-parameter limit.
+    expect(sql).toContain('"id" = ANY($1::text[])');
+    expect(query.values).toEqual([["drill", "saw"], "org-1"]);
     expect(lock.invocationCallOrder[0]).toBeLessThan(
-      vitest.mocked(db.assetKit.findFirst).mock.invocationCallOrder[0]
+      vitest.mocked(db.assetKit.findMany).mock.invocationCallOrder[0]
     );
   });
 });
