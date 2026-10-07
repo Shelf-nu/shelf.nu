@@ -19,19 +19,32 @@
  * operator switches flows without unmounting the fulfil scanner
  * cleanly, stale scans would bleed across sessions.
  *
+ * Clearing the atom on the way out is also what used to lose the
+ * operator's work, so the scanned codes are mirrored into a draft that
+ * outlives the page. The atom's lifecycle is unchanged: the draft sits
+ * beside it, scoped to this booking, and is read back on re-entry. See
+ * {@link file://./../utils/scan-draft.ts}.
+ *
  * @see {@link file://./../routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx}
- * @see {@link file://./../atoms/qr-scanner.ts} — see §A of the Phase
- *   3d-Polish plan for atom design rationale.
+ * @see {@link file://./../atoms/qr-scanner.ts}
  * @see {@link file://./use-booking-checkin-session-initialization.ts}
  */
 
-import { useEffect, useRef } from "react";
-import { useSetAtom } from "jotai";
+import { useEffect, useMemo, useRef } from "react";
+import { useAtomValue, useSetAtom, useStore } from "jotai";
+import { useLocation, useNavigation } from "react-router";
 import {
   type FulfilSessionInfo,
   endFulfilSessionAtom,
+  scannedItemsAtom,
   setFulfilSessionAtom,
 } from "~/atoms/qr-scanner";
+import {
+  clearScanDraft,
+  readScanDraft,
+  saveScanDraft,
+  scanDraftKey,
+} from "~/utils/scan-draft";
 
 /**
  * Arguments for {@link useBookingFulfilSessionInitialization}.
@@ -79,6 +92,17 @@ export function useBookingFulfilSessionInitialization(
 
   const setFulfilSession = useSetAtom(setFulfilSessionAtom);
   const endFulfilSession = useSetAtom(endFulfilSessionAtom);
+  const scannedItems = useAtomValue(scannedItemsAtom);
+  const setScannedItems = useSetAtom(scannedItemsAtom);
+  const store = useStore();
+
+  const navigation = useNavigation();
+  const location = useLocation();
+
+  const draftKey = useMemo(
+    () => scanDraftKey("fulfil", session.bookingId),
+    [session.bookingId]
+  );
 
   // Tracks which bookingId the session atom was last seeded for so we
   // don't redundantly dispatch `setFulfilSession` (which clears
@@ -96,7 +120,53 @@ export function useBookingFulfilSessionInitialization(
     }
     initializedBookingIdRef.current = session.bookingId;
     setFulfilSession(session);
-  }, [session, session.bookingId, setFulfilSession]);
+
+    // Restored entries carry no `data`, so each row resolves against the
+    // server again and a list parked overnight comes back current rather than
+    // describing the booking as it was.
+    const draft = readScanDraft(draftKey);
+    if (draft) {
+      setScannedItems(draft);
+    }
+  }, [session, session.bookingId, setFulfilSession, draftKey, setScannedItems]);
+
+  // Mirror the scan list into the draft as it changes, so leaving the page by
+  // any route — a tab closed, a reload, a phone asleep — keeps the work.
+  useEffect(() => {
+    if (initializedBookingIdRef.current !== session.bookingId) {
+      return;
+    }
+    // Read the list from the store rather than from this render. The seeding
+    // effect above writes the atom, so the render that schedules this one
+    // still closes over the PRE-seed list — the empty object the clear is
+    // about to produce, or whatever the last flow left behind. Saving that
+    // would wipe the draft the seed is restoring from, and React's
+    // development double-mount makes the loss permanent: the remount finds
+    // nothing left to restore. The store always holds the current list.
+    saveScanDraft(draftKey, store.get(scannedItemsAtom));
+  }, [scannedItems, draftKey, session.bookingId, store]);
+
+  // A submission that navigates away is one the action accepted: these scans
+  // have gone out, so the draft must not offer them again. A refused submit
+  // re-renders in place without a location change and keeps its draft, which
+  // is the case that most needs the list preserved.
+  useEffect(() => {
+    const submittedAway =
+      navigation.state === "loading" &&
+      navigation.formMethod?.toUpperCase() === "POST" &&
+      navigation.location !== undefined &&
+      navigation.location.pathname !== location.pathname;
+
+    if (submittedAway) {
+      clearScanDraft(draftKey);
+    }
+  }, [
+    navigation.state,
+    navigation.formMethod,
+    navigation.location,
+    location.pathname,
+    draftKey,
+  ]);
 
   // Effect 2: cleanup on unmount (or when the bookingId changes, in
   // case the same drawer instance is reused for a different booking).
