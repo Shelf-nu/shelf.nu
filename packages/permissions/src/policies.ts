@@ -219,6 +219,54 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       ownsWorkspace: false,
     },
   },
+  /**
+   * Runs bookings and custody for the whole workspace without administering
+   * it: the Administrator's booking and custody reach, none of its catalogue,
+   * settings, team or billing rights, and only the audits assigned to it.
+   */
+  CUSTODY_MANAGER: {
+    rank: 3,
+    workspaceOverride: null,
+    bookings: {
+      see: "all",
+      write: "all",
+      removableItemStatuses: OPEN_STATUSES,
+      manageItemsAfterDraft: true,
+      partialScanAsCustodian: false,
+      bypassTimeLimits: true,
+      explicitScanSetting: "admin",
+      deleteOnlyDrafts: false,
+      custodianPicker: "anyone",
+      showBulkActions: true,
+      documentsForOthers: true,
+    },
+    assets: { listScope: "all" },
+    custody: { see: "all", assign: "anyone" },
+    audits: { scope: "assigned", manageOthers: false },
+    notifications: {
+      orgBookingBroadcasts: true,
+      reservationAlertsAdmins: false,
+      manageBookingRecipients: true,
+      inventoryAlerts: false,
+      selectableAsRecipient: true,
+    },
+    ui: {
+      landing: "/bookings",
+      defaultAssetIndexMode: "ADVANCED",
+      advancedAssetIndex: true,
+    },
+    membership: {
+      // Equal to ADMIN: an Administrator changed to Custody Manager keeps the
+      // ownership columns (a creator reference, granting no access).
+      ownershipTier: 2,
+      changeRequiresOwner: false,
+      canReceiveTransfers: false,
+      eligibleAsNewOwner: false,
+      invitable: true,
+      ssoAssignable: true,
+      ownsWorkspace: false,
+    },
+  },
   SELF_SERVICE: {
     rank: 2,
     workspaceOverride: "selfService",

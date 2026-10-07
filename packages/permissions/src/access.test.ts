@@ -179,7 +179,7 @@ describe("rolesWhere", () => {
   test("returns roles in rank order for a policy predicate", () => {
     assert.deepEqual(
       rolesWhere((p) => p.notifications.orgBookingBroadcasts),
-      ["OWNER", "ADMIN"]
+      ["OWNER", "ADMIN", "CUSTODY_MANAGER"]
     );
   });
 });

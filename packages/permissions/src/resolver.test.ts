@@ -270,3 +270,72 @@ describe("roleHasPermission — reports entity", () => {
     }
   });
 });
+
+describe("CUSTODY_MANAGER matrix row", () => {
+  // The role holds no allow-all shortcut, so every answer comes from its row.
+  const can = (entity: string, action: string) =>
+    roleHasPermission({
+      roles: ["CUSTODY_MANAGER"],
+      entity: entity as PermissionEntity,
+      action: action as PermissionAction,
+    });
+
+  test("runs every booking", () => {
+    for (const action of [
+      "create",
+      "read",
+      "update",
+      "delete",
+      "checkout",
+      "checkin",
+      "archive",
+      "manage-assets",
+      "manage-kits",
+      "cancel",
+      "extend",
+      "export",
+    ]) {
+      assert.equal(can("booking", action), true, action);
+    }
+  });
+
+  test("assigns custody but does not edit the catalogue", () => {
+    assert.equal(can("asset", "custody"), true);
+    assert.equal(can("kit", "custody"), true);
+    for (const entity of ["asset", "kit"]) {
+      for (const action of ["create", "update", "delete", "import", "export"]) {
+        assert.equal(can(entity, action), false, `${entity}:${action}`);
+      }
+    }
+    for (const entity of ["category", "tag", "customField", "locationNote"]) {
+      assert.equal(can(entity, "read"), false, entity);
+    }
+    assert.equal(can("location", "read"), true);
+    assert.equal(can("location", "update"), false);
+  });
+
+  test("manages non-registered members but not the team", () => {
+    assert.equal(can("nonRegisteredMember", "create"), true);
+    assert.equal(can("nonRegisteredMember", "update"), true);
+    assert.equal(can("nonRegisteredMember", "delete"), false);
+    assert.equal(can("nonRegisteredMember", "import"), false);
+    assert.equal(can("teamMember", "read"), true);
+    for (const action of ["create", "update", "delete", "change-role"]) {
+      assert.equal(can("teamMember", action), false, action);
+    }
+  });
+
+  test("has no workspace, billing, reports or dashboard access", () => {
+    for (const entity of [
+      "workspace",
+      "generalSettings",
+      "subscription",
+      "emailSettings",
+      "reports",
+      "dashboard",
+      "teamMemberNote",
+    ]) {
+      assert.equal(can(entity, "read"), false, entity);
+    }
+  });
+});

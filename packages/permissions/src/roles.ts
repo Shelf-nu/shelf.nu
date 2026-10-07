@@ -16,6 +16,7 @@
 export const ORGANIZATION_ROLES = [
   "OWNER",
   "ADMIN",
+  "CUSTODY_MANAGER",
   "SELF_SERVICE",
   "BASE",
 ] as const;
@@ -27,6 +28,7 @@ export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 export const ROLE_LABELS: Record<OrganizationRole, string> = {
   OWNER: "Owner",
   ADMIN: "Administrator",
+  CUSTODY_MANAGER: "Custody manager",
   SELF_SERVICE: "Self service",
   BASE: "Base",
 };
