@@ -155,6 +155,7 @@ import {
   bookingMethodClause,
   bookingMethodMeta,
   narrowSelectedBookingAssetIds,
+  scannedRowPredicate,
   type BatchSliceId,
   type BookingMethodProvenance,
 } from "./checkout-method";
@@ -4123,24 +4124,18 @@ export async function fulfilModelRequestsAndCheckout({
           // One event per BookingAsset ROW (not deduped). For multi-row
           // qty-tracked, each event carries that row's own quantity in
           // `meta.quantity` (no-op for INDIVIDUAL).
-          // A row went through the scanner when the scan named it: an asset
-          // scanned directly (new to the booking, or already on it), a member
-          // of a scanned kit, or a row the scan claimed for a reservation.
-          // Rows the scan did not name go out with the batch unscanned, so
-          // their method is recorded as not said rather than as the batch's.
-          const scannedAssetIds = new Set([
-            ...assetIds,
-            ...kitSlices.map((slice) => slice.assetId),
-            ...addedAssetIds,
-            ...claimedAssetIds,
-          ]);
-          const scannedKitIds = new Set(kitIds);
-          const wasScanned = (row: {
-            asset: { id: string };
-            sourceKitId: string | null;
-          }) =>
-            scannedAssetIds.has(row.asset.id) ||
-            (row.sourceKitId !== null && scannedKitIds.has(row.sourceKitId));
+          // A row went through the scanner when the scan named that row: see
+          // `scannedRowPredicate` for how a quantity asset's sibling slices
+          // are told apart. Rows the scan did not name go out with the batch
+          // unscanned, so their method is recorded as not said rather than as
+          // the batch's.
+          const wasScanned = scannedRowPredicate({
+            assetIds,
+            kitSlices,
+            kitIds,
+            addedAssetIds,
+            claimedAssetIds,
+          });
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,

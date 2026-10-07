@@ -22,6 +22,7 @@ import {
   readBookingMethodMeta,
   resolveBookingMethod,
   resolveBookingMethodForSlices,
+  scannedRowPredicate,
 } from "./checkout-method";
 
 // @vitest-environment node
@@ -111,6 +112,81 @@ describe("narrowSelectedBookingAssetIds", () => {
   it("is empty without ticked slices", () => {
     expect(narrowSelectedBookingAssetIds(undefined, ["ba-1"])).toEqual([]);
     expect(narrowSelectedBookingAssetIds([], ["ba-1"])).toEqual([]);
+  });
+});
+
+describe("scannedRowPredicate", () => {
+  const noNames = {
+    assetIds: [],
+    kitSlices: [],
+    kitIds: [],
+    addedAssetIds: [],
+    claimedAssetIds: [],
+  };
+  const battery = { id: "batteries", type: "QUANTITY_TRACKED" as const };
+  const looseBatteries = {
+    asset: battery,
+    assetKitId: null,
+    sourceKitId: null,
+  };
+  const kitBatteries = {
+    asset: battery,
+    assetKitId: "ak-1",
+    sourceKitId: "kit-1",
+  };
+
+  it("marks only the kit slice when a kit scan adds a slice of an asset the booking already holds loose", () => {
+    // The batteries sit loose on the booking; scanning the kit adds its slice
+    // of the same asset. Only the kit slice went through the scanner.
+    const wasScanned = scannedRowPredicate({
+      ...noNames,
+      kitSlices: [{ assetId: "batteries", assetKitId: "ak-1" }],
+      kitIds: ["kit-1"],
+      addedAssetIds: ["batteries"],
+    });
+    expect(wasScanned(kitBatteries)).toBe(true);
+    expect(wasScanned(looseBatteries)).toBe(false);
+  });
+
+  it("marks only the standalone slice when the asset itself is scanned", () => {
+    const wasScanned = scannedRowPredicate({
+      ...noNames,
+      assetIds: ["batteries"],
+    });
+    expect(wasScanned(looseBatteries)).toBe(true);
+    expect(wasScanned(kitBatteries)).toBe(false);
+  });
+
+  it("marks a kit slice already on the booking when its kit label is scanned", () => {
+    // Members already booked: the scan adds no slice, the kit id names it.
+    const wasScanned = scannedRowPredicate({ ...noNames, kitIds: ["kit-1"] });
+    expect(wasScanned(kitBatteries)).toBe(true);
+    expect(wasScanned(looseBatteries)).toBe(false);
+  });
+
+  it("marks a claimed standalone row, which gained no row on this scan", () => {
+    const wasScanned = scannedRowPredicate({
+      ...noNames,
+      claimedAssetIds: ["batteries"],
+    });
+    expect(wasScanned(looseBatteries)).toBe(true);
+  });
+
+  it("names an INDIVIDUAL asset's one row however the scan named the asset", () => {
+    const camera = {
+      asset: { id: "camera", type: "INDIVIDUAL" as const },
+      assetKitId: null,
+      sourceKitId: null,
+    };
+    // A kit scan whose slice for the camera was dropped because the booking
+    // already holds it loose still went through the camera's row.
+    expect(
+      scannedRowPredicate({
+        ...noNames,
+        kitSlices: [{ assetId: "camera", assetKitId: "ak-cam" }],
+      })(camera)
+    ).toBe(true);
+    expect(scannedRowPredicate(noNames)(camera)).toBe(false);
   });
 });
 

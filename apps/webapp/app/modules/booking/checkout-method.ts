@@ -144,6 +144,75 @@ export function narrowSelectedBookingAssetIds(
   return [...new Set(selectedBookingAssetIds.filter((id) => inBatch.has(id)))];
 }
 
+/** What a scan named, as the fulfil scanner submits it and the scan helper reports it. */
+export type ScannedNames = {
+  /** Assets scanned directly; each lands on its standalone slice. */
+  assetIds: readonly string[];
+  /** Kit memberships the scan added, one per `AssetKit` row. */
+  kitSlices: readonly { assetId: string; assetKitId: string }[];
+  /** Kits whose label was scanned. */
+  kitIds: readonly string[];
+  /** Assets that gained a row on this scan. */
+  addedAssetIds: readonly string[];
+  /** Assets whose standalone row was already on the booking and answered a reservation. */
+  claimedAssetIds: readonly string[];
+};
+
+/** A booking slice, as far as telling whether a scan named it needs. */
+export type ScannedRow = {
+  asset: { id: string; type: "INDIVIDUAL" | "QUANTITY_TRACKED" };
+  /** The kit membership a kit-driven slice belongs to; `null` for a standalone slice. */
+  assetKitId: string | null;
+  /** The kit a kit-driven slice came from. */
+  sourceKitId: string | null;
+};
+
+/**
+ * Builds the test for "did this scan go through this booking row".
+ *
+ * An INDIVIDUAL asset is one unit with one row per booking, so naming the
+ * asset in any way names its row. A quantity-tracked asset can hold a
+ * standalone slice and kit slices on the same booking at once, so its rows are
+ * matched by slice: the standalone slice by a direct scan (or a claim of that
+ * row), a kit slice by its exact `AssetKit` membership or by its kit's label.
+ * Matching a quantity row by asset id would mark a sibling slice the scan
+ * never touched as scanned.
+ *
+ * @param names - What the scan submitted and what the scan helper reported
+ * @returns A predicate over the booking's rows after the scan
+ */
+export function scannedRowPredicate(
+  names: ScannedNames
+): (row: ScannedRow) => boolean {
+  const anyNamedAssetIds = new Set([
+    ...names.assetIds,
+    ...names.kitSlices.map((slice) => slice.assetId),
+    ...names.addedAssetIds,
+    ...names.claimedAssetIds,
+  ]);
+  const directlyScannedAssetIds = new Set([
+    ...names.assetIds,
+    ...names.claimedAssetIds,
+  ]);
+  const scannedAssetKitIds = new Set(
+    names.kitSlices.map((slice) => slice.assetKitId).filter(Boolean)
+  );
+  const scannedKitIds = new Set(names.kitIds);
+
+  return (row) => {
+    if (row.asset.type !== "QUANTITY_TRACKED") {
+      return anyNamedAssetIds.has(row.asset.id);
+    }
+    if (row.assetKitId === null) {
+      return directlyScannedAssetIds.has(row.asset.id);
+    }
+    return (
+      scannedAssetKitIds.has(row.assetKitId) ||
+      (row.sourceKitId !== null && scannedKitIds.has(row.sourceKitId))
+    );
+  };
+}
+
 /**
  * The `meta` keys an event carries for its method.
  *
