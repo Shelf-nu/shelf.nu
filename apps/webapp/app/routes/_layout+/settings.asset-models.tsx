@@ -37,11 +37,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
+    // The settings section manages the catalogue of models, so it asks for
+    // `update`, not `read`: roles that only read models (to pick one on an
+    // asset or a booking) must not reach this page.
     await requirePermission({
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
-      action: PermissionAction.read,
+      action: PermissionAction.update,
     });
 
     return payload(null);

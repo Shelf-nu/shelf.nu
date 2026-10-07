@@ -62,6 +62,14 @@ vi.mock("~/components/shared/date", () => ({
   ),
 }));
 
+// why: the component reads the viewer's roles from the layout loader to decide
+// which note controls to offer; each test picks the role, and the real
+// permission matrix answers for it.
+const viewer = vi.hoisted(() => ({ roles: ["ADMIN"] as string[] }));
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => viewer.roles,
+}));
+
 // why: avoiding Remix loader context requirements for user data hook
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: vi.fn(() => ({
@@ -146,6 +154,7 @@ function renderNotes() {
 describe("Notes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    viewer.roles = ["ADMIN"];
     useLoaderDataMock.mockReturnValue(makeLoaderData());
     // why: restore the idle fetcher each test — mock return values survive
     // clearAllMocks, so a submitting override would otherwise persist.
@@ -274,5 +283,59 @@ describe("Notes", () => {
     expect(screen.queryByText("Optimistic comment")).not.toBeInTheDocument();
     // the searched view has no matching notes, so the empty-filter state shows
     expect(screen.getByText("No matching activity")).toBeInTheDocument();
+  });
+});
+
+/** Two comment notes: one by the viewer, one by someone else. */
+const OWN_AND_OTHER_NOTES = makeLoaderData({
+  items: [
+    {
+      id: "note-own",
+      content: "Mine",
+      type: "COMMENT",
+      createdAt: new Date(),
+      userId: "user-carlos",
+      user: { firstName: "Carlos", lastName: "Virreira" },
+    },
+    {
+      id: "note-other",
+      content: "Someone else's",
+      type: "COMMENT",
+      createdAt: new Date(),
+      userId: "user-other",
+      user: { firstName: "Ana", lastName: "Lopez" },
+    },
+  ],
+  totalItems: 2,
+});
+
+describe("Notes: controls follow the viewer's note permissions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useFetcherMock.mockReturnValue(idleFetcher);
+    useLoaderDataMock.mockReturnValue(OWN_AND_OTHER_NOTES);
+  });
+
+  it("offers a Custody manager the new-note form and the menu on their own note", () => {
+    viewer.roles = ["CUSTODY_MANAGER"];
+    const { container } = renderNotes();
+
+    expect(screen.getByTestId("new-note-form")).toBeInTheDocument();
+    expect(container.querySelectorAll('[aria-haspopup="menu"]')).toHaveLength(
+      1
+    );
+    const ownNote = screen.getByText("Mine").closest("li");
+    expect(ownNote?.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
+  });
+
+  it("offers neither to a role without note:create or note:delete", () => {
+    // Self service holds no note permissions in the matrix.
+    viewer.roles = ["SELF_SERVICE"];
+    const { container } = renderNotes();
+
+    expect(screen.queryByTestId("new-note-form")).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[aria-haspopup="menu"]')).toHaveLength(
+      0
+    );
   });
 });
