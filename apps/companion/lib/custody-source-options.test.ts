@@ -10,17 +10,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ALL_SOURCES,
   UNPLACED_SOURCE,
   UNRECORDED_SOURCE,
   assignSourceOptions,
   assignSourceRequestValue,
   checkoutSourceAnswers,
   checkoutSourceOptions,
-  defaultAssignSource,
+  defaultAssignSourceOption,
   defaultCheckoutSource,
   describeHolderSources,
-  questionsForAssets,
+  questionsForCheckouts,
+  releaseAsksForSource,
   releaseSourceOptions,
+  releaseSourceQuantity,
   releaseSourceRequestValue,
   sourceHint,
 } from "./custody-source-options";
@@ -69,10 +72,10 @@ test("defaultAssignSource picks the location with the most left, never Unplaced"
     placed: 20,
     left: 20,
   });
-  assert.equal(defaultAssignSource([booth, studio, unplaced]), studio);
+  assert.equal(defaultAssignSourceOption([booth, studio, unplaced]), studio);
   // Ties go to the earlier location.
   const tie = option({ value: "tie", label: "Tie", placed: 10, left: 10 });
-  assert.equal(defaultAssignSource([tie, studio]), tie);
+  assert.equal(defaultAssignSourceOption([tie, studio]), tie);
 });
 
 test("defaultAssignSource falls back to Unplaced only when every location is empty", () => {
@@ -89,9 +92,9 @@ test("defaultAssignSource falls back to Unplaced only when every location is emp
     placed: 3,
     left: 3,
   });
-  assert.equal(defaultAssignSource([empty, unplaced]), unplaced);
-  assert.equal(defaultAssignSource([empty]), empty);
-  assert.equal(defaultAssignSource([]), null);
+  assert.equal(defaultAssignSourceOption([empty, unplaced]), unplaced);
+  assert.equal(defaultAssignSourceOption([empty]), empty);
+  assert.equal(defaultAssignSourceOption([]), null);
 });
 
 test("assign rows carry the hint and Unplaced becomes null on the wire", () => {
@@ -131,30 +134,53 @@ test("describeHolderSources names each source", () => {
       { locationId: null, unrecorded: false, name: null, quantity: 3 },
       { locationId: null, unrecorded: true, name: null, quantity: 4 },
     ]),
-    "3 unplaced · 4 (location not recorded)"
+    "3 unplaced · 4 location not recorded"
+  );
+  // One source reads like the web row: no count, the holder's total says it.
+  assert.equal(
+    describeHolderSources([
+      { locationId: "b", unrecorded: false, name: "Studio", quantity: 3 },
+    ]),
+    "from Studio"
   );
 });
 
-test("release rows map back to what the endpoint accepts", () => {
-  const rows = releaseSourceOptions(
-    [
-      { locationId: "a", unrecorded: false, name: "Camera Room", quantity: 2 },
-      { locationId: null, unrecorded: false, name: null, quantity: 1 },
-      { locationId: null, unrecorded: true, name: null, quantity: 4 },
-    ],
-    "pcs"
-  );
+const HOLDER_SOURCES = [
+  { locationId: "a", unrecorded: false, name: "Camera Room", quantity: 2 },
+  { locationId: null, unrecorded: false, name: null, quantity: 1 },
+  { locationId: null, unrecorded: true, name: null, quantity: 4 },
+];
+
+test("release rows start with All sources, then map back to what the endpoint accepts", () => {
+  const rows = releaseSourceOptions(HOLDER_SOURCES, "pcs");
   assert.deepEqual(
     rows.map((row) => [row.value, row.label, row.hint]),
     [
+      [ALL_SOURCES, "All sources", "7 pcs"],
       ["a", "Camera Room", "2 pcs"],
       [UNPLACED_SOURCE, "Unplaced", "1 pcs"],
       [UNRECORDED_SOURCE, "Location not recorded", "4 pcs"],
     ]
   );
+  // All sources sends no locationId: the server drains the whole hold.
+  assert.equal(releaseSourceRequestValue(ALL_SOURCES), undefined);
   assert.equal(releaseSourceRequestValue("a"), "a");
   assert.equal(releaseSourceRequestValue(UNPLACED_SOURCE), null);
   assert.equal(releaseSourceRequestValue(UNRECORDED_SOURCE), "unrecorded");
+});
+
+test("a release asks for a source only with two or more", () => {
+  assert.equal(releaseAsksForSource(undefined), false);
+  assert.equal(releaseAsksForSource([HOLDER_SOURCES[0]]), false);
+  assert.equal(releaseAsksForSource(HOLDER_SOURCES), true);
+});
+
+test("a release row caps at what it can give back", () => {
+  assert.equal(releaseSourceQuantity(HOLDER_SOURCES, ALL_SOURCES), 7);
+  assert.equal(releaseSourceQuantity(HOLDER_SOURCES, "a"), 2);
+  assert.equal(releaseSourceQuantity(HOLDER_SOURCES, UNRECORDED_SOURCE), 4);
+  // A row a refetch dropped caps at nothing, so the caller falls back.
+  assert.equal(releaseSourceQuantity(HOLDER_SOURCES, "gone"), null);
 });
 
 function question(
@@ -235,9 +261,58 @@ test("check-out answers carry only the rows the operator changed, Unplaced as nu
   assert.deepEqual(checkoutSourceAnswers({ "slice-1": "stu" }, []), {});
 });
 
-test("questionsForAssets keeps only the pools in the selection", () => {
+test("questionsForCheckouts asks only about pools in the check-out", () => {
   const q1 = question();
   const q2 = question({ sliceId: "slice-2", assetId: "asset-2" });
-  assert.deepEqual(questionsForAssets([q1, q2], ["asset-2"]), [q2]);
-  assert.deepEqual(questionsForAssets(undefined, ["asset-2"]), []);
+  assert.deepEqual(
+    questionsForCheckouts([q1, q2], [{ assetId: "asset-2", quantity: 10 }]),
+    [q2]
+  );
+  assert.deepEqual(questionsForCheckouts(undefined, [{ assetId: "x" }]), []);
+});
+
+test("questionsForCheckouts carries the units leaving from the slice", () => {
+  const q = question({ quantity: 10 });
+  // Fewer than the slice holds: the sheet says 3, not 10.
+  assert.equal(
+    questionsForCheckouts([q], [{ assetId: "asset-1", quantity: 3 }])[0]
+      .quantity,
+    3
+  );
+  // More than the slice holds (the rest fills kit slices): capped at the slice.
+  assert.equal(
+    questionsForCheckouts([q], [{ assetId: "asset-1", quantity: 25 }])[0]
+      .quantity,
+    10
+  );
+  // A bare id sends everything still to go out.
+  assert.equal(
+    questionsForCheckouts([q], [{ assetId: "asset-1" }])[0].quantity,
+    10
+  );
+});
+
+test("questionsForCheckouts skips a slice the claim does not reach", () => {
+  const q = question();
+  // Tagged with a kit slice: the standalone slice is not going out.
+  assert.deepEqual(
+    questionsForCheckouts(
+      [q],
+      [{ assetId: "asset-1", bookingAssetId: "kit-slice", quantity: 4 }]
+    ),
+    []
+  );
+  // Tagged with the question's own slice: asked.
+  assert.equal(
+    questionsForCheckouts(
+      [q],
+      [{ assetId: "asset-1", bookingAssetId: "slice-1", quantity: 4 }]
+    )[0].quantity,
+    4
+  );
+  // Zero units leave: nothing to ask.
+  assert.deepEqual(
+    questionsForCheckouts([q], [{ assetId: "asset-1", quantity: 0 }]),
+    []
+  );
 });

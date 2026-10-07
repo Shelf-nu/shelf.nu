@@ -127,13 +127,21 @@ export const bookingsApi = {
     bookingId: string,
     assetIds: string[],
     kitIds: string[] = [],
-    timeZone?: string
+    timeZone?: string,
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          assetIds,
+          kitIds,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 

@@ -25,7 +25,7 @@ import {
   viewerCanSeeLegacyCustody,
 } from "~/modules/api/mobile-custody-visibility.server";
 import { buildCustodySourceEntries } from "~/modules/asset/custody-source";
-import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { CURRENT_BOOKING_SLICE_FILTER } from "~/modules/asset/fields";
 import { serializeImageExpiration } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
@@ -345,10 +345,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
      * for a pool placed at two or more locations, and `options` then lists
      * each location (and "Unplaced" when units are unplaced) with what it has
      * left. The app shows a "From location" picker from it; an older build
-     * ignores the field and the server records no source, as before.
+     * ignores the field and the server records no source.
+     *
+     * Not gated on custody permissions: the holder rows' source line reads
+     * `multiSource` for every viewer. The options read skips the pool-wide
+     * availability, which this loader already derives from the quantity rows.
      */
     let custodySources: Awaited<
-      ReturnType<typeof getCustodySourceSummary>
+      ReturnType<typeof getCustodySourceOptions>
     > | null = null;
     if (isQuantityTracked(asset)) {
       const [rows, sources] = await Promise.all([
@@ -356,7 +360,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
           assetId,
           organizationId,
         }),
-        getCustodySourceSummary({
+        getCustodySourceOptions({
           assetId,
           organizationId,
           total: asset.quantity ?? 0,
@@ -596,12 +600,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         quantityBreakdown,
         // Where the pool's units can be taken from (additive, see above).
         // Null for INDIVIDUAL assets.
-        custodySources: custodySources
-          ? {
-              multiSource: custodySources.multiSource,
-              options: custodySources.options,
-            }
-          : null,
+        custodySources,
         // Reshaped from the widened select above so the companion keeps
         // reading `asset.organization.currency` and nothing else.
         organization: { currency: detailOrganization.currency },

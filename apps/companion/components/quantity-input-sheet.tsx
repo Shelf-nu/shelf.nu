@@ -24,7 +24,7 @@
  * @see {@link file://../app/(tabs)/bookings/add-assets.tsx} the reserve-model consumer
  * @see {@link file://./team-member-picker.tsx} the modal contract this mirrors
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -87,6 +87,12 @@ type Props = {
     value: string;
     onChange: (value: string) => void;
   };
+  /**
+   * Optional explanation shown under the source picker, e.g. why the cap is
+   * 0 ("Nothing left at Studio. Pick another location."). Purely
+   * informational: the picker stays usable so the operator can switch rows.
+   */
+  notice?: string;
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -135,6 +141,7 @@ export function QuantityInputSheet({
   unitOfMeasure,
   secondary,
   source,
+  notice,
   confirmLabel,
   destructive,
   isSubmitting = false,
@@ -148,18 +155,19 @@ export function QuantityInputSheet({
   const [secondaryValue, setSecondaryValue] = useState("0");
   const inputRef = useRef<TextInput>(null);
 
-  // The secondary field's presence and seed are read out as primitives so the
-  // re-seed effect below can depend on THEM rather than on the `secondary`
-  // object. Callers build that object inline, giving it a fresh identity on
-  // every parent render — as a dependency it would turn "re-seed on open" into
-  // "re-seed on every parent render", silently discarding a split the operator
-  // had already typed.
   const hasSecondaryField = secondary != null;
-  const secondaryDefaultValue = secondary?.defaultValue;
 
-  // Re-seed the inputs every time the sheet opens: each open targets a fresh
-  // action (different member/holder), so stale values must not leak across.
-  useEffect(() => {
+  // The inputs are seeded on the closed-to-open transition only. Each open
+  // targets a fresh action (a different member or holder), so stale values
+  // must not leak across opens. While the sheet is open, `max` follows the
+  // picked source and background refetches, and neither may wipe what the
+  // operator typed. Both transitions are detected during render (React's
+  // "adjust state when a prop changes" pattern), so no effect writes state.
+  const [seededOpen, setSeededOpen] = useState(false);
+  const [seenMax, setSeenMax] = useState(max);
+  if (visible !== seededOpen) {
+    setSeededOpen(visible);
+    setSeenMax(max);
     if (visible) {
       const seed = Math.min(
         Math.max(defaultValue ?? min, min),
@@ -167,21 +175,24 @@ export function QuantityInputSheet({
       );
       setValue(String(seed));
       if (hasSecondaryField) {
-        // Clamp the secondary seed to the primary seed — the two fields move
-        // together and the secondary can never exceed the units being released.
+        // The secondary seed is clamped to the primary seed: the two fields
+        // move together and the secondary never exceeds the units released.
         setSecondaryValue(
-          String(Math.min(Math.max(secondaryDefaultValue ?? 0, 0), seed))
+          String(Math.min(Math.max(secondary?.defaultValue ?? 0, 0), seed))
         );
       }
     }
-  }, [
-    visible,
-    defaultValue,
-    max,
-    min,
-    hasSecondaryField,
-    secondaryDefaultValue,
-  ]);
+  } else if (visible && max !== seenMax) {
+    // `max` moved while open: keep the typed value, pulled down to the new
+    // cap when it is now above it. A raised cap leaves the value alone.
+    setSeenMax(max);
+    const cap = Math.max(max, min);
+    const typed = value ? parseInt(value, 10) : NaN;
+    if (Number.isFinite(typed) && typed > cap) {
+      setValue(String(cap));
+      clampSecondaryTo(cap);
+    }
+  }
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
@@ -212,7 +223,7 @@ export function QuantityInputSheet({
    * used-up count keeps it when they raise the primary again. The webapp's
    * counterpart already does this in its reducer.
    */
-  const clampSecondaryTo = (nextPrimary: number) => {
+  function clampSecondaryTo(nextPrimary: number) {
     if (!hasSecondaryField) return;
     setSecondaryValue((prev) => {
       const prevParsed = prev ? parseInt(prev, 10) : NaN;
@@ -220,7 +231,7 @@ export function QuantityInputSheet({
         return prev;
       return String(nextPrimary);
     });
-  };
+  }
 
   /** Step the current value by `delta`, clamped to [min, max]. */
   const step = (delta: number) => {
@@ -319,6 +330,12 @@ export function QuantityInputSheet({
             </View>
           ) : null}
 
+          {notice ? (
+            <Text style={styles.notice} accessibilityLiveRegion="polite">
+              {notice}
+            </Text>
+          ) : null}
+
           {/* Quantity row: [-] [input] [+] */}
           <View style={styles.quantityRow}>
             <TouchableOpacity
@@ -377,8 +394,9 @@ export function QuantityInputSheet({
             </TouchableOpacity>
           </View>
 
-          {/* Echo / bounds hint under the input */}
-          {overMax ? (
+          {/* Echo / bounds hint under the input. A notice already explains
+              an empty source, so the over-cap line would repeat it. */}
+          {overMax && notice ? null : overMax ? (
             <Text style={styles.errorHint}>Only {maxLabel} available.</Text>
           ) : underMin ? (
             <Text style={styles.errorHint}>At least {minLabel}.</Text>
@@ -515,6 +533,15 @@ const useStyles = createStyles((colors, shadows) => ({
   sourceRowHint: {
     fontSize: fontSize.sm,
     color: colors.muted,
+  },
+  notice: {
+    fontSize: fontSize.sm,
+    color: colors.warningText,
+    backgroundColor: colors.warningBg,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    overflow: "hidden",
   },
   quantityRow: {
     flexDirection: "row",

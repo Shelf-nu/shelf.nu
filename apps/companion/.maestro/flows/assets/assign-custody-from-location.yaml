@@ -2,7 +2,7 @@
 # more locations (PR: feat/companion-custody-source-location).
 #
 # Precondition: app foregrounded with a signed-in session (qa-admin1 /
-# GRANULAR WORKSPACE) — the no-login pattern, so NO launchApp/clearState.
+# GRANULAR WORKSPACE): the no-login pattern, so NO launchApp/clearState.
 # Test asset: a QUANTITY_TRACKED asset placed at TWO locations with units
 # left at both, named by POOL_TITLE (default "ZZQ phone spanner"), e.g.
 # 2 at "Camera Room" + 2 at "Studio". The flow takes 1 unit from
@@ -23,7 +23,7 @@ env:
 - extendedWaitUntil:
     visible: ".*${POOL_TITLE}.*"
     timeout: 10000
-# First tap may be consumed dismissing the keyboard — tap twice, second optional.
+# First tap may be consumed dismissing the keyboard, so tap twice, second optional.
 - tapOn: ".*${POOL_TITLE}.*"
 - tapOn:
     text: ".*${POOL_TITLE}.*"

@@ -21,30 +21,28 @@
  * @see {@link file://./placement-reconcile.server.ts}
  */
 
-/**
- * Form value the web pickers post for "the unplaced units". Form parsing
- * drops empty strings, so the web cannot post `""`; JSON clients may send
- * `null` or `""` instead. See {@link isUnplacedSource}. Location ids are
- * cuids, so this word can never be mistaken for one.
- */
-export const UNPLACED_SOURCE = "unplaced";
+import type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
+import { isUnplacedSource, UNPLACED_SOURCE } from "@shelf/quantity-control";
 
-/**
- * Release-line value for custody whose source was never recorded. Like
- * {@link UNPLACED_SOURCE} it can never be mistaken for a location id.
- */
-export const UNRECORDED_SOURCE = "unrecorded";
-
-/**
- * Whether a submitted source names the unplaced units: `null`, `""` or
- * {@link UNPLACED_SOURCE}. `undefined` is NOT one of them: it means the
- * caller did not say.
- */
-export function isUnplacedSource(
-  value: string | null | undefined
-): value is null | "" | typeof UNPLACED_SOURCE {
-  return value === null || value === "" || value === UNPLACED_SOURCE;
-}
+// The picker values, the option shape, the dialog defaults and the source
+// entry shape are shared with the companion app so both pre-select the same
+// location. They live in @shelf/quantity-control and are re-exported here so
+// webapp call sites keep importing from this module.
+export {
+  UNPLACED_SOURCE,
+  UNRECORDED_SOURCE,
+  custodySourceKey,
+  defaultAssignSourceOption,
+  defaultSourceOption,
+  isUnplacedSource,
+} from "@shelf/quantity-control";
+export type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
 
 /** One manual placement of a pool. */
 export type SourcePlacement = {
@@ -59,17 +57,6 @@ export type SourceCustodyRow = {
   sourceUnknown: boolean;
   quantity: number;
 };
-
-/**
- * The value a release line names a custody row's source by: its location id,
- * {@link UNPLACED_SOURCE}, or {@link UNRECORDED_SOURCE}.
- */
-export function custodySourceKey(
-  row: Pick<SourceCustodyRow, "locationId" | "sourceUnknown">
-): string {
-  if (row.locationId !== null) return row.locationId;
-  return row.sourceUnknown ? UNRECORDED_SOURCE : UNPLACED_SOURCE;
-}
 
 /**
  * Units of a pool still out on an ONGOING or OVERDUE booking, having left
@@ -251,24 +238,6 @@ export type SourceLocationLabel = {
   parentName?: string | null;
 };
 
-/** One choice in a "From location" / "At location" dropdown. */
-export type CustodySourceOption = {
-  /** The form value: a location id, or {@link UNPLACED_SOURCE}. */
-  value: string;
-  /** NULL for the unplaced units. */
-  locationId: string | null;
-  /** "Camera Room", "Shelf A (Warehouse)" or "Unplaced". */
-  label: string;
-  /** Plain count placed there (or unplaced). */
-  placed: number;
-  /** Units in operator custody taken from there. */
-  inCustody: number;
-  /** Units out on a booking that left from there. */
-  onBooking: number;
-  /** {@link unitsLeftAtSource} for this option. */
-  left: number;
-};
-
 /**
  * Builds the dropdown choices for a pool: one per manual placement, in
  * placement order, then "Unplaced" when the pool has unplaced units.
@@ -340,45 +309,6 @@ export type CustodySourceSummary = {
    */
   poolAvailable: number;
 };
-
-/**
- * The option a dialog opens with: the LOCATION with the most units left.
- * "Unplaced" is never the default, even when it has more left; the operator
- * picks it on purpose. Ties go to the earlier location, so the choice is
- * stable between renders. NULL only when there is no location option.
- */
-export function defaultSourceOption(
-  options: CustodySourceOption[]
-): CustodySourceOption | null {
-  let best: CustodySourceOption | null = null;
-  for (const option of options) {
-    if (option.locationId === null) continue;
-    if (!best || option.left > best.left) best = option;
-  }
-  return best;
-}
-
-/**
- * The option an ASSIGN opens with. Same as {@link defaultSourceOption} while
- * some location has units left. When none does, it is "Unplaced" if the
- * unplaced units have some left: pre-selecting a location with nothing left
- * would refuse an assignment the pool can give. Falls back to the location
- * default when nothing has units left anywhere.
- *
- * Adjust keeps {@link defaultSourceOption}: a restock lands at a location,
- * and units left says nothing about where stock arrives.
- *
- * @param options - The pool's {@link buildCustodySourceOptions}
- * @returns The option to pre-select, NULL when there is no location option
- */
-export function defaultAssignSourceOption(
-  options: CustodySourceOption[]
-): CustodySourceOption | null {
-  const location = defaultSourceOption(options);
-  if (location && location.left > 0) return location;
-  const unplaced = options.find((option) => option.locationId === null);
-  return unplaced && unplaced.left > 0 ? unplaced : location;
-}
 
 /* -------------------------------------------------------------------------- */
 /*                                 Resolution                                 */
@@ -676,18 +606,6 @@ export function planCustodyRehome({
 /* -------------------------------------------------------------------------- */
 /*                                 API shape                                  */
 /* -------------------------------------------------------------------------- */
-
-/** One source of a holder's units, as the mobile API reports it. */
-export type CustodySourceEntry = {
-  /** NULL: the unplaced units, or (with `unrecorded`) a source never recorded. */
-  locationId: string | null;
-  /** True when the source was never recorded; always false with a location. */
-  unrecorded: boolean;
-  /** The location's name; null with `locationId`. */
-  name: string | null;
-  /** Units the holder took from this source. */
-  quantity: number;
-};
 
 /**
  * A holder's operator rows as per-source entries, one per source location,

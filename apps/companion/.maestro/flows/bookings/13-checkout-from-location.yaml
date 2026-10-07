@@ -2,7 +2,7 @@
 # kept at two or more locations (PR: feat/companion-custody-source-location).
 #
 # Precondition: app foregrounded with a signed-in session (qa-admin1 /
-# GRANULAR WORKSPACE) — the no-login pattern, so NO launchApp/clearState.
+# GRANULAR WORKSPACE): the no-login pattern, so NO launchApp/clearState.
 # Test data: a RESERVED booking named BOOKING_NAME holding a QUANTITY_TRACKED
 # asset placed at TWO locations (one of them SOURCE_LOCATION) with enough left
 # at both. The flow checks the booking out from SOURCE_LOCATION and expects the

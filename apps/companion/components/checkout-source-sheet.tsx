@@ -1,5 +1,5 @@
 /**
- * CheckoutSourceSheet — "Where do the units come from?" at booking check-out.
+ * CheckoutSourceSheet: "Where do the units come from?" at booking check-out.
  *
  * Mobile twin of the web's check-out source dialog: for every pool on the
  * booking that is kept at two or more locations and has not gone out yet, one
@@ -13,7 +13,8 @@
  * request with it open and closes it once the server accepts, so a refusal
  * keeps every answer on screen.
  *
- * @see {@link file://../app/(tabs)/bookings/[id].tsx} the consumer
+ * @see {@link file://../app/(tabs)/bookings/[id].tsx} booking detail check-out
+ * @see {@link file://../app/(tabs)/scanner.tsx} Scan tab check-out and fulfil
  * @see {@link file://../lib/custody-source-options.ts} the rows and defaults
  */
 import { useEffect, useState } from "react";

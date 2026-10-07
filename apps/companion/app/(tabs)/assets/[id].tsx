@@ -46,10 +46,13 @@ import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import { custodyAssignCap } from "@/lib/custody-scan-quantities";
 import {
   assignSourceOptions,
+  ALL_SOURCES,
   assignSourceRequestValue,
-  defaultAssignSource,
+  defaultAssignSourceOption,
   describeHolderSources,
+  releaseAsksForSource,
   releaseSourceOptions,
+  releaseSourceQuantity,
   releaseSourceRequestValue,
   releaseSourceValue,
 } from "@/lib/custody-source-options";
@@ -106,7 +109,7 @@ export default function AssetDetailScreen() {
   // Asset data
   const {
     asset,
-    setAsset: _setAsset,
+    setAsset,
     isLoading,
     isRefreshing,
     error,
@@ -132,6 +135,38 @@ export default function AssetDetailScreen() {
     refresh: fetchAsset,
     setSubmitting: setIsActionLoading,
   });
+
+  /**
+   * Assigns units from the quantity sheet. When the server refuses (most
+   * often because the picked source's numbers moved since the asset was
+   * loaded), the asset is reloaded so the picker's counts and default
+   * refresh while the sheet stays open with the entered quantity. The
+   * reload only replaces the asset on success: a failed reload keeps the
+   * screen as it is instead of swapping it for an error state.
+   *
+   * @param member - The team member receiving the units
+   * @param quantity - Units to assign
+   * @param locationId - The source to take them from (see `performAssignQuantity`)
+   */
+  const assignQuantityFromSheet = async (
+    member: TeamMember,
+    quantity: number,
+    locationId?: string | null
+  ) => {
+    let accepted = false;
+    await performAssignQuantity(
+      member,
+      quantity,
+      () => {
+        accepted = true;
+        setAssignQtyMember(null);
+      },
+      locationId
+    );
+    if (accepted || !currentOrg) return;
+    const { data } = await api.asset(id, currentOrg.id);
+    if (data) setAsset(data.asset);
+  };
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -200,7 +235,7 @@ export default function AssetDetailScreen() {
   } | null>(null);
   // The row the assign sheet opens on: the location with the most left.
   const defaultAssignValue = sourceSummary
-    ? defaultAssignSource(sourceSummary.options)?.value ?? null
+    ? defaultAssignSourceOption(sourceSummary.options)?.value ?? null
     : null;
   // A pick counts only while its row still exists: a refetch can drop the
   // row it named (a location cleared, a source released in full).
@@ -215,22 +250,20 @@ export default function AssetDetailScreen() {
       : null;
   // Release goes by the HOLDER's sources, not the pool's current placements:
   // custody recorded from two locations stays releasable per source even
-  // after the pool was moved to one location.
-  const releaseSources =
-    releaseQtyEntry?.sources && releaseQtyEntry.sources.length > 0
-      ? releaseQtyEntry.sources
-      : null;
-  const releaseDefaultValue = releaseSources
-    ? releaseSourceValue(releaseSources[0])
+  // after the pool was moved to one location. Only a holder with two or
+  // more sources is asked; the picker opens on "All sources", their whole
+  // hold. With 0 or 1 sources there is nothing to choose.
+  const releaseSources = releaseAsksForSource(releaseQtyEntry?.sources)
+    ? releaseQtyEntry?.sources ?? null
     : null;
+  // A pick counts only while its row still exists; otherwise the release
+  // falls back to all sources.
   const releaseSource =
     releaseQtyEntry && releaseSources
       ? releasePick?.custodianId === releaseQtyEntry.custodian.id &&
-        releaseSources.some(
-          (entry) => releaseSourceValue(entry) === releasePick.value
-        )
+        releaseSourceQuantity(releaseSources, releasePick.value) !== null
         ? releasePick.value
-        : releaseDefaultValue
+        : ALL_SOURCES
       : null;
 
   // Notes
@@ -533,6 +566,16 @@ export default function AssetDetailScreen() {
   const assignSheetMax = selectedAssignOption
     ? Math.min(assignMax, Math.max(0, selectedAssignOption.left))
     : assignMax;
+  // Why the cap is 0 when the picked source has nothing left. The server
+  // enforces the per-source cap, so the operator has to pick another row.
+  const assignSourceNotice =
+    selectedAssignOption && selectedAssignOption.left <= 0 && sourceSummary
+      ? !sourceSummary.options.some((option) => option.left > 0)
+        ? "No units are left at any location."
+        : selectedAssignOption.locationId === null
+        ? "No unplaced units are left. Pick a location."
+        : `Nothing left at ${selectedAssignOption.label}. Pick another location.`
+      : undefined;
   const assignSourceProp =
     multiSource && sourceSummary && assignSource != null
       ? {
@@ -549,20 +592,28 @@ export default function AssetDetailScreen() {
           },
         }
       : undefined;
-  // The release sheet's picker and cap: one row per source the holder took
-  // units from, shown only when there are two or more. The cap is what that
-  // source holds.
-  const selectedReleaseEntry =
+  // The release sheet's picker and cap: "All sources" plus one row per
+  // source the holder took units from, shown only when there are two or
+  // more. The cap is what the picked row holds (the whole hold for "All
+  // sources"), never above the releasable units.
+  const pickedReleaseQuantity =
     releaseSources && releaseSource != null
+      ? releaseSourceQuantity(releaseSources, releaseSource)
+      : null;
+  const releaseSheetMax =
+    pickedReleaseQuantity !== null
+      ? Math.min(releaseMax, pickedReleaseQuantity)
+      : releaseMax;
+  // The specific source picked, for the "goes back to" note. Null for "All
+  // sources", which can return units to several places.
+  const selectedReleaseEntry =
+    releaseSources && releaseSource != null && releaseSource !== ALL_SOURCES
       ? releaseSources.find(
           (entry) => releaseSourceValue(entry) === releaseSource
         ) ?? null
       : null;
-  const releaseSheetMax = selectedReleaseEntry
-    ? Math.min(releaseMax, selectedReleaseEntry.quantity)
-    : releaseMax;
   const releaseSourceProp =
-    releaseSources && releaseSources.length > 1 && releaseSource != null
+    releaseSources && releaseSource != null
       ? {
           label: "From",
           options: releaseSourceOptions(releaseSources, asset.unitOfMeasure),
@@ -1161,16 +1212,19 @@ export default function AssetDetailScreen() {
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
                 source={assignSourceProp}
+                notice={assignSourceNotice}
                 confirmLabel={isSelfService ? "Take" : "Assign"}
                 isSubmitting={isActionLoading}
                 onSubmit={(quantity) => {
                   if (!assignQtyMember) return;
-                  void performAssignQuantity(
+                  void assignQuantityFromSheet(
                     assignQtyMember,
                     quantity,
-                    () => setAssignQtyMember(null),
-                    // Sent only when the pool asked; otherwise the server
-                    // records its own default, as before.
+                    // Sent only when the pool asked. The default is sent
+                    // explicitly because the server records "location not
+                    // recorded" for a multi-source assign without one; the
+                    // server validates the cap, so a stale default is
+                    // refused rather than mis-recorded.
                     assignSourceProp && assignSource != null
                       ? assignSourceRequestValue(assignSource)
                       : undefined
@@ -1227,8 +1281,10 @@ export default function AssetDetailScreen() {
                     quantity,
                     consumed,
                     () => setReleaseQtyEntry(null),
-                    // Only a pool that asked releases per source; otherwise
-                    // the server draws the holder's rows as before.
+                    // A specific source is sent only when the holder was
+                    // asked and picked one. "All sources", or a holder with
+                    // 0 or 1 sources, sends no locationId and the server
+                    // draws the holder's rows in its fixed order.
                     releaseSources && releaseSource != null
                       ? releaseSourceRequestValue(releaseSource)
                       : undefined

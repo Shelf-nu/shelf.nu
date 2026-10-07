@@ -53,7 +53,7 @@ import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
-import { questionsForAssets } from "@/lib/custody-source-options";
+import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
   unassignedCheckoutConfirm,
@@ -198,13 +198,16 @@ export default function BookingDetailScreen() {
   // user selects the rows, then we walk each QT asset asking "how many units?"
   // (defaulting to all remaining), collect the dispositions, then submit.
   // `batch` is the selection counted when the walk starts, for the success
-  // message the submit ends in.
+  // message the submit ends in. `pendingQuantity` is the last asset's answer
+  // while the source sheet is open for it: closing that sheet reopens the last
+  // asset on the number already typed, with the earlier answers in `collected`.
   const [checkoutQueue, setCheckoutQueue] = useState<{
     queue: BookingAsset[];
     index: number;
     collected: CheckoutDisposition[];
     individualIds: string[];
     batch: SelectionCounts;
+    pendingQuantity?: number;
   } | null>(null);
 
   // Sequential disposition picker for checking IN quantity-tracked assets:
@@ -2379,9 +2382,11 @@ export default function BookingDetailScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Check-out quantity picker — walks the selected QT assets one at a
-          time, defaulting to "all remaining" so one tap takes the whole line. */}
-      {checkoutQueue && (
+      {/* Check-out quantity picker: walks the selected QT assets one at a
+          time, defaulting to "all remaining" so one tap takes the whole line.
+          Hidden (not cleared) while the source sheet is open, since two page
+          sheets cannot stack; closing that sheet brings this one back. */}
+      {checkoutQueue && !sourcePrompt && (
         <QuantityInputSheet
           // Remount per asset so the sheet's reset effect (keyed on
           // max/defaultValue) can't reuse the previous asset's typed value when
@@ -2396,7 +2401,9 @@ export default function BookingDetailScreen() {
             checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
           }
           defaultValue={
-            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ?? 1
+            checkoutQueue.pendingQuantity ??
+            checkoutQueue.queue[checkoutQueue.index].remainingToCheckOut ??
+            1
           }
           unitOfMeasure={checkoutQueue.queue[checkoutQueue.index].unitOfMeasure}
           confirmLabel={
@@ -2419,16 +2426,17 @@ export default function BookingDetailScreen() {
               });
             } else {
               // A picked pool kept at two or more locations is asked where
-              // its units leave from. The quantities travel with the sheet,
-              // and the quantity picker makes way for it (two page sheets
-              // cannot stack).
-              const asked = questionsForAssets(
-                sourceQuestions,
-                collected.map((c) => c.assetId)
-              );
+              // the units leaving from its slice come from. The queue stays
+              // alive behind the source sheet holding the last answer, so
+              // closing that sheet returns to this asset with every quantity
+              // intact. Both clear only once the server accepts.
+              const asked = questionsForCheckouts(sourceQuestions, collected);
               if (asked.length > 0) {
                 const { individualIds, batch } = checkoutQueue;
-                setCheckoutQueue(null);
+                setCheckoutQueue({
+                  ...checkoutQueue,
+                  pendingQuantity: quantity,
+                });
                 setSourcePrompt({
                   questions: asked,
                   onConfirm: (sourceLocations) =>
@@ -2436,7 +2444,10 @@ export default function BookingDetailScreen() {
                       individualIds,
                       collected,
                       batch,
-                      () => setSourcePrompt(null),
+                      () => {
+                        setSourcePrompt(null);
+                        setCheckoutQueue(null);
+                      },
                       sourceLocations
                     ),
                 });
@@ -2457,8 +2468,9 @@ export default function BookingDetailScreen() {
         />
       )}
 
-      {/* "Where do the units come from?" — asked once, at check-out, for pools
-          kept at two or more locations. Stays open until the server accepts. */}
+      {/* "Where do the units come from?": asked once, at check-out, for pools
+          kept at two or more locations. Stays open until the server accepts.
+          Closing it during a partial check-out reopens the quantity picker. */}
       <CheckoutSourceSheet
         visible={sourcePrompt != null}
         questions={sourcePrompt?.questions ?? []}

@@ -101,10 +101,9 @@ vitest.mock("~/modules/asset/quantity-breakdown.server", () => ({
 // the existing cases keep their numbers; the dedicated case below feeds a
 // two-location pool and checks the field is forwarded as-is.
 vitest.mock("~/modules/asset/custody-source.server", () => ({
-  getCustodySourceSummary: vitest.fn().mockResolvedValue({
+  getCustodySourceOptions: vitest.fn().mockResolvedValue({
     multiSource: false,
     options: [],
-    poolAvailable: 1,
   }),
 }));
 
@@ -137,7 +136,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
-import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
+import { getCustodySourceOptions } from "~/modules/asset/custody-source.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 
 /**
@@ -422,7 +421,6 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
   it("forwards the custody source summary for a pool placed at two or more locations", async () => {
     const summary = {
       multiSource: true,
-      poolAvailable: 1,
       options: [
         {
           value: "loc-a",
@@ -444,7 +442,7 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
         },
       ],
     };
-    vitest.mocked(getCustodySourceSummary).mockResolvedValueOnce(summary);
+    vitest.mocked(getCustodySourceOptions).mockResolvedValueOnce(summary);
 
     const result = await loader(
       createLoaderArgs({
@@ -457,17 +455,14 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     const body = await (result as unknown as Response).json();
 
     // The pool's total feeds the summary, scoped to the caller's workspace.
-    expect(getCustodySourceSummary).toHaveBeenCalledWith({
+    expect(getCustodySourceOptions).toHaveBeenCalledWith({
       assetId: "asset-1",
       organizationId: "org-1",
       total: 10,
     });
     // The app reads `multiSource` to decide whether to ask, and `options` to
-    // build the picker; `poolAvailable` is not sent (custodyAvailable is).
-    expect(body.asset.custodySources).toEqual({
-      multiSource: true,
-      options: summary.options,
-    });
+    // build the picker. Pool-wide availability travels as custodyAvailable.
+    expect(body.asset.custodySources).toEqual(summary);
   });
 
   it("shows a self-service caller only their own custody rows + the hidden count", async () => {

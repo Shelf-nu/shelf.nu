@@ -3,6 +3,10 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -103,30 +107,18 @@ export type AssetCustodyListEntry = {
   sources?: AssetCustodySourceEntry[];
 };
 
-/** One source line of a holder's quantity custody (see `sources` above). */
-export type AssetCustodySourceEntry = {
-  locationId: string | null;
-  /** True when the assignment never recorded a source. Only with a null location. */
-  unrecorded: boolean;
-  name: string | null;
-  quantity: number;
-};
+/**
+ * One source line of a holder's quantity custody (see `sources` above). The
+ * shape is shared with the server through `@shelf/quantity-control`.
+ */
+export type AssetCustodySourceEntry = CustodySourceEntry;
 
 /**
  * One choice of the "From location" picker: a location the pool is placed
- * at, or "Unplaced" (`locationId` null). `value` is what the picker holds
- * and `left` is what that source can still hand out (placed minus custody
- * taken from there minus units out on a booking from there).
+ * at, or "Unplaced" (`locationId` null). Shared with the server through
+ * `@shelf/quantity-control`.
  */
-export type CustodySourceOption = {
-  value: string;
-  locationId: string | null;
-  label: string;
-  placed: number;
-  inCustody: number;
-  onBooking: number;
-  left: number;
-};
+export type { CustodySourceOption };
 
 /**
  * Where a pool's units can be taken from. `multiSource` is true only for a
