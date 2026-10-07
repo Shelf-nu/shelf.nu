@@ -17,7 +17,7 @@ Read the general [SSO prerequisites](../index.md#before-you-start-prerequisites)
 
 - You have a **non-SSO owner account** ready to own the Shelf workspace.
 - You've told your Shelf contact about any existing **standard accounts** on your SSO domain, so they can be converted to SSO (they keep their data, so nothing needs to be deleted). See [Moving existing Shelf users to SSO](#moving-existing-shelf-users-to-sso).
-- You've planned which of your groups/affiliations map to which Shelf role (Administrator, Self service, Base).
+- You've planned which of your groups/affiliations map to which Shelf role (Administrator, Custody manager, Self service, Base).
 
 ## 1. Service provider (SP) details [#](#service-provider-sp-details)
 
@@ -140,22 +140,23 @@ Whichever you pick, release it via the `attribute-filter.xml` policy in §3 (swa
 
 Once your provider is registered, your **workspace owner** maps each group value to a Shelf role in **workspace settings → SSO**.
 
-![Shelf workspace SSO settings — mapping Shibboleth groups to Administrator, Self service, and Base roles](../../img/shibboleth-sso-details.png)
+![SSO details with the Administrator, Self service and Base group fields; the Custody manager field sits after Administrator](../../img/shibboleth-sso-details.png)
 
 Enter the value your IdP releases next to each role you use:
 
-| Shelf role        | Paste the group value that should grant it      |
-| ----------------- | ----------------------------------------------- |
-| **Administrator** | e.g. `cn=shelf-admins,ou=groups,dc=your,dc=edu` |
-| **Self service**  | e.g. `cn=shelf-staff,ou=groups,dc=your,dc=edu`  |
-| **Base**          | e.g. `cn=shelf-users,ou=groups,dc=your,dc=edu`  |
+| Shelf role          | Paste the group value that should grant it       |
+| ------------------- | ------------------------------------------------ |
+| **Administrator**   | e.g. `cn=shelf-admins,ou=groups,dc=your,dc=edu`  |
+| **Custody manager** | e.g. `cn=shelf-custody,ou=groups,dc=your,dc=edu` |
+| **Self service**    | e.g. `cn=shelf-staff,ou=groups,dc=your,dc=edu`   |
+| **Base**            | e.g. `cn=shelf-users,ou=groups,dc=your,dc=edu`   |
 
 Rules to know:
 
 - **Paste the value exactly** as your IdP releases it. If unsure, ask your identity team for a sample assertion (or check the IdP audit log) for the precise string.
 - **Multiple groups → one role:** each field accepts **several values, comma-separated** (e.g. Grouper paths `your:apps:shelf:it-staff, your:apps:shelf:av-services`) — anyone in _any_ of them gets that role. Note: a value that itself contains commas (a full LDAP **DN** like `cn=…,ou=…,dc=…`) can only be used **on its own**, not comma-listed — to grant one role from several DN-shaped groups, release a comma-free identifier (a Grouper path or an `eduPersonEntitlement`) for them instead.
 - **Matching is trimmed and case-insensitive** — but a leading/trailing scope difference still counts as a mismatch, so copy the real value.
-- **Precedence is Administrator > Self service > Base.** A user whose groups match more than one role gets the highest. A user still only ever holds one role per workspace.
+- **Precedence is Administrator > Custody manager > Self service > Base.** A user whose groups match more than one role gets the highest. A user still only ever holds one role per workspace.
 - Users can be members of **many** groups — Shelf matches any mapped one regardless of its position in the list. You only need to map the roles you actually use, but at least one must be mapped.
 
 ## 8. Test single sign-on [#](#test)

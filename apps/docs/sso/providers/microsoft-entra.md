@@ -120,9 +120,10 @@ In the meantime, you can continue with the next steps that will show you how to 
 
 ## Step 10: Create groups and assign users [#](#step-10-create-groups-and-assign-users)
 
-In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has three roles you can map a group to:
+In order to manage which users get access to which workspace and with what role, Shelf uses groups for the mapping. Shelf has four roles you can map a group to:
 
 - Admin group
+- Custody manager group
 - Self service group
 - Base user group
 
@@ -160,9 +161,9 @@ Once confirmed you should end up with a setup similar to this:
 
 Once you have the groups ready, you need to add their **IDs** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
-Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use — leave the others blank, but at least one group must be mapped.
+Go to the workspace settings and place the **Object ID** of each group next to its matching role (Administrator, Custody manager, Self service, Base). You can find the ID by clicking on each group in Entra and copying the _Object ID_. You only need to fill in the roles you use: leave the others blank, but at least one group must be mapped.
 
-Each field also accepts **more than one Object ID, separated by commas** — anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Self service > Base).
+Each field also accepts **more than one Object ID, separated by commas**: anyone in _any_ of the listed groups gets that role. This is useful when several existing groups should map to the same Shelf role. A user still only ever holds one role per workspace; if their groups match more than one role, the highest applies (Administrator > Custody manager > Self service > Base).
 
 > [!IMPORTANT]
 > Enter each Object ID exactly as it appears in Microsoft Entra. Matching ignores letter case and surrounding spaces, but copying the exact value is the safest way to avoid a mismatch.
