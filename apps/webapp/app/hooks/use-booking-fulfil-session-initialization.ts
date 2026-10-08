@@ -106,8 +106,7 @@ export function useBookingFulfilSessionInitialization(
   // way to keep them apart, so nothing is stored at all.
   const userId = useUserData()?.id;
   const draftKey = useMemo(
-    () =>
-      userId ? scanDraftKey("fulfil", userId, session.bookingId) : null,
+    () => (userId ? scanDraftKey("fulfil", userId, session.bookingId) : null),
     [userId, session.bookingId]
   );
 

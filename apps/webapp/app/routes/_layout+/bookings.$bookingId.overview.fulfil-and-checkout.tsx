@@ -340,6 +340,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
       requireExplicitCheckout,
+      // The fulfil scanner: every unit it sends out was scanned here.
+      provenance: { surface: "web", method: "scanned" },
       // The confirm dialog's "From location" picks, keyed by slice id, for
       // pools already on the booking at two or more placements. A pool this
       // scan adds has no slice yet, so it gets the default (see

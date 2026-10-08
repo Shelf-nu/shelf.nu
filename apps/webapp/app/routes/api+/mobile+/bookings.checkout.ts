@@ -152,6 +152,8 @@ export async function action({ request }: ActionFunctionArgs) {
       // never sends — so this stays a "without-adjusted-date" checkout).
       from: existingBooking.from,
       to: existingBooking.to,
+      // "Check Out All Assets": the phone's one tap.
+      provenance: { surface: "phone", method: "quick" },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 

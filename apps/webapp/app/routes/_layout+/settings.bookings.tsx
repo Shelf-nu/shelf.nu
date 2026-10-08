@@ -1,4 +1,5 @@
 import { OrganizationType } from "@prisma/client";
+import { EXPLICIT_REQUIREMENT_LABELS } from "@shelf/labels";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -652,9 +653,9 @@ export default function GeneralPage() {
       {/* Explicit check-in settings form */}
       <ExplicitCheckinSettings
         header={{
-          title: "Explicit check-in requirement",
+          title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE,
           subHeading:
-            "Control whether specific roles must use the scanner-based explicit check-in flow instead of the one-click quick check-in. Only workspace owners can change this setting.",
+            "Switch on a role to remove its one-click check-in. That role checks items in by scanning them or by selecting them from the list, on the web and on the phone. Only the workspace owner can change this setting.",
         }}
         defaultValues={{
           requireExplicitCheckinForAdmin:
@@ -667,9 +668,9 @@ export default function GeneralPage() {
       {/* Explicit check-out settings form */}
       <ExplicitCheckoutSettings
         header={{
-          title: "Explicit check-out requirement",
+          title: EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.TITLE,
           subHeading:
-            "Control whether specific roles must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out. Only workspace owners can change this setting.",
+            "Switch on a role to remove its one-click check-out. That role checks items out by scanning them or by selecting them from the list, on the web and on the phone. Only the workspace owner can change this setting.",
         }}
         defaultValues={{
           requireExplicitCheckoutForAdmin:

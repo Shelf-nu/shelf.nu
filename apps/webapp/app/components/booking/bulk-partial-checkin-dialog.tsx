@@ -360,7 +360,13 @@ export default function BulkPartialCheckinDialog({
               Cancel
             </Button>
 
-            {/* Submit button - conditional based on early check-in */}
+            {/* Submit button: a confirming CheckinDialog for an early final
+                check-in, a plain submit otherwise. Both post this same form
+                with intent="partial-checkin", so the overview routes every
+                path through checkinAssets, which records the batch as
+                selected and applies the date choice. The whole-booking
+                checkIn intent is the header's one-click path, which the
+                explicit rule refuses. */}
             {isEarlyCheckin ? (
               <CheckinDialog
                 booking={{
@@ -374,6 +380,7 @@ export default function BulkPartialCheckinDialog({
                 disabled={disabled}
                 portalContainer={formElement || undefined}
                 formId="bulk-partial-checkin-form"
+                intent="partial-checkin"
                 onClose={handleCloseDialog}
                 specificAssetIds={selectedAssetIds}
                 fullWidth
