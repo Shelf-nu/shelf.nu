@@ -50,15 +50,26 @@ type StoredDraft = {
 };
 
 /**
- * Builds the storage key for one flow's draft on one target.
+ * Builds the storage key for one flow's draft on one target, for one person.
+ *
+ * The user is part of the key because this storage belongs to the browser, not
+ * to the account: a warehouse terminal or a shared tablet carries one store
+ * across everyone who signs in on it. Without the user in the key, the next
+ * person to open the same booking inherits the previous one's parked list and
+ * can submit it under their own name.
  *
  * @param scope - The flow, e.g. `"fulfil"`. Distinct per scanner so two
  *   scanners open on the same booking never read each other's list.
+ * @param userId - The signed-in user the draft belongs to.
  * @param targetId - What is being scanned into: a booking, a kit, a location.
  * @returns The namespaced `localStorage` key.
  */
-export function scanDraftKey(scope: string, targetId: string): string {
-  return `${DRAFT_KEY_PREFIX}${scope}:${targetId}`;
+export function scanDraftKey(
+  scope: string,
+  userId: string,
+  targetId: string
+): string {
+  return `${DRAFT_KEY_PREFIX}${scope}:${userId}:${targetId}`;
 }
 
 /**

@@ -33,8 +33,14 @@ vi.mock("react-router", () => ({
   useLocation: () => mockLocation(),
 }));
 
+// why: the draft is keyed by the signed-in user, which the hook reads from the
+// layout route's loader data — not available without mounting the router.
+const mockUser = vi.fn();
+vi.mock("~/hooks/use-user-data", () => ({ useUserData: () => mockUser() }));
+
 const BOOKING_ID = "booking-1";
-const DRAFT_KEY = scanDraftKey("fulfil", BOOKING_ID);
+const USER_ID = "user-1";
+const DRAFT_KEY = scanDraftKey("fulfil", USER_ID, BOOKING_ID);
 const SCANNER_PATH = `/bookings/${BOOKING_ID}/overview/fulfil-and-checkout`;
 
 function session(): NonNullable<FulfilSessionInfo> {
@@ -81,6 +87,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockNavigation.mockReturnValue({ state: "idle" });
   mockLocation.mockReturnValue({ pathname: SCANNER_PATH });
+  mockUser.mockReturnValue({ id: USER_ID });
 });
 
 describe("restoring a parked scan list", () => {
@@ -191,5 +198,39 @@ describe("clearing once the scans have gone out", () => {
     rerender();
 
     expect(readScanDraft(DRAFT_KEY)).not.toBeNull();
+  });
+});
+
+/**
+ * The draft lives in the browser's storage, which a warehouse terminal or a
+ * shared tablet carries across everyone who signs in on it.
+ */
+describe("keeping people apart on a shared device", () => {
+  it("does not hand one person's parked list to the next", () => {
+    saveScanDraft(scanDraftKey("fulfil", "someone-else", BOOKING_ID), {
+      "qr-1": scanned(),
+    });
+    const store = createStore();
+
+    render(store);
+
+    expect(store.get(scannedItemsAtom)).toEqual({});
+  });
+
+  /**
+   * With nobody resolved there is no way to tell two people apart, so the
+   * safe answer is to keep nothing rather than risk showing the wrong list.
+   */
+  it("stores nothing at all when no user is resolved", () => {
+    mockUser.mockReturnValue(undefined);
+    const store = createStore();
+    const { rerender } = render(store);
+
+    store.set(scannedItemsAtom, { "qr-1": scanned() });
+    rerender();
+
+    expect(
+      Object.keys(localStorage).filter((k) => k.startsWith("shelf:scan-draft:"))
+    ).toEqual([]);
   });
 });

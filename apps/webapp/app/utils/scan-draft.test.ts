@@ -17,7 +17,7 @@ import {
   scanDraftKey,
 } from "./scan-draft";
 
-const KEY = scanDraftKey("fulfil", "booking-1");
+const KEY = scanDraftKey("fulfil", "user-1", "booking-1");
 
 function scanned(overrides: Partial<NonNullable<ScanListItems[string]>> = {}) {
   return {
@@ -38,8 +38,26 @@ afterEach(() => {
 
 describe("scanDraftKey", () => {
   it("keeps two scanners on the same target apart", () => {
-    expect(scanDraftKey("fulfil", "booking-1")).not.toBe(
-      scanDraftKey("assign", "booking-1")
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("assign", "user-1", "booking-1")
+    );
+  });
+
+  /**
+   * Local storage belongs to the browser, not to the account. On a shared
+   * terminal the next person to sign in opens the same booking, and without
+   * the user in the key they would inherit the previous one's parked list and
+   * could check it out under their own name.
+   */
+  it("keeps two people on the same booking apart", () => {
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("fulfil", "user-2", "booking-1")
+    );
+  });
+
+  it("keeps one person's two bookings apart", () => {
+    expect(scanDraftKey("fulfil", "user-1", "booking-1")).not.toBe(
+      scanDraftKey("fulfil", "user-1", "booking-2")
     );
   });
 });
@@ -176,6 +194,9 @@ describe("corrupt storage", () => {
    * to carry on regardless, so the draft is a convenience that fails silently.
    */
   it("never throws when storage is unavailable", () => {
+    // why: a private window and blocked site data make every storage call
+    // throw, and there is no way to produce that from happy-dom's working
+    // implementation. The point under test is that scanning survives it.
     const boom = () => {
       throw new Error("blocked");
     };

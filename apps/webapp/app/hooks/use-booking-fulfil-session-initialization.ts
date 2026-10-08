@@ -39,6 +39,7 @@ import {
   scannedItemsAtom,
   setFulfilSessionAtom,
 } from "~/atoms/qr-scanner";
+import { useUserData } from "~/hooks/use-user-data";
 import {
   clearScanDraft,
   readScanDraft,
@@ -99,9 +100,15 @@ export function useBookingFulfilSessionInitialization(
   const navigation = useNavigation();
   const location = useLocation();
 
+  // Keyed by the signed-in user as well as the booking: this storage belongs
+  // to the browser, so a shared terminal would otherwise hand one person's
+  // parked list to whoever signs in next. With no user resolved there is no
+  // way to keep them apart, so nothing is stored at all.
+  const userId = useUserData()?.id;
   const draftKey = useMemo(
-    () => scanDraftKey("fulfil", session.bookingId),
-    [session.bookingId]
+    () =>
+      userId ? scanDraftKey("fulfil", userId, session.bookingId) : null,
+    [userId, session.bookingId]
   );
 
   // Tracks which bookingId the session atom was last seeded for so we
@@ -124,7 +131,7 @@ export function useBookingFulfilSessionInitialization(
     // Restored entries carry no `data`, so each row resolves against the
     // server again and a list parked overnight comes back current rather than
     // describing the booking as it was.
-    const draft = readScanDraft(draftKey);
+    const draft = draftKey ? readScanDraft(draftKey) : null;
     if (draft) {
       setScannedItems(draft);
     }
@@ -143,6 +150,9 @@ export function useBookingFulfilSessionInitialization(
     // would wipe the draft the seed is restoring from, and React's
     // development double-mount makes the loss permanent: the remount finds
     // nothing left to restore. The store always holds the current list.
+    if (!draftKey) {
+      return;
+    }
     saveScanDraft(draftKey, store.get(scannedItemsAtom));
   }, [scannedItems, draftKey, session.bookingId, store]);
 
@@ -157,7 +167,7 @@ export function useBookingFulfilSessionInitialization(
       navigation.location !== undefined &&
       navigation.location.pathname !== location.pathname;
 
-    if (submittedAway) {
+    if (submittedAway && draftKey) {
       clearScanDraft(draftKey);
     }
   }, [
