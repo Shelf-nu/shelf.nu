@@ -209,7 +209,10 @@ import {
   isBookingEarlyCheckout,
   outranksReservations,
 } from "./helpers";
-import { findConflictingKits } from "./kit-conflicts.server";
+import {
+  findConflictingKits,
+  type ConflictingKit,
+} from "./kit-conflicts.server";
 import { assertScannedUnitsAreNotKitMembers } from "./kit-member-scan-guard.server";
 import { getBookingNotificationRecipients } from "./notification-recipients.server";
 import type { NotificationRecipient } from "./notification-recipients.server";
@@ -1930,32 +1933,44 @@ export async function updateBasicBooking({
   }
 }
 
+/** Arguments shared by {@link findKitsBookedElsewhere} and its assert. */
+type KitsBookedElsewhereArgs = {
+  /** The booking's slices, or the kit slices being added */
+  slices: BookingSliceKitProvenance[];
+  /** The booking being judged; its own slices never conflict */
+  bookingId: Booking["id"];
+  /** Start of the window to check; nothing conflicts without one */
+  from: Date | string | null | undefined;
+  /** End of the window to check */
+  to: Date | string | null | undefined;
+  /** Scopes every read */
+  organizationId: Organization["id"];
+  /** Pass only when the booking is already in flight, see {@link outranksReservations} */
+  ignoreReservedConflicts?: boolean;
+};
+
 /**
- * Refuses a booking write when another overlapping booking holds one of the
- * kits it involves.
+ * Finds the kits among `slices` that another booking holds: one overlapping
+ * the window, or one the kit is still out on past its due date.
  *
  * A kit is one physical case, so it is exclusive the way an INDIVIDUAL asset
  * is. The asset conflict check at each write checkpoint cannot provide that on
  * its own: it exempts QUANTITY_TRACKED assets, so a kit made only of those
- * would never be refused. Call this beside that check, over the same window.
+ * would never be refused.
  *
  * Only a LIVE kit-driven slice (`assetKitId` set) holds its kit. A detached row
  * keeps `sourceKitId` but is a standalone asset, so it is dropped before the
  * kit ids are resolved — {@link getKitIdsByBookingSlices} reads `sourceKitId`
  * first and would otherwise attribute it to the kit.
  *
- * @param args.slices - The booking's slices, or the kit slices being added
- * @param args.bookingId - The booking being written; its own slices never conflict
- * @param args.from - Start of the window to check; nothing conflicts without one
- * @param args.to - End of the window to check
- * @param args.organizationId - Scopes every read
- * @param args.ignoreReservedConflicts - Pass only when the booking is already
- *   in flight, see {@link outranksReservations}
- * @param args.action - Completes "Cannot …" in the message, e.g. "reserve booking"
+ * The booking writes refuse on this through {@link assertKitsNotBookedElsewhere};
+ * the check-out scanner reads it to raise the same refusal as a blocker before
+ * the submit.
+ *
  * @param client - Pass the active `tx` when called inside a transaction
- * @throws {ShelfError} 400 naming the kits another booking holds
+ * @returns The held kits, each with the asset ids this booking took from it
  */
-async function assertKitsNotBookedElsewhere(
+export async function findKitsBookedElsewhere(
   {
     slices,
     bookingId,
@@ -1963,22 +1978,13 @@ async function assertKitsNotBookedElsewhere(
     to,
     organizationId,
     ignoreReservedConflicts = false,
-    action,
-  }: {
-    slices: BookingSliceKitProvenance[];
-    bookingId: Booking["id"];
-    from: Date | string | null | undefined;
-    to: Date | string | null | undefined;
-    organizationId: Organization["id"];
-    ignoreReservedConflicts?: boolean;
-    action: string;
-  },
+  }: KitsBookedElsewhereArgs,
   client: Pick<ExtendedPrismaClient, "assetKit" | "bookingAsset"> = db
-) {
+): Promise<(ConflictingKit & { assetIds: string[] })[]> {
   // Truthiness rather than `!== null`, for the reason given in
   // `resolveKitIdByAssetKitId`.
   const liveKitSlices = slices.filter((slice) => Boolean(slice.assetKitId));
-  if (liveKitSlices.length === 0) return;
+  if (liveKitSlices.length === 0) return [];
 
   const assetIdsByKitId = await getKitIdsByBookingSlices({
     slices: liveKitSlices,
@@ -1997,6 +2003,28 @@ async function assertKitsNotBookedElsewhere(
     },
     client
   );
+
+  return conflicting.map((kit) => ({
+    ...kit,
+    assetIds: [...(assetIdsByKitId.get(kit.id) ?? [])],
+  }));
+}
+
+/**
+ * Refuses a booking write when another booking holds one of the kits it
+ * involves (see {@link findKitsBookedElsewhere}). Call this beside the asset
+ * conflict check, over the same window.
+ *
+ * @param args.action - Completes "Cannot …" in the message, e.g. "reserve booking"
+ * @param client - Pass the active `tx` when called inside a transaction
+ * @throws {ShelfError} 400 naming the kits another booking holds
+ */
+async function assertKitsNotBookedElsewhere(
+  { action, ...args }: KitsBookedElsewhereArgs & { action: string },
+  client: Pick<ExtendedPrismaClient, "assetKit" | "bookingAsset"> = db
+) {
+  const { bookingId } = args;
+  const conflicting = await findKitsBookedElsewhere(args, client);
   if (conflicting.length === 0) return;
 
   const names = conflicting
@@ -16117,6 +16145,12 @@ async function addScannedAssetsToBookingWithinTx(
         id: true,
         title: true,
         status: true,
+        // why: `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets only
+        // when it can see the type. Without it, a pool another booking holds a
+        // few units of reads as booked, and a kit sharing that pool with a
+        // reserved sibling kit is refused. Units are judged further down: a
+        // kit's own slice by the kit rule, standalone units by the pool guard.
+        type: true,
         // Bookings reach assets through the `BookingAsset` pivot, which is
         // what `hasAssetBookingConflicts` reads and what the
         // conflict-conditions helper returns.
@@ -16139,6 +16173,7 @@ async function addScannedAssetsToBookingWithinTx(
       id: string;
       title: string;
       status: string;
+      type: string;
       bookingAssets: Array<{ booking: { id: string; status: string } }>;
     };
     const conflicted = (candidates as ConflictCandidate[]).filter((asset) =>
