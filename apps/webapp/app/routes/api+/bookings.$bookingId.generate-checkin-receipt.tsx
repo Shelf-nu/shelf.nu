@@ -8,7 +8,7 @@
  *
  * Dates are resolved here rather than in the browser so the sheet prints the
  * format the workspace configured, the same way the booking checklist's loader
- * does.
+ * does. Sends one `pdf_preview_opened` event per preview.
  *
  * @see {@link file://./../../modules/booking/checkin-receipt.server.ts}
  * @see {@link file://./../../components/booking/booking-checkin-receipt-pdf.tsx}
@@ -17,6 +17,7 @@
 import { data } from "react-router";
 import type { LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import type { CheckinReceiptView } from "~/modules/booking/checkin-receipt";
 import { fetchCheckinReceiptData } from "~/modules/booking/checkin-receipt.server";
 import { getClientHint } from "~/utils/client-hints";
@@ -129,6 +130,18 @@ export const loader = async ({
       latenessNote: receipt.latenessNote,
       checkedInByNames: receipt.checkedInByNames,
     };
+
+    captureServerEvent({
+      distinctId: userId,
+      event: "pdf_preview_opened",
+      properties: {
+        sheet: "checkin_receipt",
+        organizationId,
+        rowCount: pdfMeta.rows.length,
+        // Rows are booking slices: one asset can print in several of them.
+        assetCount: new Set(receipt.rows.map((row) => row.assetId)).size,
+      },
+    });
 
     return data(payload({ pdfMeta }));
   } catch (cause) {

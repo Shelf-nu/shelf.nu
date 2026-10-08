@@ -69,6 +69,7 @@ import {
   updateBookingAssets,
   createKitBookingNote,
 } from "~/modules/booking/service.server";
+import { stillOutOnOverdueKitSlice } from "~/modules/booking/utils.server";
 import { getBookingModelTabData } from "~/modules/booking-model-request/service.server";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -263,48 +264,57 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                   custody: true,
                   bookingAssets: {
                     /**
-                     * Only bookings whose period overlaps this one make a kit
-                     * unavailable, so the picker's rows are filtered to those.
+                     * The slices that can make a kit unavailable to this
+                     * booking, for the row's availability label.
                      *
-                     * Two intervals overlap when each starts before the other
+                     * First, bookings whose period overlaps this one. Two
+                     * intervals overlap when each starts before the other
                      * ends: the other booking's `from` must not fall after this
                      * booking's `to`, and its `to` must not fall before this
                      * booking's `from`. Both comparisons cross between the two
                      * bookings — a clause comparing a candidate's `from` and
                      * `to` against the SAME endpoint of this booking narrows to
                      * containment or, if the endpoints are the wrong way round,
-                     * to nothing at all.
+                     * to nothing at all. The second clause is containment,
+                     * which the first already covers; it is kept so this
+                     * predicate stays identical to the booking overview's.
                      *
-                     * The second clause is containment, which the first already
-                     * covers. It is kept so this predicate stays identical to
-                     * the three siblings that answer the same question — the
-                     * booking overview, `getKitAvailability` and the scanner's
-                     * picker metadata — since a picker that disagrees with them
-                     * offers kits the save then refuses.
+                     * Second, a kit slice still out on an OVERDUE booking,
+                     * whatever its dates: an overdue kit has no known return
+                     * date. The picker's filter and the booking writes apply
+                     * the same rule (`findKitSlicesInWindow`), so the label
+                     * cannot offer a kit they hide or refuse.
                      */
                     where: {
-                      booking: {
-                        status: {
-                          in: [
-                            BookingStatus.RESERVED,
-                            BookingStatus.ONGOING,
-                            BookingStatus.OVERDUE,
-                          ],
+                      OR: [
+                        {
+                          booking: {
+                            status: {
+                              in: [
+                                BookingStatus.RESERVED,
+                                BookingStatus.ONGOING,
+                                BookingStatus.OVERDUE,
+                              ],
+                            },
+                            ...(booking.from &&
+                              booking.to && {
+                                OR: [
+                                  {
+                                    from: { lte: booking.to },
+                                    to: { gte: booking.from },
+                                  },
+                                  {
+                                    from: { gte: booking.from },
+                                    to: { lte: booking.to },
+                                  },
+                                ],
+                              }),
+                          },
                         },
-                        ...(booking.from &&
-                          booking.to && {
-                            OR: [
-                              {
-                                from: { lte: booking.to },
-                                to: { gte: booking.from },
-                              },
-                              {
-                                from: { gte: booking.from },
-                                to: { lte: booking.to },
-                              },
-                            ],
-                          }),
-                      },
+                        stillOutOnOverdueKitSlice({
+                          currentBookingId: booking.id,
+                        }),
+                      ],
                     },
                     include: {
                       booking: {

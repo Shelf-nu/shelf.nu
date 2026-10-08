@@ -29,6 +29,8 @@ const EXPECTED_IDS = [
   "assets-in-custody",
   "kits-already-checked-out",
   "kit-in-custody",
+  "kits-booked-elsewhere",
+  "kit-assets-booked-elsewhere",
   "redundant-kit-assets",
   "kits-not-in-booking",
   "invalid-codes",
@@ -85,10 +87,14 @@ function build(
     bookingAssetIds = ["a1", "a2", "m1", "m2"],
     remainingByAssetId = {},
     alreadyCheckedOut = [],
+    kitsBookedElsewhere = [],
+    assetsInKitsBookedElsewhere = [],
   }: {
     bookingAssetIds?: string[];
     remainingByAssetId?: Record<string, number>;
     alreadyCheckedOut?: string[];
+    kitsBookedElsewhere?: string[];
+    assetsInKitsBookedElsewhere?: string[];
   } = {}
 ): PartialCheckoutBlockers & {
   removeAssetsFromList: ReturnType<typeof vi.fn>;
@@ -103,6 +109,8 @@ function build(
       bookingAssetIds: new Set(bookingAssetIds),
       remainingByAssetId,
       alreadyCheckedOut: new Set(alreadyCheckedOut),
+      kitsBookedElsewhere: new Set(kitsBookedElsewhere),
+      assetsInKitsBookedElsewhere: new Set(assetsInKitsBookedElsewhere),
       removeAssetsFromList,
       removeItemsFromList,
     }),
@@ -203,6 +211,62 @@ describe("buildPartialCheckoutBlockers", () => {
       }),
     });
     expect(activeIds(built)).not.toContain("kit-in-custody");
+  });
+
+  it("kits-booked-elsewhere: a kit another booking holds, e.g. still out on an overdue one", () => {
+    const built = build(
+      {
+        qrKit: kitItem("k1", {
+          members: [{ id: "m1", type: "QUANTITY_TRACKED" }],
+        }),
+      },
+      { kitsBookedElsewhere: ["k1"], assetsInKitsBookedElsewhere: ["m1"] }
+    );
+    expect(activeIds(built)).toEqual(["kits-booked-elsewhere"]);
+    built.blockerConfigs
+      .find((b) => b.id === "kits-booked-elsewhere")
+      ?.onResolve();
+    expect(built.removeItemsFromList).toHaveBeenCalledWith(["qrKit"]);
+  });
+
+  it("kits-booked-elsewhere: a kit no other booking holds does not block", () => {
+    const built = build(
+      { qrKit: kitItem("k1", { members: [{ id: "m1" }] }) },
+      { kitsBookedElsewhere: ["k2"] }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("kit-assets-booked-elsewhere: a member scanned on its own, from a kit another booking holds", () => {
+    // The submit sends every slice of a scanned asset, kit slice included, so
+    // the server refuses it as it would the kit.
+    const built = build(
+      { qrAsset: assetItem({ id: "m1", type: "QUANTITY_TRACKED" } as never) },
+      {
+        remainingByAssetId: { m1: 2 },
+        kitsBookedElsewhere: ["k1"],
+        assetsInKitsBookedElsewhere: ["m1"],
+      }
+    );
+    expect(activeIds(built)).toEqual(["kit-assets-booked-elsewhere"]);
+    built.blockerConfigs
+      .find((b) => b.id === "kit-assets-booked-elsewhere")
+      ?.onResolve();
+    expect(built.removeItemsFromList).toHaveBeenCalledWith(["qrAsset"]);
+  });
+
+  it("kit-assets-booked-elsewhere: a member scanned with its held kit is reported once, on the kit", () => {
+    const built = build(
+      {
+        qrAsset: assetItem({ id: "m1", assetKits: [{ kitId: "k1" }] as never }),
+        qrKit: kitItem("k1", { members: [{ id: "m1" }] }),
+      },
+      { kitsBookedElsewhere: ["k1"], assetsInKitsBookedElsewhere: ["m1"] }
+    );
+    expect(activeIds(built)).toEqual([
+      "kits-booked-elsewhere",
+      "redundant-kit-assets",
+    ]);
   });
 
   it("redundant-kit-assets: a member scanned alongside its kit", () => {

@@ -66,45 +66,93 @@ export function getPrimaryKit<TKit>(
 }
 
 /**
- * Returns true when the asset's kit membership should block booking it
- * directly (outside of its kit).
+ * The kit membership an asset row carries, in either projection we load:
+ * the `assetKits` pivot rows (asset detail, scanner drawers, simple-mode index
+ * rows) or the flattened `kit` scalar (advanced-mode index rows).
+ */
+type KitMembershipProjection = {
+  type?: AssetType | string | null;
+  assetKits?: Array<unknown> | null;
+  kit?: unknown;
+  // Index signature so loosely-typed list rows (`ListItemData`, which is
+  // `{ id: string; [x: string]: any }`) are assignable. Without it TS's
+  // weak-type check rejects them for having "no properties in common".
+  [key: string]: unknown;
+};
+
+/**
+ * Returns true when the asset is an individually tracked member of a kit.
  *
- * Only `INDIVIDUAL` assets are blocked. An INDIVIDUAL asset lives entirely
- * inside its kit — the `enforce_individual_asset_single_kit` trigger caps it
- * at one membership — so booking it standalone would double-book the very
- * same physical unit.
+ * An INDIVIDUAL asset lives entirely inside its kit (the
+ * `enforce_individual_asset_single_kit` trigger caps it at one membership), so
+ * whatever happens to it on its own, a booking or a custody hand-over, happens
+ * to the kit's unit too. Both are refused for such an asset: book or assign the
+ * kit, or take the asset out of the kit first.
  *
- * `QUANTITY_TRACKED` assets are NOT blocked: each `AssetKit` row claims only a
- * *slice* of the pool (`AssetKit.quantity`), and a QT asset may belong to
- * several kits at once while still keeping free-pool units. Those free units
- * are legitimately bookable on their own — which is exactly what the booking
- * page's asset picker already allows. Over-allocation is caught server-side by
- * the windowed availability guards in `createBooking` / `updateBookingAssets`,
- * so this client-side check stays purely advisory.
+ * `QUANTITY_TRACKED` assets are never kit members in this sense: each
+ * `AssetKit` row claims only a *slice* of the pool, and a QT asset may belong
+ * to several kits at once while still keeping free units that can be booked or
+ * handed over on their own.
  *
- * Accepts either projection of kit membership we load today: the `assetKits`
- * pivot rows (asset detail, scanner drawers) or the flattened `kit` scalar
- * (assets index rows).
+ * Client-side checks built on this are advisory. The server refuses custody
+ * with `assertNotKitMembers` and over-booking with the windowed availability
+ * guards in `createBooking` / `updateBookingAssets`.
  *
  * @param asset - An asset-like object carrying `type` plus `assetKits` and/or `kit`
- * @returns true when direct booking must be disabled because of a kit
+ * @returns true for an INDIVIDUAL asset that belongs to a kit
  */
-export function isDirectBookingBlockedByKit(
-  asset?: {
-    type?: AssetType | string | null;
-    assetKits?: Array<unknown> | null;
-    kit?: unknown;
-    // Index signature so loosely-typed list rows (`ListItemData`, which is
-    // `{ id: string; [x: string]: any }`) are assignable — without it TS's
-    // weak-type check rejects them for having "no properties in common".
-    [key: string]: unknown;
-  } | null
+export function isIndividualKitMember(
+  asset?: KitMembershipProjection | null
 ): boolean {
   if (!asset) return false;
 
   const isPartOfKit = (asset.assetKits?.length ?? 0) > 0 || !!asset.kit;
 
   return isPartOfKit && !isQuantityTracked(asset);
+}
+
+/** A kit as either index row shape carries it: only its status is read. */
+type RowKit = { status?: string | null } | null | undefined;
+
+/**
+ * Returns the status of the kit an index row's asset belongs to, or `null` when
+ * it is in no kit.
+ *
+ * Assets index rows carry kit membership in two shapes: simple mode loads the
+ * `assetKits` pivot rows (`assetIndexFields`), advanced mode a flattened `kit`
+ * object built in raw SQL. Read the kit through this helper rather than
+ * `row.kit`, which is absent from every simple-mode row and so silently reads
+ * as "no kit" there. Both shapes name the asset's primary (oldest) kit.
+ *
+ * @param asset - An index row, in either mode
+ * @returns The kit's status (e.g. `"IN_CUSTODY"`), or `null` for no kit
+ */
+export function getRowKitStatus(
+  asset?: {
+    kit?: RowKit;
+    assetKits?: Array<{ kit?: RowKit }> | null;
+    // Index signature so loosely-typed list rows (`ListItemData`) are
+    // assignable; see `KitMembershipProjection`.
+    [key: string]: unknown;
+  } | null
+): string | null {
+  return asset?.kit?.status ?? asset?.assetKits?.[0]?.kit?.status ?? null;
+}
+
+/**
+ * Returns true when the asset's kit membership should block booking it
+ * directly (outside of its kit). Same rule as {@link isIndividualKitMember}:
+ * an individually tracked kit member is booked through its kit, a
+ * quantity-tracked asset's free units stay bookable on their own (the booking
+ * page's asset picker allows the same).
+ *
+ * @param asset - An asset-like object carrying `type` plus `assetKits` and/or `kit`
+ * @returns true when direct booking must be disabled because of a kit
+ */
+export function isDirectBookingBlockedByKit(
+  asset?: KitMembershipProjection | null
+): boolean {
+  return isIndividualKitMember(asset);
 }
 
 /**

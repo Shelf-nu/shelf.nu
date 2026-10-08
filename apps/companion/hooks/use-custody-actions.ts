@@ -33,7 +33,13 @@ interface UseCustodyActionsReturn {
   performAssignQuantity: (
     member: TeamMember,
     quantity: number,
-    closeSheet: () => void
+    closeSheet: () => void,
+    /**
+     * Where the units come from, for a pool placed at two or more locations:
+     * a location id, or `null` for the unplaced units. Leave it out and the
+     * server records its own default.
+     */
+    locationId?: string | null
   ) => Promise<void>;
   /**
    * Release `quantity` units of a QUANTITY_TRACKED asset from the custodian
@@ -48,7 +54,13 @@ interface UseCustodyActionsReturn {
     custodianId: string,
     quantity: number,
     consumed: number | undefined,
-    closeSheet: () => void
+    closeSheet: () => void,
+    /**
+     * Release only the units taken from this source: a location id, `null`
+     * for the unplaced units, or `"unrecorded"`. Leave it out and the server
+     * draws the holder's rows in its fixed order.
+     */
+    locationId?: string | null
   ) => Promise<void>;
 }
 
@@ -146,13 +158,22 @@ export function useCustodyActions({
   const performAssignQuantity = async (
     member: TeamMember,
     quantity: number,
-    closeSheet: () => void
+    closeSheet: () => void,
+    locationId?: string | null
   ) => {
     if (!currentOrg || !asset) return;
     const orgId = currentOrg.id;
     const assetId = asset.id;
     await submitFromSheet(
-      () => api.assignQuantityCustody(orgId, assetId, member.id, quantity),
+      () =>
+        api.assignQuantityCustody(
+          orgId,
+          assetId,
+          member.id,
+          quantity,
+          undefined,
+          locationId
+        ),
       closeSheet
     );
   };
@@ -161,7 +182,8 @@ export function useCustodyActions({
     custodianId: string,
     quantity: number,
     consumed: number | undefined,
-    closeSheet: () => void
+    closeSheet: () => void,
+    locationId?: string | null
   ) => {
     if (!currentOrg || !asset) return;
     const orgId = currentOrg.id;
@@ -170,6 +192,7 @@ export function useCustodyActions({
       () =>
         api.releaseQuantityCustody(orgId, assetId, custodianId, quantity, {
           consumed,
+          locationId,
         }),
       closeSheet
     );

@@ -31,8 +31,10 @@ import {
   validateBarcodeUniqueness,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { findKitsHeldByOtherBookings } from "~/modules/booking/kit-conflicts.server";
 import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
+import { lockAssetsForKitMembership } from "~/modules/custody/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { getClientHint } from "~/utils/client-hints";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
@@ -2520,28 +2522,39 @@ export async function getPaginatedAndFilterableKits<
       };
 
       if (bookingFrom && bookingTo) {
-        // Apply booking conflict logic similar to assets, but through kit assets
+        /**
+         * Two questions decide whether another booking keeps a kit off this
+         * one, and each member type answers only one of them.
+         *
+         * An INDIVIDUAL member is one physical item, so any overlapping
+         * booking of that asset takes it, whichever kit or standalone row
+         * booked it (Rules 1 and 2).
+         *
+         * A QUANTITY_TRACKED member is a pool shared by several kits and the
+         * free stock. Each kit owns its own units (`AssetKit.quantity`), which
+         * no other slice draws on, so another kit's slice of the same pool says
+         * nothing about this kit. Its units are taken only when this kit's own
+         * slice is, which is the kit-level rule below. Check-out applies the
+         * same split: kit-driven slices are never measured against the pool.
+         */
+        const overlapsWindow: Prisma.BookingWhereInput["OR"] = [
+          { from: { lte: bookingTo }, to: { gte: bookingFrom } },
+          { from: { gte: bookingFrom }, to: { lte: bookingTo } },
+        ];
+
         const kitWhere: Prisma.KitWhereInput[] = [
-          // Rule 1: RESERVED bookings always exclude kits (if any asset is in a RESERVED booking)
+          // Rule 1: an INDIVIDUAL member on an overlapping RESERVED booking
           {
             assetKits: {
               none: {
                 asset: {
+                  type: AssetType.INDIVIDUAL,
                   bookingAssets: {
                     some: {
                       booking: {
                         id: { not: currentBookingId },
                         status: BookingStatus.RESERVED,
-                        OR: [
-                          {
-                            from: { lte: bookingTo },
-                            to: { gte: bookingFrom },
-                          },
-                          {
-                            from: { gte: bookingFrom },
-                            to: { lte: bookingTo },
-                          },
-                        ],
+                        OR: overlapsWindow,
                       },
                     },
                   },
@@ -2549,16 +2562,17 @@ export async function getPaginatedAndFilterableKits<
               },
             },
           },
-          // Rule 2: For ONGOING/OVERDUE bookings, allow kits that are AVAILABLE or have no conflicting assets
+          // Rule 2: an INDIVIDUAL member on an overlapping ONGOING/OVERDUE
+          // booking, unless the kit is AVAILABLE (checked in from a partial
+          // check-in)
           {
             OR: [
-              // Either kit is AVAILABLE (checked in from partial check-in)
               { status: KitStatus.AVAILABLE },
-              // Or kit has no assets in conflicting ONGOING/OVERDUE bookings
               {
                 assetKits: {
                   none: {
                     asset: {
+                      type: AssetType.INDIVIDUAL,
                       bookingAssets: {
                         some: {
                           booking: {
@@ -2569,16 +2583,7 @@ export async function getPaginatedAndFilterableKits<
                                 BookingStatus.OVERDUE,
                               ],
                             },
-                            OR: [
-                              {
-                                from: { lte: bookingTo },
-                                to: { gte: bookingFrom },
-                              },
-                              {
-                                from: { gte: bookingFrom },
-                                to: { lte: bookingTo },
-                              },
-                            ],
+                            OR: overlapsWindow,
                           },
                         },
                       },
@@ -2590,7 +2595,24 @@ export async function getPaginatedAndFilterableKits<
           },
         ];
 
-        // Combine the basic filters with booking conflict filters
+        /**
+         * The kit-level rule: another booking holds this kit through its own
+         * slices. Judged by `findKitsHeldByOtherBookings`, the same rule the
+         * booking writes refuse on and the row's availability label shows.
+         * `AssetKit` has no Prisma relation to its booking slices, so the held
+         * kits are resolved first and excluded here, keeping the page and the
+         * count on one `where`.
+         */
+        const heldKits = await findKitsHeldByOtherBookings({
+          bookingId: currentBookingId,
+          from: bookingFrom,
+          to: bookingTo,
+          organizationId,
+        });
+        if (heldKits.length > 0) {
+          kitWhere.push({ id: { notIn: heldKits.map((kit) => kit.id) } });
+        }
+
         where.AND = kitWhere;
       }
     }
@@ -6133,8 +6155,9 @@ export async function updateKitAssets({
         hasCustody(asset.custody) &&
         asset.assetKits[0]?.kitId !== kit.id
     );
-    if (isSomeAssetInCustody) {
-      throw new ShelfError({
+    /** The refusal for an INDIVIDUAL asset that is already in custody. */
+    const assetsInCustodyError = () =>
+      new ShelfError({
         cause: null,
         message:
           "Cannot add assets that are already in custody to a kit. Please release custody of assets to allow them to be added to a kit.",
@@ -6143,6 +6166,8 @@ export async function updateKitAssets({
         shouldBeCaptured: false,
         status: 400,
       });
+    if (isSomeAssetInCustody) {
+      throw assetsInCustodyError();
     }
 
     /**
@@ -6286,6 +6311,13 @@ export async function updateKitAssets({
       // asset's full pool — matches the backfill so there's no
       // observable change until the picker is wired up.
       if (newlyAddedAssets.length > 0) {
+        // Same lock order as a custody assignment, so the two queue instead
+        // of deadlocking. See `lockAssetsForKitMembership`.
+        await lockAssetsForKitMembership(
+          tx,
+          newlyAddedAssets.map((asset) => asset.id),
+          organizationId
+        );
         await tx.assetKit.createMany({
           data: newlyAddedAssets.map((asset) => ({
             assetId: asset.id,
@@ -6294,6 +6326,35 @@ export async function updateKitAssets({
             quantity: addedAssetKitQuantity(asset),
           })),
         });
+
+        /**
+         * Re-check custody for the INDIVIDUAL assets just added, now that the
+         * insert holds them.
+         *
+         * The in-custody check above read the assets before this transaction.
+         * A custody assignment can commit in between, so the insert's own
+         * foreign-key lock (`FOR KEY SHARE` on each asset) is what orders the
+         * two: it waits for an assignment's `FOR UPDATE` lock
+         * (`assertNotKitMembers`), and this read, a new statement under READ
+         * COMMITTED, then sees the custody row it committed. Kit-derived rows
+         * are excluded: those come from a kit and are refused above already.
+         */
+        const addedIndividualIds = newlyAddedAssets
+          .filter((asset) => asset.type !== AssetType.QUANTITY_TRACKED)
+          .map((asset) => asset.id);
+        if (addedIndividualIds.length > 0) {
+          const heldMember = await tx.custody.findFirst({
+            where: {
+              assetId: { in: addedIndividualIds },
+              asset: { organizationId },
+              kitCustodyId: null,
+            },
+            select: { id: true },
+          });
+          if (heldMember) {
+            throw assetsInCustodyError();
+          }
+        }
       }
 
       // Update: existing-in-kit assets whose submitted quantity differs

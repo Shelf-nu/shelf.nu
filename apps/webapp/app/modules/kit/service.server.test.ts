@@ -31,6 +31,7 @@ import {
   getKitCurrentBooking,
   bulkRemoveAssetsFromKits,
   moveAssetKitUnits,
+  getPaginatedAndFilterableKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
@@ -2602,6 +2603,183 @@ describe("updateKitAssets - Location Cascade", () => {
     expect(db.assetLocation.createMany).not.toHaveBeenCalled();
     expect(db.assetLocation.updateMany).not.toHaveBeenCalled();
     expect(db.assetLocation.deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Adding an individually tracked asset to a kit re-reads custody after the
+ * `AssetKit` insert, inside the transaction.
+ *
+ * The in-custody check reads the assets before the transaction, so a custody
+ * assignment can commit in between. The insert's foreign-key lock waits for an
+ * assignment's `FOR UPDATE` lock (`assertNotKitMembers`), and this re-read then
+ * sees the committed custody row. Without it, two operators acting at the same
+ * moment leave a held asset inside an available kit.
+ */
+describe("updateKitAssets: custody committed while the asset is being added", () => {
+  const KIT = { id: "kit-1", location: null, assetKits: [], custody: null };
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    // `clearAllMocks` keeps implementations, so the held row these tests
+    // arrange would otherwise answer every custody read in the suites below.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue(null);
+  });
+
+  it("refuses an individual asset whose custody committed after the first check", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    // Read as free before the transaction...
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "gimbal",
+        title: "Gimbal",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+    ]);
+    // ...but held by the time the insert has it.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue({ id: "custody-1" });
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["gimbal"],
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining(
+        "Cannot add assets that are already in custody to a kit"
+      ),
+    });
+
+    // The re-read runs after the insert, against operator rows in this
+    // workspace only. The throw rolls the insert back in production.
+    expect(db.custody.findFirst).toHaveBeenCalledWith({
+      where: {
+        assetId: { in: ["gimbal"] },
+        asset: { organizationId: "org-1" },
+        kitCustodyId: null,
+      },
+      select: { id: true },
+    });
+    expect(
+      vitest.mocked(db.assetKit.createMany).mock.invocationCallOrder[0]
+    ).toBeLessThan(
+      vitest.mocked(db.custody.findFirst).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("locks the new members in id order before inserting them", async () => {
+    // why this is asserted on the query and its order: a custody assignment
+    // locks the same rows FOR UPDATE in id order. The insert's own
+    // foreign-key locks follow row order, so without this explicit lock taken
+    // first the two can wait on each other in a cycle and one is aborted.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "tripod",
+        title: "Tripod",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+      {
+        id: "gimbal",
+        title: "Gimbal",
+        type: AssetType.INDIVIDUAL,
+        assetKits: [],
+        custody: [],
+        assetLocations: [],
+      },
+    ]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["tripod", "gimbal"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    const rawCalls = vitest.mocked(db.$queryRaw).mock;
+    /** The SQL text of a raw call, whether a tagged template or a `Prisma.sql`. */
+    const sqlOf = (call: unknown[]) => {
+      const first = call[0] as { text?: string } | TemplateStringsArray;
+      return "text" in first && typeof first.text === "string"
+        ? first.text
+        : (first as TemplateStringsArray).join("?");
+    };
+    const lockIndex = rawCalls.calls.findIndex((call) =>
+      sqlOf(call).includes("FOR KEY SHARE")
+    );
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    const sql = sqlOf(rawCalls.calls[lockIndex]).replace(/\s+/g, " ");
+    expect(sql).toContain('FROM "Asset"');
+    expect(sql).toContain('ORDER BY "id" FOR KEY SHARE');
+    expect(
+      (rawCalls.calls[lockIndex][0] as unknown as { values: unknown[] }).values
+    ).toContain("org-1");
+    expect(rawCalls.invocationCallOrder[lockIndex]).toBeLessThan(
+      vitest.mocked(db.assetKit.createMany).mock.invocationCallOrder[0]
+    );
+  });
+
+  it("does not re-check a quantity-tracked asset, whose free units can be held", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(KIT);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      {
+        id: "batteries",
+        title: "AA Batteries",
+        type: AssetType.QUANTITY_TRACKED,
+        quantity: 10,
+        assetKits: [],
+        custody: [],
+        bookingAssets: [],
+        assetLocations: [],
+      },
+    ]);
+    // A held slice of the pool must not refuse the add.
+    //@ts-expect-error missing vitest type
+    db.custody.findFirst.mockResolvedValue({ id: "custody-1" });
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["batteries"],
+      assetQuantities: { batteries: 2 },
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    });
+
+    expect(db.assetKit.createMany).toHaveBeenCalled();
+    expect(db.custody.findFirst).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ kitCustodyId: null }),
+      })
+    );
   });
 });
 
@@ -7871,5 +8049,107 @@ describe("removeDestroyedUnitsFromKits", () => {
       shrunkMemberships: [],
       detachmentImpact: [],
     });
+  });
+});
+
+describe("getPaginatedAndFilterableKits: booking kit picker availability", () => {
+  const BOOKING_ID = "booking-current";
+  const FROM = "2026-10-08T09:00:00.000Z";
+  const TO = "2026-10-08T17:00:00.000Z";
+
+  /** A picker request for this booking's window, hiding unavailable kits. */
+  function pickerRequest() {
+    const params = new URLSearchParams({
+      hideUnavailable: "true",
+      bookingFrom: FROM,
+      bookingTo: TO,
+    });
+    return new Request(`https://app.shelf.nu/kits?${params}`);
+  }
+
+  async function runPicker() {
+    await getPaginatedAndFilterableKits({
+      request: pickerRequest(),
+      organizationId: "org-1",
+      currentBookingId: BOOKING_ID,
+      canSeeAllCustody: true,
+      userId: "user-1",
+    });
+    // why: the db is mocked module-wide; the `where` handed to it is the
+    // picker's whole availability decision, so it is what these tests read.
+    return vitest.mocked(db.kit.findMany).mock.calls.at(-1)![0]!.where!;
+  }
+
+  /** Every `asset` filter in the where that judges the asset's own bookings. */
+  function assetBookingFilters(node: unknown): Record<string, unknown>[] {
+    if (!node || typeof node !== "object") return [];
+    const found: Record<string, unknown>[] = [];
+    for (const [key, value] of Object.entries(node)) {
+      if (
+        key === "asset" &&
+        value &&
+        typeof value === "object" &&
+        "bookingAssets" in value
+      ) {
+        found.push(value as Record<string, unknown>);
+      }
+      found.push(...assetBookingFilters(value));
+    }
+    return found;
+  }
+
+  beforeEach(() => {
+    vitest.mocked(db.kit.findMany).mockResolvedValue([]);
+    vitest.mocked(db.kit.count).mockResolvedValue(0);
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([]);
+    vitest.mocked(db.assetKit.findMany).mockResolvedValue([]);
+  });
+
+  it("judges only INDIVIDUAL members by their asset's bookings, so a shared quantity pool hides no sibling kit", async () => {
+    const where = await runPicker();
+
+    // Rule 1 (RESERVED) and Rule 2 (ONGOING/OVERDUE) both read member assets'
+    // bookings. A QUANTITY_TRACKED member's bookings include every other
+    // kit's slice of the same pool, so they must never decide this kit.
+    const filters = assetBookingFilters(where);
+    expect(filters).toHaveLength(2);
+    for (const filter of filters) {
+      expect(filter.type).toBe(AssetType.INDIVIDUAL);
+    }
+  });
+
+  it("leaves out a kit whose own slice another booking holds in the window", async () => {
+    // Kit A is reserved for an overlapping window through its own membership.
+    vitest.mocked(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        assetKitId: "ak-a",
+        checkedOutAt: null,
+        checkedInAt: null,
+        booking: { id: "other-booking", status: BookingStatus.RESERVED },
+      },
+    ] as never);
+    vitest
+      .mocked(db.assetKit.findMany)
+      .mockResolvedValue([
+        { id: "ak-a", kitId: "kit-a", kit: { name: "Kit A" } },
+      ] as never);
+
+    const where = await runPicker();
+
+    expect(where.AND).toEqual(
+      expect.arrayContaining([{ id: { notIn: ["kit-a"] } }])
+    );
+    // The count must agree with the page, or pagination drifts.
+    expect(
+      vitest
+        .mocked(db.kit.count)
+        .mock.calls.some(([args]) => args?.where === where)
+    ).toBe(true);
+  });
+
+  it("adds no exclusion when no other booking holds a kit", async () => {
+    const where = await runPicker();
+
+    expect(JSON.stringify(where)).not.toContain("notIn");
   });
 });
