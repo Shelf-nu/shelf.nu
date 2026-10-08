@@ -44,6 +44,13 @@ import { getQr } from "../qr/service.server";
 
 // Mock dependencies
 // why: testing kit service logic without executing actual database operations
+// why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
+// the guard's own behaviour is what these suites assert on.
+vitest.mock("~/modules/asset/archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
+}));
+
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -4739,6 +4746,42 @@ describe("updateKitLocation - cascade to member assets", () => {
     });
   }
 
+  it("leaves an archived member where it is (issue #382)", async () => {
+    mockKitWithAssets([
+      {
+        quantity: 1,
+        asset: {
+          id: "asset-archived",
+          title: "Archived member",
+          type: AssetType.INDIVIDUAL,
+          quantity: null,
+          unitOfMeasure: null,
+          assetLocations: [{ location: { id: "loc-old", name: "Old Loc" } }],
+        },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    // The cascade only reads members that are not archived, so an archived
+    // one is never re-placed, noted or reported as moved.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ asset: { archivedAt: null } }),
+      })
+    );
+  });
+
   it("moves an INDIVIDUAL member that already has a location", async () => {
     expect.assertions(3);
 
@@ -6687,6 +6730,34 @@ describe("kit detach flows — helper wiring", () => {
 });
 
 describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () => {
+  it("reads only the kits' members that are not archived (issue #382)", async () => {
+    // An archived member is out of service: no custody, no status change, no
+    // note, no event. Filtering at the read keeps every later step honest.
+    // why: an unavailable kit stops the call right after the read.
+    (db.kit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "kit-1", name: "Kit 1", status: "IN_CUSTODY", assetKits: [] },
+    ]);
+
+    await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      custodianId: "tm-1",
+      custodianName: "Bob",
+      userId: "user-1",
+    }).catch(() => null);
+
+    expect(db.kit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetKits: expect.objectContaining({
+            where: { asset: { archivedAt: null } },
+          }),
+        }),
+      })
+    );
+  });
+
   it("rejects an unavailable kit as a handled 400, not a captured 500", async () => {
     // why: the availability guard reads freshly-queried kit status; return an
     // IN_CUSTODY (not AVAILABLE) kit so the unavailable-kits guard fires.

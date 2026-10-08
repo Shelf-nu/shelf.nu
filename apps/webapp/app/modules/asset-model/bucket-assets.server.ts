@@ -43,6 +43,7 @@ import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { applyAssetModelBucketFilters } from "./bucket";
@@ -224,6 +225,15 @@ export async function loadAssetModelBucketAssets({
     // through it.
     const availableToBookOnly = access.policy.assets.listScope === "bookable";
 
+    // The index's Archived and All views are for members who can act on what
+    // is in them (`asset: archive`, issue #382); everyone else is held to the
+    // Active view whatever the forwarded string says, as on the index itself.
+    const honorArchivedView = roleHasPermission({
+      roles: [access.role],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.archive,
+    });
+
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
         request,
@@ -233,6 +243,7 @@ export async function loadAssetModelBucketAssets({
         canUseBarcodes,
         timeZone,
         availableToBookOnly,
+        honorArchivedView,
       });
 
     // Only an empty sheet has a use for this, and only an empty sheet pays for
@@ -244,7 +255,9 @@ export async function loadAssetModelBucketAssets({
             bucket,
             organizationId,
             availableToBookOnly,
-            archivedFilter: getArchivedFilterFromParams(forwarded),
+            archivedFilter: honorArchivedView
+              ? getArchivedFilterFromParams(forwarded)
+              : "active",
           })
         : null;
 

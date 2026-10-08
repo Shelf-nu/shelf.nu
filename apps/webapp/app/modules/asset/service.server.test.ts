@@ -42,6 +42,7 @@ import {
   bulkMarkAvailability,
   unarchiveAsset,
   updateAssetBookingAvailability,
+  updateAssetMainImage,
   bulkAssignAssetTags,
   bulkCheckInAssets,
   bulkCheckOutAssets,
@@ -2735,10 +2736,9 @@ describe("updateAsset archived freeze (issue #382)", () => {
     expect(db.asset.update).not.toHaveBeenCalled();
   });
 
-  it("lets the signed-URL refresh through on an archived asset", async () => {
-    // why: re-signing an expired image URL is system bookkeeping on the READ
-    // path — blocking it would break viewing an archived asset's image. Same
-    // carve-out the DB freeze trigger makes.
+  it("refuses an image change on an archived asset, with no carve-out", async () => {
+    // A new main image is a user edit. Re-signing an expired URL never comes
+    // through `updateAsset`, so there is nothing here to let through.
     mockCount.mockResolvedValue(1);
 
     await expect(
@@ -2748,11 +2748,42 @@ describe("updateAsset archived freeze (issue #382)", () => {
         organizationId: "org-1",
         mainImage: "https://signed/new",
         mainImageExpiration: new Date(),
-        allowArchived: true,
       } as any)
-    ).resolves.toBeDefined();
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+  });
 
-    expect(mockCount).not.toHaveBeenCalled();
+  it("refuses to relink a QR code to an archived asset, from any route", async () => {
+    // The guard lives in the service, so the QR "link" page and the companion
+    // are refused as well as the asset page.
+    mockCount.mockResolvedValue(1);
+
+    await expect(
+      relinkAssetQrCode({
+        qrId: "qr-1",
+        assetId: "asset-1",
+        organizationId: "org-1",
+        userId: "user-1",
+      })
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+    expect(db.asset.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses an image upload on an archived asset before anything is uploaded", async () => {
+    mockCount.mockResolvedValue(1);
+
+    await expect(
+      updateAssetMainImage({
+        request: new Request("http://localhost/assets/asset-1/edit", {
+          method: "POST",
+        }),
+        assetId: "asset-1",
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+    // Refused before the upload: no image was signed, none was stored.
+    expect(createSignedUrl).not.toHaveBeenCalled();
   });
 
   it("does not stand in the way of a normal, unarchived write", async () => {
@@ -6338,6 +6369,10 @@ describe("availability writes on archived assets (issue #382)", () => {
         clientVersion: "test",
       })
     );
+    // why: the re-read that confirms the asset really is archived now.
+    vitest
+      .mocked(db.asset.findFirst)
+      .mockResolvedValueOnce({ archivedAt: new Date() } as never);
 
     await expect(
       updateAssetBookingAvailability({
@@ -6346,6 +6381,29 @@ describe("availability writes on archived assets (issue #382)", () => {
         availableToBook: false,
       })
     ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+  });
+
+  it("does not call a P2025 'archived' when the asset is not archived", async () => {
+    // A P2025 can come from something other than an archive. Reporting it as
+    // "archived" would send the user to reinstate an asset that is active.
+    vitest.mocked(db.asset.update).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("No record found", {
+        code: "P2025",
+        clientVersion: "test",
+      })
+    );
+    // why: the re-read finds the asset active.
+    vitest
+      .mocked(db.asset.findFirst)
+      .mockResolvedValueOnce({ archivedAt: null } as never);
+
+    await expect(
+      updateAssetBookingAvailability({
+        id: "a1",
+        organizationId: "org-1",
+        availableToBook: false,
+      })
+    ).rejects.not.toMatchObject({ title: "Asset is archived" });
   });
 
   it("skips assets archived after the bulk check", async () => {

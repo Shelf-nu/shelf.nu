@@ -2192,6 +2192,16 @@ export async function reserveBooking({
       });
     }
 
+    // Backstop for issue #382: every path that adds assets to a booking
+    // refuses archived ones, but a booking is the last place to catch any that
+    // got in another way, before it commits to a pickup.
+    await assertAssetsAreNotArchived({
+      assetIds: [
+        ...new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id)),
+      ],
+      organizationId,
+    });
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
@@ -3478,6 +3488,13 @@ export async function checkoutBooking({
         organizationId,
       });
     }
+
+    // Backstop for issue #382: an archived asset is out of service and must
+    // never go out, however it reached this booking.
+    await assertAssetsAreNotArchived({
+      assetIds: bookingFoundAssetIds,
+      organizationId,
+    });
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
@@ -17853,6 +17870,35 @@ export async function duplicateBooking({
      * notification recipients), so we mirror the emission pattern here.
      */
     const newBooking = await db.$transaction(async (tx) => {
+      /**
+       * Archived assets are out of service (issue #382), and the source booking
+       * may hold some: archiving is allowed once a booking is finished. They
+       * are DROPPED from the copy rather than refusing it, the same way
+       * detached kit residue is dropped above: the duplicate is a new plan, and
+       * the rest of it is still worth having. Locked first, the lock every
+       * archive and booking write takes, so an archive cannot land between
+       * this read and the insert.
+       */
+      const sliceAssetIds = [...new Set(createSlices.map((s) => s.assetId))];
+      await lockAssetsForArchiveGuard(tx, sliceAssetIds, organizationId);
+      const archivedAssetIds = new Set(
+        sliceAssetIds.length > 0
+          ? (
+              await tx.asset.findMany({
+                where: {
+                  id: { in: sliceAssetIds },
+                  organizationId,
+                  archivedAt: { not: null },
+                },
+                select: { id: true },
+              })
+            ).map((a) => a.id)
+          : []
+      );
+      const isActive = (row: { assetId: string }) =>
+        !archivedAssetIds.has(row.assetId);
+      const slicesToCreate = createSlices.filter(isActive);
+
       const created = await tx.booking.create({
         data: {
           name: bookingToDuplicate.name + " (Copy)",
@@ -17885,7 +17931,7 @@ export async function duplicateBooking({
              * at checkout, so an over-reservation here is surfaced to the
              * user at the right time instead of being silently truncated.
              */
-            create: createSlices,
+            create: slicesToCreate,
           },
           tags: {
             connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
@@ -17918,7 +17964,7 @@ export async function duplicateBooking({
           entityId: created.id,
           bookingId: created.id,
           meta: {
-            assetCount: createSlices.length,
+            assetCount: slicesToCreate.length,
             duplicatedFromBookingId: bookingToDuplicate.id,
           },
         },
@@ -17931,7 +17977,7 @@ export async function duplicateBooking({
       // event per slice, each carrying that slice's count. We iterate the
       // same create payload (standalone source rows + kit-driven current
       // rows) so the events reflect what was actually inserted.
-      if (createSlices.length > 0) {
+      if (slicesToCreate.length > 0) {
         const eventRows: Array<{
           assetId: string;
           quantity: number;
@@ -17947,7 +17993,7 @@ export async function duplicateBooking({
             quantity: row.quantity,
             asset: row.asset,
           })),
-        ];
+        ].filter(isActive);
 
         await recordEvents(
           eventRows.map((row) => ({

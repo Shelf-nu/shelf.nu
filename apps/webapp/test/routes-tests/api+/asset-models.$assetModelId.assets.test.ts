@@ -265,6 +265,27 @@ describe("asset model assets endpoint", () => {
     });
   });
 
+  it("holds a member without asset: archive to the Active view (issue #382)", async () => {
+    // A BASE member never sees the Archived tab. Typing `archived=archived`
+    // into the forwarded string must not hand them the archived set anyway.
+    vitest
+      .mocked(requirePermission)
+      .mockResolvedValue(caller("BASE", { organizationId: "org-1" }) as never);
+
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: null,
+    });
+  });
+
   it("skips the unfiltered count when the filtered set has rows", async () => {
     vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mockResolvedValue({
       assets: [{ id: "asset-1" }],

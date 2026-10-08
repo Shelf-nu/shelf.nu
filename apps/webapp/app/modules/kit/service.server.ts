@@ -25,6 +25,7 @@ import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
 import {
   updateBarcodes,
@@ -172,7 +173,7 @@ type KitLocationTxClient = Omit<ExtendedPrismaClient, ITXClientDenyList>;
 type KitCustodyInheritTxClient = {
   asset: {
     findMany: (args: {
-      where: { id: { in: string[] } };
+      where: { id: { in: string[] }; archivedAt: null };
       select: {
         id: true;
         type: true;
@@ -1942,8 +1943,10 @@ export async function buildKitCustodyInheritData({
   if (assetIds.length === 0) return [];
 
   const assets = await tx.asset.findMany({
+    // Archived members never inherit kit custody (issue #382). Callers filter
+    // them out already; this keeps every caller honest.
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIds` are resolved org-scoped by the caller (updateKitAssets fetches them via the org-scoped `where: { id: { in }, organizationId }` asset query) before this helper runs
-    where: { id: { in: assetIds } },
+    where: { id: { in: assetIds }, archivedAt: null },
     select: {
       id: true,
       type: true,
@@ -3985,7 +3988,10 @@ export async function bulkAssignKitCustody({
           // We include the kit's id/name on each asset row by
           // re-projecting the parent kit, since the helper needs a
           // {kit: {id, name}} shape downstream to render the note link.
+          // Archived members are out of service (issue #382): they take no
+          // custody, no status change, no note and no event.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -4953,8 +4959,11 @@ async function cascadeKitLocationToAssets(
     where: { assetKit: memberScope },
   });
 
+  // Archived members are frozen (issue #382): their placement stays where it
+  // was. Only quantity-tracked rows are kit-driven, and those cannot be
+  // archived, so the delete above never touches an archived member's row.
   const assetKits = await tx.assetKit.findMany({
-    where: memberScope,
+    where: { ...memberScope, asset: { archivedAt: null } },
     select: {
       id: true,
       assetId: true,
@@ -6051,11 +6060,12 @@ export async function updateKitAssets({
      * every other edit. Removing an archived member stays allowed. Runs after
      * the select-all expansion, so the real ids are checked, not the sentinel.
      */
+    const archiveGuardAssetIds = [
+      ...newlyAddedAssets.map((asset) => asset.id),
+      ...qtyChangedAssets.map((asset) => asset.id),
+    ];
     await assertAssetsAreNotArchived({
-      assetIds: [
-        ...newlyAddedAssets.map((asset) => asset.id),
-        ...qtyChangedAssets.map((asset) => asset.id),
-      ],
+      assetIds: archiveGuardAssetIds,
       organizationId,
     });
 
@@ -6245,6 +6255,15 @@ export async function updateKitAssets({
     let locationCascadedAssetIds = new Set<string>();
 
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still join the kit. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, archiveGuardAssetIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: archiveGuardAssetIds, organizationId },
+        tx
+      );
+
       // Disconnect: drop the pivot rows for removed assets (only when not
       // in addOnly mode).
       if (!addOnly && removedAssets.length > 0) {

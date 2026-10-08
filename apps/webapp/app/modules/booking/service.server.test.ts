@@ -172,7 +172,10 @@ vitest.mock("~/database/db.server", () => ({
       // db.asset.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
       // Echo the requested ids so the guard passes for happy-path tests; other
       // call sites (no id.in) still get [], and tests override per-case.
+      // A query for ARCHIVED rows (`archivedAt: { not: null }`, as
+      // duplicateBooking issues) answers "none archived" instead of echoing.
       findMany: vitest.fn().mockImplementation((args?: any) => {
+        if (args?.where?.archivedAt?.not === null) return Promise.resolve([]);
         const ids = args?.where?.id?.in;
         return Promise.resolve(
           Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
@@ -7679,6 +7682,17 @@ describe("duplicateBooking", () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: duplicateBooking asks which copied assets are archived (issue #382).
+    // clearAllMocks keeps implementations, so a fixture an earlier describe
+    // left on `asset.findMany` would answer that as "all archived". None are.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockImplementation(((args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where as { archivedAt?: unknown } | undefined)?.archivedAt
+            ? []
+            : (args?.where?.id?.in ?? []).map((id) => ({ id }))
+        )) as never);
   });
 
   it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
@@ -7711,6 +7725,69 @@ describe("duplicateBooking", () => {
       expect(db.booking.create).not.toHaveBeenCalled();
     }
   );
+
+  it("drops an asset archived since the source booking, keeps the rest (issue #382)", async () => {
+    // Archiving is allowed once a booking is finished, so a source booking can
+    // hold an asset that is now out of service. The copy must not bring it
+    // back into a booking that can be reserved and checked out.
+    const slice = (assetId: string, id: string) => ({
+      asset: { id: assetId, assetKits: [] },
+      assetId,
+      quantity: 1,
+      id,
+      checkedOutAt: null,
+      checkedInAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      bookingAssets: [
+        slice("asset-active", "ba-1"),
+        slice("asset-archived", "ba-2"),
+      ],
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue({
+      ...mockBookingData,
+      id: "booking-2",
+    });
+    // why: the archived lookup inside the transaction finds the second asset.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockImplementation(((args?: { where?: { archivedAt?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt ? [{ id: "asset-archived" }] : []
+        )) as never);
+
+    await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    const created = vitest.mocked(db.booking.create).mock.calls[0][0] as {
+      data: { bookingAssets: { create: { assetId: string }[] } };
+    };
+    expect(created.data.bookingAssets.create.map((s) => s.assetId)).toEqual([
+      "asset-active",
+    ]);
+    // Locked first, so an archive cannot land between the read and the insert.
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["asset-active", "asset-archived"],
+      "org-1"
+    );
+    // No BOOKING_ASSETS_ADDED for the dropped asset.
+    const added = vitest
+      .mocked(activityEventService.recordEvents)
+      .mock.calls.flatMap(([events]) => events as { assetId?: string }[]);
+    expect(added.map((e) => e.assetId)).toEqual(["asset-active"]);
+  });
 
   it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);

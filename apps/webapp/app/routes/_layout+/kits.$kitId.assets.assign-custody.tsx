@@ -306,7 +306,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // ("custody of 50 boxes via Kittington"), so pull the fields
           // `formatUnitCount` needs: type + unitOfMeasure. INDIVIDUAL
           // rows continue to render countless ("custody via Kittington").
+          // Archived members are out of service (issue #382) and are left out.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: { id: true, type: true, unitOfMeasure: true },

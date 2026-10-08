@@ -33,6 +33,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: the lock helper issues a raw `SELECT ... FOR UPDATE`; the test drives
 // the quantity validation through its resolved value instead of a DB.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));
@@ -59,6 +66,8 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
+import { ShelfError } from "~/utils/error";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 
 /** Shape of the `data()` result the route action returns. */
 type DataResult<T> = { data: T; init: ResponseInit | null };
@@ -256,6 +265,33 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ quantity: 10 }),
     });
+  });
+
+  it("refuses an archived asset under the row lock, writing nothing (issue #382)", async () => {
+    // This route writes the placement itself, so it carries its own freeze.
+    // why: the guard reports the asset archived.
+    vi.mocked(assertAssetsAreNotArchived).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: "Archived assets are read-only.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenCalledWith(
+      { assetIds: ["asset-1"], organizationId: "org-1" },
+      expect.anything()
+    );
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
   });
 
   it("rejects a quantity above the asset's total pool", async () => {

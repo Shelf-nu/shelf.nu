@@ -1062,6 +1062,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   availableToBookOnly = false,
   preParsedFilters,
   timeZone = "UTC",
+  honorArchivedView = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1081,6 +1082,13 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * for callers that don't resolve the acting user's prefs.
    */
   timeZone?: string;
+  /**
+   * Honour the `?archived=` view param (issue #382). Off by default, so every
+   * list shows active assets unless its caller opts in: the asset index and
+   * export pass it for members holding `asset: archive`. A picker, or a
+   * member without the grant, gets active assets whatever the URL says.
+   */
+  honorArchivedView?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1129,7 +1137,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       lowStockOnly,
       // Active/Archived/All dimension — keeps the advanced (raw-SQL) index in
       // sync with the simple index's default-hide-archived behavior.
-      getArchivedFilterFromParams(searchParams)
+      honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -2048,7 +2056,6 @@ export async function updateAsset({
   minQuantity,
   consumptionType,
   unitOfMeasure,
-  allowArchived = false,
 }: UpdateAssetPayload) {
   try {
     /**
@@ -2057,10 +2064,12 @@ export async function updateAsset({
      * because `updateAsset` is the single write chokepoint every surface goes
      * through — web routes, the CSV import-update, and all of the companion
      * app's asset writes. Guarding per-route left the mobile paths open.
+     *
+     * There is no carve-out. Re-signing an expired image URL writes the
+     * column directly (`api+/asset.refresh-main-image`, the mobile refresh)
+     * and never comes through here, so every caller is a user edit.
      */
-    if (!allowArchived) {
-      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
-    }
+    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
 
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
@@ -2695,8 +2704,8 @@ export async function updateAsset({
           // otherwise still mutate a frozen row. Riding the predicate on the
           // UPDATE itself closes that window — no match becomes P2025, which
           // the catch below reports as the archived conflict it almost always
-          // is. `allowArchived` callers (the signed-URL refresh) skip it.
-          ...(allowArchived ? {} : { archivedAt: null }),
+          // is.
+          archivedAt: null,
         },
         data,
         include: {
@@ -3414,11 +3423,11 @@ export async function updateAsset({
       throw cause;
     }
 
-    const archivedMidWrite = archivedMidWriteError(cause, {
-      userId,
-      id,
-      organizationId,
-    });
+    const archivedMidWrite = await archivedMidWriteError(
+      cause,
+      { id, organizationId },
+      { userId, id, organizationId }
+    );
     if (archivedMidWrite) {
       throw archivedMidWrite;
     }
@@ -3434,19 +3443,32 @@ export async function updateAsset({
  *
  * Single-asset writes carry `archivedAt: null` in their WHERE, so an archive
  * that commits after the caller's pre-check makes the row vanish from the
- * predicate and Prisma raises P2025. Callers have already ruled out "not in
- * this workspace" with that pre-check, so P2025 here means archived. Shared so
- * every such write tells the user the same thing (issue #382).
+ * predicate and Prisma raises P2025. A P2025 can also mean something else
+ * (a nested relation the write could not find), so the asset is re-read and
+ * the conflict reported only when it really is archived now. Shared so every
+ * such write tells the user the same thing (issue #382).
  *
  * @param cause - The error the write threw
+ * @param asset - The asset the write targeted
  * @param additionalData - Context for logs
- * @returns The archived ShelfError for a P2025, or `null` for anything else
+ * @returns The archived ShelfError when the asset is archived, or `null` to
+ *   let the caller handle `cause` as it would have
  */
-function archivedMidWriteError(
+async function archivedMidWriteError(
   cause: unknown,
+  asset: { id: string; organizationId: string },
   additionalData: AdditionalData
-): ShelfError | null {
+): Promise<ShelfError | null> {
   if (!isNotFoundError(cause)) {
+    return null;
+  }
+
+  // A read of the archive state itself, so it must reach archived rows.
+  const current = await db.asset.findFirst({
+    where: { id: asset.id, organizationId: asset.organizationId },
+    select: { archivedAt: true },
+  });
+  if (!current?.archivedAt) {
     return null;
   }
 
@@ -4128,6 +4150,12 @@ export async function replaceAssetPlacements({
     //    so a fully-placed asset can still be added to a kit — counting both
     //    axes here would refuse placement edits on an asset the database
     //    considers perfectly valid.
+    //
+    // Archived assets are frozen (issue #382). Only quantity-tracked assets
+    // reach this today, and those cannot be archived, so this is a backstop
+    // for the day one can.
+    await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+
     const asset = await db.asset.findUniqueOrThrow({
       where: { id: assetId, organizationId },
       select: {
@@ -4608,6 +4636,14 @@ export async function updateAssetMainImage({
   isNewAsset?: boolean;
 }): Promise<boolean> {
   try {
+    // Archived assets are frozen (issue #382). Refused before the upload, not
+    // after: the file would otherwise land in storage, and the old images be
+    // deleted, before `updateAsset` turned the change down. A new asset cannot
+    // be archived yet, so it skips the read.
+    if (!isNewAsset) {
+      await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+    }
+
     const fileData = await parseFileFormData({
       request,
       bucketName: "assets",
@@ -4669,10 +4705,6 @@ export async function updateAssetMainImage({
       userId,
       organizationId,
       request,
-      // Signed-URL bookkeeping is a system write, not a user edit, so it is
-      // allowed on an archived asset (issue #382). Mirrors the DB freeze
-      // trigger's carve-out for the image columns.
-      allowArchived: true,
     });
 
     /**
@@ -5200,6 +5232,7 @@ export async function getPaginatedAndFilterableAssets({
   availableToBookOnly,
   canSeeAllCustody,
   userId,
+  honorArchivedView = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -5221,6 +5254,13 @@ export async function getPaginatedAndFilterableAssets({
    */
   canSeeAllCustody: boolean;
   userId?: string;
+  /**
+   * Honour the `?archived=` view param (issue #382). Off by default, so every
+   * list shows active assets unless its caller opts in: the asset index and
+   * export pass it for members holding `asset: archive`. A picker, or a
+   * member without the grant, gets active assets whatever the URL says.
+   */
+  honorArchivedView?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -5325,7 +5365,9 @@ export async function getPaginatedAndFilterableAssets({
         extraInclude,
         assetKitFilter,
         availableToBookOnly,
-        archivedFilter: getArchivedFilterFromParams(searchParams),
+        archivedFilter: honorArchivedView
+          ? getArchivedFilterFromParams(searchParams)
+          : "active",
       }),
     ]);
 
@@ -6548,10 +6590,11 @@ export async function updateAssetBookingAvailability({
       throw cause;
     }
 
-    const archivedMidWrite = archivedMidWriteError(cause, {
-      id,
-      organizationId,
-    });
+    const archivedMidWrite = await archivedMidWriteError(
+      cause,
+      { id, organizationId },
+      { id, organizationId }
+    );
     if (archivedMidWrite) {
       throw archivedMidWrite;
     }
@@ -7355,6 +7398,14 @@ export async function bulkCheckOutAssets({
      * 2. Update status of all assets to IN_CUSTODY
      */
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId },
+        tx
+      );
       // why: hard cross-org guard inside the tx. Mirrors the org-scoped
       // validation pattern used by `updateBookingAssets`. This throws before
       // any custody row is written if `custodianId` belongs to another
@@ -7900,6 +7951,14 @@ export async function bulkUpdateAssetLocation({
     );
 
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId },
+        tx
+      );
       if (assetsToUpdate.length > 0) {
         // Per-asset MANUAL pivot replace. Drop the asset's existing
         // manual rows (kit-driven rows survive — they're owned by the
@@ -8156,6 +8215,14 @@ export async function bulkUpdateAssetCategory({
     }
 
     await db.$transaction(async (tx) => {
+      // The archived check above is a read; an archive committing before this
+      // write would still be modified. Re-checked under the row lock the
+      // archive paths take, so the two serialize (issue #382).
+      await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: resolvedIds, organizationId },
+        tx
+      );
       await tx.asset.updateMany({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: assetsThatChange is derived from assetsBeforeUpdate fetched on lines 4322-4326 with where { id in resolvedIds, organizationId }; every id is already org-proven
         where: { id: { in: assetsThatChange.map((a) => a.id) } },
@@ -8413,6 +8480,14 @@ export async function bulkUpdateAssetModel({
       // `bulkDeleteAssets`.
       await db.$transaction(
         async (tx) => {
+          // The archived check above is a read; an archive committing before this
+          // write would still be modified. Re-checked under the row lock the
+          // archive paths take, so the two serialize (issue #382).
+          await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+          await assertAssetsAreNotArchived(
+            { assetIds: resolvedIds, organizationId },
+            tx
+          );
           /**
            * Re-read under the transaction. The rows above were read before it
            * opened, so a concurrent change would be overwritten here while the
@@ -8650,6 +8725,14 @@ export async function bulkAssignAssetTags({
     // P2028 (Sentry SHELF-WEBAPP-1MH). Bump the ceiling to 15s.
     const updatedAssets = await db.$transaction(
       async (tx) => {
+        // The archived check above is a read; an archive committing before this
+        // write would still be modified. Re-checked under the row lock the
+        // archive paths take, so the two serialize (issue #382).
+        await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
+        await assertAssetsAreNotArchived(
+          { assetIds: resolvedIds, organizationId },
+          tx
+        );
         const results = await Promise.all(
           resolvedIds.map((id) =>
             tx.asset.update({
@@ -8808,6 +8891,12 @@ export async function relinkAssetQrCode({
   assetId: Asset["id"];
   organizationId: Organization["id"];
 }) {
+  // Archived assets are frozen (issue #382). Guarded here, at the one service
+  // every relink goes through (the asset page, the QR "link" page and the
+  // companion), rather than on each route. Org-scoped, so an asset that is
+  // not the caller's passes through to the 404 below.
+  await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),
     getUserByID(userId, {

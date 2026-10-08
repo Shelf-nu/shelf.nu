@@ -19,6 +19,7 @@ import { createNote } from "~/modules/note/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -184,6 +185,15 @@ export async function action({ request }: ActionFunctionArgs) {
         tx,
         assetId,
         organizationId
+      );
+
+      // Archived assets are frozen (issue #382). This route writes the
+      // placement itself rather than through `updateAsset`, so it needs the
+      // freeze of its own. Read under the row lock just taken, so an archive
+      // cannot land between this check and the write.
+      await assertAssetsAreNotArchived(
+        { assetIds: [assetId], organizationId },
+        tx
       );
 
       // Per-placement bound: the requested units must fit the asset's
