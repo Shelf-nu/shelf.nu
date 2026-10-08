@@ -27,7 +27,7 @@ import {
   type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { assetDetailHref } from "@/lib/asset-routes";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
@@ -360,6 +360,10 @@ function AuditDetailContent() {
   // Stale-while-revalidate — skip refetch if data is fresh (< 60s old)
   const hasFetched = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Set when a row opens its asset. The asset can be edited or deleted there,
+  // so coming back refetches even inside the 60s window: otherwise the row
+  // would show the details from before the fix the auditor just made.
+  const returningFromAsset = useRef(false);
 
   // ── Fetch ──────────────────────────────────────────────
 
@@ -403,8 +407,13 @@ function AuditDetailContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
-      if (hasFetched.current && Date.now() - lastFetchedAt.current < 60_000)
+      if (
+        hasFetched.current &&
+        !returningFromAsset.current &&
+        Date.now() - lastFetchedAt.current < 60_000
+      )
         return;
+      returningFromAsset.current = false;
       if (!hasFetched.current) {
         setIsLoading(true);
       }
@@ -607,6 +616,19 @@ function AuditDetailContent() {
     return displayAssets.filter((a) => a.status === effectiveFilter);
   }, [displayAssets, effectiveFilter]);
 
+  // Pushes the asset detail onto THIS stack (the Audits-mounted copy of the
+  // Assets tab's screen), so the header back button, the iOS swipe and the
+  // Android back button all pop straight back to this audit, with its filter
+  // and scroll intact. The Assets tab's route would switch tabs instead, and
+  // back would land on the Assets list. See lib/asset-routes.ts.
+  const openAsset = useCallback(
+    (assetId: string) => {
+      returningFromAsset.current = true;
+      router.push(assetDetailHref("audits", assetId));
+    },
+    [router]
+  );
+
   // ── Render functions ──────────────────────────────────
 
   const renderAsset = useCallback(
@@ -670,7 +692,8 @@ function AuditDetailContent() {
       // unexpected asset updates it from here. A deleted asset has no detail
       // left to open, so that row stays an inert summary and only its
       // evidence chip (below) is tappable.
-      const opensAsset = item.assetId !== null;
+      const assetId = item.assetId;
+      const opensAsset = assetId !== null;
       const Card = opensAsset ? TouchableOpacity : View;
       const openEvidence = () =>
         onEvidencePress({
@@ -683,14 +706,7 @@ function AuditDetailContent() {
           style={styles.assetCard}
           {...(opensAsset
             ? {
-                // Cross-tab: pushIntoTab anchors the Assets list beneath the
-                // detail so "back" has a target, and leaves this audit mounted
-                // in its own stack instead of pushing the asset onto it.
-                onPress: () =>
-                  pushIntoTab(
-                    "/(tabs)/assets",
-                    `/(tabs)/assets/${item.assetId}`
-                  ),
+                onPress: () => openAsset(assetId),
                 activeOpacity: 0.7,
                 accessibilityRole: "button" as const,
               }
@@ -811,7 +827,14 @@ function AuditDetailContent() {
         </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
+    [
+      colors,
+      auditAssetStatusBadge,
+      styles,
+      formatDateTime,
+      onEvidencePress,
+      openAsset,
+    ]
   );
 
   // ── Loading / Error states ────────────────────────────

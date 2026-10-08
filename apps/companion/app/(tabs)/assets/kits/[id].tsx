@@ -29,7 +29,7 @@ import { Image } from "expo-image";
 import { api } from "@/lib/api";
 import type { KitDetail } from "@/lib/api/types";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { useAssetScreenNavigation } from "@/lib/asset-host-stack";
 import {
   fontSize,
   spacing,
@@ -58,6 +58,9 @@ import { userHasPermission } from "@/lib/permissions";
 export default function KitDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { currentOrg } = useOrg();
+  // Asset rows open in whichever stack mounts this screen (the Assets tab, or
+  // the Audits stack when reached from an audit). See lib/asset-routes.ts.
+  const assetNavigation = useAssetScreenNavigation();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   const { formatDate } = useDateFormatter();
@@ -326,12 +329,7 @@ export default function KitDetailScreen() {
                     <TouchableOpacity
                       key={asset.id}
                       style={styles.assetRow}
-                      onPress={() =>
-                        pushIntoTab(
-                          "/(tabs)/assets",
-                          `/(tabs)/assets/${asset.id}`
-                        )
-                      }
+                      onPress={() => assetNavigation.openAsset(asset.id)}
                       activeOpacity={0.7}
                       accessibilityLabel={`View asset ${asset.title}`}
                       accessibilityRole="button"
