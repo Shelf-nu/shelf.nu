@@ -25,11 +25,19 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: rendering a QR per asset is real work (qrcode-generator + sharp) and
-// irrelevant here — the printed code is resolved independently of whether an
-// image came back.
+// why: rendering a QR per asset is external image work (qrcode-generator +
+// sharp). The stub hands back one recognisable picture per asset it is given,
+// so a test can tell which assets were sent for a QR. Barcode pictures are NOT
+// stubbed: they are drawn by the real bwip-js, because their geometry is what
+// makes them scan.
 vi.mock("~/modules/qr/service.server", () => ({
-  getQrCodeMaps: vi.fn().mockResolvedValue({}),
+  getQrCodeMaps: vi.fn(({ assets }: { assets: { id: string }[] }) =>
+    Promise.resolve(
+      Object.fromEntries(
+        assets.map((asset) => [asset.id, `qr-image:${asset.id}`])
+      )
+    )
+  ),
 }));
 
 // why: the booking read is a large org-scoped query with its own tests; this
@@ -41,8 +49,10 @@ vi.mock("./service.server", () => ({
 import type { QrIdDisplayPreference } from "@prisma/client";
 
 import { db } from "~/database/db.server";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { fetchAllPdfRelatedData } from "~/modules/booking/pdf-helpers";
 import { getQrCodeMaps } from "~/modules/qr/service.server";
+import { ShelfError } from "~/utils/error";
 
 import { getBooking } from "./service.server";
 
@@ -60,7 +70,8 @@ const ASSET = {
   mainImageExpiration: null,
   // Nullable: an asset without one is what sends SAM_ID to its fallback.
   sequentialId: "SAM-0001" as string | null,
-  preferredBarcodeId: null,
+  // Nullable: set, it names the barcode that overrides the workspace choice.
+  preferredBarcodeId: null as string | null,
   qrCodes: [{ id: "qr-visible-id", version: 0, errorCorrection: "L" }],
   barcodes: [{ id: "bc-1", type: "Code128", value: "128-VALUE" }],
   category: { name: "Support" },
@@ -145,7 +156,7 @@ async function run(prefs: OrgPrefs, overrides: Partial<typeof ASSET> = {}) {
     "booking-1",
     "org-1",
     "user-1",
-    // No role: the ownership check is exercised by its own tests.
+    // No access: the ownership check is exercised by its own tests.
     undefined,
     new Request("http://localhost/x")
   );
@@ -168,8 +179,9 @@ describe("booking checklist PDF — the printed asset code", () => {
     // why: NOT the tight `{ take: 1, select: { id } }` the code-bearing-entity
     // rule asks for. The same payload is handed to `getQrCodeMaps`, which
     // renders the image from `version` / `errorCorrection`. Narrowing this
-    // select breaks the QR images, silently, in print only.
-    expect(include.qrCodes).toBe(true);
+    // select breaks the QR images, silently, in print only. Ordered so the QR
+    // picture and the QR id under it are the same first code on every print.
+    expect(include.qrCodes).toEqual({ orderBy: QR_CODES_ORDER_BY });
   });
 
   it("asks the database which code the workspace wants printed", async () => {
@@ -292,16 +304,289 @@ describe("booking checklist PDF — the printed asset code", () => {
     expect(mockOf(getQrCodeMaps)).toHaveBeenCalledTimes(1);
   });
 
-  it("encodes nothing when the workspace prints no QR image", async () => {
-    // The sheet renders no image in this case, so encoding one would cost a
-    // QR per asset and carry a data URL per asset to a browser that drops it.
-    // The printed code is resolved independently, so the row stays matchable.
+  it("encodes nothing when the workspace prints no code pictures", async () => {
+    // The sheet renders no picture in this case, so encoding one would cost an
+    // encode per asset and carry a data URL per asset to a browser that drops
+    // it. The printed code is resolved independently, so the row stays
+    // matchable.
     const result = await run({ ...QR_ORG, showQrCodesOnPdfs: false });
 
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
-    expect(result.assetIdToQrCodeMap).toEqual({});
+    expect(result.assetIdToCodeImageMap).toEqual({});
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
       "qr-visible-id"
     );
+  });
+});
+
+/** Decodes a code picture's data URL back to its SVG source. */
+function svgOf(dataUrl: string | undefined): string {
+  expect(dataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+  return Buffer.from(dataUrl!.split(",")[1], "base64").toString("utf8");
+}
+
+/**
+ * Builds a checklist over several standalone assets, one row each, so a case
+ * can mix assets that carry the preferred barcode with assets that do not.
+ */
+async function runWithAssets(
+  prefs: OrgPrefs,
+  assets: Array<Partial<typeof ASSET> & { id: string }>,
+  options?: Parameters<typeof fetchAllPdfRelatedData>[6]
+) {
+  vi.clearAllMocks();
+
+  const rows = assets.map((overrides) => ({
+    ...ASSET,
+    assetKits: [],
+    barcodes: [],
+    qrCodes: [{ id: `qr-${overrides.id}`, version: 0, errorCorrection: "L" }],
+    ...overrides,
+  }));
+
+  // why: supplies one standalone `BookingAsset` slice per asset.
+  mockOf(getBooking).mockResolvedValue({
+    id: "booking-1",
+    name: "Shoot",
+    description: null,
+    custodianUser: null,
+    custodianTeamMember: { name: "Ada" },
+    tags: [],
+    modelRequests: [],
+    bookingAssets: rows.map((asset) => ({
+      id: `ba-${asset.id}`,
+      quantity: 1,
+      assetKitId: null,
+      sourceKitId: null,
+      asset,
+    })),
+  });
+  // why: the deduped asset read the pictures are drawn from.
+  mockOf(db.asset.findMany).mockResolvedValue(rows);
+  // why: no slice names a kit, so the snapshot kit lookup finds nothing.
+  mockOf(db.kit.findMany).mockResolvedValue([]);
+  // why: carries the preference and the switch under test.
+  mockOf(db.organization.findUnique).mockResolvedValue({
+    id: "org-1",
+    name: "Org",
+    imageId: null,
+    currency: "USD",
+    updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    showQrCodesOnPdfs: true,
+    ...prefs,
+  });
+
+  return fetchAllPdfRelatedData(
+    "booking-1",
+    "org-1",
+    "user-1",
+    undefined,
+    new Request("http://localhost/x"),
+    undefined,
+    options
+  );
+}
+
+const CODE128_ORG: OrgPrefs = {
+  qrIdDisplayPreference: "Code128",
+  barcodesEnabled: true,
+};
+
+describe("booking checklist PDF: the picture in the Code cell", () => {
+  it("draws the barcode for an asset that carries the workspace's barcode", async () => {
+    const result = await runWithAssets(CODE128_ORG, [
+      {
+        id: "with-barcode",
+        barcodes: [{ id: "bc-1", type: "Code128", value: "AB-12345678" }],
+      },
+    ]);
+
+    // why: the picture must be the SAME code as the text under it, so a
+    // scanner reads what the picker reads.
+    expect(result.assetIdToDisplayCodeMap["with-barcode"].value).toBe(
+      "AB-12345678"
+    );
+    const image = result.assetIdToCodeImageMap["with-barcode"];
+    expect(image).toMatchObject({ shape: "linear", placement: "cell" });
+    const svg = svgOf(image?.src);
+    expect(svg).toContain('preserveAspectRatio="none"');
+    expect(svg).toMatch(/<svg[^>]* width="[\d.]+mm"/);
+  });
+
+  it("prints the Shelf QR for an asset without the workspace's barcode", async () => {
+    // why: its text falls back to the QR id, so its picture must be the QR.
+    const result = await runWithAssets(CODE128_ORG, [
+      { id: "without-barcode" },
+    ]);
+
+    expect(result.assetIdToDisplayCodeMap["without-barcode"]).toMatchObject({
+      type: "QR_ID",
+      isFallback: true,
+    });
+    expect(result.assetIdToCodeImageMap["without-barcode"]).toEqual({
+      src: "qr-image:without-barcode",
+      shape: "square",
+      placement: "cell",
+    });
+  });
+
+  it("prints the Shelf QR in a SAM ID workspace", async () => {
+    // why: a SAM ID has no picture of its own. The QR is what the label on the
+    // asset carries alongside it, so the sheet keeps printing it.
+    const result = await runWithAssets(
+      { qrIdDisplayPreference: "SAM_ID", barcodesEnabled: false },
+      [{ id: "sam-asset" }]
+    );
+
+    expect(result.assetIdToDisplayCodeMap["sam-asset"].type).toBe("SAM_ID");
+    expect(result.assetIdToCodeImageMap["sam-asset"]).toEqual({
+      src: "qr-image:sam-asset",
+      shape: "square",
+      placement: "cell",
+    });
+  });
+
+  it("sends only the assets whose picture is a QR to the QR renderer", async () => {
+    await runWithAssets(CODE128_ORG, [
+      {
+        id: "with-barcode",
+        barcodes: [{ id: "bc-1", type: "Code128", value: "AB-12345678" }],
+      },
+      { id: "without-barcode" },
+    ]);
+
+    const sent = mockOf(getQrCodeMaps).mock.calls[0][0].assets.map(
+      (asset: { id: string }) => asset.id
+    );
+    expect(sent).toEqual(["without-barcode"]);
+  });
+
+  it("does not call the QR renderer when every picture is a barcode", async () => {
+    await runWithAssets(CODE128_ORG, [
+      {
+        id: "with-barcode",
+        barcodes: [{ id: "bc-1", type: "Code128", value: "AB-12345678" }],
+      },
+    ]);
+
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("moves a barcode too wide for the Code column onto the line under its row", async () => {
+    // 20 letters of Code 128: well over 250 modules, so even at the 0.19 mm
+    // floor it needs more than the cell's ~44.7 mm.
+    const result = await runWithAssets(CODE128_ORG, [
+      {
+        id: "long-barcode",
+        barcodes: [
+          { id: "bc-1", type: "Code128", value: "ABCDEFGHIJKLMNOPQRST" },
+        ],
+      },
+    ]);
+
+    // why: shrinking it into the cell would make the bars too thin to scan,
+    // and printing a QR instead would put a picture of a DIFFERENT code beside
+    // the text. The full-width line fits it at the preferred module width.
+    expect(result.assetIdToDisplayCodeMap["long-barcode"].value).toBe(
+      "ABCDEFGHIJKLMNOPQRST"
+    );
+    const image = result.assetIdToCodeImageMap["long-barcode"];
+    expect(image).toMatchObject({ shape: "linear", placement: "line" });
+    expect(svgOf(image?.src)).toMatch(/<svg[^>]* width="[\d.]+mm"/);
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("prints text only for an EAN-13 the encoder refuses", async () => {
+    const result = await runWithAssets(
+      { qrIdDisplayPreference: "EAN13", barcodesEnabled: true },
+      [
+        {
+          id: "bad-ean",
+          barcodes: [{ id: "bc-1", type: "EAN13", value: "12345" }],
+        },
+      ]
+    );
+
+    expect(result.assetIdToCodeImageMap).not.toHaveProperty("bad-ean");
+  });
+
+  it("draws a per-asset preferred barcode even in a SAM ID workspace", async () => {
+    // why: the per-asset override wins over the workspace preference, for the
+    // text and so for the picture.
+    const result = await runWithAssets(
+      { qrIdDisplayPreference: "SAM_ID", barcodesEnabled: true },
+      [
+        {
+          id: "override",
+          preferredBarcodeId: "bc-1",
+          barcodes: [{ id: "bc-1", type: "DataMatrix", value: "DM-0001" }],
+        },
+      ]
+    );
+
+    expect(result.assetIdToDisplayCodeMap["override"].type).toBe("DataMatrix");
+    expect(svgOf(result.assetIdToCodeImageMap["override"]?.src)).toContain(
+      "<svg"
+    );
+  });
+
+  it("draws no pictures for a sheet that prints none", async () => {
+    // why: the check-in receipt prints the code as text only.
+    const result = await runWithAssets(
+      CODE128_ORG,
+      [
+        {
+          id: "with-barcode",
+          barcodes: [{ id: "bc-1", type: "Code128", value: "AB-12345678" }],
+        },
+        { id: "without-barcode" },
+      ],
+      { includeCodeImages: false }
+    );
+
+    expect(result.assetIdToCodeImageMap).toEqual({});
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+});
+
+describe("booking checklist PDF — failures", () => {
+  it("keeps a refusal's 403 instead of reporting a server error", async () => {
+    vi.clearAllMocks();
+    // why: the booking read is where the ownership refusal is raised.
+    mockOf(getBooking).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("still reports an unexpected failure as a 500", async () => {
+    vi.clearAllMocks();
+    // why: an unclassified database failure during the read.
+    mockOf(getBooking).mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      fetchAllPdfRelatedData(
+        "booking-1",
+        "org-1",
+        "user-1",
+        undefined,
+        new Request("http://localhost/x")
+      )
+    ).rejects.toMatchObject({ status: 500 });
   });
 });

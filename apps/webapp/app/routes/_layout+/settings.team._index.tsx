@@ -3,29 +3,33 @@ import { ErrorContent } from "~/components/errors";
 import { makeShelfError } from "~/utils/error";
 import { error } from "~/utils/http.server";
 import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+  TEAM_LAYOUT_GATES,
+  visibleTeamTabs,
+} from "~/utils/permissions/settings-tabs";
+import { requireAnyPermission } from "~/utils/roles.server";
 
 /**
- * We are not going to render anything on /settings/team route
- * instead we are going to redirect user to /settings/team/users
+ * `/settings/team` renders nothing: it sends the member to the first Team tab
+ * they may see.
+ *
+ * @see {@link file://../../utils/permissions/settings-tabs.ts}
  */
 export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
   try {
-    const { currentOrganization } = await requirePermission({
+    const { currentOrganization, roles } = await requireAnyPermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.read,
+      anyOf: TEAM_LAYOUT_GATES,
     });
-    const isPersonalOrg = currentOrganization.type === "PERSONAL";
-    return redirect(
-      isPersonalOrg ? "/settings/team/nrm" : "/settings/team/users"
-    );
+    const [first] = visibleTeamTabs({
+      roles,
+      isPersonalOrg: currentOrganization.type === "PERSONAL",
+    });
+    // `requireAnyPermission` already refused a membership with no Team tab,
+    // so `first` exists; the fallback keeps the type total.
+    return redirect(`/settings/team/${first?.to ?? "nrm"}`);
   } catch (cause) {
     const reason = makeShelfError(cause);
     throw data(error(reason), { status: reason.status });

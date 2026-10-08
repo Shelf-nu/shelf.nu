@@ -181,6 +181,47 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
 /**
+ * Title of the refusal and disabled reasons for custody of an individually
+ * tracked kit member. Custody of such an asset comes from its kit. Shared by
+ * the server's 400, the web menus and the companion asset screen.
+ */
+export declare const KIT_MEMBER_CUSTODY_BLOCKED_TITLE: "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param kitName - the name of the kit the asset belongs to
+ */
+export declare function kitMemberCustodyBlockedReason(kitName: string): string;
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param names - the asset's title and its kit's name
+ */
+export declare function kitMemberCustodyRefusal(names: {
+  assetTitle: string;
+  kitName: string;
+}): string;
+
+/**
+ * The server's refusal when an assign request names several kit members: the
+ * count plus the first few titles. One member reads exactly as
+ * {@link kitMemberCustodyRefusal}.
+ *
+ * @param members - at least one kit member, with its title and kit's name
+ */
+export declare function kitMembersCustodyRefusal(
+  members: { assetTitle: string; kitName: string }[]
+): string;
+
+/**
+ * The reason a bulk "Assign custody" action is disabled when the selection
+ * holds at least one kit member.
+ */
+export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
+/**
  * The semantic weight a status badge carries, independent of any palette. Each
  * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
  * the companion's light/dark theme), so the VALUES stay app-owned while the
@@ -199,3 +240,28 @@ export declare const AUDIT_STATUS_TONES: Readonly<
 export declare const AUDIT_ASSET_STATUS_TONES: Readonly<
   Record<AuditAssetStatusKey, StatusTone>
 >;
+
+export declare const ASSET_TYPE_LABELS: {
+  readonly INDIVIDUAL: "Individually tracked";
+  readonly QUANTITY_TRACKED: "Tracked by quantity";
+};
+
+export declare const CONSUMPTION_TYPE_LABELS: {
+  readonly ONE_WAY: "Used up (one-way)";
+  readonly TWO_WAY: "Returnable (two-way)";
+};
+
+export declare const CONSUMPTION_TYPE_DESCRIPTIONS: {
+  readonly ONE_WAY: "consumed and not returned";
+  readonly TWO_WAY: "checked out and returned";
+};
+
+export declare const ASSET_TYPE_ADJECTIVES: {
+  readonly INDIVIDUAL: "individually tracked";
+  readonly QUANTITY_TRACKED: "quantity-tracked";
+};
+
+export declare const CONSUMPTION_TYPE_ADJECTIVES: {
+  readonly ONE_WAY: "used up";
+  readonly TWO_WAY: "returnable";
+};

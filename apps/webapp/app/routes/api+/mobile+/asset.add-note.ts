@@ -29,8 +29,8 @@ export async function action({ request }: ActionFunctionArgs) {
     await requireMobilePermission({
       userId: user.id,
       organizationId,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      entity: PermissionEntity.note,
+      action: PermissionAction.create,
     });
 
     const { assetId, content } = await parseMobileBody(

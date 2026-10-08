@@ -1,4 +1,9 @@
-import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
+import {
+  AssetStatus,
+  AssetType,
+  BookingStatus,
+  OrganizationRoles,
+} from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
@@ -18,6 +23,7 @@ import {
   loader,
 } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -181,14 +187,15 @@ describe("manage-assets route validation", () => {
 
     // Setup default mocks
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
-      isSelfServiceOrBase: false,
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
       userOrganizations: [],
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -740,6 +747,11 @@ describe("manage-assets route validation", () => {
         // form makes a silent regression impossible: dropping the flag fails
         // this test rather than quietly restoring the duplicate.
         skipBookingNote: true,
+        // The caller's access, so the service re-checks the add rule against
+        // the booking status it reads under the row lock.
+        access: expect.objectContaining({
+          bookings: expect.objectContaining({ writeAll: true }),
+        }),
       });
 
       // Verify per-asset note creation. The route now uses markdoc link
@@ -1099,6 +1111,140 @@ describe("manage-assets route validation", () => {
       );
     });
   });
+
+  /**
+   * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+   * `requirePermission` alone cannot stop a restricted user from writing
+   * assets to a booking that is not theirs. These cases would pass (no
+   * refusal) without the ownership check the action runs right after
+   * fetching the booking.
+   */
+  describe("ownership guard: SELF_SERVICE / BASE may only manage their own booking's assets", () => {
+    /** A DRAFT booking, both custody links defaulting to someone else. */
+    function ownedBooking(overrides: Record<string, unknown> = {}) {
+      return {
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        creatorId: "someone-else",
+        custodianUserId: "someone-else-too",
+        ...overrides,
+      };
+    }
+
+    function mockRole(role: OrganizationRoles) {
+      vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role], organizationId: "org123" }) as any
+      );
+    }
+
+    beforeEach(() => {
+      // No new assets and nothing removed, isolating the ownership guard from
+      // the add/remove/adjust flows those already have their own coverage for.
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        assetIds: ["asset1", "asset2"],
+        removedAssetIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.asset.findMany).mockResolvedValue([]);
+    });
+
+    it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
+      mockRole(OrganizationRoles.SELF_SERVICE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ownedBooking());
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(403);
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("refuses a BASE user who is neither creator nor custodian", async () => {
+      mockRole(OrganizationRoles.BASE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(ownedBooking());
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(403);
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("allows the creator to manage their own booking's assets", async () => {
+      mockRole(OrganizationRoles.SELF_SERVICE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+        ownedBooking({ creatorId: "user123", custodianUserId: null })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+    });
+
+    it("allows the custodian to manage the booking's assets", async () => {
+      mockRole(OrganizationRoles.BASE);
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+        ownedBooking({ creatorId: "someone-else", custodianUserId: "user123" })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(response).toBeInstanceOf(Response);
+      expect((response as Response).status).toBe(302);
+    });
+
+    it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+      "leaves %s able to manage a booking they neither created nor hold custody of",
+      async (role) => {
+        mockRole(role);
+        vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue(
+          // ADMIN/OWNER are not restricted to DRAFT, so the base ONGOING
+          // status from `mockBooking` is left as-is here.
+          {
+            ...mockBooking,
+            creatorId: "someone-else",
+            custodianUserId: "someone-else-too",
+          }
+        );
+
+        const response = await action(
+          createActionArgs({
+            context: mockContext,
+            request: mockRequest,
+            params: mockParams,
+          })
+        );
+
+        expect(response).toBeInstanceOf(Response);
+        expect((response as Response).status).toBe(302);
+      }
+    );
+  });
 });
 
 /**
@@ -1129,6 +1275,10 @@ describe("manage-assets loader — Models tab payload", () => {
     id: "booking123",
     name: "Test Booking",
     status: BookingStatus.DRAFT,
+    // The signed-in caller's own booking, so a restricted role passes the
+    // ownership check and the case stays about what the payload carries.
+    creatorId: "user123",
+    custodianUserId: null,
     from: new Date("2026-01-01"),
     to: new Date("2026-01-02"),
     bookingAssets: [],
@@ -1195,14 +1345,15 @@ describe("manage-assets loader — Models tab payload", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1270,6 +1421,15 @@ describe("manage-assets loader — Models tab payload", () => {
   });
 
   it("redacts custodian identity from picker rows for a restricted viewer", async () => {
+    // why: a real SELF_SERVICE membership with every workspace toggle off: it may
+    // manage items on its own DRAFT booking but may not see others' custody.
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.SELF_SERVICE],
+      }) as unknown as Awaited<ReturnType<typeof rolesServer.requirePermission>>
+    );
+
     // why: this fixture mirrors what `assetIndexFields()` actually selects —
     // the full `custody.custodian.user` including `email` — so the assertion
     // measures redaction rather than the shape of a real query. The picker is
@@ -1457,14 +1617,15 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     vi.clearAllMocks();
 
     vi.mocked(rolesServer.requirePermission).mockResolvedValue({
-      organizationId: "org123",
+      ...permissionContext({
+        organizationId: "org123",
+        roles: [OrganizationRoles.ADMIN],
+      }),
+      // An ADMIN membership: the routes decide from `access`. The membership
+      // list is empty because the mocked booking lookups never read it.
       userOrganizations: [],
-      isSelfServiceOrBase: false,
       organizations: [],
       currentOrganization: {} as any,
-      role: {} as any,
-      canSeeAllBookings: false,
-      canSeeAllCustody: false,
       canUseBarcodes: false,
       canUseAudits: false,
     });
@@ -1653,4 +1814,144 @@ describe("manage-assets loader — units reserved by model elsewhere", () => {
     // what the booking may still take.
     expect(result.modelHeadroom).toEqual({ model1: 2 });
   });
+});
+
+/**
+ * `booking:update` is a permission SELF_SERVICE and BASE both hold, so
+ * `requirePermission` alone cannot stop a restricted user from opening this
+ * picker for a booking that is not theirs. These cases would pass (no throw)
+ * without the ownership check the loader runs right after fetching the
+ * booking.
+ */
+describe("manage-assets loader: ownership gate", () => {
+  const mockContext = {
+    getSession: () => ({ userId: "user123" }),
+    appVersion: "1.0.0",
+    isAuthenticated: true,
+    setSession: vi.fn(),
+    destroySession: vi.fn(),
+    errorMessage: null,
+  } as any;
+
+  const mockParams = { bookingId: "booking123" };
+
+  const mockPaginatedAssets = {
+    search: null,
+    totalAssets: 0,
+    perPage: 20,
+    page: 1,
+    categories: [],
+    tags: [],
+    assets: [],
+    totalPages: 0,
+    totalCategories: 0,
+    totalTags: 0,
+    locations: [],
+    totalLocations: 0,
+  };
+
+  /** A DRAFT booking with no rows and no requests, both custody links overridable per case. */
+  function bookingWith(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "booking123",
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+      from: new Date("2026-01-01"),
+      to: new Date("2026-01-02"),
+      bookingAssets: [],
+      modelRequests: [],
+      creatorId: "someone-else",
+      custodianUserId: "someone-else-too",
+      ...overrides,
+    } as any;
+  }
+
+  function mockRole(role: OrganizationRoles) {
+    vi.mocked(rolesServer.requirePermission).mockResolvedValue(
+      permissionContext({ roles: [role], organizationId: "org123" }) as any
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(httpServer.getParams).mockReturnValue({
+      bookingId: "booking123",
+    });
+    vi.mocked(assetService.getPaginatedAndFilterableAssets).mockResolvedValue(
+      mockPaginatedAssets as any
+    );
+    vi.mocked(bookingService.getKitIdsByBookingSlices).mockResolvedValue(
+      new Map()
+    );
+    vi.mocked(modelRequestService.getBookingModelTabData).mockResolvedValue({
+      showModelsTab: false,
+      assetModels: [],
+      initialAssetModels: [],
+      totalAssetModels: 0,
+      matchedAssetModels: 0,
+      modelRequests: [],
+    } as any);
+  });
+
+  /** Runs the loader expecting the ownership guard to throw a 403. */
+  async function runLoaderExpectingRefusal() {
+    try {
+      await loader(
+        createLoaderArgs({ context: mockContext, params: mockParams })
+      );
+    } catch (thrown) {
+      return thrown as { init?: { status?: number } };
+    }
+    throw new Error("expected the loader to throw, but it resolved");
+  }
+
+  it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
+    mockRole(OrganizationRoles.SELF_SERVICE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("refuses a BASE user who is neither creator nor custodian", async () => {
+    mockRole(OrganizationRoles.BASE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+    const refusal = await runLoaderExpectingRefusal();
+    expect(refusal.init?.status).toBe(403);
+  });
+
+  it("allows the creator to open the picker for their own booking", async () => {
+    mockRole(OrganizationRoles.SELF_SERVICE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingWith({ creatorId: "user123", custodianUserId: null })
+    );
+
+    await expect(
+      loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+    ).resolves.toBeTruthy();
+  });
+
+  it("allows the custodian to open the picker", async () => {
+    mockRole(OrganizationRoles.BASE);
+    vi.mocked(bookingService.getBooking).mockResolvedValue(
+      bookingWith({ creatorId: "someone-else", custodianUserId: "user123" })
+    );
+
+    await expect(
+      loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+    ).resolves.toBeTruthy();
+  });
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "leaves %s able to open a booking they neither created nor hold custody of",
+    async (role) => {
+      mockRole(role);
+      vi.mocked(bookingService.getBooking).mockResolvedValue(bookingWith());
+
+      await expect(
+        loader(createLoaderArgs({ context: mockContext, params: mockParams }))
+      ).resolves.toBeTruthy();
+    }
+  );
 });

@@ -1,6 +1,6 @@
 /**
  * Per-scan strict-available pool computation for the QR-scanner
- * drawers (location, kit, booking).
+ * drawers (location, kit, booking, custody).
  *
  * Each scanner drawer wants the same "· X available" / "qty input
  * MAX" UX the manage-assets picker shows. The picker computes this
@@ -20,14 +20,24 @@ import { AssetType } from "@prisma/client";
 import { z } from "zod";
 import { db } from "~/database/db.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
+import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { getKitPickerMeta } from "~/modules/kit/picker-meta.server";
 import { getLocationPickerMeta } from "~/modules/location/picker-meta.server";
 
-/** Identifies which destination the scanner is feeding. */
-export const ScannerPickerContextSchema = z.object({
-  type: z.enum(["location", "kit", "booking"]),
-  id: z.string().min(1),
-});
+/**
+ * Identifies which destination the scanner is feeding.
+ *
+ * A union rather than one shape because `custody` has no destination id: units
+ * are handed to a custodian chosen after scanning, and the pool a scan may draw
+ * on is a property of the asset, not of who ends up holding it.
+ */
+export const ScannerPickerContextSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("location"), id: z.string().min(1) }),
+  z.object({ type: z.literal("kit"), id: z.string().min(1) }),
+  z.object({ type: z.literal("booking"), id: z.string().min(1) }),
+  z.object({ type: z.literal("custody") }),
+]);
 
 export type ScannerPickerContext = z.infer<typeof ScannerPickerContextSchema>;
 
@@ -43,6 +53,12 @@ export type ScannerPickerMeta = {
   /** Asset's total quantity — shown alongside MAX in the row label. */
   assetQuantity: number;
   unitOfMeasure: string | null;
+  /**
+   * Custody context only: where the units can come from, for a pool placed
+   * at two or more locations. The assign drawer shows a "From location"
+   * picker from it; absent otherwise.
+   */
+  sources?: CustodySourceSummary | null;
 };
 
 /**
@@ -96,6 +112,24 @@ export async function getScannerPickerMeta({
       maxAllowed: meta.maxAllowedForThisKit,
       assetQuantity: totalQty,
       unitOfMeasure: meta.unitOfMeasure,
+    };
+  }
+
+  if (context.type === "custody") {
+    // The pool `checkOutQuantity` enforces, read through the same helper it
+    // uses (`computeCustodyAvailability`, inside the summary), so the input's
+    // ceiling and the write's rule cannot drift apart. The summary also
+    // carries the source options the asset page's Assign dialog shows.
+    const summary = await getCustodySourceSummary({
+      assetId,
+      organizationId,
+      total: totalQty,
+    });
+    return {
+      maxAllowed: Math.max(0, summary.poolAvailable),
+      assetQuantity: totalQty,
+      unitOfMeasure: asset.unitOfMeasure,
+      sources: summary.multiSource ? summary : null,
     };
   }
 

@@ -76,7 +76,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -114,7 +114,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         // Only reaches `?teamMember=` here; pass the resolved rule so an
         // admin's custodian filter still works on this dialog.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
@@ -138,7 +138,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // whether the UI draws them, so a viewer without custody visibility can
       // read them straight out of the route's data payload. Redact here, not
       // in the component.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       page,
       search,
       totalItems: totalKits,

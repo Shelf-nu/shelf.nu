@@ -10,18 +10,18 @@ import { useFetcher, useLoaderData } from "react-router";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
-import { fileErrorAtom, defaultValidateFileAtom } from "~/atoms/file";
+import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
-import { ACCEPT_SUPPORTED_IMAGES } from "~/utils/constants";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
 import QrIdDisplayPreferenceSelector from "./qr-id-display-preference-selector";
+import { WorkspaceLogoField } from "./workspace-logo-field";
 import FormRow from "../forms/form-row";
 import { InnerLabel } from "../forms/inner-label";
 import Input from "../forms/input";
@@ -139,7 +139,6 @@ const WorkspaceGeneralEditForms = ({
   const fetcher = useFetcher({ key: "general" });
   const disabled = useDisabled(fetcher);
   const fileError = useAtomValue(fileErrorAtom);
-  const [, validateFile] = useAtom(defaultValidateFileAtom);
   const [, updateTitle] = useAtom(updateDynamicTitleAtom);
 
   const fetcherError = (
@@ -195,26 +194,11 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow rowLabel={"Main image"} className="border-b-0">
-          <div>
-            <p className="hidden lg:block">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-            <Input
-              // disabled={disabled}
-              accept={ACCEPT_SUPPORTED_IMAGES}
-              name="image"
-              type="file"
-              onChange={validateFile}
-              label={"Main image"}
-              hideLabel
-              error={imageError}
-              className="mt-2"
-              inputClassName="border-0 shadow-none p-0 rounded-none"
-            />
-            <p className="mt-2 lg:hidden">
-              Accepts PNG, JPG, JPEG, or WebP (max.4 MB)
-            </p>
-          </div>
+          <WorkspaceLogoField
+            imageId={organization.imageId}
+            updatedAt={organization.updatedAt}
+            error={imageError}
+          />
         </FormRow>
 
         <div>
@@ -330,12 +314,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"QR codes on PDFs"}
+          rowLabel={"Code images on PDFs"}
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether the QR image is printed on the booking checklist
-              and the audit receipt.
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
             </p>
           }
         >
@@ -358,16 +342,15 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showQrCodesOnPdfs"
                 className="cursor-pointer text-[14px] font-medium text-gray-700"
               >
-                Print QR codes on PDFs
+                Print code images on PDFs
               </label>
               <p
                 id="showQrCodesOnPdfs-desc"
                 className="text-[14px] text-gray-600"
               >
-                Turn this off when people should scan the label on the item
-                itself. A printed sheet carries the same codes, so it can be
-                scanned instead of walking to the equipment. The code still
-                prints as text either way.
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -602,7 +585,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -764,7 +747,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);

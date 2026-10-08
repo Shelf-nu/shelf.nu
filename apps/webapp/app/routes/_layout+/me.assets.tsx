@@ -23,7 +23,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
   const userId = authSession.userId;
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.asset,
@@ -36,7 +36,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
       // filter it injects against `viewerId`.
       userId,
       viewerId: userId,
-      canSeeAllCustody,
+      canSeeAllCustody: access.custody.seeAll,
       request,
       organizationId,
     });

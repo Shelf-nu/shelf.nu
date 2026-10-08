@@ -1,9 +1,6 @@
 import { Readable } from "node:stream";
 
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type { LRUCache } from "lru-cache";
 import type { ResizeOptions } from "sharp";
 
@@ -19,6 +16,7 @@ import { SUPABASE_URL } from "./env";
 import type { AdditionalData, ErrorLabel } from "./error";
 import { isLikeShelfError, ShelfError } from "./error";
 import { extractImageNameFromSupabaseUrl } from "./extract-image-name-from-supabase-url";
+import { getMaxFileSizeExceededError } from "./form-data-parse-errors.server";
 import { id } from "./id/id.server";
 import { detectImageFormat } from "./image-format.server";
 import {
@@ -388,8 +386,11 @@ export async function parseFileFormData({
       const originalName =
         upload?.name ?? upload?.filename ?? file?.name ?? undefined;
 
-      // Only process image files
-      if (mimeType && !mimeType.includes("image")) {
+      // Only process image files. Matched as a prefix rather than a substring:
+      // `.includes("image")` also accepts a parameterised type such as
+      // `text/html; x=image`, which would then be handed to `uploadFile` as the
+      // content type the object is stored and served with.
+      if (mimeType && !String(mimeType).startsWith("image/")) {
         return undefined;
       }
 
@@ -454,6 +455,7 @@ export async function parseFileFormData({
         }MB`,
         additionalData: { maxFileSize },
         label,
+        status: 400,
         shouldBeCaptured: false,
       });
     }
@@ -467,6 +469,9 @@ export async function parseFileFormData({
         : "Something went wrong while uploading the file. Please try again or contact support.",
       title: nestedShelfError?.title,
       label,
+      // The parser wraps the upload's error; its status (a 400 for a file
+      // the user can fix) must survive the wrapping like its message does.
+      status: nestedShelfError?.status,
       shouldBeCaptured: nestedShelfError?.shouldBeCaptured,
     });
   }
@@ -491,29 +496,6 @@ export function findShelfErrorInCause(error: unknown): ShelfError | null {
   }
 
   return findShelfErrorInCause(cause);
-}
-
-/**
- * Recursively walks the `.cause` chain to find a `MaxFileSizeExceededError`.
- *
- * `parseFormData` wraps errors, so this helper normalises the shape and lets
- * callers respond with the correct user-facing message when the underlying
- * file exceeds the configured size.
- */
-function getMaxFileSizeExceededError(
-  error: unknown
-): MaxFileSizeExceededError | null {
-  if (error instanceof MaxFileSizeExceededError) {
-    return error;
-  }
-
-  const cause = (error as { cause?: unknown })?.cause;
-
-  if (!cause) {
-    return null;
-  }
-
-  return getMaxFileSizeExceededError(cause);
 }
 
 /**
@@ -897,6 +879,69 @@ export async function removePublicFile({ publicUrl }: { publicUrl: string }) {
       label,
     });
   }
+}
+
+/**
+ * Most objects Supabase Storage deletes in one `remove()` request. The API
+ * rejects a larger list, so callers with more files must split them.
+ */
+export const MAX_PUBLIC_FILES_PER_REMOVE = 1000;
+
+/**
+ * Removes many files from the public `files` bucket in a single storage
+ * request, using their public URLs.
+ *
+ * A URL that does not point into the public bucket is skipped rather than
+ * failing the rest, and counted in the result so the caller can log it.
+ * Objects that no longer exist are not an error.
+ *
+ * @param publicUrls - Public URLs of the files, at most
+ *   {@link MAX_PUBLIC_FILES_PER_REMOVE}
+ * @returns How many URLs were skipped because they are not public bucket URLs
+ * @throws {ShelfError} When the list is too long or the storage request fails
+ */
+export async function removePublicFiles({
+  publicUrls,
+}: {
+  publicUrls: string[];
+}): Promise<{ invalidUrlCount: number }> {
+  if (publicUrls.length > MAX_PUBLIC_FILES_PER_REMOVE) {
+    throw new ShelfError({
+      cause: null,
+      message: `Cannot remove more than ${MAX_PUBLIC_FILES_PER_REMOVE} files in one request`,
+      additionalData: { count: publicUrls.length },
+      label,
+    });
+  }
+
+  const bucketPrefix = `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/`;
+  const paths = publicUrls
+    .filter((publicUrl) => publicUrl.startsWith(bucketPrefix))
+    .map((publicUrl) => publicUrl.slice(bucketPrefix.length));
+  const invalidUrlCount = publicUrls.length - paths.length;
+
+  if (paths.length === 0) {
+    return { invalidUrlCount };
+  }
+
+  try {
+    const { error } = await getSupabaseAdmin()
+      .storage.from(PUBLIC_BUCKET)
+      .remove(paths);
+
+    if (error) {
+      throw error;
+    }
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to remove files. Please try again.",
+      additionalData: { count: paths.length },
+      label,
+    });
+  }
+
+  return { invalidUrlCount };
 }
 
 /**

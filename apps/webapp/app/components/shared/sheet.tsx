@@ -45,9 +45,17 @@ const sheetVariants = cva(
         right:
           "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right ",
       },
+      // `wide` gives a sheet room for a full advanced-index table (the
+      // drill-down sheet); every other sheet keeps the unset default so its
+      // width comes entirely from `side`.
+      size: {
+        default: "",
+        wide: "sm:max-w-[min(1100px,92vw)] w-full",
+      },
     },
     defaultVariants: {
       side: "right",
+      size: "default",
     },
   }
 );
@@ -56,19 +64,36 @@ interface SheetContentProps
   extends ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {}
 
+/**
+ * The sheet's panel: an overlay plus the content that slides in over it.
+ *
+ * @param side - Edge the panel slides from. Defaults to `right`; `left` and
+ *   `right` are full height, `top` and `bottom` span the width.
+ * @param size - Panel width. `default` takes the width from `side`; `wide`
+ *   widens it enough for a full data table, capped against the viewport.
+ * @param hideCloseButton - Omits the built-in close control, for panels that
+ *   provide their own dismissal.
+ */
 const SheetContent = forwardRef<
   ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps & { hideCloseButton?: boolean }
 >(
   (
-    { side = "right", className, children, hideCloseButton = false, ...props },
+    {
+      side = "right",
+      size = "default",
+      className,
+      children,
+      hideCloseButton = false,
+      ...props
+    },
     ref
   ) => (
     <SheetPortal>
       <SheetOverlay />
       <SheetPrimitive.Content
         ref={ref}
-        className={tw(sheetVariants({ side }), className)}
+        className={tw(sheetVariants({ side, size }), className)}
         {...props}
       >
         <When truthy={!hideCloseButton}>

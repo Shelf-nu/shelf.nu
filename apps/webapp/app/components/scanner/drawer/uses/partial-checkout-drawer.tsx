@@ -24,6 +24,7 @@ import {
 } from "~/atoms/qr-scanner";
 import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckoutDialog from "~/components/booking/checkout-dialog";
+import { CheckoutSourceSelect } from "~/components/booking/checkout-source-select";
 import { Form } from "~/components/custom-form";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
@@ -49,6 +50,10 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import {
+  buildPartialCheckoutBlockers,
+  isAssetFullyCheckedOut,
+} from "./partial-checkout-blockers";
 import { PendingItemsList, SectionHeader } from "./pending-items-list";
 
 /** Narrowed alias used when classifying expected qty-tracked slices below. */
@@ -167,6 +172,12 @@ type CheckoutDispositionContextValue = {
   updateQuantity: (bookingAssetId: string, value: string) => void;
 };
 
+/**
+ * The footer form's id. Rows render outside it, so their inputs (the
+ * "From location" select) join the submission through `form=`.
+ */
+const PARTIAL_CHECKOUT_FORM_ID = "partial-checkout-form";
+
 const CheckoutDispositionContext =
   createContext<CheckoutDispositionContextValue | null>(null);
 
@@ -184,54 +195,6 @@ function useCheckoutDispositionContext(): CheckoutDispositionContextValue {
 function parseCheckoutQty(state: CheckoutQtyState | undefined): number {
   const n = Number(state?.quantity ?? "");
   return Number.isFinite(n) ? n : 0;
-}
-
-/** Minimal asset shape the type-aware "fully checked out" predicate needs. */
-type FullyCheckedOutAsset = {
-  id: string;
-  status: AssetStatus;
-  type?: AssetType | string | null;
-};
-
-/**
- * Decide whether an asset is fully checked out on this booking — i.e. has
- * zero units left to check out and should be treated as a blocker / hide
- * the qty input.
- *
- * - INDIVIDUAL: binary — "fully out" iff live status is `CHECKED_OUT` OR
- *   the asset appears in a prior `PartialBookingCheckout` record.
- * - QUANTITY_TRACKED: gated on the loader-computed
- *   `remainingToCheckOutByAsset` (sum of remaining units across every
- *   slice on this booking). A partial top-off (e.g. 5 of 50 already out,
- *   45 still bookable) is NOT "fully out" — the asset stays scannable
- *   and the qty input renders with the remaining units pre-filled.
- *
- * Without the type branch a QT asset would be misclassified as
- * "already checked out" after the first partial checkout, preventing
- * the operator from topping off the remaining units via the scanner.
- *
- * @param asset Asset (id + live status + optional `type`)
- * @param remainingByAssetId Loader-supplied asset-level remaining map (QT only)
- * @param checkedOutIdSet Asset ids recorded in prior partial-checkouts
- * @returns `true` when no more units of the asset can be checked out
- */
-function isAssetFullyCheckedOut(
-  asset: FullyCheckedOutAsset,
-  remainingByAssetId: Record<string, number>,
-  checkedOutIdSet: Set<string>
-): boolean {
-  if (asset.type === "QUANTITY_TRACKED") {
-    // Use the loader-supplied remaining only when an entry exists for
-    // this asset. Absent entry = legacy/test path: fall back to the
-    // binary gate so QT assets without a top-off map don't get flagged
-    // "fully out" simply because the asset is missing from the map.
-    if (asset.id in remainingByAssetId) {
-      return (remainingByAssetId[asset.id] ?? 0) <= 0;
-    }
-  }
-  return (
-    asset.status === AssetStatus.CHECKED_OUT || checkedOutIdSet.has(asset.id)
-  );
 }
 
 /** Props required to render the booking header row at the top of the drawer. */
@@ -313,6 +276,7 @@ export default function PartialCheckoutDrawer({
     checkedOutAssetIds,
     checkedInAssetIds,
     remainingToCheckOutByAsset,
+    kitsBookedElsewhere,
   } = useLoaderData<typeof loader>();
 
   // Per-asset units-still-to-check-out map for QUANTITY_TRACKED assets,
@@ -654,232 +618,23 @@ export default function PartialCheckoutDrawer({
       shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers - only assets NOT in this booking
-  const assetsNotInBookingIds = assets
-    .filter((asset) => !bookingAssetIds.has(asset.id))
-    .map((a) => a.id);
-
-  // Assets that are FULLY checked out for this booking and therefore cannot
-  // be checked out again. Type-aware via `isAssetFullyCheckedOut`:
-  // - INDIVIDUAL: status CHECKED_OUT OR recorded in a prior partial-checkout.
-  // - QUANTITY_TRACKED: only when `remainingByAssetId[id] === 0`. A QT asset
-  //   with a partial top-off left (5 of 50 already out, 45 still bookable)
-  //   does NOT land in this blocker — it must stay scannable.
-  const alreadyCheckedOutAssets = assets
-    .filter(
-      (asset) =>
-        bookingAssetIds.has(asset.id) &&
-        isAssetFullyCheckedOut(asset, remainingByAssetId, alreadyCheckedOut)
-    )
-    .map((a) => a.id);
-
-  const qrIdsOfAlreadyCheckedOutAssets = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "asset") return false;
-      return alreadyCheckedOutAssets.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-
-  // Assets currently held in custody — custody must be released before they can
-  // be checked out.
-  const assetsInCustody = assets
-    .filter(
-      (asset) =>
-        bookingAssetIds.has(asset.id) && asset.status === AssetStatus.IN_CUSTODY
-    )
-    .map((a) => a.id);
-
-  const qrIdsOfAssetsInCustody = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "asset") return false;
-      return assetsInCustody.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-
-  // why: conflict validation (asset checked out under a different booking) is
-  // enforced server-side in partialCheckoutBooking, which throws a friendly
-  // error. The scanned-asset payload (AssetFromQr) doesn't carry conflicting
-  // bookings, so we deliberately don't build a client-side conflict blocker.
-
-  // Note: In partial check-out context, we allow individual kit assets to be checked out
-  // so we don't create blockers for assets that are part of kits
-
-  // Kit blockers - kits not in this booking
-  const kitsNotInBooking = kits
-    .filter(
-      (kit) => !kit.assetKits.some((ak) => bookingAssetIds.has(ak.asset.id))
-    )
-    .map((kit) => kit.id);
-
-  const qrIdsOfKitsNotInBooking = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitsNotInBooking.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-
-  // Kits that are already checked out for this booking (every kit asset in
-  // booking is FULLY checked out — type-aware via `isAssetFullyCheckedOut`
-  // so a kit containing a QT asset with remaining units doesn't trip this
-  // blocker and the qty top-off can still flow through).
-  const alreadyCheckedOutKits = kits
-    .filter((kit) => {
-      // Get kit assets that are in this booking (post-pivot: via assetKits[])
-      const kitAssetsInBooking = kit.assetKits
-        .map((ak) => ak.asset)
-        .filter((asset) => bookingAssetIds.has(asset.id));
-
-      // Kit is considered already checked out only if every one of its
-      // in-booking assets has zero units left to check out.
-      return (
-        kitAssetsInBooking.length > 0 &&
-        kitAssetsInBooking.every((asset) =>
-          isAssetFullyCheckedOut(asset, remainingByAssetId, alreadyCheckedOut)
-        )
-      );
-    })
-    .map((kit) => kit.id);
-
-  const qrIdsOfAlreadyCheckedOutKits = Object.entries(items)
-    .filter(([_qrId, item]) => {
-      if (!item || item.type !== "kit") return false;
-      const kitId = (item?.data as any)?.id;
-      const isAlreadyCheckedOut = alreadyCheckedOutKits.includes(kitId);
-
-      return isAlreadyCheckedOut;
-    })
-    .map(([qrId]) => qrId);
-
-  // Assets that are redundant because their kit is also scanned
-  const redundantAssetIds: string[] = [];
-  const qrIdsOfRedundantAssets: string[] = [];
-
-  // Check for assets that belong to scanned kits
-  assets.forEach((asset) => {
-    // Post-pivot: kit membership lives on `Asset.assetKits[]`. Pick the first
-    // pivot row's kitId for the customer-facing 1-asset-1-kit semantics this
-    // redundancy check expresses.
-    const assetKitId = asset.assetKits?.[0]?.kitId;
-    if (!assetKitId) return;
-
-    // Check if this asset's kit is also scanned
-    const kitIsScanned = kits.some((kit) => kit.id === assetKitId);
-    if (kitIsScanned && bookingAssetIds.has(asset.id)) {
-      redundantAssetIds.push(asset.id);
-
-      // Find the QR ID for this asset
-      const assetQrId = Object.entries(items).find(
-        ([, item]) =>
-          item?.type === "asset" && (item?.data as any)?.id === asset.id
-      )?.[0];
-
-      if (assetQrId) {
-        qrIdsOfRedundantAssets.push(assetQrId);
-      }
-    }
+  // The blocker list is derived in a pure builder so its ids can be pinned by
+  // a test; see `partial-checkout-blockers.test.tsx`.
+  const { blockerConfigs, onResolveAll } = buildPartialCheckoutBlockers({
+    items,
+    bookingAssetIds,
+    remainingByAssetId,
+    alreadyCheckedOut,
+    kitsBookedElsewhere: new Set(kitsBookedElsewhere.map((kit) => kit.id)),
+    assetsInKitsBookedElsewhere: new Set(
+      kitsBookedElsewhere.flatMap((kit) => kit.assetIds)
+    ),
+    removeAssetsFromList,
+    removeItemsFromList,
   });
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: assetsNotInBookingIds.length > 0,
-      count: assetsNotInBookingIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> not
-          part of this booking.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsNotInBookingIds),
-    },
-    {
-      condition: alreadyCheckedOutAssets.length > 0,
-      count: alreadyCheckedOutAssets.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> already
-          checked out for this booking.
-        </>
-      ),
-      description: "These assets cannot be checked out again",
-      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedOutAssets),
-    },
-    {
-      condition: assetsInCustody.length > 0,
-      count: assetsInCustody.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> currently
-          in custody — release custody first.
-        </>
-      ),
-      description: "Release custody before checking these assets out",
-      onResolve: () => removeItemsFromList(qrIdsOfAssetsInCustody),
-    },
-    {
-      condition: alreadyCheckedOutKits.length > 0,
-      count: alreadyCheckedOutKits.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s have" : " has"}`}</strong>{" "}
-          already been checked out for this booking.
-        </>
-      ),
-      description: "All assets from these kits have already been checked out",
-      onResolve: () => removeItemsFromList(qrIdsOfAlreadyCheckedOutKits),
-    },
-    {
-      condition: redundantAssetIds.length > 0,
-      count: redundantAssetIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already covered by scanned kit QR codes.
-        </>
-      ),
-      description: "Kit QR codes include all kit assets automatically",
-      onResolve: () => removeItemsFromList(qrIdsOfRedundantAssets),
-    },
-    {
-      condition: kitsNotInBooking.length > 0,
-      count: kitsNotInBooking.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"} `}</strong> not
-          part of this booking.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfKitsNotInBooking),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
-
-  // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInBookingIds]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsNotInBooking,
-        ...qrIdsOfRedundantAssets,
-        ...qrIdsOfAlreadyCheckedOutAssets,
-        ...qrIdsOfAssetsInCustody,
-        ...qrIdsOfAlreadyCheckedOutKits,
-      ]);
-    },
+    onResolveAll,
   });
 
   /**
@@ -1390,6 +1145,13 @@ function QuantityCheckoutBlock({
   info: CheckoutQtyInfo;
 }) {
   const { dispositions, updateQuantity } = useCheckoutDispositionContext();
+  // A pool at two or more locations going out for the first time asks
+  // where its units leave from. The select lives in this row, outside the
+  // footer form, so it joins the submission through `form=`.
+  const { checkoutSourceQuestions } = useLoaderData<typeof loader>();
+  const sourceQuestion = checkoutSourceQuestions.find(
+    (question) => question.sliceId === bookingAssetId
+  );
   // Default value: full slice qty. Tracked as a string so an empty
   // input stays empty (controlled `value=""`) instead of coercing to 0.
   const state = dispositions[bookingAssetId];
@@ -1439,6 +1201,15 @@ function QuantityCheckoutBlock({
           </span>
         </div>
       </label>
+      {sourceQuestion ? (
+        <CheckoutSourceSelect
+          question={sourceQuestion}
+          fieldKey={bookingAssetId}
+          formId={PARTIAL_CHECKOUT_FORM_ID}
+          variant="inline"
+          className="mt-2"
+        />
+      ) : null}
     </div>
   );
 }
@@ -1604,7 +1375,7 @@ const CustomForm = ({
   return (
     <Form
       ref={setFormElement}
-      id="partial-checkout-form"
+      id={PARTIAL_CHECKOUT_FORM_ID}
       className="mb-4 flex max-h-full w-full"
       method="post"
     >
@@ -1648,7 +1419,7 @@ const CustomForm = ({
               isLoading || hasBlockers || assetIdsForCheckout.length === 0
             }
             portalContainer={formElement || undefined}
-            formId="partial-checkout-form"
+            formId={PARTIAL_CHECKOUT_FORM_ID}
             // CheckoutDialog's trigger defaults to `grow` (designed for the
             // full-width booking-header bar). Inside this drawer footer the
             // sibling Cancel is `w-auto`, so the default grow makes the

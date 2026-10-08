@@ -24,6 +24,14 @@ import {
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
+    // The org guards look the target up by id + organizationId. Default:
+    // every requested id is found, i.e. it belongs to the caller's workspace.
+    asset: {
+      findMany: vitest.fn(),
+    },
+    kit: {
+      findMany: vitest.fn(),
+    },
     barcode: {
       create: vitest.fn().mockResolvedValue({}),
       createMany: vitest.fn().mockResolvedValue({}),
@@ -37,6 +45,18 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 const mockTransaction = db.$transaction as ReturnType<typeof vitest.fn>;
+
+/** Resolves every id the org guard asks about, as if all were in the workspace. */
+function findAllRequestedIds({ where }: { where: { id: { in: string[] } } }) {
+  return Promise.resolve(where.id.in.map((id) => ({ id })));
+}
+
+beforeEach(() => {
+  //@ts-expect-error missing vitest type
+  db.asset.findMany.mockImplementation(findAllRequestedIds);
+  //@ts-expect-error missing vitest type
+  db.kit.findMany.mockImplementation(findAllRequestedIds);
+});
 
 const mockBarcodeData = {
   id: "barcode-1",
@@ -60,6 +80,49 @@ const mockCreateParams = {
 describe("createBarcode", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it("refuses to attach a barcode to an asset outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    const error = await createBarcode(mockCreateParams).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses to attach a barcode to a kit outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([]);
+
+    const error = await createBarcode({
+      type: BarcodeType.Code128,
+      value: "TEST123",
+      organizationId: "org-1",
+      userId: "user-1",
+      kitId: "kit-from-another-org",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.create).not.toHaveBeenCalled();
+  });
+
+  it("checks the asset against the caller's workspace", async () => {
+    expect.assertions(1);
+    //@ts-expect-error missing vitest type
+    db.barcode.create.mockResolvedValue(mockBarcodeData);
+
+    await createBarcode(mockCreateParams);
+
+    expect(db.asset.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["asset-1"] }, organizationId: "org-1" },
+      select: { id: true },
+    });
   });
 
   it("should create a barcode successfully", async () => {
@@ -211,6 +274,23 @@ describe("createBarcode", () => {
 describe("createBarcodes", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+  });
+
+  it("refuses to attach barcodes to an asset outside the caller's workspace", async () => {
+    expect.assertions(3);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([]);
+
+    const error = await createBarcodes({
+      barcodes: [{ type: BarcodeType.Code128, value: "TEST123" }],
+      organizationId: "org-1",
+      userId: "user-1",
+      assetId: "asset-from-another-org",
+    }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error.status).toBe(400);
+    expect(db.barcode.createMany).not.toHaveBeenCalled();
   });
 
   it("should create multiple barcodes successfully", async () => {

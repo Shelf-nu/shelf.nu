@@ -16,15 +16,24 @@
  *                                  `assetModelId` matches an expected
  *                                  model and whose session count is
  *                                  within `booked`. Green "Ready".
+ *                                  Scanned kits carrying such members
+ *                                  sit here too.
  *   3. Unmatched scanned rows   — off-model scans OR over-scans of an
- *                                  expected model. Yellow warning
- *                                  badge clarifying the asset will
- *                                  both land on the booking _and_ go
- *                                  with this checkout.
+ *                                  expected model, plus kits whose
+ *                                  members assign nothing. Yellow
+ *                                  warning badge clarifying the item
+ *                                  will both land on the booking _and_
+ *                                  go with this checkout.
  *   4. Already included         — concrete `BookingAsset`s already on
  *                                  the booking. Collapsed by default,
  *                                  green "Already included" chip,
  *                                  read-only.
+ *
+ * Kits take part in the same matching. A scanned kit goes on the booking
+ * whole and its INDIVIDUAL members assign outstanding reserved units on the
+ * way, exactly as loose scans of those members would. Members are never
+ * submitted as loose asset ids — the form sends the kit id and the server
+ * resolves it into kit-driven rows.
  *
  * The submit button integrates the existing `CheckoutDialog`, so the
  * early-checkout prompt matches the non-fulfil checkout path. A check-out
@@ -56,6 +65,7 @@
 
 import { useMemo, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { AssetType } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
 import { ChevronDownIcon, Package as PackageIcon } from "lucide-react";
 import { z } from "zod";
@@ -64,32 +74,48 @@ import {
   expectedModelRequestsAtom,
   fulfilSessionAtom,
   removeScannedItemAtom,
+  removeScannedItemsByAssetIdAtom,
   scannedItemsAtom,
   type FulfilSessionInfo,
 } from "~/atoms/qr-scanner";
 import CheckoutDialog, {
   CheckoutIntentEnum,
 } from "~/components/booking/checkout-dialog";
+import type { ModelProgress } from "~/components/booking/model-pending-rows";
+import { buildPendingModelRows } from "~/components/booking/model-pending-rows";
+import { ModelProgressStrips } from "~/components/booking/model-progress-strips";
 import { Form } from "~/components/custom-form";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
-import { Progress } from "~/components/shared/progress";
-import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
+import type {
+  ScannedAssetRow,
+  ScannedKitRow,
+} from "~/modules/booking-model-request/scan-matching";
+import { matchScansToModelRequests } from "~/modules/booking-model-request/scan-matching";
+import type {
+  AssetFromQr,
+  KitFromQr,
+} from "~/routes/api+/get-scanned-item.$qrId";
 import { BADGE_COLORS } from "~/utils/badge-colors";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
 
 /**
  * Zod schema for the fulfil-and-checkout form payload.
  *
- * - `assetIds`: every resolved scan the submit acts on. The server
+ * - `assetIds`: every resolved asset scan the submit acts on. The server
  *   assigns matching assets to outstanding `BookingModelRequest` rows,
  *   adds off-model assets as new `BookingAsset` rows, and checks out.
- * - `kitIds`: always empty from this drawer; kit scans are not part of
- *   this flow.
+ *   Kit members are not listed here — sending one both as a loose id and
+ *   inside its kit would book it twice.
+ * - `kitIds`: every resolved kit scan. The server resolves each into
+ *   kit-driven `BookingAsset` rows and assigns their members to
+ *   outstanding `BookingModelRequest` rows.
  * - `checkoutIntentChoice`: populated only by the `CheckoutDialog`
  *   early-checkout alert buttons. Undefined on the plain submit path
  *   (not-early) — the server treats undefined as "keep original
@@ -111,27 +137,6 @@ const assetTypePillClass = tw(
 );
 
 /**
- * Shape of a scanned asset row after bucket classification. `qrId`
- * preserves the insertion order from `scannedItemsAtom` so the drawer
- * feels stable as scans arrive.
- */
-type ScannedAssetRow = {
-  qrId: string;
-  /** Real `AssetFromQr` payload when resolved, undefined while loading. */
-  asset: AssetFromQr | undefined;
-  /**
-   * - `"matched"`    — fills a pending model row (counts toward progress)
-   * - `"unmatched"`  — off-model OR over-scan OR still loading (warning copy)
-   * - `"duplicate"`  — asset is already on the booking via `alreadyIncluded`
-   *                    and the whole booking goes out anyway; the scan is a
-   *                    no-op and is not submitted.
-   * - `"included"`   — asset is already on the booking and submit sends out
-   *                    only scanned items; the scan checks this item out.
-   */
-  bucket: "matched" | "unmatched" | "duplicate" | "included";
-};
-
-/**
  * Props for {@link FulfilReservationsDrawer}.
  */
 type FulfilReservationsDrawerProps = {
@@ -143,6 +148,12 @@ type FulfilReservationsDrawerProps = {
   isLoading?: boolean;
   /** Forwarded through to `ConfigurableDrawer`. */
   defaultExpanded?: boolean;
+  /**
+   * Pools already on the booking that sit at two or more locations and have
+   * not gone out yet. The check-out confirmation asks where each one's units
+   * leave from, for the ones this submit sends out.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
@@ -164,24 +175,19 @@ export default function FulfilReservationsDrawer({
   style,
   isLoading,
   defaultExpanded = false,
+  sourceQuestions,
 }: FulfilReservationsDrawerProps) {
   const session = useAtomValue(fulfilSessionAtom);
   const expectedModelRequests = useAtomValue(expectedModelRequestsAtom);
   const items = useAtomValue(scannedItemsAtom);
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
   /**
-   * Classify scanned items into matched / unmatched buckets using the
-   * row-matching rules below. The matched-count tally is
-   * derived per-render (not stored in state) so a scan can flip
-   * buckets as the upstream model list changes.
-   *
-   * Assets that haven't resolved yet (`asset === undefined`) flow
-   * through `GenericItemRow`'s loading branch. We still classify them
-   * — parking them in "unmatched" is safe: once the fetch resolves,
-   * this memo re-runs and the row migrates to "matched" if a slot is
-   * free.
+   * Ids of the concrete `BookingAsset`s already on the booking. An asset in
+   * here can never be a fresh match, whether it arrives as a loose scan or
+   * inside a scanned kit.
    */
   const alreadyIncludedIds = useMemo(() => {
     const set = new Set<string>();
@@ -191,70 +197,47 @@ export default function FulfilReservationsDrawer({
     return set;
   }, [session?.alreadyIncluded]);
 
-  const scannedBuckets = useMemo(() => {
-    // assetModelId → number of scans consumed against that model's
-    // `remaining` quota so far in this iteration. "Remaining" already
-    // accounts for pre-fulfilled units — a model with `quantity: 3,
-    // fulfilledQuantity: 2` ships `remaining: 1`, so only one scan can
-    // match before we flip to "unmatched" (over-scan).
-    const matchedCountByModel = new Map<string, number>();
-    const rows: ScannedAssetRow[] = [];
-
-    for (const [qrId, item] of Object.entries(items)) {
-      if (!item) continue;
-      // Only assets participate in model-request matching. Kits
-      // aren't supported in this flow — the
-      // route loader filters them out of the expected list. Skip
-      // defensively without adding them to `rows`.
-      if (item.type && item.type !== "asset") continue;
-
-      const asset = (item.data ?? undefined) as AssetFromQr | undefined;
-
-      // An asset already on the booking never counts as a fresh match, or
-      // re-scanning it would fill the progress bar with nothing new. Whether
-      // the scan does anything depends on what submit sends out: when only
-      // scanned items leave, scanning it is how it gets checked out.
-      if (asset && alreadyIncludedIds.has(asset.id)) {
-        rows.push({
-          qrId,
-          asset,
-          bucket: session?.checksOutScannedOnly ? "included" : "duplicate",
-        });
-        continue;
-      }
-
-      const modelId = asset?.assetModelId ?? null;
-      const expected = modelId
-        ? expectedModelRequests.find((e) => e.assetModelId === modelId)
-        : undefined;
-
-      if (expected) {
-        const consumed = matchedCountByModel.get(expected.assetModelId) ?? 0;
-        // Only scans within the STILL-OUTSTANDING count match. If the
-        // request is already partially pre-fulfilled (2 of 3 scanned
-        // earlier), only one more scan can match; subsequent scans
-        // flip to unmatched/over-scan.
-        if (consumed < expected.remaining) {
-          matchedCountByModel.set(expected.assetModelId, consumed + 1);
-          rows.push({ qrId, asset, bucket: "matched" });
-          continue;
-        }
-      }
-
-      // Either (a) the asset resolved but its model isn't expected,
-      // (b) it's an over-scan of an expected model, or (c) the asset
-      // hasn't resolved yet. In all cases we park it in "unmatched"
-      // so `GenericItemRow` still mounts + fires the fetch.
-      rows.push({ qrId, asset, bucket: "unmatched" });
+  /**
+   * Already-included assets whose row still answers no reservation.
+   *
+   * The server decides this, because it depends on the row's stamp rather than
+   * on anything the scan can see. An asset listed twice, once standalone and
+   * once through a kit, is claimable if any of its entries says so.
+   */
+  const claimableIncludedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of session?.alreadyIncluded ?? []) {
+      if (item.claimable) set.add(item.id);
     }
+    return set;
+  }, [session?.alreadyIncluded]);
 
-    return { rows, matchedCountByModel };
-  }, [
-    items,
-    expectedModelRequests,
-    alreadyIncludedIds,
-    session?.checksOutScannedOnly,
-  ]);
+  /**
+   * Classify scanned items into asset rows (matched / unmatched / duplicate /
+   * included) and kit rows, and tally what each assigns against the
+   * outstanding reservations. The tally is derived per-render (not stored in
+   * state) so a row can change bucket as the upstream model list changes.
+   *
+   * Delegates to `matchScansToModelRequests`, shared with the scan-to-assign
+   * drawer so the two never drift from each other or from the server write.
+   */
+  const scannedBuckets = useMemo(
+    () =>
+      matchScansToModelRequests({
+        items,
+        expectedModelRequests,
+        alreadyIncludedIds,
+        claimableIncludedIds,
+        checksOutScannedOnly: session?.checksOutScannedOnly ?? false,
+      }),
+    [
+      items,
+      expectedModelRequests,
+      alreadyIncludedIds,
+      claimableIncludedIds,
+      session?.checksOutScannedOnly,
+    ]
+  );
 
   /**
    * Per-model progress strips (`Dell 2/3 • HP 0/1`). The progress
@@ -321,34 +304,106 @@ export default function FulfilReservationsDrawer({
   }, [scannedBuckets.rows]);
 
   /**
-   * Synthetic pending rows: one per outstanding unit per model. Built
-   * after all hooks so the hook-count is stable across renders; safe
-   * because it reads only memoized values above.
+   * The "From location" questions for what this submit sends out: every pool
+   * on the booking when the whole booking goes out, only the scanned ones
+   * when only scanned items leave.
    */
-  const pendingModelRows = useMemo(() => {
-    const rows: Array<{
-      key: string;
-      assetModelId: string;
-      assetModelName: string;
-      indexInModel: number;
-    }> = [];
-    for (const model of progressByModel) {
-      // Pending rows = outstanding (remaining) minus in-session scans.
-      // Do NOT use `booked` here — that would render pending rows for
-      // units that were already materialised in previous scans and are
-      // now sitting as concrete BookingAssets in "Already included".
-      const pending = Math.max(0, model.remaining - model.matched);
-      for (let i = 0; i < pending; i += 1) {
-        rows.push({
-          key: `pending-${model.assetModelId}-${i}`,
-          assetModelId: model.assetModelId,
-          assetModelName: model.assetModelName,
-          indexInModel: i,
-        });
-      }
+  const sourceQuestionsToAsk = useMemo(() => {
+    if (!sourceQuestions?.length) return [];
+    if (!session?.checksOutScannedOnly) return sourceQuestions;
+    const scanned = new Set(assetIdsToSubmit);
+    return sourceQuestions.filter((question) => scanned.has(question.assetId));
+  }, [sourceQuestions, session?.checksOutScannedOnly, assetIdsToSubmit]);
+
+  /**
+   * Kit ids to submit: every resolved kit scan. Unresolved scans are excluded
+   * for the same reason asset scans are — the server can't act on an id we
+   * don't know yet.
+   *
+   * Their members stay out of `assetIdsToSubmit`: the server resolves each
+   * kit into kit-driven `BookingAsset` rows, and a member sent as a loose id
+   * as well would land on the booking twice.
+   */
+  const kitIdsToSubmit = useMemo(() => {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const row of scannedBuckets.kitRows) {
+      const id = row.kit?.id;
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
     }
-    return rows;
-  }, [progressByModel]);
+    return ids;
+  }, [scannedBuckets.kitRows]);
+
+  /**
+   * Synthetic pending rows: one per outstanding unit per model. Built after
+   * all hooks so the hook-count is stable across renders; safe because it
+   * reads only memoized values above.
+   *
+   * Delegates to `buildPendingModelRows`, shared with the scan-to-assign
+   * drawer so both screens ask for the same units.
+   */
+  const pendingModelRows = useMemo(
+    () => buildPendingModelRows(progressByModel),
+    [progressByModel]
+  );
+
+  // Declared above the early return below: every hook in this component
+  // must run on every render, and the blocker's inputs are all resolved by
+  // this point.
+  /**
+   * Units the scan would take out of a kit.
+   *
+   * An INDIVIDUAL asset committed to a kit is not a free unit: sending it out
+   * alone answers the reservation and checks the booking out with the kit
+   * split — one item in the field, the rest on the shelf. The server refuses
+   * these, so the block here is what turns a refusal at submit into something
+   * the operator can see and fix while scanning.
+   *
+   * Not blocked when the asset's kit was scanned too (that is how a member is
+   * meant to go out) or when it is already on the booking (it is committed
+   * through the row it has, so the scan takes it nowhere new).
+   */
+  const kitMemberScanIds = useMemo(() => {
+    const scannedKitIds = new Set(
+      Object.values(items)
+        .filter((item) => item?.type === "kit" && item?.data)
+        .map((item) => (item?.data as KitFromQr).id)
+    );
+
+    return scannedBuckets.rows
+      .filter((row) => {
+        const asset = row.asset;
+        if (!asset || asset.type !== AssetType.INDIVIDUAL) return false;
+        if (alreadyIncludedIds.has(asset.id)) return false;
+        const memberships = asset.assetKits ?? [];
+        if (memberships.length === 0) return false;
+        return !memberships.some((membership) =>
+          scannedKitIds.has(membership.kitId)
+        );
+      })
+      .map((row) => row.asset!.id);
+  }, [scannedBuckets.rows, items, alreadyIncludedIds]);
+
+  const [hasBlockers, Blockers] = createBlockers({
+    blockerConfigs: [
+      {
+        condition: kitMemberScanIds.length > 0,
+        count: kitMemberScanIds.length,
+        message: (count: number) => (
+          <>
+            <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong>
+            {count > 1 ? "belong" : "belongs"} to a kit.
+          </>
+        ),
+        description:
+          "Scan the kit to take all of it, or scan another unit of the same model. Sending one member out on its own would split the kit.",
+        onResolve: () => removeAssetsFromList(kitMemberScanIds),
+      },
+    ],
+    onResolveAll: () => removeAssetsFromList(kitMemberScanIds),
+  });
 
   // Early return AFTER all hooks so the hook order stays stable
   // across renders (React rules of hooks). The session only turns
@@ -379,7 +434,31 @@ export default function FulfilReservationsDrawer({
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}
       renderItem={(data) => (
-        <ScannedAssetRowBody asset={data as AssetFromQr} bucket={row.bucket} />
+        <ScannedAssetRowBody
+          asset={data as AssetFromQr}
+          bucket={row.bucket}
+          viaKitName={row.viaKitName}
+          claimedModelName={row.claimedModelName}
+        />
+      )}
+    />
+  );
+
+  /** Render a single scanned kit row. */
+  const renderScannedKitRow = (row: ScannedKitRow): ReactNode => (
+    <GenericItemRow
+      key={row.qrId}
+      qrId={row.qrId}
+      item={items[row.qrId]}
+      onRemove={removeItem}
+      renderLoading={(pendingQrId, error) => (
+        <DefaultLoadingState qrId={pendingQrId} error={error} />
+      )}
+      renderItem={(data) => (
+        <ScannedKitRowBody
+          kit={data as KitFromQr}
+          matchedMemberCount={row.matchedMemberCount}
+        />
       )}
     />
   );
@@ -390,9 +469,20 @@ export default function FulfilReservationsDrawer({
    * already-included).
    * Duplicates sit ABOVE unmatched so the operator sees the blocker
    * (red "Already on this booking") before the softer yellow warning.
+   *
+   * Kits join the group their contribution matches: one that assigns
+   * reserved units reads as good news beside the matched scans, one that
+   * assigns none beside the yellow warnings it shares copy with.
    */
   const customRenderAllItems = (): ReactNode => {
     const matched = scannedBuckets.rows.filter((r) => r.bucket === "matched");
+    const matchingKits = scannedBuckets.kitRows.filter(
+      (r) => r.matchedMemberCount > 0
+    );
+    const nonMatchingKits = scannedBuckets.kitRows.filter(
+      (r) => r.matchedMemberCount === 0
+    );
+    const claimed = scannedBuckets.rows.filter((r) => r.bucket === "claimed");
     const included = scannedBuckets.rows.filter((r) => r.bucket === "included");
     const duplicate = scannedBuckets.rows.filter(
       (r) => r.bucket === "duplicate"
@@ -400,6 +490,7 @@ export default function FulfilReservationsDrawer({
     const unmatched = scannedBuckets.rows.filter(
       (r) => r.bucket === "unmatched"
     );
+    const viaKit = scannedBuckets.rows.filter((r) => r.bucket === "viaKit");
 
     return (
       <>
@@ -408,8 +499,15 @@ export default function FulfilReservationsDrawer({
           <PendingModelRow key={row.key} assetModelName={row.assetModelName} />
         ))}
 
-        {/* Bucket 2: matched scanned rows (green "Ready" chip). */}
+        {/* Bucket 2: matched scanned rows (green "Ready" chip), then the
+            kits whose members assign reserved units. */}
         {matched.map(renderScannedItemRow)}
+        {claimed.map(renderScannedItemRow)}
+        {matchingKits.map(renderScannedKitRow)}
+
+        {/* Scanned alongside their own kit: the kit above assigns them, so
+            they sit with it rather than among the warnings. */}
+        {viaKit.map(renderScannedItemRow)}
 
         {/* Items already on the booking, scanned to check them out. */}
         {included.map(renderScannedItemRow)}
@@ -419,8 +517,10 @@ export default function FulfilReservationsDrawer({
             the operator clears the blocker first. */}
         {duplicate.map(renderScannedItemRow)}
 
-        {/* Bucket 4: unmatched scanned rows (yellow warning badge). */}
+        {/* Bucket 4: unmatched scanned rows (yellow warning badge), then
+            the kits that assign nothing but still go out. */}
         {unmatched.map(renderScannedItemRow)}
+        {nonMatchingKits.map(renderScannedKitRow)}
 
         {/* Bucket 5: already-included collapser (collapsed by default). */}
         {session.alreadyIncluded.length > 0 ? (
@@ -436,6 +536,7 @@ export default function FulfilReservationsDrawer({
    */
   const hasSomethingToCheckOut =
     assetIdsToSubmit.length > 0 ||
+    kitIdsToSubmit.length > 0 ||
     (!session.checksOutScannedOnly && session.alreadyIncluded.length > 0);
   const shouldDisableSubmit = Boolean(isLoading) || !hasSomethingToCheckOut;
   const notice = !hasSomethingToCheckOut
@@ -462,6 +563,8 @@ export default function FulfilReservationsDrawer({
       // rows still need to be visible so the operator knows what's
       // expected.
       renderWhenEmpty
+      Blockers={Blockers}
+      disableSubmit={hasBlockers}
       defaultExpanded={defaultExpanded}
       className={tw(
         "[&_.default-base-drawer-header]:rounded-b [&_.default-base-drawer-header]:border [&_.default-base-drawer-header]:px-4 [&_thead]:hidden",
@@ -477,10 +580,16 @@ export default function FulfilReservationsDrawer({
             from: new Date(session.bookingFrom),
           }}
           assetIds={assetIdsToSubmit}
+          kitIds={kitIdsToSubmit}
           isLoading={isLoading}
-          disableSubmit={shouldDisableSubmit}
+          // This drawer submits through `CheckoutDialog`, not the drawer's own
+          // button, so `ConfigurableDrawer`'s `disableSubmit` never reaches it
+          // — the blocker has to be folded in here too or it would show a
+          // warning over a live button.
+          disableSubmit={shouldDisableSubmit || hasBlockers}
           notice={notice}
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestionsToAsk}
           // Only a RESERVED booking's first check-out can move its start date.
           suppressEarlyCheckoutPrompt={session.bookingStatus !== "RESERVED"}
         />
@@ -490,56 +599,21 @@ export default function FulfilReservationsDrawer({
 }
 
 /**
- * Number of model strips that fit in the list's height cap.
+ * Drawer header: booking name, description, and per-model progress strips.
  *
- * Doubles as the threshold for starting folded: a list short enough to read at
- * a glance opens with the drawer, while one that would need its own scrollbar
- * starts as a summary and leaves the height to the scan list.
- */
-const MODEL_STRIPS_VISIBLE = 6;
-
-/**
- * Drawer header: booking name + per-model progress strips.
- *
- * Rendered as the drawer's `headerContent` so it stays pinned while
- * the scanned/pending list scrolls underneath.
- *
- * The strip list folds. It is fixed chrome sharing one screen with the scan
- * list and the check-out button, so on a booking reserving dozens of models
- * the per-model detail is worth less than the room it occupies — the summary
- * row keeps overall progress visible either way.
+ * Rendered as the drawer's `headerContent` so it stays pinned while the
+ * scanned/pending list scrolls underneath. The strips are
+ * `ModelProgressStrips`; this component owns only the booking link and the
+ * screen's descriptive copy, since those are this drawer's own chrome and
+ * not shared with the other booking scanner.
  */
 function FulfilHeader({
   session,
   progressByModel,
 }: {
   session: Exclude<FulfilSessionInfo, null>;
-  progressByModel: Array<{
-    assetModelId: string;
-    assetModelName: string;
-    booked: number;
-    remaining: number;
-    prefulfilled: number;
-    matched: number;
-  }>;
+  progressByModel: ModelProgress[];
 }) {
-  const [showModels, setShowModels] = useState(
-    progressByModel.length <= MODEL_STRIPS_VISIBLE
-  );
-
-  // Totals span every reserved model, folded or not, so the summary is never
-  // a statement about only the part that happens to be on screen.
-  const totalBooked = progressByModel.reduce(
-    (sum, model) => sum + model.booked,
-    0
-  );
-  const totalFulfilled = progressByModel.reduce(
-    (sum, model) => sum + model.prefulfilled + model.matched,
-    0
-  );
-  const totalPercentage =
-    totalBooked > 0 ? Math.min(100, (totalFulfilled / totalBooked) * 100) : 0;
-
   return (
     <div className="border border-b-0 bg-gray-50 p-4">
       <div className="flex flex-col gap-3">
@@ -559,89 +633,10 @@ function FulfilHeader({
           </div>
         </div>
 
-        {progressByModel.length > 0 ? (
-          <>
-            {/* Summary row doubles as the fold control: the aggregate stays
-                readable when the per-model strips are hidden. */}
-            <button
-              type="button"
-              onClick={() => setShowModels((prev) => !prev)}
-              aria-expanded={showModels}
-              // Only reference the list while it exists — folding unmounts it.
-              aria-controls={
-                showModels ? "fulfil-model-progress-list" : undefined
-              }
-              className="flex w-full items-center gap-3 text-left"
-            >
-              <ChevronDownIcon
-                aria-hidden="true"
-                className={tw(
-                  "size-4 shrink-0 text-gray-500 transition-transform duration-150",
-                  showModels ? "rotate-0" : "-rotate-90"
-                )}
-              />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">
-                {progressByModel.length}{" "}
-                {progressByModel.length === 1 ? "model" : "models"} reserved
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-gray-600">
-                {totalFulfilled} / {totalBooked}
-              </span>
-              <Progress
-                aria-label={`${totalFulfilled} of ${totalBooked} units fulfilled across all reserved models`}
-                value={totalPercentage}
-                className="h-1.5 w-32 shrink-0"
-              />
-            </button>
-
-            {/* One strip per reserved model, and a booking can reserve dozens.
-                The cap keeps the header a header: it is the drawer's fixed
-                chrome, so its height is spent from the same budget as the scan
-                list and the check-out button below it.
-
-                Folding UNMOUNTS the list rather than hiding it. A `hidden`
-                attribute would not survive the `flex` class: `display: none`
-                arrives from the base layer and any display utility overrides
-                it, so the list renders on regardless of the state. */}
-            {showModels ? (
-              <ul
-                id="fulfil-model-progress-list"
-                className="flex max-h-[176px] flex-col gap-2 overflow-y-auto pr-1"
-              >
-                {progressByModel.map((model) => {
-                  // Cumulative fulfilment against the ORIGINAL reservation
-                  // — includes units scanned in previous sessions
-                  // (`prefulfilled`) so the operator's mental model
-                  // ("I reserved 3, I've got 2 already") stays consistent
-                  // on re-entry.
-                  const fulfilled = model.prefulfilled + model.matched;
-                  const percentage =
-                    model.booked > 0
-                      ? Math.min(100, (fulfilled / model.booked) * 100)
-                      : 0;
-                  return (
-                    <li
-                      key={model.assetModelId}
-                      className="flex items-center gap-3"
-                    >
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800">
-                        {model.assetModelName}
-                      </span>
-                      <span className="shrink-0 text-xs tabular-nums text-gray-600">
-                        {fulfilled} / {model.booked}
-                      </span>
-                      <Progress
-                        aria-label={`${model.assetModelName}: ${fulfilled} of ${model.booked} fulfilled`}
-                        value={percentage}
-                        className="h-1.5 w-32 shrink-0"
-                      />
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </>
-        ) : null}
+        <ModelProgressStrips
+          progressByModel={progressByModel}
+          idPrefix="fulfil"
+        />
       </div>
     </div>
   );
@@ -697,6 +692,9 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
  * `renderItem` slot). Branches on `bucket` for the status chip:
  *
  * - `"matched"`   → green "Ready" chip.
+ * - `"viaKit"`    → blue chip naming the scanned kit it arrives with. Not a
+ *   warning and not a second assignment: the kit row is what assigns it, and
+ *   this row says so rather than looking like an idle duplicate.
  * - `"unmatched"` → yellow warning badge. Copy explicitly states the
  *   asset will land on the booking _and_ go with this checkout so
  *   the operator knows both side-effects are coupled into one submit
@@ -710,9 +708,13 @@ function PendingModelRow({ assetModelName }: { assetModelName: string }) {
 function ScannedAssetRowBody({
   asset,
   bucket,
+  viaKitName,
+  claimedModelName,
 }: {
   asset: AssetFromQr;
   bucket: ScannedAssetRow["bucket"];
+  viaKitName?: string;
+  claimedModelName?: string;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -734,6 +736,28 @@ function ScannedAssetRowBody({
               withDot={false}
             >
               Ready
+            </Badge>
+          ) : bucket === "viaKit" ? (
+            <Badge
+              color={BADGE_COLORS.blue.bg}
+              textColor={BADGE_COLORS.blue.text}
+              withDot={false}
+              className="max-w-full"
+            >
+              {viaKitName
+                ? `Arrives with ${viaKitName}`
+                : "Arrives with its kit"}
+            </Badge>
+          ) : bucket === "claimed" ? (
+            <Badge
+              color={BADGE_COLORS.green.bg}
+              textColor={BADGE_COLORS.green.text}
+              withDot={false}
+              className="max-w-full"
+            >
+              {claimedModelName
+                ? `Already here, now counts toward ${claimedModelName}`
+                : "Already here, now counts"}
             </Badge>
           ) : bucket === "included" ? (
             <Badge
@@ -763,6 +787,64 @@ function ScannedAssetRowBody({
             </Badge>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Body of a scanned-kit row (rendered inside `GenericItemRow`'s `renderItem`
+ * slot). A kit always lands on the booking and always goes out with this
+ * check-out, so the badge reports the one thing that varies: how many of its
+ * members assign an outstanding reserved unit.
+ *
+ * A kit that assigns none carries the same yellow warning as an off-model
+ * asset scan — it is accepted, and the operator should see that it does not
+ * move the progress strips.
+ *
+ * @param kit - Resolved kit payload from the scanned-item endpoint.
+ * @param matchedMemberCount - Members assigning a reserved unit; see
+ *   {@link ScannedKitRow}.
+ */
+function ScannedKitRowBody({
+  kit,
+  matchedMemberCount,
+}: {
+  kit: KitFromQr;
+  matchedMemberCount: number;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="word-break whitespace-break-spaces font-medium text-gray-800">
+        {kit.name}
+        <span className="ml-1.5 text-xs font-medium text-gray-500">
+          {kit._count.assetKits}{" "}
+          {kit._count.assetKits === 1 ? "asset" : "assets"}
+        </span>
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={assetTypePillClass}>kit</span>
+        {matchedMemberCount > 0 ? (
+          <Badge
+            color={BADGE_COLORS.green.bg}
+            textColor={BADGE_COLORS.green.text}
+            withDot={false}
+            className="max-w-full"
+          >
+            {matchedMemberCount === 1
+              ? "Assigns 1 reserved unit"
+              : `Assigns ${matchedMemberCount} reserved units`}
+          </Badge>
+        ) : (
+          <Badge
+            color={BADGE_COLORS.amber.bg}
+            textColor={BADGE_COLORS.amber.text}
+            withDot={false}
+            className="max-w-full"
+          >
+            Will be added to booking and checked out
+          </Badge>
+        )}
       </div>
     </div>
   );
@@ -868,6 +950,8 @@ type FulfilCheckoutFormProps = {
   booking: { id: string; name: string; from: Date };
   /** Matched + unmatched scanned asset ids to attach to the booking. */
   assetIds: string[];
+  /** Scanned kit ids to attach to the booking as kit-driven rows. */
+  kitIds: string[];
   /** `true` while a submit is in-flight. */
   isLoading?: boolean;
   /** `true` while nothing would go out, or while a submit is in flight. */
@@ -881,6 +965,8 @@ type FulfilCheckoutFormProps = {
   unassignedUnits: UnassignedModelUnits[];
   /** Skips the early check-out prompt; see `CheckoutDialog`. */
   suppressEarlyCheckoutPrompt: boolean;
+  /** Pools to ask "From location" for; see `CheckoutDialog`. */
+  sourceQuestions: CheckoutSourceQuestion[];
 };
 
 /**
@@ -900,18 +986,19 @@ type FulfilCheckoutFormProps = {
  * 2. On-time booking → plain submit button, no `checkoutIntentChoice`
  *    field — the server treats undefined as "keep original from".
  *
- * `assetIds` is serialized as `assetIds[0]=…&assetIds[1]=…` so the
- * Zod schema picks it up as an array. `kitIds` is intentionally empty
- * (kit scans are not part of this flow).
+ * `assetIds` and `kitIds` are serialized as `assetIds[0]=…&assetIds[1]=…`
+ * so the Zod schema picks each up as an array.
  */
 function FulfilCheckoutForm({
   booking,
   assetIds,
+  kitIds,
   isLoading,
   disableSubmit,
   notice,
   unassignedUnits,
   suppressEarlyCheckoutPrompt,
+  sourceQuestions,
 }: FulfilCheckoutFormProps) {
   /**
    * Form DOM node ref — used as the portal container for the
@@ -946,6 +1033,17 @@ function FulfilCheckoutForm({
           />
         ))}
 
+        {/* Hidden kit ids — the server resolves each into kit-driven rows
+            and assigns their members to outstanding reservations. */}
+        {kitIds.map((kitId, index) => (
+          <input
+            key={kitId}
+            type="hidden"
+            name={`kitIds[${index}]`}
+            value={kitId}
+          />
+        ))}
+
         {notice ? (
           <p className="mr-auto text-xs text-gray-600">{notice}</p>
         ) : null}
@@ -960,6 +1058,7 @@ function FulfilCheckoutForm({
           portalContainer={formElement || undefined}
           formId="fulfil-and-checkout-form"
           unassignedUnits={unassignedUnits}
+          sourceQuestions={sourceQuestions}
           suppressEarlyCheckoutPrompt={suppressEarlyCheckoutPrompt}
           // `grow` (the CheckoutDialog default) makes the button stretch
           // across the drawer — with the disabled primary-300 tint this

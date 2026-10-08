@@ -28,6 +28,7 @@
 import type { Booking } from "@prisma/client";
 import { ChevronRightIcon, ScanLine } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import type { ButtonProps } from "../shared/button";
@@ -72,6 +73,12 @@ type CheckoutDropdownProps = {
    * out" is offered, and nothing at all when there is nothing left to scan.
    */
   requireExplicitCheckout?: boolean;
+  /**
+   * Pools at two or more locations that the quick option would send out for
+   * the first time. Non-empty turns the quick option into a confirm dialog
+   * with a "From location" select per pool; see `CheckoutDialog`.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
@@ -95,6 +102,7 @@ export default function CheckoutDropdown({
   canCheckOutRemaining,
   canScanCheckOut,
   requireExplicitCheckout,
+  sourceQuestions,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
@@ -200,6 +208,7 @@ export default function CheckoutDropdown({
         intent={quickCheckoutIntent}
         label={quickCheckoutLabel}
         suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+        sourceQuestions={sourceQuestions}
       />
     );
   }
@@ -274,6 +283,7 @@ export default function CheckoutDropdown({
                 label={quickCheckoutLabel}
                 variant="dropdown"
                 suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+                sourceQuestions={sourceQuestions}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

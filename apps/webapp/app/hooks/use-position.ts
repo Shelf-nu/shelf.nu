@@ -1,14 +1,29 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { atom, useAtom } from "jotai";
 import { useFetcher, useParams } from "react-router";
 import { useSearchParams } from "~/hooks/search-params";
 
-const positionAtom = atom<GeolocationCoordinates | null>(null);
+/**
+ * The last fix obtained, tagged with the scan it was obtained for.
+ *
+ * The tag is what makes the value safe to keep in a module atom: the `qr+`
+ * layout and its child route both mount this hook for one scan, so the atom is
+ * shared on purpose, and it outlives the scan that filled it. A fix is only
+ * ever reported for the scan it belongs to — an untagged position would be
+ * posted against whichever scan came next, giving that record the coordinates
+ * of wherever the previous one happened.
+ */
+type FixForScan = {
+  scanId: string;
+  coords: GeolocationCoordinates;
+};
+
+const positionAtom = atom<FixForScan | null>(null);
 
 export const usePosition = () => {
   let { qrId } = useParams();
   const [searchParams] = useSearchParams();
-  const [position, setPosition] = useAtom(positionAtom);
+  const [fix, setFix] = useAtom(positionAtom);
   const fetcher = useFetcher();
   const scanId = searchParams.get("scanId") as string;
 
@@ -17,6 +32,9 @@ export const usePosition = () => {
     qrId = searchParams.get("qrId") as string;
   }
 
+  /** The fix for the scan currently in the URL, or null when there is none. */
+  const position = fix?.scanId === scanId ? fix.coords : null;
+
   useEffect(() => {
     if (navigator && navigator.geolocation && scanId) {
       // The error callback must be a function or omitted; passing `null` makes
@@ -24,7 +42,7 @@ export const usePosition = () => {
       // function`. Use `undefined` to opt out cleanly. The caller doesn't
       // surface geolocation errors anyway, so a no-op handler is unnecessary.
       navigator.geolocation.getCurrentPosition(
-        (position) => setPosition(position.coords),
+        (position) => setFix({ scanId, coords: position.coords }),
         undefined,
         {
           enableHighAccuracy: true,
@@ -33,8 +51,10 @@ export const usePosition = () => {
         }
       );
     }
+    // Keyed on the scan: a new scan needs its own fix, and asking again is the
+    // only way to get one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scanId]);
 
   useEffect(() => {
     if (position && scanId) {
@@ -51,5 +71,11 @@ export const usePosition = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [position]);
 
-  return [position, setPosition];
+  /** Records a fix for the scan currently in the URL. */
+  const setPosition = useCallback(
+    (coords: GeolocationCoordinates) => setFix({ scanId, coords }),
+    [scanId, setFix]
+  );
+
+  return [position, setPosition] as const;
 };

@@ -1,11 +1,14 @@
 import { useState } from "react";
+import { KIT_MEMBERS_CUSTODY_BLOCKED_REASON } from "@shelf/labels";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { getRowKitStatus, isIndividualKitMember } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { isFormProcessing } from "~/utils/form";
 import { isSelectingAllItems } from "~/utils/list";
@@ -84,7 +87,8 @@ function ConditionalDropdown() {
 
   const allSelected = isSelectingAllItems(selectedAssets);
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   /**
@@ -104,8 +108,25 @@ function ConditionalDropdown() {
     (asset) => asset.status === "CHECKED_OUT"
   );
 
-  const someAssetPartOfUnavailableKit = selectedAssets.some(
-    (asset) => asset?.kit && asset.kit.status !== "AVAILABLE"
+  /**
+   * A selected asset whose kit is not available (in custody or checked out):
+   * its custody is the kit's to change. Read through `getRowKitStatus`, which
+   * understands both index row shapes; simple-mode rows carry no `kit` field.
+   */
+  const someAssetPartOfUnavailableKit = selectedAssets.some((asset) => {
+    const kitStatus = getRowKitStatus(asset);
+    return kitStatus !== null && kitStatus !== "AVAILABLE";
+  });
+
+  /**
+   * An individually tracked kit member takes custody through its kit, so bulk
+   * "Assign custody" is disabled while one is selected. Reads both index row
+   * shapes (`assetKits` in simple mode, `kit` in advanced mode). Advisory: the
+   * server refuses the same request (`assertNotKitMembers`), including for a
+   * "select all" whose rows are not loaded here.
+   */
+  const someAssetIsIndividualKitMember = selectedAssets.some((asset) =>
+    isIndividualKitMember(asset)
   );
 
   const selfUserCustody = selectedAssets.some((a) => {
@@ -114,7 +135,7 @@ function ConditionalDropdown() {
     ) as { custodian?: { userId?: string } } | null;
     return primary?.custodian?.userId === user?.id;
   });
-  const disableReleaseCustody = isSelfService && !selfUserCustody;
+  const disableReleaseCustody = assignsSelfOnly && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -317,13 +338,17 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreAvailable || someAssetPartOfUnavailableKit
+                    !allAssetsAreAvailable ||
+                    someAssetPartOfUnavailableKit ||
+                    someAssetIsIndividualKitMember
                       ? {
                           reason: someAssetPartOfUnavailableKit
                             ? "Some of the selected assets have custody assigned via a kit. If you want to change their custody, please update the kit instead."
+                            : someAssetIsIndividualKitMember
+                            ? KIT_MEMBERS_CUSTODY_BLOCKED_REASON
                             : "Some of the selected assets are not available.",
                         }
                       : isLoading

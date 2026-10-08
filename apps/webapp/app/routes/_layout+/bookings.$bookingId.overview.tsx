@@ -1,8 +1,8 @@
 import {
   AssetStatus,
+  AssetType,
   BookingStatus,
   TagUseFor,
-  OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
 import type {
@@ -41,6 +41,15 @@ import {
   BOOKING_DISPOSITION_CATEGORIES,
   computeBookingSliceUnitCounts,
 } from "~/modules/booking/booking-slice-unit-counts.server";
+import {
+  isManualSourceSlice,
+  parseSourceLocationsFromFormData,
+} from "~/modules/booking/checkout-source-location";
+import {
+  getCheckoutSourceQuestions,
+  loadMultiPlacedPoolIds,
+  loadSliceSourceLocations,
+} from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
   archiveBooking,
@@ -63,10 +72,12 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
+import { buildUnavailableAssets } from "~/modules/booking/unavailable-assets";
 import {
   calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
+  stillOutOnOverdueKitSlice,
 } from "~/modules/booking/utils.server";
 import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -86,13 +97,11 @@ import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.
 import bookingPageCss from "~/styles/booking.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
+  assertCanDeleteBooking,
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
-import {
-  calculateTotalValueOfAssets,
-  canRoleRemoveBookingAssets,
-} from "~/utils/bookings";
+import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
 import {
@@ -121,6 +130,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import {
+  canRemoveBookingItems,
+  isExplicitScanRequired,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import type { Route } from "./+types/bookings.$bookingId.overview";
 
@@ -144,19 +157,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { perPage } = cookie;
 
   try {
-    const {
-      organizationId,
-      isSelfServiceOrBase,
-      currentOrganization,
-      userOrganizations,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId: authSession?.userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, userOrganizations, access } =
+      await requirePermission({
+        userId: authSession?.userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     // Get the booking with basic asset information
     const [booking, tags, notifyData] = await Promise.all([
@@ -175,12 +182,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
               profilePicture: true,
             },
           },
-          // Only include notification recipients for admin/owner users.
-          // Self-service/base users don't need this data (they can't see or
-          // manage notification settings).
-          ...(isSelfServiceOrBase
-            ? {}
-            : {
+          // Recipients are loaded only for members who may view and manage
+          // them (notifications.manageBookingRecipients).
+          ...(access.policy.notifications.manageBookingRecipients
+            ? {
                 notificationRecipients: {
                   select: {
                     id: true,
@@ -194,7 +199,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                     },
                   },
                 },
-              }),
+              }
+            : {}),
         },
       }),
       db.tag.findMany({
@@ -207,13 +213,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         },
         orderBy: { name: "asc" },
       }),
-      // Only fetch notification team members for admin/owner users
-      isSelfServiceOrBase
-        ? Promise.resolve({
+      // The recipient picker's roster, only for members who manage recipients
+      access.policy.notifications.manageBookingRecipients
+        ? getTeamMembersForNotify({ organizationId })
+        : Promise.resolve({
             teamMembersForNotify: [],
             totalTeamMembersForNotify: 0,
-          })
-        : getTeamMembersForNotify({ organizationId }),
+          }),
     ]);
 
     // Exclude custodian from the notification recipients picker since
@@ -254,7 +260,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      */
     if (
       !canSeeBooking({
-        canSeeAllBookings,
+        access,
         booking,
         userId: authSession.userId,
       })
@@ -419,11 +425,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         trustedSelectedTeamMembers: booking.custodianTeamMemberId
           ? [booking.custodianTeamMemberId]
           : [],
-        // A sidebar FILTER, so the custody read-visibility rule governs — the
-        // role alone ignored the workspace's `selfServiceCanSeeCustody` /
-        // `baseUserCanSeeCustody` overrides, which made this seed disagree with
-        // the search endpoint.
-        filterByUserId: !canSeeAllCustody,
+        // A sidebar FILTER, so custody visibility governs (including the
+        // workspace toggles): only the caller's own team member unless custody
+        // is visible to them, matching the search endpoint.
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
 
@@ -431,7 +436,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       getTeamMemberForForm({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        access,
         custodianUserId: booking.custodianUserId || undefined,
         custodianTeamMemberId: booking.custodianTeamMemberId || undefined,
         bookingStatus: booking.status,
@@ -487,45 +492,58 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // enough for assets that inherit their image from their model.
           ...ASSET_MODEL_IMAGE_SELECT,
           bookingAssets: {
+            /**
+             * Other bookings' slices that can make a row unavailable: those on
+             * an overlapping booking, plus any kit slice still out on an
+             * OVERDUE booking whatever its dates, since an overdue kit has no
+             * known return date. The kit row judges a kit on its own slices
+             * (`hasKitBookingConflicts`), the same rule the booking writes
+             * refuse on.
+             */
             where: {
-              booking: {
-                ...(booking.from && booking.to
-                  ? {
-                      OR: [
-                        // Rule 1: RESERVED bookings always conflict
-                        {
-                          status: "RESERVED",
-                          id: { not: booking.id },
+              OR: [
+                {
+                  booking: {
+                    ...(booking.from && booking.to
+                      ? {
                           OR: [
+                            // Rule 1: RESERVED bookings always conflict
                             {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
+                              status: "RESERVED",
+                              id: { not: booking.id },
+                              OR: [
+                                {
+                                  from: { lte: booking.to },
+                                  to: { gte: booking.from },
+                                },
+                                {
+                                  from: { gte: booking.from },
+                                  to: { lte: booking.to },
+                                },
+                              ],
                             },
+                            // Rule 2: ONGOING/OVERDUE bookings
                             {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
+                              status: { in: ["ONGOING", "OVERDUE"] },
+                              id: { not: booking.id },
+                              OR: [
+                                {
+                                  from: { lte: booking.to },
+                                  to: { gte: booking.from },
+                                },
+                                {
+                                  from: { gte: booking.from },
+                                  to: { lte: booking.to },
+                                },
+                              ],
                             },
                           ],
-                        },
-                        // Rule 2: ONGOING/OVERDUE bookings
-                        {
-                          status: { in: ["ONGOING", "OVERDUE"] },
-                          id: { not: booking.id },
-                          OR: [
-                            {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
-                            },
-                            {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
-                            },
-                          ],
-                        },
-                      ],
-                    }
-                  : {}),
-              },
+                        }
+                      : {}),
+                  },
+                },
+                stillOutOnOverdueKitSlice({ currentBookingId: booking.id }),
+              ],
             },
             include: {
               booking: true,
@@ -602,6 +620,45 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * `bookingAssetId` + `bookedQuantity` come straight off the pivot row
      * so downstream qty enrichment can attribute dispositions per-row.
      */
+    /**
+     * Reserved model name per `BookingModelRequest` id, for the rows that
+     * discharged one.
+     *
+     * `BookingAsset.bookingModelRequestId` is a plain column with no Prisma
+     * relation accessor (see the schema comment — the extra relation pushes
+     * the extended client past TS's recursion limit), so the name cannot be
+     * joined from the row. The booking already loads its own `modelRequests`
+     * with `assetModel`, and a row can only ever point at one of those, so the
+     * lookup costs nothing extra.
+     */
+    const modelNameByRequestId = new Map<string, string>(
+      (booking.modelRequests ?? []).map((request) => [
+        request.id,
+        request.assetModel.name,
+      ])
+    );
+
+    /**
+     * Where each checked-out pool slice's units left from, for the "from
+     * <Location>" line on its row. Shown only on standalone slices of pools
+     * at two or more placements: a pool at one location, or a kit's units,
+     * shows nothing new.
+     */
+    const poolSliceAssetIds = booking.bookingAssets
+      .filter(
+        (ba) =>
+          ba.asset.type === AssetType.QUANTITY_TRACKED &&
+          isManualSourceSlice(ba)
+      )
+      .map((ba) => ba.assetId);
+    const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
+      loadSliceSourceLocations({
+        organizationId,
+        locationIds: booking.bookingAssets.map((ba) => ba.sourceLocationId),
+      }),
+      loadMultiPlacedPoolIds({ organizationId, assetIds: poolSliceAssetIds }),
+    ]);
+
     const enrichedAssetsForView = booking.bookingAssets.map((ba) => {
       const detail = assetDetailsMap.get(ba.assetId);
       const base = detail ?? ba.asset;
@@ -686,6 +743,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
          * row projection does not carry `assetKitId`.
          */
         isKitDriven: ba.assetKitId != null,
+        /**
+         * The reserved model this row answered, when it answered one.
+         *
+         * Derived here for the same reason as the markers above: the cached
+         * row projection carries neither `bookingModelRequestId` nor anything
+         * that could resolve it back to a model name.
+         */
+        fulfilsModelName: ba.bookingModelRequestId
+          ? modelNameByRequestId.get(ba.bookingModelRequestId) ?? null
+          : null,
+        /**
+         * The location this pool slice's units left from, recorded at
+         * check-out. `null` unless the slice is a standalone slice of a pool
+         * at two or more placements (see above). Derived here for the same
+         * reason as the markers above: the cached row projection does not
+         * carry `sourceLocationId`.
+         */
+        sourceLocation:
+          isManualSourceSlice(ba) && multiPlacedPoolIds.has(ba.assetId)
+            ? sourceLocationsById.get(ba.sourceLocationId) ?? null
+            : null,
       };
     });
 
@@ -1110,6 +1188,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Always use teamMembersForForm from getTeamMemberForForm - it handles all cases correctly
     const teamMembersForForm = teamMembersForFormData.teamMembers;
 
+    const checkoutSourceQuestions = (
+      [
+        BookingStatus.RESERVED,
+        BookingStatus.ONGOING,
+        BookingStatus.OVERDUE,
+      ] as BookingStatus[]
+    ).includes(booking.status)
+      ? await getCheckoutSourceQuestions({
+          organizationId,
+          bookingId: booking.id,
+        })
+      : [];
+
     return data(
       payload({
         userId,
@@ -1157,6 +1248,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ...teamMembersData,
         teamMembersForForm,
         bookingFlags,
+        // Names what `bookingFlags.hasUnavailableAssets` refuses over. Built
+        // from rows already fetched above, so it adds no query.
+        unavailableAssets: buildUnavailableAssets(bookingAssets),
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           // Each `bookingAssets` row is built from a `BookingAsset` pivot
@@ -1183,6 +1277,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         lifecycleProgress,
         checkedOutAssetIds,
         remainingToCheckOutByAsset,
+        /**
+         * Pools on this booking that sit at two or more locations and have
+         * not gone out yet: the check-out dialogs render one "From location"
+         * select per entry. Empty for bookings that cannot check out, and for
+         * bookings with no such pool, so their check-out stays one click.
+         */
+        checkoutSourceQuestions,
         /**
          * QT workspace-availability map (assetId → `{ bookable, physicalNow,
          * reserved }`, all excluding this booking + kit-custody). Drives the
@@ -1314,6 +1415,29 @@ export const handle = {
 
 export type BookingPageActionData = typeof action;
 
+/**
+ * The verb phrase each mutating intent reads as in an ownership refusal
+ * ("You are not authorized to <verb> this booking.").
+ */
+const INTENT_VERB = {
+  save: "save",
+  reserve: "reserve",
+  delete: "delete",
+  removeAsset: "remove items from",
+  checkOut: "check out",
+  checkOutRemaining: "check out",
+  checkIn: "check in",
+  archive: "archive",
+  cancel: "cancel",
+  removeKit: "remove kits from",
+  "revert-to-draft": "revert",
+  "extend-booking": "extend",
+  "bulk-remove-asset-or-kit": "remove items from",
+  "partial-checkin": "check in",
+  "partial-checkout": "check out",
+  updateNotificationRecipients: "change the notification recipients of",
+} as const;
+
 export async function action({ context, request, params }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -1383,16 +1507,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       updateNotificationRecipients: PermissionAction.update,
     };
 
-    const { organizationId, role, isSelfServiceOrBase } =
+    const { organizationId, access, userOrganizations } =
       await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
         action: intent2ActionMap[intent],
       });
-
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
 
     const user = await getUserByID(userId, {
       select: {
@@ -1413,39 +1534,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * so we must not call findUniqueOrThrow before this.
      */
     if (intent === "delete") {
-      if (isSelfServiceOrBase) {
-        /**
-         * When user is self_service we need to check if the booking belongs to them and only then allow them to delete it.
-         * They have delete permissions but shouldnt be able to delete other people's bookings
-         * Practically they should not be able to even view/access another booking but this is just an extra security measure
-         */
+      // A caller who writes every booking and may delete any status needs no
+      // lookup. Everyone else is held to their own bookings, and roles whose
+      // policy limits delete to drafts are held to drafts.
+      if (
+        !access.bookings.writeAll ||
+        access.policy.bookings.deleteOnlyDrafts
+      ) {
         const b = await getBooking({ id, organizationId, request });
-        validateBookingOwnership({
-          booking: b,
-          userId,
-          role,
-          action: "delete",
-        });
-
-        // BASE users can only delete DRAFT bookings
-        if (
-          role === OrganizationRoles.BASE &&
-          b.status !== BookingStatus.DRAFT
-        ) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "You are not authorized to delete this booking. BASE users can only delete draft bookings.",
-            status: 403,
-            label: "Booking",
-          });
-        }
+        assertCanDeleteBooking({ access, booking: b, userId });
       }
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },
         getClientHint(request),
-        userId
+        userId,
+        // Re-checked at write time: the booking may have left DRAFT since.
+        { onlyIfDraft: access.policy.bookings.deleteOnlyDrafts }
       );
 
       const actor = wrapUserLinkForNote({ ...user, id: userId });
@@ -1509,9 +1614,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * rules is cosmetic, and a crafted POST reaches this action directly.
      *
      * A closed booking (COMPLETE / ARCHIVED / CANCELLED) is immutable for
-     * everyone. Below that, a restricted role is bounded by status — removing
-     * from a live booking reconciles the asset back to available, which is a
-     * check-in, and BASE holds no `booking:checkin`.
+     * everyone. Below that, a caller is bounded by the statuses its policy
+     * lists (`bookings.removableItemStatuses`): removing from a live booking
+     * reconciles the asset back to available, which is a check-in, and BASE
+     * holds no `booking:checkin`.
      *
      * WHO owns the booking is still settled below by `validateBookingOwnership`.
      */
@@ -1522,10 +1628,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     ];
     if (
       removeIntents.includes(intent) &&
-      // `[role]` is safe here, unlike on the mobile endpoint: `requirePermission`
-      // resolves through `resolveEffectiveRole`, which returns the MOST
-      // PRIVILEGED role on the membership rather than `roles[0]`.
-      !canRoleRemoveBookingAssets({ roles: [role], booking: basicBookingInfo })
+      !canRemoveBookingItems({ access, bookingStatus: basicBookingInfo.status })
     ) {
       throw new ShelfError({
         cause: null,
@@ -1535,7 +1638,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId,
           id,
           intent,
-          role,
+          role: access.role,
           status: basicBookingInfo.status,
         },
         label: "Booking",
@@ -1556,19 +1659,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * ownership references -- so this is the only thing standing between a
      * restricted role and someone else's booking.
      *
-     * No-op for ADMIN/OWNER. `delete` is not reachable here -- it returns
-     * before this point, with its own check, because it must not fetch the
-     * booking first. The compiler confirms it: `intent` has already narrowed to
-     * exclude it.
+     * `delete` is not reachable here: it returns before this point, with its
+     * own check, because it must not fetch the booking first. The compiler
+     * confirms it: `intent` has already narrowed to exclude it.
+     *
+     * No-op when `access.bookings.writeAll`.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: basicBookingInfo,
-        userId,
-        role,
-        action: intent,
-      });
-    }
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: INTENT_VERB[intent],
+    });
 
     switch (intent) {
       case "save": {
@@ -1587,10 +1689,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             prefs,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1646,10 +1748,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             status: basicBookingInfo.status,
             workingHours,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1671,7 +1773,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           custodianUserId: parsedData.custodian?.userId,
           custodianTeamMemberId: parsedData.custodian?.id,
           hints: getClientHint(request),
-          isSelfServiceOrBase,
+          alertsOrgOnReservation:
+            access.policy.notifications.reservationAlertsAdmins,
           tags,
           userId,
         });
@@ -1689,8 +1792,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "checkOut": {
         // The one-click check-out is refused when the workspace requires the
-        // explicit flow (scan or select) for this role.
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        // explicit flow (scan or select) for this caller.
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         const booking = await checkoutBooking({
           id,
@@ -1700,6 +1803,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,
+          // The confirm dialog's "From location" picks, one per pool at two
+          // or more placements. Absent when the dialog asked nothing.
+          sourceLocations: parseSourceLocationsFromFormData(formData),
         });
 
         const actor = wrapUserLinkForNote({ ...user, id: userId });
@@ -1733,7 +1839,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // progressive partial-checkout path, which writes notes/events.
         // Being one click, it is refused under the explicit check-out
         // requirement, the same as "Check out".
-        assertQuickCheckoutAllowed({ role, bookingSettings });
+        assertQuickCheckoutAllowed({ access, bookingSettings });
 
         return await checkoutRemainingAssets({
           formData,
@@ -1745,24 +1851,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "checkIn": {
-        // Enforce explicit check-in requirement based on role and settings
+        // Refuse the one-click check-in when the workspace requires the
+        // explicit flow for this caller.
         if (
-          role === OrganizationRoles.ADMIN &&
-          bookingSettings.requireExplicitCheckinForAdmin
-        ) {
-          throw new ShelfError({
-            cause: null,
-            title: "Not allowed to quick check-in",
-            message:
-              "Explicit check-in is required in this organization. Please use the explicit check-in scanner.",
-            status: 403,
-            label: "Booking",
-            shouldBeCaptured: false,
-          });
-        }
-        if (
-          role === OrganizationRoles.SELF_SERVICE &&
-          bookingSettings.requireExplicitCheckinForSelfService
+          isExplicitScanRequired({
+            access,
+            settings: bookingSettings,
+            direction: "checkin",
+          })
         ) {
           throw new ShelfError({
             cause: null,
@@ -1861,7 +1957,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             assetId: z.string(),
           }),
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
 
@@ -1919,7 +2015,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           formData,
           CancelBookingSchema,
           {
-            additionalData: { userId, id, organizationId, role },
+            additionalData: { userId, id, organizationId, role: access.role },
           }
         );
         const cancelledBooking = await cancelBooking({
@@ -1964,7 +2060,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
       case "removeKit": {
         const { kitId } = parseData(formData, z.object({ kitId: z.string() }), {
-          additionalData: { userId, id, organizationId, role },
+          additionalData: { userId, id, organizationId, role: access.role },
         });
 
         const kit = await db.kit.findUniqueOrThrow({
@@ -2045,7 +2141,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             workingHours,
             prefs,
             bookingSettings,
-            isAdminOrOwner,
+            bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
           }),
           {
             additionalData: { userId, organizationId },
@@ -2060,7 +2156,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           hints,
           newEndDate: endDate,
           userId,
-          role,
+          access,
+          roles:
+            userOrganizations.find((o) => o.organization.id === organizationId)
+              ?.roles ?? [],
         });
 
         sendNotification({
@@ -2073,7 +2172,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return payload({ success: true });
       }
       case "updateNotificationRecipients": {
-        if (isSelfServiceOrBase) {
+        if (!access.policy.notifications.manageBookingRecipients) {
           throw new ShelfError({
             cause: null,
             message:

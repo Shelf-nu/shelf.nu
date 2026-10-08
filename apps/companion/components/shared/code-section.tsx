@@ -11,9 +11,10 @@
  * workspace preference, and resolving server-side is what lets an installed
  * build follow a preference change without an app release.
  *
- * Symbology maps and bwip-js options are kept identical to the web renderer
- * (`apps/webapp/app/components/barcode/barcode-display.tsx`) so the same value
- * produces the same bars in both apps — a label printed from the web must scan
+ * Symbology maps mirror the webapp's `apps/webapp/app/modules/barcode/bwip-format.ts`
+ * and bwip-js options mirror the web renderer
+ * (`apps/webapp/app/components/barcode/barcode-display.tsx`), so the same value
+ * produces the same bars in both apps: a label printed from the web must scan
  * against what this screen shows.
  *
  * @see {@link file://./../../../webapp/app/modules/barcode/display.ts} `resolveDisplayCode`

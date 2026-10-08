@@ -230,6 +230,69 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
+// Why an individually tracked asset that belongs to a kit cannot be put into
+// custody on its own. Custody of such an asset comes from its kit: assign
+// custody to the kit, or take the asset out of the kit first. One register for
+// every surface that states the rule: the server's 400 on every assign path,
+// the web asset page and assets index menus, and the companion asset screen.
+//
+// Quantity-tracked assets are not covered. A kit holds only a slice of a pool,
+// and the units outside every kit can still be assigned on their own.
+export const KIT_MEMBER_CUSTODY_BLOCKED_TITLE = "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param {string} kitName - the name of the kit the asset belongs to
+ * @returns {string}
+ */
+export function kitMemberCustodyBlockedReason(kitName) {
+  return `This asset is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param {{ assetTitle: string; kitName: string }} names
+ * @returns {string}
+ */
+export function kitMemberCustodyRefusal({ assetTitle, kitName }) {
+  return `"${assetTitle}" is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/** How many kit members a refusal names before summarising the rest. */
+const KIT_MEMBERS_NAMED_IN_REFUSAL = 3;
+
+/**
+ * The server's refusal when an assign request names several kit members.
+ *
+ * A "select all" request can hold many, and the operator cannot see which from
+ * the menu, so the refusal gives the count and names the first few. One member
+ * reads exactly as {@link kitMemberCustodyRefusal}.
+ *
+ * @param {{ assetTitle: string; kitName: string }[]} members - at least one
+ * @returns {string}
+ */
+export function kitMembersCustodyRefusal(members) {
+  if (members.length === 1) return kitMemberCustodyRefusal(members[0]);
+
+  const named = members
+    .slice(0, KIT_MEMBERS_NAMED_IN_REFUSAL)
+    .map((m) => `"${m.assetTitle}"`);
+  const rest = members.length - named.length;
+  const list =
+    rest > 0
+      ? `${named.join(", ")} and ${rest} more`
+      : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+
+  return `${members.length} of the selected assets are part of a kit: ${list}. Assign custody to the kit, or remove them from the kit first.`;
+}
+
+// The reason a bulk "Assign custody" action is disabled when the selection
+// holds at least one kit member.
+export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
+  "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
 /**
  * The semantic weight a status badge carries, independent of any palette.
  *
@@ -282,4 +345,60 @@ export const AUDIT_ASSET_STATUS_TONES = Object.freeze({
   FOUND: "success",
   MISSING: "danger",
   UNEXPECTED: "warning",
+});
+
+/**
+ * How an asset's tracking method is named, on the website and on the phone.
+ *
+ * These are the words the tracking-method picker shows. The CSV importer names
+ * the same concepts, but a CSV cell must hold the raw enum member, so an import
+ * message pairs the literal value with the label rather than replacing it.
+ */
+export const ASSET_TYPE_LABELS = Object.freeze({
+  INDIVIDUAL: "Individually tracked",
+  QUANTITY_TRACKED: "Tracked by quantity",
+});
+
+/**
+ * How a quantity-tracked asset's consumption behaviour is named.
+ *
+ * The parenthetical restates the enum member in words, because "used up" and
+ * "returnable" are the concepts while ONE_WAY and TWO_WAY are what the data
+ * holds — someone reading a CSV template and someone reading the asset form
+ * have to arrive at the same place.
+ */
+export const CONSUMPTION_TYPE_LABELS = Object.freeze({
+  ONE_WAY: "Used up (one-way)",
+  TWO_WAY: "Returnable (two-way)",
+});
+
+/**
+ * What each consumption type means for the stock, as a clause that follows its
+ * label. Kept apart from the label so a surface can show the name alone.
+ */
+export const CONSUMPTION_TYPE_DESCRIPTIONS = Object.freeze({
+  ONE_WAY: "consumed and not returned",
+  TWO_WAY: "checked out and returned",
+});
+
+/**
+ * The same tracking methods used attributively, as in "quantity-tracked
+ * assets". {@link ASSET_TYPE_LABELS} names the method — the title of the
+ * picker card — and reads wrongly in front of a noun; this reads wrongly as a
+ * title. Both are needed, and the bulk dialogs already use these words.
+ */
+export const ASSET_TYPE_ADJECTIVES = Object.freeze({
+  INDIVIDUAL: "individually tracked",
+  QUANTITY_TRACKED: "quantity-tracked",
+});
+
+/**
+ * The same consumption types used attributively, as in "used up items".
+ * {@link CONSUMPTION_TYPE_LABELS} names the option as the picker titles it and
+ * carries a parenthetical that is redundant next to the raw value, so prose
+ * that already shows ONE_WAY or TWO_WAY uses these instead.
+ */
+export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
+  ONE_WAY: "used up",
+  TWO_WAY: "returnable",
 });

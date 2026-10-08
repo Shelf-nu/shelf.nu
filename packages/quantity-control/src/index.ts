@@ -34,6 +34,8 @@
  * @see {@link file://./dispositions.ts} — check-in disposition arithmetic and
  *   the shared release-category predicate.
  * @see {@link file://./format.ts} — unit-count formatting.
+ * @see {@link file://./custody-source.ts} custody source picker values,
+ *   options, defaults and source wording.
  */
 
 export * from "./types";
@@ -42,3 +44,4 @@ export * from "./guards";
 export * from "./low-stock";
 export * from "./dispositions";
 export * from "./format";
+export * from "./custody-source";

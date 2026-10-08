@@ -18,7 +18,7 @@
  */
 import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { tw } from "~/utils/tw";
 import FormRow from "../forms/form-row";
 import { Switch } from "../forms/switch";
@@ -54,7 +54,7 @@ export function ExplicitRequirementSettingsCard({
   switches: ExplicitRequirementSwitch[];
 }) {
   const fetcher = useFetcher();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   // Bumped on every refused save; keyed on the form, it remounts the switches
   // from `defaultChecked`. A Radix switch keeps its visible state in React and
   // ignores a native form reset, so remounting is what returns it to the

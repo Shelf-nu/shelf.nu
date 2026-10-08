@@ -1,9 +1,11 @@
 import type { Booking } from "@prisma/client";
 import { Zap } from "lucide-react";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { isBookingEarlyCheckout } from "~/modules/booking/helpers";
 import type { UnassignedModelUnits } from "~/utils/booking-model-requests";
 import { summarizeUnassignedUnits } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
+import { CheckoutSourceSelect } from "./checkout-source-select";
 import type { ButtonProps } from "../shared/button";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
@@ -73,13 +75,38 @@ type CheckoutDialogProps = {
    * before the booking goes out without them.
    */
   unassignedUnits?: UnassignedModelUnits[];
+  /**
+   * Pools on the booking that sit at two or more locations and are about to
+   * go out for the first time. When any are listed, the trigger opens a
+   * confirmation with one "From location" select per pool; otherwise the
+   * check-out stays one click.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
- * Stable empty list for the default below: a fresh `[]` per render would be a
- * new prop value every time for a caller that passes nothing.
+ * Stable empty lists for the defaults below: a fresh `[]` per render would be
+ * a new prop value every time for a caller that passes nothing.
  */
 const NO_UNASSIGNED_UNITS: UnassignedModelUnits[] = [];
+const NO_SOURCE_QUESTIONS: CheckoutSourceQuestion[] = [];
+
+/**
+ * The confirm dialog's title: the most pressing reason it opened.
+ *
+ * @returns One short line
+ */
+function checkoutDialogTitle({
+  hasUnassigned,
+  isEarlyCheckout,
+}: {
+  hasUnassigned: boolean;
+  isEarlyCheckout: boolean;
+}): string {
+  if (hasUnassigned) return "Some reserved units aren't assigned";
+  if (isEarlyCheckout) return "Early Check-Out Warning";
+  return "Where do the units come from?";
+}
 
 export default function CheckoutDialog({
   disabled,
@@ -93,6 +120,7 @@ export default function CheckoutDialog({
   suppressEarlyCheckoutPrompt = false,
   fullWidth = false,
   unassignedUnits = NO_UNASSIGNED_UNITS,
+  sourceQuestions = NO_SOURCE_QUESTIONS,
 }: CheckoutDialogProps) {
   const isEarlyCheckout =
     !suppressEarlyCheckoutPrompt && isBookingEarlyCheckout(booking.from);
@@ -125,7 +153,9 @@ export default function CheckoutDialog({
     label
   );
 
-  if (!isEarlyCheckout && !unassignedSummary) {
+  const asksSource = sourceQuestions.length > 0;
+
+  if (!isEarlyCheckout && !unassignedSummary && !asksSource) {
     return (
       <Button
         disabled={disabled}
@@ -161,9 +191,10 @@ export default function CheckoutDialog({
       <AlertDialogContent portalProps={{ container: portalContainer }}>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {unassignedSummary
-              ? "Some reserved units aren't assigned"
-              : "Early Check-Out Warning"}
+            {checkoutDialogTitle({
+              hasUnassigned: Boolean(unassignedSummary),
+              isEarlyCheckout,
+            })}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="flex flex-col gap-3">
@@ -189,9 +220,32 @@ export default function CheckoutDialog({
                   date?
                 </p>
               ) : null}
+              {asksSource ? (
+                <p>
+                  {sourceQuestions.length === 1
+                    ? "This item is kept at more than one location."
+                    : "These items are kept at more than one location."}{" "}
+                  Pick where the units leave from. Units used up on this booking
+                  come off that location at check-in.
+                </p>
+              ) : null}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        {asksSource ? (
+          <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
+            {sourceQuestions.map((question) => (
+              <CheckoutSourceSelect
+                key={question.sliceId}
+                question={question}
+                fieldKey={question.sliceId}
+                formId={formId}
+                disabled={Boolean(disabled)}
+              />
+            ))}
+          </div>
+        ) : null}
 
         <AlertDialogFooter>
           <AlertDialogCancel asChild>
@@ -235,7 +289,7 @@ export default function CheckoutDialog({
               value={intent}
               form={formId}
             >
-              Check out anyway
+              {unassignedSummary ? "Check out anyway" : "Check out"}
             </Button>
           )}
         </AlertDialogFooter>
