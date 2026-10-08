@@ -185,6 +185,32 @@ describe("clearing once the scans have gone out", () => {
     expect(readScanDraft(DRAFT_KEY)).not.toBeNull();
   });
 
+  /**
+   * Rows restored from a draft resolve asynchronously, so one can land after
+   * the submit cleared the draft and before the route unmounts. Mirroring it
+   * would write the scans back and offer, on re-entry, work that has already
+   * gone out.
+   */
+  it("does not write the draft again when a row resolves after the submit", () => {
+    saveScanDraft(DRAFT_KEY, { "qr-1": scanned() });
+    const store = createStore();
+    const { rerender } = render(store);
+
+    mockNavigation.mockReturnValue({
+      state: "loading",
+      formMethod: "POST",
+      location: { pathname: `/bookings/${BOOKING_ID}` },
+    });
+    rerender();
+    expect(readScanDraft(DRAFT_KEY)).toBeNull();
+
+    // A late resolution writing the row back into the list.
+    store.set(scannedItemsAtom, { "qr-1": scanned() });
+    rerender();
+
+    expect(readScanDraft(DRAFT_KEY)).toBeNull();
+  });
+
   /** Cancel is a plain navigation, and parks the list rather than binning it. */
   it("keeps the draft when the operator navigates away without submitting", () => {
     saveScanDraft(DRAFT_KEY, { "qr-1": scanned() });

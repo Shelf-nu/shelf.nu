@@ -111,6 +111,12 @@ export function useBookingFulfilSessionInitialization(
     [userId, session.bookingId]
   );
 
+  // Set once a submission is accepted. Rows restored from a draft resolve
+  // asynchronously, so one can land after the submit has cleared the draft but
+  // before the route unmounts; mirroring that would write the scans back and
+  // offer work that has already gone out.
+  const acceptedSubmitRef = useRef(false);
+
   // Tracks which bookingId the session atom was last seeded for so we
   // don't redundantly dispatch `setFulfilSession` (which clears
   // `scannedItemsAtom`) on every render that happens to have the same
@@ -150,7 +156,7 @@ export function useBookingFulfilSessionInitialization(
     // would wipe the draft the seed is restoring from, and React's
     // development double-mount makes the loss permanent: the remount finds
     // nothing left to restore. The store always holds the current list.
-    if (!draftKey) {
+    if (!draftKey || acceptedSubmitRef.current) {
       return;
     }
     saveScanDraft(draftKey, store.get(scannedItemsAtom));
@@ -168,6 +174,7 @@ export function useBookingFulfilSessionInitialization(
       navigation.location.pathname !== location.pathname;
 
     if (submittedAway && draftKey) {
+      acceptedSubmitRef.current = true;
       clearScanDraft(draftKey);
     }
   }, [
