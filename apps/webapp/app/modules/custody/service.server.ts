@@ -1,5 +1,9 @@
 import type { Asset, User } from "@prisma/client";
-import { AssetStatus } from "@prisma/client";
+import { AssetType, Prisma } from "@prisma/client";
+import {
+  KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
+  kitMembersCustodyRefusal,
+} from "@shelf/labels";
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
@@ -58,6 +62,183 @@ export async function assertNoKitDerivedCustody(
       shouldBeCaptured: false,
     });
   }
+}
+
+/** Row-lock strengths {@link lockAssetRows} takes. A closed set: it is spliced into SQL. */
+type AssetRowLockMode = "FOR UPDATE" | "FOR KEY SHARE";
+
+/**
+ * Locks the given asset rows, in id order, in the caller's workspace.
+ *
+ * The custody assign guard and the kit-membership insert both lock through
+ * this one query, so they always take their locks in the same order. That
+ * shared order is what keeps them from deadlocking: keep the `ORDER BY` and
+ * the workspace filter here, never in a copy.
+ *
+ * The ids travel as one array parameter (`= ANY`), so a "select all" over any
+ * number of assets stays within Postgres's bind-parameter limit.
+ *
+ * @param tx - the active transaction the lock is held for
+ * @param assetIds - assets to lock (request input; rows in other workspaces are skipped)
+ * @param organizationId - the caller's workspace
+ * @param mode - `FOR UPDATE` on the custody side, `FOR KEY SHARE` on the kit side
+ */
+async function lockAssetRows(
+  tx: Pick<typeof db, "$queryRaw">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"],
+  mode: AssetRowLockMode
+) {
+  if (assetIds.length === 0) return;
+
+  // Column names are literal: `Asset` declares no `@map`.
+  // @see .claude/rules/raw-sql-respects-prisma-map.md
+  await tx.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "Asset"
+    WHERE "id" = ANY(${assetIds}::text[]) AND "organizationId" = ${organizationId}
+    ORDER BY "id"
+    ${Prisma.raw(mode)}
+  `);
+}
+
+/**
+ * Refuses to put an individually tracked kit member into custody on its own,
+ * without taking any lock.
+ *
+ * Custody of an asset that belongs to a kit comes from the kit: assign custody
+ * to the kit, or take the asset out of the kit first. Both scanners already
+ * refuse such an asset; this is the server-side rule every assign path calls,
+ * so no request can reach a state the scanners would refuse.
+ *
+ * `QUANTITY_TRACKED` assets are not refused. A kit holds only a slice of a
+ * pool, and the units outside every kit can still be assigned on their own.
+ *
+ * Release is not covered and must not be: custody rows written before this
+ * rule existed stay releasable.
+ *
+ * This is the read on its own, for pages that only decide whether to open (the
+ * assign page's loader). Anything that goes on to write custody must call
+ * {@link assertNotKitMembers}, which locks first.
+ *
+ * @param reader - the client or transaction to read through
+ * @param assetIds - assets about to be put into custody (request input)
+ * @param organizationId - the caller's workspace; memberships in any other
+ *   workspace are ignored
+ * @throws {ShelfError} 400 giving the number of kit members and naming the
+ *   first few
+ */
+export async function refuseKitMembers(
+  reader: Pick<typeof db, "assetKit">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  if (assetIds.length === 0) return;
+
+  const memberships = await reader.assetKit.findMany({
+    where: {
+      assetId: { in: assetIds },
+      organizationId,
+      asset: { type: AssetType.INDIVIDUAL },
+    },
+    select: {
+      asset: { select: { id: true, title: true } },
+      kit: { select: { id: true, name: true } },
+    },
+    orderBy: { asset: { title: "asc" } },
+  });
+
+  if (memberships.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    title: KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
+    message: kitMembersCustodyRefusal(
+      memberships.map((m) => ({
+        assetTitle: m.asset.title,
+        kitName: m.kit.name,
+      }))
+    ),
+    additionalData: {
+      assetIds: memberships.map((m) => m.asset.id),
+      kitIds: [...new Set(memberships.map((m) => m.kit.id))],
+      organizationId,
+    },
+    label: "Custody",
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Locks the asset rows, then refuses kit members ({@link refuseKitMembers}).
+ * Every path that writes custody calls this one.
+ *
+ * Call it inside the assign transaction, before ANY write to the asset rows
+ * (the status claim included) and before the custody rows, so the refusal rolls
+ * back anything the transaction already did.
+ *
+ * It serialises against adding the same asset to a kit. It first takes
+ * `FOR UPDATE` on the asset rows, which an `AssetKit` insert has to wait for
+ * (the insert's foreign-key check takes `FOR KEY SHARE` on the asset). So:
+ * - a kit insert that got there first makes this lock wait until it commits,
+ *   and the membership read after the lock then sees the new row;
+ * - an assignment that got there first makes the kit insert wait, and
+ *   `updateKitAssets` re-reads custody after its insert, so it sees the
+ *   committed custody row and refuses.
+ * Both halves are needed: drop either one and two operators acting at the
+ * same moment can both pass. Both sides lock through {@link lockAssetRows}, in
+ * id order, so neither two assignments nor an assignment and a kit add over
+ * overlapping assets can deadlock.
+ *
+ * The lock must come before the assignment's own status write. A kit add can
+ * write the member's status after its insert (a checked-out kit marks it
+ * checked out); if the assignment already held its status-write lock, each
+ * transaction would wait on the other.
+ *
+ * @param tx - the active transaction the assignment runs in
+ * @param assetIds - assets about to be put into custody (request input)
+ * @param organizationId - the caller's workspace; memberships in any other
+ *   workspace are ignored
+ * @throws {ShelfError} 400 giving the number of kit members and naming the
+ *   first few
+ */
+export async function assertNotKitMembers(
+  tx: Pick<typeof db, "assetKit" | "$queryRaw">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  await lockAssetRows(tx, assetIds, organizationId, "FOR UPDATE");
+  await refuseKitMembers(tx, assetIds, organizationId);
+}
+
+/**
+ * Takes the kit-membership lock on assets about to be added to a kit, in the
+ * same id order {@link assertNotKitMembers} uses.
+ *
+ * An `AssetKit` insert takes `FOR KEY SHARE` on each asset through its
+ * foreign-key check, in the order the rows are written. A custody assignment
+ * over the same assets takes `FOR UPDATE` in id order. Two transactions taking
+ * conflicting locks on the same rows in different orders deadlock, and
+ * Postgres aborts one of them. Taking `FOR KEY SHARE` here, in id order,
+ * before the insert makes both sides queue in one order instead. The insert's
+ * own checks then find the locks already held.
+ *
+ * `FOR KEY SHARE` is the weakest lock that conflicts with `FOR UPDATE`, so two
+ * kit edits, or a status change, on the same asset do not wait on each other.
+ *
+ * Call it inside the kit transaction, immediately before the `AssetKit`
+ * insert.
+ *
+ * @param tx - the active transaction that inserts the `AssetKit` rows
+ * @param assetIds - assets about to join the kit
+ * @param organizationId - the caller's workspace
+ */
+export async function lockAssetsForKitMembership(
+  tx: Pick<typeof db, "$queryRaw">,
+  assetIds: Asset["id"][],
+  organizationId: Asset["organizationId"]
+) {
+  await lockAssetRows(tx, assetIds, organizationId, "FOR KEY SHARE");
 }
 
 /**
