@@ -4,17 +4,24 @@ tags:
   - audits
 
 ---
-# Test: an asset row on the audit detail opens the asset detail.
+# Test: an asset row on the audit detail opens the asset detail, and every way
+# back returns to the SAME audit.
 #
 # The web audit row links its title to the asset page; the phone row does the
-# same so a field worker who finds a missing or unexpected asset can update it
-# on the spot. The row navigates cross-tab through pushIntoTab, which anchors
-# the Assets list beneath the asset detail, so "back" lands on the Assets list
-# (not on the audit) and must never strand the user on a detail with no back
-# target. The audit stays mounted in its own stack: reopening it from Home
-# shows it again.
+# same so a field worker who finds a missing or unexpected asset can fix it on
+# the spot and carry on with the audit. The row pushes the asset onto the
+# Audits stack (the Assets tab's screen, mounted there too), so back is a
+# plain pop to the audit, never a jump to the Assets list.
 #
-# Fixture: SHELF_TEST_AUDIT_NAME is an audit with at least one expected asset.
+# Covers, each ending on the audit with its filter pills:
+#   1. Maestro `back` (the hardware back button on Android)
+#   2. the iOS edge swipe (Android repeats the back button)
+#   3. Edit opened from that asset: Cancel returns to the asset, back again
+#      returns to the audit
+# and finally that the Assets tab still shows its own list, not the asset.
+#
+# Fixture: SHELF_TEST_AUDIT_NAME is an audit with at least one expected asset,
+# opened by a user who may edit assets (Edit is hidden from other roles).
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_AUDIT_NAME
 
 - runFlow: ../../shared/login.yaml
@@ -35,7 +42,7 @@ tags:
     visible: "Filter: All.*"
     timeout: 15000
 
-# ── First asset row opens the asset ──
+# ── 1. Row opens the asset, back returns to the audit ──
 # The row's a11y label names the action; a deleted asset's row does not carry
 # it, so this always picks a row that has an asset to open.
 - extendedWaitUntil:
@@ -52,24 +59,72 @@ tags:
     timeout: 20000
 - takeScreenshot: audit-row-asset-detail
 
-# ── Back has a target: the Assets list, not a dead end ──
 - back
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 15000
+- assertVisible: "Audit Details"
+- assertNotVisible: "Created"
+# Not the Assets list: back stays in the Audits stack.
+- assertNotVisible: "Search assets"
+- takeScreenshot: audit-row-back-to-audit
+
+# ── 2. Same again with the swipe back gesture ──
+- tapOn:
+    text: ".*, tap to open asset"
+    index: 0
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 20000
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      # From the very left edge: the interactive pop only starts there.
+      - swipe:
+          start: "1%,50%"
+          end: "90%,50%"
+          duration: 400
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 15000
+- assertNotVisible: "Created"
+- assertNotVisible: "Search assets"
+- takeScreenshot: audit-row-swipe-back-to-audit
+
+# ── 3. Edit from that asset stays on the audit's path ──
+- tapOn:
+    text: ".*, tap to open asset"
+    index: 0
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 20000
+- tapOn: "Edit asset"
+- extendedWaitUntil:
+    visible: "Cancel editing"
+    timeout: 15000
+- takeScreenshot: audit-row-asset-edit
+# Untouched form: Cancel goes straight back, no discard prompt.
+- tapOn: "Cancel editing"
+- extendedWaitUntil:
+    visible: "Created"
+    timeout: 15000
+- back
+- extendedWaitUntil:
+    visible: "Filter: All.*"
+    timeout: 15000
+- assertNotVisible: "Created"
+- takeScreenshot: audit-row-edit-back-to-audit
+
+# ── The Assets tab was never touched ──
+- tapOn: "Assets"
 - extendedWaitUntil:
     visible: "Search assets"
     timeout: 15000
 - assertNotVisible: "Created"
-- takeScreenshot: audit-row-back-to-assets
-
-# ── The audit is still reachable and intact ──
-- tapOn: "Home"
-- tapOn: "Audits"
-- scrollUntilVisible:
-    element: ".*${SHELF_TEST_AUDIT_NAME}.*"
-    direction: DOWN
-    timeout: 30000
-- tapOn: ".*${SHELF_TEST_AUDIT_NAME}.*"
-- extendedWaitUntil:
-    visible: "Audit Details"
-    timeout: 15000
-- assertVisible: "Filter: All.*"
-- takeScreenshot: audit-row-back-to-audit
+- takeScreenshot: audit-row-assets-tab-untouched

@@ -474,6 +474,15 @@ export const BookingCheckinReceiptPreview = ({
             </ReceiptFact>
           </When>
 
+          {/* One line when every returned row came back the same way; a
+              mixed return says it per row instead. Nothing when no row
+              recorded a method. */}
+          <When truthy={!!pdfMeta.checkedInHow}>
+            <ReceiptFact label="Check-in method">
+              {pdfMeta.checkedInHow}
+            </ReceiptFact>
+          </When>
+
           <When truthy={!!booking.description}>
             <ReceiptFact label="Description">{booking.description}</ReceiptFact>
           </When>
@@ -563,6 +572,13 @@ export const BookingCheckinReceiptPreview = ({
                 </td>
                 <td className="break-words border-gray-300 p-2.5 text-sm text-gray-600">
                   {row.checkedInByName}
+                  {/* The recorded method, per row, only when the header has
+                      no shared line to carry it. */}
+                  <When truthy={!pdfMeta.checkedInHow && !!row.checkedInHow}>
+                    <span className="mt-1 block text-xs text-gray-500">
+                      {row.checkedInHow}
+                    </span>
+                  </When>
                 </td>
               </tr>
             ))}

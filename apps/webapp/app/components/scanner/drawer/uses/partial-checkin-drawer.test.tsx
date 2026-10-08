@@ -39,6 +39,7 @@ import {
   bookingExpectedAssetsAtom,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
+import { partialCheckinAssetsSchema } from "./partial-checkin-drawer";
 
 import PartialCheckinDrawer from "./partial-checkin-drawer";
 
@@ -466,5 +467,22 @@ describe("PartialCheckinDrawer", () => {
     // Substring match — the blocker copy may evolve. We key off the
     // stable phrase about "no quantity entered".
     expect(await screen.findByText(/no quantity entered/i)).toBeInTheDocument();
+  });
+});
+
+describe("partialCheckinAssetsSchema: rows checked without scanning", () => {
+  it("accepts the ticked slices, by BookingAsset id, next to the scanned rows", () => {
+    // The same asset can be scanned on its kit slice and ticked on its
+    // standalone slice, so the form names the slice, never the asset.
+    const parsed = partialCheckinAssetsSchema.parse({
+      assetIds: ["asset-1", "asset-2"],
+      selectedBookingAssetIds: ["ba-standalone"],
+    });
+    expect(parsed.selectedBookingAssetIds).toEqual(["ba-standalone"]);
+  });
+
+  it("needs no ticked slices, so the list dialogs post as before", () => {
+    const parsed = partialCheckinAssetsSchema.parse({ assetIds: ["asset-1"] });
+    expect(parsed.selectedBookingAssetIds).toBeUndefined();
   });
 });

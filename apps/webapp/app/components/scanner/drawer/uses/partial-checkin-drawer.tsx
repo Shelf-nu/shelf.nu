@@ -231,6 +231,15 @@ export const partialCheckinAssetsSchema = z.object({
    */
   assetIds: z.array(z.string()).min(1).optional(),
   /**
+   * Slices (`BookingAsset` ids) the operator checked "without scanning" rather
+   * than scanning. The action records them as `"selected"` while the rest of
+   * the batch stays `"scanned"`; absent from the list dialogs, which never
+   * scan. Keyed by slice because a quantity-tracked asset can sit on a
+   * standalone slice and a kit slice of the same booking, one scanned and the
+   * other ticked.
+   */
+  selectedBookingAssetIds: z.array(z.string()).optional(),
+  /**
    * Modern per-asset disposition payload — JSON-encoded to sidestep the
    * limits of form-encoded arrays-of-objects (same pattern the
    * manage-assets drawer uses for its `quantities` map).
@@ -542,6 +551,23 @@ export default function PartialCheckinDrawer({
           .map((a) => a.id)
       ),
     ])
+  );
+
+  /**
+   * Slices the operator checked "without scanning": their entry sits under a
+   * synthetic quick-check-in key, the prefix plus the slice's `BookingAsset`
+   * id, rather than a scanned QR id. The action records these slices as
+   * selected and every other row of the batch as scanned, so the activity line
+   * and the receipt can say which was which.
+   */
+  const selectedBookingAssetIds = useMemo(
+    () =>
+      Object.entries(items).flatMap(([key, item]) =>
+        item && key.startsWith(QUICK_CHECKIN_QR_PREFIX)
+          ? [key.slice(QUICK_CHECKIN_QR_PREFIX.length)]
+          : []
+      ),
+    [items]
   );
 
   /**
@@ -1473,6 +1499,7 @@ export default function PartialCheckinDrawer({
         form={
           <CustomForm
             assetIdsForCheckin={assetIdsForCheckin}
+            selectedBookingAssetIds={selectedBookingAssetIds}
             isEarlyCheckin={isEarlyCheckin}
             booking={booking}
             isLoading={isLoading}
@@ -2432,6 +2459,8 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 // Custom form component that handles early check-in dialog
 type CustomFormProps = {
   assetIdsForCheckin: string[];
+  /** Slices checked "without scanning"; posted so the action records them as selected. */
+  selectedBookingAssetIds: string[];
   isEarlyCheckin: boolean;
   booking: Pick<Booking, "id" | "name" | "from" | "to">;
   isLoading?: boolean;
@@ -2447,6 +2476,7 @@ type CustomFormProps = {
 
 const CustomForm = ({
   assetIdsForCheckin,
+  selectedBookingAssetIds,
   isEarlyCheckin,
   booking,
   isLoading,
@@ -2479,6 +2509,15 @@ const CustomForm = ({
         {checkinsJson ? (
           <input type="hidden" name="checkins" value={checkinsJson} />
         ) : null}
+
+        {selectedBookingAssetIds.map((bookingAssetId, index) => (
+          <input
+            key={`selectedBookingAssetIds-${bookingAssetId}`}
+            type="hidden"
+            name={`selectedBookingAssetIds[${index}]`}
+            value={bookingAssetId}
+          />
+        ))}
 
         {/* Cancel button */}
         <Button type="button" variant="secondary" to=".." className="ml-auto">

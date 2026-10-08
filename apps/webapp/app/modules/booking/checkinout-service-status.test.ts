@@ -259,6 +259,8 @@ const PROBES = {
         organizationId: ORG_ID,
         userId: USER_ID,
         authSession: AUTH_SESSION,
+        // The web scan page's own statement; the status guard is under test.
+        provenance: { surface: "web", method: "scanned" },
       }),
   },
   partialCheckinBooking: {
@@ -282,6 +284,8 @@ const PROBES = {
         organizationId: ORG_ID,
         userId: USER_ID,
         authSession: AUTH_SESSION,
+        // The web scan page's own statement; the status guard is under test.
+        provenance: { surface: "web", method: "scanned" },
       }),
   },
   fulfilModelRequestsAndCheckout: {

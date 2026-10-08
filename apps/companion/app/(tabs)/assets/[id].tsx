@@ -39,6 +39,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { pushIntoTab } from "@/lib/navigation";
+import { useAssetScreenNavigation } from "@/lib/asset-host-stack";
 import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
@@ -76,6 +77,10 @@ import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  // Edit and Kit open in whichever stack mounts this screen (the Assets tab,
+  // or the Audits stack when opened from an audit row), so back retraces the
+  // path instead of jumping tabs. See lib/asset-routes.ts.
+  const assetNavigation = useAssetScreenNavigation();
   const { currentOrg } = useOrg();
   // Role-aware UI. Server enforces these on every API call
   // (requireMobilePermission); this hides actions the user cannot perform
@@ -552,7 +557,8 @@ export default function AssetDetailScreen() {
   const bookingCustodyRows = buildBookingCustodyRows(asset.activeBooking, {
     formatDateTime,
     // The booking lives in another tab; the helper roots that tab at its list
-    // so "back" has somewhere to go.
+    // so "back" has somewhere to go. The same holds when this screen is
+    // mounted in the Audits stack: the booking screen is not mounted there.
     onOpenBooking: (bookingId) =>
       pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`),
   });
@@ -787,12 +793,7 @@ export default function AssetDetailScreen() {
                 ? setShowPlacementsSheet(true)
                 : setShowLocationPicker(true)
             }
-            onEditPress={() =>
-              router.push({
-                pathname: "/(tabs)/assets/edit",
-                params: { id: asset.id },
-              })
-            }
+            onEditPress={() => assetNavigation.openEdit(asset.id)}
             onDeletePress={handleDeleteAsset}
             isActionLoading={isActionLoading}
             showOverflowMenu={showOverflowMenu}
@@ -875,11 +876,9 @@ export default function AssetDetailScreen() {
                 icon="layers-outline"
                 label="Kit"
                 value={asset.kit.name}
-                // Kit detail lives in this same stack, so a plain push keeps
+                // Kit detail is mounted in this same stack, so the push keeps
                 // "back" returning to this asset.
-                onPress={() =>
-                  router.push(`/(tabs)/assets/kits/${asset.kit!.id}`)
-                }
+                onPress={() => assetNavigation.openKit(asset.kit!.id)}
                 accessibilityLabel={`View kit ${asset.kit.name}`}
               />
             )}
