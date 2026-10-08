@@ -364,17 +364,30 @@ function AuditDetailContent() {
   // so coming back refetches even inside the 60s window: otherwise the row
   // would show the details from before the fix the auditor just made.
   const returningFromAsset = useRef(false);
+  // Each fetch takes the next number, and only the newest one may write
+  // state. A pull-to-refresh can still be in flight when a row opens its
+  // asset; its answer must not overwrite the reload made on the way back.
+  const latestRequestId = useRef(0);
 
   // ── Fetch ──────────────────────────────────────────────
 
-  const fetchAudit = useCallback(async () => {
-    if (!id || !currentOrg) return;
+  /**
+   * Loads the audit and writes it into state.
+   *
+   * @returns true when this was the newest request, so the caller may record
+   *   it as the latest load; false when it was cancelled or superseded
+   */
+  const fetchAudit = useCallback(async (): Promise<boolean> => {
+    if (!id || !currentOrg) return false;
+    const requestId = ++latestRequestId.current;
     const { data, error: fetchErr } = await api.audit(id, currentOrg.id);
-    // Request cancelled (navigation) — ignore
-    if (!data && !fetchErr) return;
+    // A newer fetch started while this one was in flight: its answer wins.
+    if (requestId !== latestRequestId.current) return false;
+    // Request cancelled (navigation): ignore
+    if (!data && !fetchErr) return false;
     if (fetchErr || !data) {
       setError(fetchErr || "Failed to load audit");
-      return;
+      return true;
     }
     setError(null);
     setAudit(data.audit);
@@ -399,6 +412,7 @@ function AuditDetailContent() {
         useNativeDriver: false,
       }).start();
     }
+    return true;
     // why: reduceMotion is captured by closure but only read on initial render path;
     // rebuilding fetchAudit when reduceMotion toggles would re-fire focus refetches
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -417,11 +431,14 @@ function AuditDetailContent() {
       if (!hasFetched.current) {
         setIsLoading(true);
       }
-      fetchAudit().finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        hasFetched.current = true;
-      });
+      fetchAudit()
+        .then((isNewest) => {
+          // A superseded fetch must not stamp the cache: the newer one owns it.
+          if (!isNewest) return;
+          lastFetchedAt.current = Date.now();
+          hasFetched.current = true;
+        })
+        .finally(() => setIsLoading(false));
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAudit])
