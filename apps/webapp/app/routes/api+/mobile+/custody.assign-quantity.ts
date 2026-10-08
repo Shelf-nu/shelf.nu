@@ -3,7 +3,7 @@
  *
  * Assigns (checks out) N units of a QUANTITY_TRACKED asset to a team member.
  * Mobile twin of the web's `/api/assets/assign-quantity-custody` route: same
- * Zod schema, same org-scoped custodian check, same SELF_SERVICE guard, and the
+ * Zod schema, same org-scoped custodian check, same custody-scope guard, and the
  * same `assignQuantityToCustodian` call (the custody change, its audit note
  * and the low-stock check). Only the auth/permission/envelope skeleton differs
  * (bearer auth + the mobile error envelope, per `custody.assign.ts`).
@@ -20,7 +20,6 @@
  * @see {@link file://./custody.release-quantity.ts} — counterpart release route
  */
 
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import {
@@ -58,6 +57,13 @@ const AssignQuantityCustodySchema = z.object({
     .string()
     .optional()
     .transform((val) => (val === "" ? undefined : val)),
+  /**
+   * Where the units come from: a location id, or `null` / `""` for the
+   * unplaced units. Optional and additive: an app build that does not send
+   * it gets the server-side default (the only placement of a pool at one
+   * location, otherwise no recorded source), never a refusal.
+   */
+  locationId: z.string().nullable().optional(),
 });
 
 export async function action({ request }: ActionFunctionArgs) {
@@ -81,13 +87,10 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Role for the SELF_SERVICE guard below; canSeeAllCustody for shaping
-    // the refreshed asset. No getAssetIndexSettings here: checkOutQuantity
+    // Access for the custody-scope guard below and for shaping the
+    // refreshed asset. No getAssetIndexSettings here: checkOutQuantity
     // takes no `settings` param (that call is bulk-route plumbing only).
-    const { role, canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // why: siblings use raw `.parse`, which surfaces a ZodError as a 500
     // through makeShelfError's unknown-error branch. The web route returns
@@ -107,7 +110,7 @@ export async function action({ request }: ActionFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
-    const { assetId, teamMemberId, quantity, note } = parsed.data;
+    const { assetId, teamMemberId, quantity, note, locationId } = parsed.data;
 
     /** Validate that the team member belongs to the same organization */
     const teamMember = await getTeamMember({
@@ -125,11 +128,8 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    /** Self-service users can only assign custody to themselves */
-    if (
-      role === OrganizationRoles.SELF_SERVICE &&
-      teamMember.userId !== user.id
-    ) {
+    /** A caller whose custody scope is `self` may assign only to themselves */
+    if (access.custody.assign === "self" && teamMember.userId !== user.id) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -150,8 +150,9 @@ export async function action({ request }: ActionFunctionArgs) {
       quantity,
       userId: user.id,
       organizationId,
-      role,
+      custodyAssign: access.custody.assign,
       note,
+      locationId,
     });
 
     // No route-level sendNotification success toast here: that's the web's
@@ -170,7 +171,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assetId,
         organizationId,
         viewerUserId: user.id,
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
       });
     } catch (refreshError) {
       Logger.error(

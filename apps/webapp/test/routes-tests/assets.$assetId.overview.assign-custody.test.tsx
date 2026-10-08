@@ -14,6 +14,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { createTeamMember } from "@factories";
+import { accessFor } from "@helpers/role-access";
 
 const dbMocks = vi.hoisted(() => {
   return {
@@ -244,6 +245,7 @@ describe("assets.$assetId.overview.assign-custody loader", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -276,6 +278,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Valid custodian from same org
@@ -321,6 +324,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -376,6 +380,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -424,6 +429,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -509,6 +515,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -563,6 +570,7 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -702,6 +710,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
@@ -730,6 +739,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
@@ -754,6 +764,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     dbMocks.asset.findFirst.mockResolvedValue({ type: "INDIVIDUAL" });
@@ -797,6 +808,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     // why: null is what the org-scoped read returns for a deleted asset or one
@@ -817,6 +829,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     // No custody yet, so without the guard the loader would render the modal.
@@ -841,6 +854,7 @@ describe("assign-custody — quantity-tracked assets", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     getAssetMock.mockResolvedValue({
@@ -894,6 +908,7 @@ describe("assign-custody: kit members", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
     mockGetTeamMember.mockResolvedValue({

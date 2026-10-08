@@ -29,8 +29,16 @@ interface QuickActionsProps {
   /** Role can change custody (assign/release). Server-enforced; this hides the button. */
   canCustody: boolean;
   /**
-   * Self-service wording (web parity): those users can only take custody
-   * themselves, so the button says "Take Custody" instead of "Assign Custody".
+   * Whether this member may release the asset's current custody. A member
+   * who may only take custody for themselves may only release their own, so
+   * the button is withheld on someone else's custody rather than offered and
+   * refused. Defaults to true.
+   */
+  canReleaseCustody?: boolean;
+  /**
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the button says "Take Custody"
+   * instead of "Assign Custody" (web parity).
    */
   isSelfService?: boolean;
   /** Role can update the asset (location/edit). */
@@ -64,6 +72,7 @@ export const QuickActions = memo(function QuickActions({
   isActionLoading,
   setShowOverflowMenu,
   canCustody,
+  canReleaseCustody = true,
   isSelfService = false,
   canUpdate,
   canDelete,
@@ -78,7 +87,9 @@ export const QuickActions = memo(function QuickActions({
   // QUANTITY_TRACKED: the primary is always Assign (release lives on the
   // per-holder rows), regardless of status — a partially-custodied QT asset
   // can be IN_CUSTODY yet still have units to assign.
-  const showPrimary = canCustody && (isQtyTracked || hasCustody || isAvailable);
+  const showPrimary =
+    canCustody &&
+    (isQtyTracked || (hasCustody ? canReleaseCustody : isAvailable));
   const showSecondary = canUpdate || canDelete;
   // Disabled only when the server SENT a cap and it is exhausted; an absent
   // cap (older server) keeps the button live and lets the server validate.

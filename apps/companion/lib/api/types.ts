@@ -3,6 +3,10 @@ import type {
   TimeFormatPreference,
   WeekStartPreference,
 } from "@shelf/datetime";
+import type {
+  CustodySourceEntry,
+  CustodySourceOption,
+} from "@shelf/quantity-control";
 
 // ── Types ──────────────────────────────────────────────
 
@@ -20,6 +24,16 @@ export type Organization = {
    * every mobile audit endpoint returns 403.
    */
   auditsEnabled: boolean;
+  /**
+   * The workspace's visibility toggles for restricted roles, from
+   * `/api/mobile/me`. Each widens what one role may SEE (bookings or custody),
+   * never what it may change. Absent on servers older than this field; the app
+   * then reads them as `false`, which only ever under-offers.
+   */
+  selfServiceCanSeeBookings?: boolean;
+  baseUserCanSeeBookings?: boolean;
+  selfServiceCanSeeCustody?: boolean;
+  baseUserCanSeeCustody?: boolean;
 };
 
 export type MeResponse = {
@@ -93,6 +107,38 @@ export type AssetCustodyListEntry = {
    * fall back to `quantity` (the server still enforces the real cap).
    */
   releasableQuantity?: number;
+  /**
+   * Where this holder's operator units were taken from, one entry per
+   * source: a location, the unplaced units (`locationId` null), or units
+   * whose source was never recorded (`unrecorded` true). Kit-held units are
+   * not listed. Absent on older servers. The screen shows these only for a
+   * pool placed at two or more locations (`AssetDetail.custodySources`).
+   */
+  sources?: AssetCustodySourceEntry[];
+};
+
+/**
+ * One source line of a holder's quantity custody (see `sources` above). The
+ * shape is shared with the server through `@shelf/quantity-control`.
+ */
+export type AssetCustodySourceEntry = CustodySourceEntry;
+
+/**
+ * One choice of the "From location" picker: a location the pool is placed
+ * at, or "Unplaced" (`locationId` null). Shared with the server through
+ * `@shelf/quantity-control`.
+ */
+export type { CustodySourceOption };
+
+/**
+ * Where a pool's units can be taken from. `multiSource` is true only for a
+ * pool placed at two or more locations; the app then asks "From location"
+ * when custody is assigned and shows per-source lines on each holder.
+ * Absent on older servers and null for INDIVIDUAL assets.
+ */
+export type AssetCustodySources = {
+  multiSource: boolean;
+  options: CustodySourceOption[];
 };
 
 /**
@@ -284,6 +330,8 @@ export type AssetDetail = {
     custodian: {
       id: string;
       name: string;
+      /** The custodian's user; null for a non-registered member. */
+      userId?: string | null;
       user: {
         firstName: string | null;
         lastName: string | null;
@@ -371,6 +419,8 @@ export type AssetDetail = {
    * Absent on older servers; fall back to the flat `location` field.
    */
   placements?: AssetPlacement[];
+  /** Where the pool's units can be taken from; see {@link AssetCustodySources}. */
+  custodySources?: AssetCustodySources | null;
   /**
    * Number of AssetLocation placements the asset currently has. Absent on
    * older servers.
@@ -794,6 +844,46 @@ export type BookingAssetSlice = {
   quantity: number;
   assetKitId: string | null;
   kit: { id: string; name: string } | null;
+  /**
+   * The location this slice's units left from, recorded at check-out. Set
+   * only for a standalone slice of a pool placed at two or more locations
+   * once it is out; null otherwise. Absent on older servers.
+   */
+  sourceLocation?: { id: string; name: string } | null;
+};
+
+/** One manual placement of a pool, as a check-out source question lists it. */
+export type CheckoutSourcePlacement = {
+  locationId: string;
+  name: string;
+  /** Units placed there. */
+  placed: number;
+  /** Units in custody taken from there. */
+  inCustody: number;
+  /** Units out on other bookings that left from there. */
+  onBooking: number;
+  /** Units that location has left to give. */
+  left: number;
+};
+
+/**
+ * One pool on a booking that check-out asks "Where do the units come from?"
+ * about: a pool placed at two or more locations whose slice has not gone out
+ * yet. The answer is sent as `sourceLocations[sliceId]`.
+ */
+export type CheckoutSourceQuestion = {
+  /** The BookingAsset row the answer is recorded on. */
+  sliceId: string;
+  assetId: string;
+  title: string;
+  unitOfMeasure: string | null;
+  /** Units this slice sends out. */
+  quantity: number;
+  placements: CheckoutSourcePlacement[];
+  /** Units of the pool that sit at no location. */
+  unplaced: number;
+  /** The option to pre-select: the server's own answer when nothing is picked. */
+  defaultLocationId: string | null;
 };
 
 export type BookingAsset = {
@@ -941,6 +1031,8 @@ export type BookingDetail = {
   custodianTeamMember: {
     id: string;
     name: string;
+    /** The team member's user, once they have accepted an invite. */
+    userId?: string | null;
   } | null;
   tags: { id: string; name: string; color: string | null }[];
   assets: BookingAsset[];
@@ -1041,11 +1133,23 @@ export type BookingDetailResponse = {
    * same gates regardless.
    */
   bookingActions: {
+    /**
+     * Whether the caller may edit this booking (open, and one they write).
+     * Optional: servers that predate the flag omit it, and the app then keeps
+     * offering Edit as before.
+     */
+    canEdit?: boolean;
     canCancel: boolean;
     canArchive: boolean;
     canDuplicate: boolean;
     canDelete: boolean;
   };
+  /**
+   * Pools on this booking that check-out must ask "Where do the units come
+   * from?" about (placed at two or more locations, not out yet). Empty when
+   * nothing needs asking; absent on older servers.
+   */
+  checkoutSourceQuestions?: CheckoutSourceQuestion[];
 };
 
 export type BookingActionResponse = {

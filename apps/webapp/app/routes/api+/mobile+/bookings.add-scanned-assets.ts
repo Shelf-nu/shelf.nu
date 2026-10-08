@@ -1,4 +1,4 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -14,13 +14,13 @@ import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
 } from "~/modules/booking/service.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -34,9 +34,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * ready-made kit slices, while the phone sends kit ids and this route resolves
  * them, keeping the mobile client thin and the lookup org-scoped.
  *
- * Status/role gating mirrors the web (`canUserManageBookingAssets`):
- * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
- * only modify their own DRAFT bookings.
+ * Status gating mirrors the web manage-items rule (`canManageBookingItems`):
+ * COMPLETE / ARCHIVED / CANCELLED bookings reject, and roles held to DRAFT
+ * may only add to a DRAFT booking. Callers who do not write every booking may
+ * only modify a booking they are the custodian of.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
  *
@@ -135,17 +136,13 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE for managing booking assets: own
-    // bookings only, and DRAFT only, via `canUserManageBookingAssets`. Both
-    // roles hold `booking:update`, so the permission gate above lets them
-    // through and this is what narrows them.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `booking:update` lets SELF_SERVICE and BASE through the gate above; the
+    // caller's access narrows them to their own bookings, and the manage-items
+    // rule below to the statuses their policy allows.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Self-service / BASE users may only modify their own bookings.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only modify their own.
+    if (!access.bookings.writeAll && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -155,7 +152,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -302,6 +299,8 @@ export async function action({ request }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId: user.id,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
     });
 
     /**

@@ -9,7 +9,8 @@
  * Resolution order (first-match wins for dedup):
  *   1. Custodian (always included)
  *   2. Booking creator (if org setting enabled)
- *   3. Organization admins (RESERVATION events only, if org setting enabled)
+ *   3. The workspace booking broadcast audience (RESERVATION events whose
+ *      maker's role triggers it, if org setting enabled)
  *   4. Always-notify team members (org-level setting)
  *   5. Per-booking notification recipients
  *
@@ -23,7 +24,7 @@ import type {
 } from "@prisma/client";
 import type { BookingForEmail } from "~/emails/types";
 import { getBookingNotificationSettingsForOrg } from "~/modules/booking-settings/service.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 
@@ -121,18 +122,19 @@ export async function getBookingNotificationRecipients({
   organizationId,
   editorUserId,
   isScheduledJob,
-  isSelfServiceOrBase,
+  alertsOrgOnReservation,
 }: {
   booking: BookingForEmail;
   eventType: BookingEventType;
   organizationId: string;
   editorUserId?: string;
   isScheduledJob?: boolean;
-  /** When true, the booking was created by a base/self-service user.
-   *  Admin broadcast only fires for reservations made by these roles
-   *  (preserving current behavior where admins are alerted to "pickup"
-   *  requests from lower-role users). */
-  isSelfServiceOrBase?: boolean;
+  /**
+   * The reserving member's role triggers the workspace booking broadcast
+   * (`notifications.reservationAlertsAdmins`): their reservation is a
+   * "pickup" request someone else must handle.
+   */
+  alertsOrgOnReservation?: boolean;
 }): Promise<NotificationRecipient[]> {
   try {
     const recipients = new Map<string, NotificationRecipient>();
@@ -173,17 +175,17 @@ export async function getBookingNotificationRecipients({
       }
     }
 
-    // 4. Notify admins only on reservation requests from base/self-service
-    //    users. This is the "pickup" broadcast — admins are alerted so someone
-    //    can handle the request. Admins reserving their own bookings don't
-    //    trigger this broadcast (preserving current behavior).
+    // 4. On a reservation whose maker's role triggers the broadcast, notify
+    //    the broadcast audience (`notifications.orgBookingBroadcasts`) so
+    //    someone can handle the pickup.
     if (
       settings.notifyAdminsOnNewBooking &&
       eventType === "RESERVATION" &&
-      isSelfServiceOrBase
+      alertsOrgOnReservation
     ) {
-      const admins = await getOrganizationAdminsForNotification({
+      const admins = await getOrganizationNotificationAudience({
         organizationId,
+        audience: "orgBookingBroadcasts",
       });
 
       for (const admin of admins) {

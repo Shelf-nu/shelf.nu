@@ -1,36 +1,59 @@
 /**
- * The asset page's actions menu disables "Assign custody" for an individually
- * tracked kit member and says why.
+ * ActionsDropdown, the asset page's actions menu.
  *
- * Custody of a kit member comes from its kit. The server refuses the request
- * (`assertNotKitMembers`); the menu says so before the click. A
- * quantity-tracked asset in a kit keeps its quantity custody action, because
- * the units outside every kit can still be handed over on their own.
+ * Two behaviours are pinned here:
+ *
+ * - The mobile Close button and status notices sit outside the `asset:update`
+ *   group. A SELF_SERVICE member holds `asset:custody` but not `asset:update`,
+ *   so most of the menu is gated away; without a way to dismiss it on mobile
+ *   they would be stuck, and without the notice they would have no
+ *   explanation for a disabled custody action.
+ * - "Assign custody" is disabled for an individually tracked kit member, with
+ *   the reason. Custody of a kit member comes from its kit; the server refuses
+ *   the request (`assertNotKitMembers`) and the menu says so before the click.
+ *   A quantity-tracked asset in a kit keeps its quantity custody action,
+ *   because the units outside every kit can still be handed over on their own.
  *
  * @see {@link file://./actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
  */
+import { OrganizationRoles } from "@prisma/client";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ActionsDropdown from "./actions-dropdown";
 
-const useLoaderDataMock = vi.hoisted(() => vi.fn());
+/** The caller each suite renders as: roles for the matrix, access for reach. */
+const caller = vi.hoisted(() => ({
+  roles: [] as string[],
+  assign: "anyone" as "anyone" | "self" | "none",
+}));
 
-// why: the menu reads the asset straight off the route loader; there is no
-// prop seam to inject it through. The rest of react-router stays real so the
-// link-style menu items can render inside a MemoryRouter.
+/** The asset the route loader returns for the current render. */
+let mockAsset: Record<string, unknown> = {};
+
+// why: the component reads the asset straight off the route loader; there is
+// no prop seam to inject it through. The rest of react-router stays real so
+// the link-style menu items can render inside a MemoryRouter.
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("react-router");
-  return { ...actual, useLoaderData: useLoaderDataMock };
+  return {
+    ...actual,
+    // `custodySources` is the layout loader's source summary for the Assign
+    // and Adjust dialogs; an asset at one location (or none) has a single pool.
+    useLoaderData: () => ({
+      asset: mockAsset,
+      custodySources: { multiSource: false, options: [], poolAvailable: 0 },
+    }),
+  };
 });
 
-// why: `useHydrated` is false on the first render, which renders a placeholder
-// button instead of the menu.
+// why: the default export renders a static placeholder until hydrated; the
+// popover content under test only exists past that point.
 vi.mock("remix-utils/use-hydrated", () => ({ useHydrated: () => true }));
 
-// why: the menu's open state comes from this hook, which reads search params;
-// forcing it open renders the items the tests read.
+// why: forces the popover open without simulating a click; the real hook
+// reads search params through a router context we don't mount.
 vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
   useControlledDropdownMenu: () => ({
     ref: { current: null },
@@ -39,21 +62,26 @@ vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
   }),
 }));
 
-// why: the role helper and the user both read the `_layout` route loader,
-// which is not mounted here. An admin sees every item.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({
-    roles: ["ADMIN"],
-    isSelfService: false,
-    isAdministratorOrOwner: true,
-  }),
+// why: the role under test. The real hook reads the `_layout` route loader,
+// which is not mounted here.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => caller.roles,
 }));
+
+// why: drives `assignsSelfOnly`; the real hook reads the `_layout` loader.
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => ({ custody: { assign: caller.assign } }),
+}));
+
+// why: the real hook reads the root loader; a fixed id is enough to compute
+// "assigned to me" without mounting a router.
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),
 }));
 
 // why: these items and dialogs each bring their own fetchers and loaders, and
-// nothing here asserts on them.
+// nothing here asserts on them. The relink dialog also pulls in the QR/barcode
+// scanner, which touches canvas APIs Happy DOM does not implement.
 vi.mock("./delete-asset", () => ({ DeleteAsset: () => null }));
 vi.mock("./update-gps-coordinates-form", () => ({
   UpdateGpsCoordinatesForm: () => null,
@@ -67,42 +95,70 @@ vi.mock("../asset-reminder/set-or-edit-reminder-dialog", () => ({
   default: () => null,
 }));
 
-/** An available asset as the asset page loader returns it. */
-function asset(overrides: Record<string, unknown>) {
-  return {
-    id: "asset-1",
-    title: "Tripod",
-    status: "AVAILABLE",
-    type: "INDIVIDUAL",
-    quantity: null,
-    unitOfMeasure: null,
-    custody: [],
-    assetKits: [],
-    qrCodes: [],
-    ...overrides,
-  };
-}
+/** A bookable, INDIVIDUAL asset with no custody and no kit membership. */
+const baseAsset = {
+  id: "asset-1",
+  title: "Tripod",
+  type: "INDIVIDUAL",
+  status: "AVAILABLE",
+  quantity: null as number | null,
+  unitOfMeasure: null,
+  custody: [],
+  assetKits: [] as unknown[],
+  qrCodes: [],
+};
 
 const IN_CAMERA_KIT = [
   { kit: { id: "kit-camera", name: "Camera Kit", status: "AVAILABLE" } },
 ];
 
-function renderMenu(loadedAsset: Record<string, unknown>) {
-  useLoaderDataMock.mockReturnValue({ asset: loadedAsset });
-  render(
+function renderMenu(overrides: Partial<typeof baseAsset> = {}) {
+  mockAsset = { ...baseAsset, ...overrides };
+  return render(
     <MemoryRouter>
       <ActionsDropdown />
     </MemoryRouter>
   );
 }
 
-describe("asset page actions menu: custody of kit members", () => {
+describe("ActionsDropdown: custody-only caller (SELF_SERVICE)", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    caller.roles = [OrganizationRoles.SELF_SERVICE];
+    caller.assign = "self";
+  });
+
+  it("opens the menu and offers the mobile Close button", () => {
+    renderMenu();
+
+    expect(screen.getByRole("button", { name: /^close$/i })).toBeTruthy();
+    expect(
+      screen.queryByText(
+        /some actions are disabled due to the asset being checked out/i
+      )
+    ).toBeNull();
+  });
+
+  it("also shows the checked-out notice when the asset is checked out", () => {
+    renderMenu({ status: "CHECKED_OUT" });
+
+    expect(screen.getByRole("button", { name: /^close$/i })).toBeTruthy();
+    expect(
+      screen.getByText(
+        /some actions are disabled due to the asset being checked out/i
+      )
+    ).toBeTruthy();
+  });
+});
+
+describe("ActionsDropdown: custody of kit members", () => {
+  beforeEach(() => {
+    // An admin sees every item.
+    caller.roles = [OrganizationRoles.ADMIN];
+    caller.assign = "anyone";
   });
 
   it("disables Assign custody for an individually tracked kit member, naming the kit", () => {
-    renderMenu(asset({ assetKits: IN_CAMERA_KIT }));
+    renderMenu({ assetKits: IN_CAMERA_KIT });
 
     const item = screen.getByRole("link", { name: /assign custody/i });
     expect(item).toHaveAttribute("aria-disabled", "true");
@@ -112,7 +168,7 @@ describe("asset page actions menu: custody of kit members", () => {
   });
 
   it("keeps Assign custody enabled for an asset in no kit", () => {
-    renderMenu(asset({}));
+    renderMenu();
 
     const item = screen.getByRole("link", { name: /assign custody/i });
     expect(item).not.toHaveAttribute("aria-disabled");
@@ -120,13 +176,11 @@ describe("asset page actions menu: custody of kit members", () => {
   });
 
   it("keeps the quantity custody action enabled for a quantity-tracked asset in a kit", () => {
-    renderMenu(
-      asset({
-        type: "QUANTITY_TRACKED",
-        quantity: 10,
-        assetKits: IN_CAMERA_KIT,
-      })
-    );
+    renderMenu({
+      type: "QUANTITY_TRACKED",
+      quantity: 10,
+      assetKits: IN_CAMERA_KIT,
+    });
 
     const item = screen.getByRole("button", { name: /assign custody/i });
     expect(item).toBeEnabled();
@@ -134,7 +188,7 @@ describe("asset page actions menu: custody of kit members", () => {
   });
 
   it("still disables Update location for a kit member, pointing at the kit", () => {
-    renderMenu(asset({ assetKits: IN_CAMERA_KIT }));
+    renderMenu({ assetKits: IN_CAMERA_KIT });
 
     const item = screen.getByRole("link", { name: /update location/i });
     expect(item).toHaveAttribute("aria-disabled", "true");

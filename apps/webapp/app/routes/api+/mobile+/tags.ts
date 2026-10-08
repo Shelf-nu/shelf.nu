@@ -36,7 +36,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
 
-    const [{ tags }, { role }] = await Promise.all([
+    const [{ tags }, { roles }] = await Promise.all([
       getTagsForAssetTagsFilter({ organizationId }),
       getMobileUserContext(user.id, organizationId),
     ]);
@@ -48,7 +48,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const canCreate = await hasPermission({
       userId: user.id,
       organizationId,
-      roles: [role],
+      roles,
       entity: PermissionEntity.tag,
       action: PermissionAction.create,
     });

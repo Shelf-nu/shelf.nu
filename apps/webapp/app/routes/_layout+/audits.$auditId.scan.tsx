@@ -34,7 +34,7 @@ import {
   getAuditSessionDetails,
   getAuditScans,
   requireAuditAssignee,
-  requireAuditAssigneeForBaseSelfService,
+  requireAuditAssigneeForScopedViewer,
   removeAuditScan,
 } from "~/modules/audit/service.server";
 import scannerCss from "~/styles/scanner.css?url";
@@ -85,7 +85,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   });
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.audit,
@@ -117,13 +117,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       });
     }
 
-    // Assignee-gated: ADMIN/OWNER may act on any audit,
-    // BASE/SELF_SERVICE only when assigned.
+    // Assignee-gated: callers who see every audit may act on any audit,
+    // everyone else only when assigned.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     const formData = await request.clone().formData();
@@ -190,8 +190,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       action: PermissionAction.update,
     });
 
-    const { organizationId, userOrganizations, isSelfServiceOrBase } =
-      permissionResult;
+    const { organizationId, userOrganizations, access } = permissionResult;
 
     const { session, expectedAssets } = await getAuditSessionDetails({
       // The scan drawer renders the expected-asset photos.
@@ -206,12 +205,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/audits/${auditId}/overview`);
     }
 
-    // Scan access: ADMIN/OWNER can scan any audit,
-    // BASE/SELF_SERVICE only when assigned.
-    requireAuditAssigneeForBaseSelfService({
+    // Scan access: callers who see every audit can scan any audit, everyone
+    // else only when assigned.
+    requireAuditAssigneeForScopedViewer({
       audit: session,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
       auditId,
     });
 

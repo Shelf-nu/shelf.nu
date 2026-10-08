@@ -2,6 +2,7 @@ import { OrganizationRoles } from "@prisma/client";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import { action } from "~/routes/_layout+/bookings.new";
 import { requirePermission } from "~/utils/roles.server";
@@ -164,9 +165,8 @@ beforeEach(() => {
 describe("bookings/new - custodian assignment", () => {
   it("prevents assigning booking to custodians from different organizations", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     // Custodian not found due to org filter
@@ -204,9 +204,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("allows assigning booking to custodians from the same organization", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     // Valid team member from same org
@@ -245,9 +244,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("redirects scan intent to the booking overview scan assets page", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
-      isSelfServiceOrBase: false,
     } as any);
 
     mockGetTeamMember.mockResolvedValue({
@@ -283,9 +281,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("prevents self-service users from assigning booking to other team members", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, but different user
@@ -320,9 +317,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("allows self-service users to assign booking to themselves", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.SELF_SERVICE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, same user
@@ -355,9 +351,8 @@ describe("bookings/new - custodian assignment", () => {
 
   it("allows BASE role users to assign booking to themselves only", async () => {
     requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.BASE] }),
       organizationId: "org-1",
-      role: OrganizationRoles.BASE,
-      isSelfServiceOrBase: true,
     } as any);
 
     // Valid team member from same org, but different user (should fail for BASE role)

@@ -61,6 +61,8 @@ export enum PermissionEntity {
   /** Org-wide analytics under `/reports` — pages, CSV and PDF exports. */
   reports = "reports",
   teamMemberNote = "teamMemberNote",
+  /** Non-registered team members (people without an account), managed under Settings -> Team. */
+  nonRegisteredMember = "nonRegisteredMember",
   assetModel = "assetModel",
   emailSettings = "emailSettings",
   userData = "user-data", // This is for the user to load their own data.

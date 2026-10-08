@@ -4,8 +4,11 @@
  * The canonical source is the `@shelf/permissions` workspace package, so the
  * webapp (server + client validators) and the mobile companion resolve
  * permissions from ONE definition. This file only forwards it. The Prisma
- * role parity guard that used to live here moved to
- * `./permission.roles-parity.ts`.
+ * role parity guard lives in `./permission.roles-parity.ts`.
+ *
+ * `roleHasPermission` is re-exported for pure modules that loaders and
+ * components share (`settings-tabs.ts`, `admin-areas.ts`); components
+ * otherwise use `userHasPermission`.
  *
  * ## Why this shim still exists
  *
@@ -40,4 +43,5 @@ export {
   PermissionAction,
   PermissionEntity,
   Role2PermissionMap,
+  roleHasPermission,
 } from "@shelf/permissions";

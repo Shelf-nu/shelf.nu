@@ -1,14 +1,20 @@
 /**
- * Web partial check-out page — the refusal a direct POST to its action gets.
+ * Web partial check-out page: what a direct POST to its action, which skips the
+ * loader, is held to before `checkoutAssets` runs.
  *
- * The page's guard (SELF_SERVICE may check out only a booking they are the
- * custodian of, while it is reserved, ongoing or overdue) runs in both loader
- * and action. A refusal must reach the caller as a 403, not a 500.
+ * The page's guard runs in both loader and action:
+ *  - SELF_SERVICE may check out only a booking they are the custodian of, while
+ *    it is reserved, ongoing or overdue. Having created the booking is not
+ *    enough, and the workspace toggle that lets them SEE other bookings does
+ *    not let them check those out;
+ *  - a refusal is a 403, not a 500.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.checkout-assets.tsx}
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
+import type { WorkspaceAccessSettings } from "~/utils/permissions/role-access";
 
 // why: React Router v7 single fetch — `data()` must return a real Response so
 // the action's error path has an assertable status.
@@ -36,10 +42,12 @@ vi.mock("~/utils/roles.server", () => ({
 
 // why: the booking lookup feeds the guard, and `checkoutAssets` is the sink a
 // refused request must never reach; both avoid a database
-const { getBookingMock, checkoutAssetsMock } = vi.hoisted(() => ({
-  getBookingMock: vi.fn(),
-  checkoutAssetsMock: vi.fn(),
-}));
+const { getBookingMock, checkoutAssetsMock, findKitsBookedElsewhereMock } =
+  vi.hoisted(() => ({
+    getBookingMock: vi.fn(),
+    checkoutAssetsMock: vi.fn(),
+    findKitsBookedElsewhereMock: vi.fn(),
+  }));
 vi.mock("~/modules/booking/service.server", () => ({
   getBooking: getBookingMock,
   checkoutAssets: checkoutAssetsMock,
@@ -47,14 +55,66 @@ vi.mock("~/modules/booking/service.server", () => ({
   computeBookingAssetSliceRemainingToCheckOut: vi.fn(),
   getDetailedPartialCheckoutData: vi.fn(),
   getPartiallyCheckedInAssetIds: vi.fn(),
+  findKitsBookedElsewhere: findKitsBookedElsewhereMock,
+}));
+
+// why: loader-only; the source-location question is not under test
+vi.mock("~/modules/booking/checkout-source-location.server", () => ({
+  getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
 }));
 
 // why: loader-only database access on import
 vi.mock("~/database/db.server", () => ({ db: {} }));
 
-import { action } from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
+import {
+  action,
+  loader,
+} from "~/routes/_layout+/bookings.$bookingId.overview.checkout-assets";
+import {
+  getDetailedPartialCheckoutData,
+  getPartiallyCheckedInAssetIds,
+} from "~/modules/booking/service.server";
 
 // @vitest-environment node
+
+const CALLER = "user-1";
+
+/** POSTs a check-out as a caller with `roles` against a booking shaped by the rest. */
+async function postCheckout({
+  roles,
+  workspace = {},
+  status = "RESERVED",
+  creatorId = "someone-else",
+  custodianUserId = "someone-else",
+}: {
+  roles: OrganizationRoles[];
+  workspace?: Partial<WorkspaceAccessSettings>;
+  status?: string;
+  creatorId?: string;
+  custodianUserId?: string | null;
+}) {
+  requirePermissionMock.mockResolvedValue(
+    permissionContext({ roles, workspace })
+  );
+  getBookingMock.mockResolvedValue({
+    id: "booking-1",
+    status,
+    creatorId,
+    custodianUserId,
+    from: new Date("2026-01-01T09:00:00Z"),
+    to: new Date("2099-01-02T09:00:00Z"),
+  });
+  checkoutAssetsMock.mockResolvedValue(new Response(null, { status: 204 }));
+
+  return (await action({
+    request: new Request(
+      "https://app.shelf.nu/bookings/booking-1/overview/checkout-assets",
+      { method: "POST", body: new URLSearchParams({ "assetIds[0]": "a-1" }) }
+    ),
+    params: { bookingId: "booking-1" },
+    context: { getSession: () => ({ userId: CALLER }) },
+  } as never)) as Response;
+}
 
 describe("checkout-assets action", () => {
   beforeEach(() => {
@@ -62,30 +122,118 @@ describe("checkout-assets action", () => {
   });
 
   it("refuses SELF_SERVICE on a booking they do not hold with a 403 and no check-out", async () => {
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
-      userOrganizations: [],
+    const response = await postCheckout({
+      roles: [OrganizationRoles.SELF_SERVICE],
     });
-    getBookingMock.mockResolvedValue({
-      id: "booking-1",
-      status: "RESERVED",
-      creatorId: "someone-else",
-      custodianUserId: "someone-else",
-      from: new Date("2026-01-01T09:00:00Z"),
-      to: new Date("2099-01-02T09:00:00Z"),
-    });
-
-    const response = (await action({
-      request: new Request(
-        "https://app.shelf.nu/bookings/booking-1/overview/checkout-assets",
-        { method: "POST", body: new URLSearchParams({ "assetIds[0]": "a-1" }) }
-      ),
-      params: { bookingId: "booking-1" },
-      context: { getSession: () => ({ userId: "user-1" }) },
-    } as never)) as Response;
 
     expect(response.status).toBe(403);
     expect(checkoutAssetsMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses SELF_SERVICE who created the booking but is not its custodian", async () => {
+    const response = await postCheckout({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      creatorId: CALLER,
+    });
+
+    expect(response.status).toBe(403);
+    expect(checkoutAssetsMock).not.toHaveBeenCalled();
+  });
+
+  it("lets SELF_SERVICE check out a RESERVED booking they hold", async () => {
+    await postCheckout({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      custodianUserId: CALLER,
+      status: "RESERVED",
+    });
+
+    expect(checkoutAssetsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses SELF_SERVICE on someone else's live booking even with the see-toggle on", async () => {
+    const response = await postCheckout({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      workspace: { selfServiceCanSeeBookings: true },
+      status: "ONGOING",
+    });
+
+    expect(response.status).toBe(403);
+    expect(checkoutAssetsMock).not.toHaveBeenCalled();
+  });
+
+  it("lets ADMIN check out someone else's live booking", async () => {
+    await postCheckout({
+      roles: [OrganizationRoles.ADMIN],
+      status: "ONGOING",
+    });
+
+    expect(checkoutAssetsMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("checkout-assets loader: kits another booking holds", () => {
+  const FROM = new Date("2026-01-01T09:00:00Z");
+  const TO = new Date("2099-01-02T09:00:00Z");
+
+  /** Loads the page for a booking in `status` holding one kit slice. */
+  async function load(status: string) {
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] })
+    );
+    getBookingMock.mockResolvedValue({
+      id: "booking-1",
+      name: "Shoot",
+      status,
+      creatorId: CALLER,
+      custodianUserId: CALLER,
+      from: FROM,
+      to: TO,
+      bookingAssets: [],
+    });
+    vi.mocked(getDetailedPartialCheckoutData).mockResolvedValue({
+      checkedOutAssetIds: [],
+    } as never);
+    vi.mocked(getPartiallyCheckedInAssetIds).mockResolvedValue([]);
+    findKitsBookedElsewhereMock.mockResolvedValue([
+      { id: "kit-1", name: "Kit 1", assetIds: ["asset-1"] },
+    ]);
+
+    return (await loader({
+      request: new Request(
+        "https://app.shelf.nu/bookings/booking-1/overview/checkout-assets"
+      ),
+      params: { bookingId: "booking-1" },
+      context: { getSession: () => ({ userId: CALLER }) },
+    } as never)) as { kitsBookedElsewhere: unknown };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hands the drawer the held kits and their assets, judged over the booking's window", async () => {
+    const result = await load("RESERVED");
+
+    expect(findKitsBookedElsewhereMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bookingId: "booking-1",
+        from: FROM,
+        to: TO,
+        organizationId: expect.any(String),
+        // A reserved booking has taken nothing yet, so a reservation conflicts.
+        ignoreReservedConflicts: false,
+      })
+    );
+    expect(result.kitsBookedElsewhere).toEqual([
+      { id: "kit-1", assetIds: ["asset-1"] },
+    ]);
+  });
+
+  it("lets an in-flight booking outrank reservations, as the submit does", async () => {
+    await load("ONGOING");
+
+    expect(findKitsBookedElsewhereMock).toHaveBeenCalledWith(
+      expect.objectContaining({ ignoreReservedConflicts: true })
+    );
   });
 });

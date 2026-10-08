@@ -18,9 +18,12 @@ import type { AssetFromQr } from "~/routes/api+/get-scanned-item.$qrId";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  buildSourceLocationsPayload,
   hasKitInheritedCustody,
   operatorHolderCount,
   releasableUnits,
+  scannedSourceChoice,
+  sourceCappedMax,
   shouldShowStateBadges,
 } from "./custody-scan-quantities";
 
@@ -34,11 +37,24 @@ function assetItem(
   };
 }
 
-/** An asset carrying just the custody rows the release ceiling reads. */
+/**
+ * An asset carrying just the custody rows the release ceiling reads. Each row
+ * belongs to its own holder unless `teamMemberId` says otherwise.
+ */
 function assetWithCustody(
-  custody: { quantity: number; kitCustodyId: string | null }[]
+  custody: {
+    quantity: number;
+    kitCustodyId: string | null;
+    teamMemberId?: string;
+  }[]
 ): AssetFromQr {
-  return { id: "asset-1", custody } as unknown as AssetFromQr;
+  return {
+    id: "asset-1",
+    custody: custody.map((row, index) => ({
+      teamMemberId: `tm-${index}`,
+      ...row,
+    })),
+  } as unknown as AssetFromQr;
 }
 
 /** Stands in for a drawer's per-row ceiling; 10 units free unless stated. */
@@ -99,6 +115,18 @@ describe("operatorHolderCount", () => {
         ])
       )
     ).toBe(2);
+  });
+
+  it("counts one person once when their units came from two locations", () => {
+    // One operator row per source location: the same holder, not two.
+    expect(
+      operatorHolderCount(
+        assetWithCustody([
+          { quantity: 2, kitCustodyId: null, teamMemberId: "tm-ahmed" },
+          { quantity: 1, kitCustodyId: null, teamMemberId: "tm-ahmed" },
+        ])
+      )
+    ).toBe(1);
   });
 
   it("does not count a kit-inherited holder", () => {
@@ -249,5 +277,101 @@ describe("buildQuantitiesPayload", () => {
     });
 
     expect(payload).toEqual({ "asset-1": 1 });
+  });
+});
+
+describe("scanned pools: where the units come from", () => {
+  /** A pool placed at two locations, as the custody picker meta reports it. */
+  const twoLocations = {
+    maxAllowed: 4,
+    assetQuantity: 4,
+    unitOfMeasure: "pcs",
+    sources: {
+      multiSource: true,
+      poolAvailable: 4,
+      options: [
+        {
+          value: "loc-camera",
+          locationId: "loc-camera",
+          label: "Camera Room",
+          placed: 2,
+          inCustody: 1,
+          left: 1,
+        },
+        {
+          value: "loc-studio",
+          locationId: "loc-studio",
+          label: "Studio",
+          placed: 2,
+          inCustody: 0,
+          left: 2,
+        },
+      ],
+    },
+  };
+
+  const pool = (pickerMeta: object | null, id = "a1") =>
+    ({ id, type: "QUANTITY_TRACKED", pickerMeta }) as unknown as AssetFromQr;
+
+  it("pre-selects the location with the most units left", () => {
+    expect(scannedSourceChoice(pool(twoLocations), {}).value).toBe(
+      "loc-studio"
+    );
+  });
+
+  it("caps the row at what the chosen location has left", () => {
+    const choice = scannedSourceChoice(pool(twoLocations), {});
+    // Studio (pre-selected) has 2 left of a pool-wide 4.
+    expect(sourceCappedMax(4, choice)).toBe(2);
+    expect(sourceCappedMax(4, { ...choice, value: "loc-camera" })).toBe(1);
+    // The pool-wide ceiling still wins when it is lower.
+    expect(sourceCappedMax(1, choice)).toBe(1);
+    // A row with no picker keeps the pool-wide ceiling.
+    expect(sourceCappedMax(4, { options: [], value: null })).toBe(4);
+  });
+
+  it("keeps the operator's pick while it is still an option", () => {
+    expect(
+      scannedSourceChoice(pool(twoLocations), { a1: "loc-camera" }).value
+    ).toBe("loc-camera");
+    expect(
+      scannedSourceChoice(pool(twoLocations), { a1: "loc-gone" }).value
+    ).toBe("loc-studio");
+  });
+
+  it("offers nothing for a pool at one location, or an individual asset", () => {
+    const oneLocation = { ...twoLocations, sources: null };
+    expect(scannedSourceChoice(pool(oneLocation), {})).toEqual({
+      options: [],
+      value: null,
+    });
+    expect(
+      scannedSourceChoice(
+        { id: "i1", type: "INDIVIDUAL", pickerMeta: null } as AssetFromQr,
+        {}
+      ).value
+    ).toBeNull();
+  });
+
+  it("submits one source per pool that shows a picker, and nothing for the rest", () => {
+    const items = {
+      qr1: assetItem({ id: "a1", pickerMeta: twoLocations } as never),
+      qr2: assetItem({
+        id: "a2",
+        pickerMeta: { ...twoLocations, sources: null },
+      } as never),
+      qr3: assetItem({
+        id: "a3",
+        pickerMeta: { ...twoLocations, maxAllowed: 0 },
+      } as never),
+    } as ScanListItems;
+
+    expect(
+      buildSourceLocationsPayload({
+        items,
+        assetIds: ["a1", "a2", "a3"],
+        picked: { a1: "loc-camera" },
+      })
+    ).toEqual({ a1: "loc-camera" });
   });
 });

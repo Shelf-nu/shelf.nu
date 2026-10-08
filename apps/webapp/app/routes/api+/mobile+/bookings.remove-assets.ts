@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -11,17 +10,14 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
-import {
-  canSeeBooking,
-  resolveMostPrivilegedRole,
-} from "~/utils/booking-authorization.server";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import { isBookingCustodian } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -37,11 +33,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Adding assets/kits is handled by the existing `add-scanned-assets` endpoint;
  * this endpoint is the removal counterpart for the picker-based edit flow.
  *
- * Gating is `canRoleRemoveBookingAssets` (role + status) plus an explicit
- * own-booking guard for self-service and BASE users. Still looser than the ADD
- * counterpart for SELF_SERVICE, which may remove from its own RESERVED
- * booking; BASE stops at DRAFT on both. Matches the web booking-overview
- * remove actions.
+ * Gating is `canRemoveBookingItems` (the statuses the caller's policy lists)
+ * plus an own-booking guard for callers who do not write every booking.
+ * Looser than the ADD counterpart for SELF_SERVICE, which may remove from its
+ * own RESERVED booking; BASE stops at DRAFT on both. Matches the web
+ * booking-overview remove actions.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[],
  *   standaloneAssetIds?: string[] }
@@ -106,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // BOTH custody links are needed. A booking assigned to a team member
         // before a user was attached to it keeps `custodianUserId = NULL` even
         // after the invite is accepted, so the user link alone fails closed for
-        // the very users those bookings belong to. See `canSeeBooking`.
+        // the very users those bookings belong to. See `isBookingCustodian`.
         custodianUserId: true,
         custodianTeamMember: { select: { userId: true } },
       },
@@ -119,35 +115,21 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // `access` is resolved from the membership's effective (highest-rank)
+    // role, so a membership holding ADMIN beside a restricted role is an admin.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // `resolveMostPrivilegedRole`, not the context's `role`, which is
-    // `roles[0]`: a membership stored `[SELF_SERVICE, ADMIN]` would otherwise
-    // read as restricted and refuse an actual admin someone else's booking.
-    // The sibling mobile endpoints (`bookings.checkin`, `partial-checkout`,
-    // `fulfil-and-checkout`) all resolve the same way, as does the web side
-    // via `resolveEffectiveRole`.
-    const role = resolveMostPrivilegedRole(roles);
-
-    // BASE is as restricted as SELF_SERVICE for managing booking assets: both
-    // may only touch their OWN bookings (enforced just below). Keying only on
-    // SELF_SERVICE let a BASE user with `booking:update` edit anyone's booking
-    // via this endpoint.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
-
-    // Self-service / BASE users may only modify their own bookings. Reuses the
-    // shared custody predicate rather than comparing `custodianUserId` alone:
-    // that narrower test 403s a custodian whose booking is held through the
-    // team-member link, which is precisely the user this endpoint's removal
-    // parity is meant to serve.
-    const ownsBooking = canSeeBooking({
-      canSeeAllBookings: false,
+    // A caller who does not write every booking may only modify their own.
+    // BASE holds `booking:update` too, so this applies to it as well as to
+    // SELF_SERVICE. Reuses the shared custody predicate rather than comparing
+    // `custodianUserId` alone: that narrower test 403s a custodian whose
+    // booking is held through the team-member link, which is precisely the
+    // user this endpoint's removal parity is meant to serve.
+    const ownsBooking = isBookingCustodian({
       booking,
       userId: user.id,
     });
-    if (isSelfServiceOrBase && !ownsBooking) {
+    if (!access.bookings.writeAll && !ownsBooking) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -157,20 +139,23 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Role + status. Looser than the ADD counterpart
-    // (`canUserManageBookingAssets`) for SELF_SERVICE, which pins to DRAFT and
-    // so blocked a custodian from removing an item from their OWN reserved
-    // booking — the web allows exactly that, and the two surfaces must agree.
-    // BASE stops at DRAFT here as it does on web: removing from a live booking
-    // resets the asset to available, which is the check-in BASE cannot run.
-    // Ownership is already enforced by the own-booking guard directly above.
-    if (!canRoleRemoveBookingAssets({ roles, booking })) {
+    // Statuses from the caller's policy (`bookings.removableItemStatuses`);
+    // looser than the ADD rule for SELF_SERVICE, which may remove from its own
+    // RESERVED booking, as on web. BASE stops at DRAFT: removing from a live
+    // booking resets the asset to available, which is the check-in BASE cannot
+    // run. Ownership is already enforced by the own-booking guard above.
+    if (!canRemoveBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
         message:
           "Assets cannot be removed from this booking in its current status.",
-        additionalData: { userId, bookingId, roles, status: booking.status },
+        additionalData: {
+          userId,
+          bookingId,
+          role: access.role,
+          status: booking.status,
+        },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,

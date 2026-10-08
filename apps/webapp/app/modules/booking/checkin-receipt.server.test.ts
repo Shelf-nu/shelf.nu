@@ -86,6 +86,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 
+import { ShelfError } from "~/utils/error";
 import { fetchCheckinReceiptData } from "./checkin-receipt.server";
 import type { PdfDbResult } from "./pdf-helpers";
 import { fetchAllPdfRelatedData } from "./pdf-helpers";
@@ -398,5 +399,22 @@ describe("fetchCheckinReceiptData", () => {
       expect(row.checkedInByName).toBe("");
     }
     expect(receipt.checkedInByNames).toEqual([]);
+  });
+});
+
+describe("fetchCheckinReceiptData — failures", () => {
+  it("keeps a refusal's 403 instead of reporting a server error", async () => {
+    // why: the shared PDF read raises the ownership refusal.
+    mockOf(fetchAllPdfRelatedData).mockRejectedValue(
+      new ShelfError({
+        cause: null,
+        message: "You are not authorized to view this booking",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      })
+    );
+
+    await expect(run()).rejects.toMatchObject({ status: 403 });
   });
 });

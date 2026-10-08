@@ -10,6 +10,7 @@
  * @see {@link file://./bulk-actions-dropdown.tsx}
  * @see {@link file://./../../modules/asset/utils.ts} isIndividualKitMember
  */
+import { OrganizationRoles } from "@prisma/client";
 import { render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DisabledProp } from "~/components/shared/button";
@@ -57,10 +58,14 @@ vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
   }),
 }));
 
-// why: the role helper and the user both read the `_layout` route loader,
-// which is not mounted here. An admin sees every item.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: ["ADMIN"], isSelfService: false }),
+// why: the roles, the role access and the user all read the `_layout` route
+// loader, which is not mounted here. An admin sees every item and assigns
+// custody to anyone.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => [OrganizationRoles.ADMIN],
+}));
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => ({ custody: { assign: "anyone" } }),
 }));
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),

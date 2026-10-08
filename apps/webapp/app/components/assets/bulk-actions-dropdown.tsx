@@ -5,8 +5,9 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getRowKitStatus, isIndividualKitMember } from "~/modules/asset/utils";
 import { getPrimaryCustody } from "~/modules/custody/utils";
 import { isFormProcessing } from "~/utils/form";
@@ -86,7 +87,8 @@ function ConditionalDropdown() {
 
   const allSelected = isSelectingAllItems(selectedAssets);
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   /**
@@ -133,7 +135,7 @@ function ConditionalDropdown() {
     ) as { custodian?: { userId?: string } } | null;
     return primary?.custodian?.userId === user?.id;
   });
-  const disableReleaseCustody = isSelfService && !selfUserCustody;
+  const disableReleaseCustody = assignsSelfOnly && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -336,7 +338,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
                     !allAssetsAreAvailable ||

@@ -1,7 +1,6 @@
 import {
   AssetStatus,
   AssetType,
-  OrganizationRoles,
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
@@ -153,6 +152,10 @@ vitest.mock("~/database/db.server", () => ({
     custody: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
       findFirst: vitest.fn().mockResolvedValue(null),
+      // why: checkOutQuantity / releaseQuantity read a pool's operator custody
+      // rows (one per holder per source location) to resolve and cap the
+      // source; release suites describe the holder through `stubHolderRows`.
+      findMany: vitest.fn().mockResolvedValue([]),
       create: vitest.fn().mockResolvedValue({}),
       delete: vitest.fn().mockResolvedValue({}),
       update: vitest.fn().mockResolvedValue({}),
@@ -169,6 +172,9 @@ vitest.mock("~/database/db.server", () => ({
     // why: availability math must subtract units tied to ONGOING/OVERDUE bookings
     bookingAsset: {
       aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      // why: a pool's units left at each location also subtract units out on
+      // bookings from there; no test here books a pool out, so none are.
+      findMany: vitest.fn().mockResolvedValue([]),
     },
     // why: moveAssetLocationUnits + placeUnplacedUnits read/write the
     // AssetLocation pivot for the manual placement rows. `findFirst` is
@@ -218,6 +224,28 @@ vitest.mock("~/database/db.server", () => ({
 vitest.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vitest.fn(),
 }));
+
+/**
+ * Stubs the operator custody rows `releaseQuantity` reads for the pool, one
+ * row per holder per source location. Rows default to no recorded source.
+ */
+function stubHolderRows(
+  ...rows: Array<{
+    id: string;
+    teamMemberId: string;
+    quantity: number;
+    locationId?: string | null;
+    createdAt?: Date;
+  }>
+) {
+  (db.custody.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+    rows.map((row) => ({
+      locationId: null,
+      createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      ...row,
+    }))
+  );
+}
 
 // why: the stock-lowering guard's own committed-peak math (custody + kits +
 // peak-concurrent bookings) is exhaustively unit-tested in
@@ -658,6 +686,12 @@ describe("duplicateAsset", () => {
   });
 
   it("keeps an individual copy at the source's primary location", async () => {
+    // why: createAsset proves the location belongs to the org before placing
+    // the copy there.
+    vi.mocked(db.location.findFirst).mockResolvedValueOnce({
+      id: "loc-a",
+    } as never);
+
     await duplicateAsset({
       asset: makeSource({ assetLocations: [{ location: { id: "loc-a" } }] }),
       userId: "user-1",
@@ -1331,7 +1365,7 @@ describe("checkOutQuantity — availability accounting", () => {
         quantity: 80,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
     } catch (e) {
       caught = e;
@@ -1358,7 +1392,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 80,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCustodyCreate).toHaveBeenCalled();
@@ -1380,7 +1414,7 @@ describe("checkOutQuantity — availability accounting", () => {
         quantity: 25,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
     } catch (err) {
       caught = err;
@@ -1407,7 +1441,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 15,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCustodyCreate).toHaveBeenCalledTimes(1);
@@ -1431,7 +1465,7 @@ describe("checkOutQuantity — availability accounting", () => {
       quantity: 90,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // Assert the aggregate was invoked with the ONGOING/OVERDUE filter —
@@ -1490,7 +1524,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1521,7 +1555,7 @@ describe("checkOutQuantity — activity events", () => {
       quantity: 3,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledWith(
@@ -1567,6 +1601,7 @@ describe("releaseQuantity — activity events", () => {
       teamMemberId: "tm-1",
       quantity: 10,
     });
+    stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 10 });
   });
 
   it("emits CUSTODY_RELEASED with quantity + viaQuantity meta on partial release", async () => {
@@ -1578,7 +1613,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockRecordEvent).toHaveBeenCalledTimes(1);
@@ -1622,7 +1657,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // `updateMany` + a `status: { not: CHECKED_OUT }` guard, so releasing the
@@ -1658,7 +1693,7 @@ describe("releaseQuantity — activity events", () => {
       quantity: 4,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockAssetUpdate).not.toHaveBeenCalledWith(
@@ -1710,6 +1745,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       teamMemberId: "tm-1",
       quantity: 40,
     });
+    stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 40 });
     (db.custody.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
     // why: the `refreshExpiredAssetImages` suite earlier in this file leaves a
     // rejection implementation on the asset write mocks that `clearAllMocks`
@@ -1737,7 +1773,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // Exactly one log, classified as consumption. Writing RETURN here is the
@@ -1774,7 +1810,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // 10 gloves used up, 30 handed back in good condition. Destroying all 40
@@ -1809,7 +1845,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // One event per field that changed: stock dropped by the consumed
@@ -1852,7 +1888,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       consumed: 0,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledTimes(1);
@@ -1889,7 +1925,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1915,7 +1951,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCreateConsumptionLog).toHaveBeenCalledWith(
@@ -1940,7 +1976,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 5,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow(/consumable/i);
 
@@ -1961,7 +1997,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
         consumed: 11,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow();
 
@@ -1987,7 +2023,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // The three write methods the mocked client exposes — the same set
@@ -2017,7 +2053,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(db.assetLocation.update).toHaveBeenCalledWith({
@@ -2047,7 +2083,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 10,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(db.assetLocation.update).not.toHaveBeenCalled();
@@ -2068,7 +2104,7 @@ describe("releaseQuantity — consumptionType disposition", () => {
       quantity: 40,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     // Guarded `updateMany` — see the sibling assertion in the
@@ -3641,7 +3677,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
       custodianName: "Custodian",
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
   const checkIn = () =>
@@ -3651,7 +3687,7 @@ describe("bulk custody — refusals of the selection answer 400", () => {
       assetIds: ["asset-1"],
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
   it.each([
@@ -3747,7 +3783,7 @@ describe("checkOutQuantity: SELF_SERVICE guard", () => {
         quantity: 5,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
       });
     } catch (e) {
       caught = e;
@@ -3772,7 +3808,7 @@ describe("checkOutQuantity: SELF_SERVICE guard", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
+      custodyAssign: "self",
     });
 
     expect(mockCustodyCreate).toHaveBeenCalled();
@@ -3787,7 +3823,7 @@ describe("checkOutQuantity: SELF_SERVICE guard", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCustodyCreate).toHaveBeenCalled();
@@ -3805,7 +3841,7 @@ describe("checkOutQuantity: SELF_SERVICE guard", () => {
         quantity: 5,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
     } catch (e) {
       caught = e;
@@ -3858,6 +3894,10 @@ describe("releaseQuantity: SELF_SERVICE guard", () => {
       id: "custody-1",
       quantity: 20,
     });
+    stubHolderRows(
+      { id: "custody-self", teamMemberId: "tm-self", quantity: 20 },
+      { id: "custody-colleague", teamMemberId: "tm-colleague", quantity: 20 }
+    );
     (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
       _sum: { quantity: 20 },
     });
@@ -3874,7 +3914,7 @@ describe("releaseQuantity: SELF_SERVICE guard", () => {
         quantity: 5,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
       });
     } catch (e) {
       caught = e;
@@ -3900,7 +3940,7 @@ describe("releaseQuantity: SELF_SERVICE guard", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.SELF_SERVICE,
+      custodyAssign: "self",
     });
 
     expect(mockCustodyUpdate).toHaveBeenCalled();
@@ -3915,7 +3955,7 @@ describe("releaseQuantity: SELF_SERVICE guard", () => {
       quantity: 5,
       userId: "user-1",
       organizationId: "org-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     });
 
     expect(mockCustodyUpdate).toHaveBeenCalled();
@@ -3961,7 +4001,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianName: "Other Person",
         organizationId: "org-1",
         settings: ASSET_INDEX_SETTINGS,
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
       });
     } catch (err) {
       caught = err;
@@ -4007,7 +4047,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianName: "Self",
         organizationId: "org-1",
         settings: ASSET_INDEX_SETTINGS,
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
       });
     } catch (err) {
       if (err instanceof ShelfError && err.status === 403) threw403 = true;
@@ -4046,7 +4086,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         custodianName: "Anyone",
         organizationId: "org-1",
         settings: ASSET_INDEX_SETTINGS,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
     } catch (err) {
       if (err instanceof ShelfError && err.status === 403) threw403 = true;
@@ -4084,7 +4124,7 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
         // caller passes through the SELF_SERVICE guard. Pass ADMIN here to
         // assert the same intent the legacy test had — non-SELF_SERVICE
         // callers must not throw 403 on a custodian mismatch.
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
         assetIds: ["asset-1"],
         custodianId: "tm-anyone",
         custodianName: "Anyone",
@@ -4970,7 +5010,7 @@ describe("custody SELF_SERVICE self-restriction (bulk services)", () => {
       bulkCheckOutAssets({
         allowedTeamMemberIds: "all" as const,
         userId: "me",
-        role: OrganizationRoles.SELF_SERVICE,
+        custodyAssign: "self",
         assetIds: ["asset-1"],
         custodianId: "tm-other",
         custodianName: "Other Person",
@@ -5055,7 +5095,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
         custodianName: "Custodian",
         organizationId: "org-1",
         settings: ASSET_INDEX_SETTINGS,
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       })
     ).rejects.toThrow(/checked out while this action was in progress/);
 
@@ -5074,7 +5114,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
       custodianName: "Custodian",
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     }).catch((err: unknown) => err);
 
     expect((caught as ShelfError).status).toBe(409);
@@ -5096,7 +5136,7 @@ describe("bulkCheckOutAssets — status guard gates the batch", () => {
       custodianName: "Custodian",
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     }).catch(() => undefined);
 
     expect(db.custody.createMany).toHaveBeenCalled();
@@ -6005,7 +6045,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
 
       // The custody row is still written — only the status is protected.
@@ -6022,7 +6062,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.IN_CUSTODY);
@@ -6037,6 +6077,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         teamMemberId: "tm-1",
         quantity: 20,
       });
+      stubHolderRows({ id: "custody-1", teamMemberId: "tm-1", quantity: 20 });
       // Zero rows left → the flip-to-AVAILABLE branch fires.
       mockCustodyCount.mockResolvedValue(0);
     });
@@ -6052,7 +6093,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.CHECKED_OUT);
@@ -6067,7 +6108,7 @@ describe("custody writes must not overwrite CHECKED_OUT", () => {
         quantity: 20,
         userId: "user-1",
         organizationId: "org-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
       });
 
       expect(currentStatus).toBe(AssetStatus.AVAILABLE);
@@ -6132,7 +6173,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     // downstream can tell the two cases apart.
     await bulkCheckInAssets({
       userId: "user-1",
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
@@ -6152,7 +6193,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
     await expect(
       bulkCheckInAssets({
         userId: "user-1",
-        role: OrganizationRoles.ADMIN,
+        custodyAssign: "anyone",
         assetIds: ["asset-1", "asset-2"],
         organizationId: "org-1",
         settings: ASSET_INDEX_SETTINGS,
@@ -6197,7 +6238,7 @@ describe("bulk custody paths — kit-derived custody guard", () => {
       custodianName: "Custodian",
       organizationId: "org-1",
       settings: ASSET_INDEX_SETTINGS,
-      role: OrganizationRoles.ADMIN,
+      custodyAssign: "anyone",
     }).catch(() => undefined);
 
     expect(db.custody.deleteMany).toHaveBeenCalledWith({

@@ -15,7 +15,7 @@ import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isDirectBookingBlockedByKit } from "~/modules/asset/utils";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
@@ -54,7 +54,7 @@ function ConditionalActionsDropdown() {
   } = useControlledDropdownMenu();
   const organization = useCurrentOrganization();
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const allSelected = isSelectingAllItems(selectedAssets);
   const buttonTitle = `Book selection ${

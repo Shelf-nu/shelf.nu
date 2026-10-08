@@ -1,5 +1,5 @@
 import type { Asset, User } from "@prisma/client";
-import { AssetType, OrganizationRoles, Prisma } from "@prisma/client";
+import { AssetType, Prisma } from "@prisma/client";
 import {
   KIT_MEMBER_CUSTODY_BLOCKED_TITLE,
   kitMembersCustodyRefusal,
@@ -7,6 +7,7 @@ import {
 import { db } from "~/database/db.server";
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { ShelfError } from "~/utils/error";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { releaseAssetsToAvailableUnlessCheckedOut } from "../asset/custody-status.server";
 
 /**
@@ -255,12 +256,13 @@ export async function lockAssetsForKitMembership(
  * slice. Both callers enforce the contract with `isQuantityTracked` before
  * calling in, so the delete is deliberately NOT scoped to a single custodian —
  * scoping it would be dead code on the only shape that reaches here, and would
- * make the SELF_SERVICE path silently diverge from the ADMIN one.
+ * make the `self`-scoped path silently diverge from the unrestricted one.
  *
  * @param assetId - The ID of the asset to release custody from
  * @param organizationId - The organization ID
- * @param userId - The caller's user ID (for the SELF_SERVICE self-restriction)
- * @param role - The caller's role; SELF_SERVICE may only release their own custody
+ * @param userId - The caller's user ID (for the `self` custody scope)
+ * @param custodyAssign - The caller's custody scope; `self` may only release
+ *   their own custody
  * @param activityEvent - Optional activity event data for audit trail
  *   (records `CUSTODY_RELEASED` atomically when provided)
  */
@@ -268,17 +270,18 @@ export async function releaseCustody({
   assetId,
   organizationId,
   userId,
-  role,
+  custodyAssign,
   activityEvent,
 }: {
   assetId: Asset["id"];
   organizationId: Asset["organizationId"];
   userId: User["id"];
   /**
-   * Caller's role. Required so the SELF_SERVICE self-restriction is enforced
-   * here for EVERY caller (web + mobile), not duplicated in each route.
+   * The caller's custody-assignment scope (`access.custody.assign`). With
+   * `"self"` the service refuses to touch custody of anyone but the caller,
+   * for every caller (web and mobile).
    */
-  role: OrganizationRoles;
+  custodyAssign: RoleAccess["custody"]["assign"];
   /** Optional activity event data - if provided, records CUSTODY_RELEASED event atomically */
   activityEvent?: {
     actorUserId: string;
@@ -294,18 +297,19 @@ export async function releaseCustody({
     // `Custody[]`, so `delete: true` no longer compiles.
     return await db.$transaction(async (tx) => {
       /**
-       * Self-service users may only release custody assigned to them.
+       * A caller whose scope is `self` may only release custody assigned to
+       * them.
        *
        * Read INSIDE the transaction: a check before it is a TOCTOU gap in the
-       * authorization itself — custody reassigned between the read and the
-       * delete would let a self-service user release a custodian that is no
+       * authorization itself. Custody reassigned between the read and the
+       * delete would let a `self`-scoped caller release a custodian that is no
        * longer theirs. Same reasoning as the status guard below, applied to
        * the permission rather than the column.
        *
        * The catch at the bottom rethrows `ShelfError` untouched, so this 403
        * still reaches the user as itself rather than as the generic message.
        */
-      if (role === OrganizationRoles.SELF_SERVICE) {
+      if (custodyAssign === "self") {
         const current = await tx.custody.findFirst({
           where: { assetId, asset: { organizationId } },
           select: { custodian: { select: { userId: true } } },

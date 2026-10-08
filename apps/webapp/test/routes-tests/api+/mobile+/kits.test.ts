@@ -13,6 +13,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -93,7 +94,7 @@ beforeEach(() => {
   requireOrganizationAccessMock.mockResolvedValue(FAKE_ORG_ID);
   requireMobilePermissionMock.mockResolvedValue(undefined);
   getMobileUserContextMock.mockResolvedValue({
-    canSeeAllCustody: true,
+    access: accessFor(["ADMIN"]),
   } as Awaited<ReturnType<typeof getMobileUserContext>>);
 });
 

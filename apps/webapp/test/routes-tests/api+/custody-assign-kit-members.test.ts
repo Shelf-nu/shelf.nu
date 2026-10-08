@@ -29,6 +29,9 @@ import { action as webBulkAssign } from "~/routes/api+/assets.bulk-assign-custod
 import { action as mobileBulkAssign } from "~/routes/api+/mobile+/bulk-assign-custody";
 import { action as mobileAssign } from "~/routes/api+/mobile+/custody.assign";
 import { requirePermission } from "~/utils/roles.server";
+import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import { mobileUserContext } from "@helpers/mobile-user-context";
+import { permissionContext } from "@helpers/role-access";
 
 // @vitest-environment node
 
@@ -102,11 +105,8 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
   requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
   requireMobilePermission: vi.fn().mockResolvedValue(undefined),
-  getMobileUserContext: vi.fn().mockResolvedValue({
-    role: OrganizationRoles.ADMIN,
-    canUseBarcodes: false,
-    canSeeAllCustody: true,
-  }),
+  // Resolved per test in `beforeEach`, from the real role policy.
+  getMobileUserContext: vi.fn(),
 }));
 
 // why: the rate limiter keeps in-process counters across tests.
@@ -233,12 +233,18 @@ const ENDPOINTS = [
 beforeEach(() => {
   vi.clearAllMocks();
 
+  // An admin, with access resolved by the real role policy so the fixture
+  // cannot describe a reach the role does not have.
   vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role: OrganizationRoles.ADMIN,
+    ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
     canUseBarcodes: false,
-    canSeeAllCustody: true,
-  } as Awaited<ReturnType<typeof requirePermission>>);
+  } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+  vi.mocked(getMobileUserContext).mockResolvedValue(
+    mobileUserContext({
+      roles: [OrganizationRoles.ADMIN],
+      canUseBarcodes: false,
+    }) as unknown as Awaited<ReturnType<typeof getMobileUserContext>>
+  );
 
   // `mockResolvedValue`, not `...Once`, so a value one test sets can never be
   // left queued for the next test's read.

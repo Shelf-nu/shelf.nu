@@ -18,7 +18,9 @@
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.scan-assets.tsx}
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 // why: the loader's own logic under test is deriving `assignSession` from
@@ -114,11 +116,11 @@ async function runLoaderExpectingRefusal() {
 describe("scan-assets loader assignSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role: "ADMIN",
-      userOrganizations: [],
-    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({
+        roles: [OrganizationRoles.ADMIN],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
     vi.mocked(db.asset.findMany).mockResolvedValue([]);
   });
 
@@ -253,11 +255,11 @@ describe("scan-assets loader ownership gate", () => {
   });
 
   function mockRole(role: string) {
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-      role,
-      userOrganizations: [],
-    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({
+        roles: [role as OrganizationRoles],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
   }
 
   it("refuses a SELF_SERVICE user who is neither creator nor custodian", async () => {
@@ -306,6 +308,8 @@ describe("scan-assets loader ownership gate", () => {
     mockRole("BASE");
     vi.mocked(getBooking).mockResolvedValue(
       bookingWith({
+        // BASE adds items only while its booking is a draft.
+        status: "DRAFT",
         creatorId: "someone-else",
         custodianUserId: "user-1",
       }) as unknown as Awaited<ReturnType<typeof getBooking>>

@@ -25,6 +25,8 @@ import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
+import { questionsForCheckouts } from "@/lib/custody-source-options";
 import type {
   AssetQuantityFields,
   TeamMember,
@@ -34,6 +36,7 @@ import type {
   AssetType,
   BookingAsset,
   BookingDetailResponse,
+  CheckoutSourceQuestion,
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
@@ -93,6 +96,7 @@ import {
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
@@ -264,9 +268,10 @@ function ScannerContent() {
     [currentOrg?.roles]
   );
 
-  // Self-service users may only assign custody to themselves (mirrors the
+  const access = useRoleAccess();
+  // Custody this member may only take for themselves: no picker (mirrors the
   // web scanner, which pre-selects self and disables the custodian picker).
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
 
   // Native claim / link-existing is gated on qr:update — effectively
   // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
@@ -324,6 +329,16 @@ function ScannerContent() {
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+  // Synchronous twin of `isBookingSubmitting` for the check-out sends: a
+  // second tap on the source sheet's Confirm lands before the state re-render
+  // disables it, and the check-out must not go out twice.
+  const bookingSubmitLock = useRef(false);
+  // "Where do the units come from?", when open: the pools it asks about and
+  // the send its answers ride on. Stays open until the server accepts.
+  const [sourcePrompt, setSourcePrompt] = useState<{
+    questions: CheckoutSourceQuestion[];
+    onConfirm: (sourceLocations: Record<string, string | null>) => void;
+  } | null>(null);
 
   /**
    * Clear the measured height once no drawer can be showing. The drawer host
@@ -359,6 +374,10 @@ function ScannerContent() {
     // True when the workspace requires explicit check-out for this operator's
     // role: only scanned units go out, so a check-out needs at least one scan.
     requireExplicitCheckout: boolean;
+    // Pools on the booking kept at two or more locations that have not gone
+    // out yet: a check-out reaching one asks where its units come from. Empty
+    // when nothing needs asking, or from a server that does not send it.
+    checkoutSourceQuestions: CheckoutSourceQuestion[];
   } | null>(null);
 
   // Also called from the scan paths when a code arrives before the first
@@ -388,6 +407,7 @@ function ScannerContent() {
           data.booking.modelRequests
         ),
         requireExplicitCheckout: !canOfferQuickCheckout(data),
+        checkoutSourceQuestions: data.checkoutSourceQuestions ?? [],
       });
     },
     []
@@ -1796,8 +1816,8 @@ function ScannerContent() {
     if (scannedItems.length === 0 || blockers.length > 0) return;
 
     if (action === "assign_custody") {
-      if (isSelfService) {
-        // Self-service: no picker. Resolve own team-member record and assign.
+      if (takesCustodyForSelfOnly) {
+        // Self-only custody: no picker; resolve own team-member record and assign.
         void assignCustodyToSelf();
       } else {
         setShowCustodyPicker(true);
@@ -1806,7 +1826,9 @@ function ScannerContent() {
       // Blockers guarantee every whole asset and kit here is in custody, and
       // every quantity row has exactly one holder with units to give back.
       const plan = planCustodySubmit("release_custody", scannedItems);
-      const audience: CustodyAudience = { isSelfService };
+      const audience: CustodyAudience = {
+        isSelfService: takesCustodyForSelfOnly,
+      };
       const confirm = describeCustodyConfirm("release_custody", plan, audience);
       Alert.alert(confirm.title, confirm.message, [
         { text: "Cancel", style: "cancel" },
@@ -1823,9 +1845,9 @@ function ScannerContent() {
   };
 
   /**
-   * Self-service custody assignment: the mobile team-members endpoint returns
-   * only the caller's own record for SELF_SERVICE roles, so resolve it and go
-   * straight to the confirm dialog, with no picker.
+   * Self-only custody assignment: the mobile team-members endpoint returns
+   * only the caller's own record when their custody scope is self, so resolve
+   * it and go straight to the confirm dialog, with no picker.
    */
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
@@ -1852,7 +1874,7 @@ function ScannerContent() {
     const plan = planCustodySubmit("assign_custody", scannedItems);
     const audience: CustodyAudience = {
       custodianName: displayName,
-      isSelfService,
+      isSelfService: takesCustodyForSelfOnly,
     };
     const confirm = describeCustodyConfirm("assign_custody", plan, audience);
     Alert.alert(confirm.title, confirm.message, [
@@ -2090,6 +2112,30 @@ function ScannerContent() {
   };
 
   /**
+   * Run a check-out send, first asking "Where do the units come from?" when
+   * `questions` is non-empty. The answers ride on the send; the sheet stays
+   * open until the send succeeds (the send closes it), so a refusal keeps
+   * every answer for a retry. No other sheet is open here: both callers run
+   * from the drawer's submit, through an Alert.
+   *
+   * @param questions The source questions this check-out reaches.
+   * @param send The request, given the sheet's answers when it asked.
+   */
+  const askSourcesThen = (
+    questions: CheckoutSourceQuestion[],
+    send: (sourceLocations?: Record<string, string | null>) => Promise<void>
+  ) => {
+    if (questions.length === 0) {
+      void send();
+      return;
+    }
+    setSourcePrompt({
+      questions,
+      onConfirm: (sourceLocations) => void send(sourceLocations),
+    });
+  };
+
+  /**
    * Send a confirmed fulfil-and-check-out, report what went out, and return to
    * the booking.
    *
@@ -2099,13 +2145,17 @@ function ScannerContent() {
    * @param assigned How many of `assetIds` assign a reserved unit, measured
    *   against the reservations as they stood when the operator confirmed. The
    *   rest are extras, and the report names the two separately.
+   * @param sourceLocations The source sheet's answers, when it asked.
    */
   const submitBookingFulfil = async (
     assetIds: string[],
     kitIds: string[],
-    assigned: number
+    assigned: number,
+    sourceLocations?: Record<string, string | null>
   ) => {
     if (!bookingId || !currentOrg) return;
+    if (bookingSubmitLock.current) return;
+    bookingSubmitLock.current = true;
 
     setIsBookingSubmitting(true);
     const timeZone = (() => {
@@ -2116,23 +2166,30 @@ function ScannerContent() {
       }
     })();
 
-    const { data, error } = await api.fulfilAndCheckoutBooking(
-      currentOrg.id,
-      bookingId,
-      assetIds,
-      kitIds,
-      timeZone
-    );
-    setIsBookingSubmitting(false);
+    const { data, error } = await api
+      .fulfilAndCheckoutBooking(
+        currentOrg.id,
+        bookingId,
+        assetIds,
+        kitIds,
+        timeZone,
+        sourceLocations
+      )
+      .finally(() => {
+        bookingSubmitLock.current = false;
+        setIsBookingSubmitting(false);
+      });
 
     if (error) {
       // A refusal after the assignment step leaves the scanned units on the
       // booking. Re-reading the booking lets the add blockers flag them as
-      // already in this booking.
+      // already in this booking. The source sheet, if open, keeps its answers.
       fetchBookingCtx();
       Alert.alert("Couldn't check out", error);
       return;
     }
+
+    setSourcePrompt(null);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
@@ -2231,15 +2288,32 @@ function ScannerContent() {
       applyBookingCtx(fresh, currentOrg.id);
     }
 
+    // The "From location" questions this check-out reaches, mirroring the web
+    // fulfil drawer: every pool on the booking when the whole booking goes
+    // out, only the scanned ones when only scanned units leave. Read from the
+    // fresh response when it arrived, since `bookingCtx` here is this render's.
+    const allQuestions = fresh
+      ? fresh.checkoutSourceQuestions ?? []
+      : bookingCtx.checkoutSourceQuestions;
+    const scannedOnly = fresh
+      ? !canOfferQuickCheckout(fresh)
+      : bookingCtx.requireExplicitCheckout;
+    const questions = scannedOnly
+      ? questionsForCheckouts(
+          allQuestions,
+          assetIds.map((assetId) => ({ assetId }))
+        )
+      : allQuestions;
+    const send = () =>
+      askSourcesThen(questions, (sourceLocations) =>
+        submitBookingFulfil(assetIds, kitIds, match.matched, sourceLocations)
+      );
+
     const unassignedConfirm = unassignedCheckoutConfirm(match.unassigned);
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        {
-          text: unassignedConfirm.confirmLabel,
-          onPress: () =>
-            void submitBookingFulfil(assetIds, kitIds, match.matched),
-        },
+        { text: unassignedConfirm.confirmLabel, onPress: send },
       ]);
       return;
     }
@@ -2251,11 +2325,7 @@ function ScannerContent() {
       } on "${bookingName || "this booking"}"?`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check out",
-          onPress: () =>
-            void submitBookingFulfil(assetIds, kitIds, match.matched),
-        },
+        { text: "Check out", onPress: send },
       ]
     );
   };
@@ -2416,12 +2486,19 @@ function ScannerContent() {
    * @param batch What the drawer and its confirm named, counted from the list
    *   before the submit: the request carries member asset ids, so the server's
    *   reply cannot tell a scanned kit from its assets.
+   * @param assetIds The scanned asset ids, as the confirm named them.
+   * @param sourceLocations The source sheet's answers, when it asked.
    */
-  const submitBookingCheckout = async (batch: SelectionCounts) => {
-    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+  const submitBookingCheckout = async (
+    batch: SelectionCounts,
+    assetIds: string[],
+    sourceLocations?: Record<string, string | null>
+  ) => {
+    if (!bookingId || !currentOrg || assetIds.length === 0) return;
+    if (bookingSubmitLock.current) return;
+    bookingSubmitLock.current = true;
 
     setIsBookingSubmitting(true);
-    const assetIds = bookingCheckinItems.map((i) => i.targetId);
     const timeZone = (() => {
       try {
         return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -2433,18 +2510,27 @@ function ScannerContent() {
     // No per-asset quantities: a bare id checks out every remaining unit of a
     // quantity-tracked asset, which is the default the scanner offers. Picking
     // a smaller count is the booking screen's "Select to Check Out" flow.
-    const { data: result, error } = await api.partialCheckoutBooking(
-      currentOrg.id,
-      bookingId,
-      assetIds,
-      timeZone
-    );
-    setIsBookingSubmitting(false);
+    const { data: result, error } = await api
+      .partialCheckoutBooking(
+        currentOrg.id,
+        bookingId,
+        assetIds,
+        timeZone,
+        undefined,
+        sourceLocations
+      )
+      .finally(() => {
+        bookingSubmitLock.current = false;
+        setIsBookingSubmitting(false);
+      });
 
     if (error) {
+      // The source sheet, if open, stays up with its answers for a retry.
       Alert.alert("Error", error);
       return;
     }
+
+    setSourcePrompt(null);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
@@ -2467,6 +2553,11 @@ function ScannerContent() {
                       : {}),
                   }
                 : a
+            ),
+            // A bare id sends every remaining unit, so these pools' questions
+            // are answered and must not be asked again by the next batch.
+            checkoutSourceQuestions: prev.checkoutSourceQuestions.filter(
+              (question) => !submittedIds.has(question.assetId)
             ),
           }
         : prev
@@ -2529,24 +2620,41 @@ function ScannerContent() {
     // opened, and a scanning session runs for minutes. The response also
     // refreshes the scan-time gates, the way the fulfil submit does.
     let unassignedConfirm = null;
+    // The source questions the send reads: this render's context, replaced by
+    // the fresh read below when one is taken.
+    let allQuestions = bookingCtx?.checkoutSourceQuestions ?? [];
     if (bookingCtx?.bookingStatus === "RESERVED") {
       setIsBookingSubmitting(true);
       const { data: fresh } = await api.booking(bookingId, currentOrg.id);
       setIsBookingSubmitting(false);
-      if (fresh) applyBookingCtx(fresh, currentOrg.id);
+      if (fresh) {
+        applyBookingCtx(fresh, currentOrg.id);
+        allQuestions = fresh.checkoutSourceQuestions ?? [];
+      }
       unassignedConfirm = unassignedCheckoutConfirm(
         fresh
           ? toOutstandingReservations(fresh.booking.modelRequests)
           : bookingCtx.outstandingModelRequests
       );
     }
+
+    // Bare ids: each scanned pool sends every unit it still has to go out, so
+    // a pool kept at two or more locations is asked where they come from
+    // after the confirm and before the send.
+    const assetIds = bookingCheckinItems.map((i) => i.targetId);
+    const questions = questionsForCheckouts(
+      allQuestions,
+      assetIds.map((assetId) => ({ assetId }))
+    );
+    const send = () =>
+      askSourcesThen(questions, (sourceLocations) =>
+        submitBookingCheckout(batch, assetIds, sourceLocations)
+      );
+
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        {
-          text: unassignedConfirm.confirmLabel,
-          onPress: () => void submitBookingCheckout(batch),
-        },
+        { text: unassignedConfirm.confirmLabel, onPress: send },
       ]);
       return;
     }
@@ -2560,10 +2668,7 @@ function ScannerContent() {
       }),
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: () => void submitBookingCheckout(batch),
-        },
+        { text: "Check Out", onPress: send },
       ]
     );
   };
@@ -2656,7 +2761,9 @@ function ScannerContent() {
   const submitLabelMap: Record<ScannerAction, string> = {
     view: "",
     // Self-service users can only take custody themselves — no picker step.
-    assign_custody: isSelfService ? "Take Custody" : "Choose Custodian",
+    assign_custody: takesCustodyForSelfOnly
+      ? "Take Custody"
+      : "Choose Custodian",
     release_custody: "Release All",
     update_location: "Choose Location",
   };
@@ -3125,6 +3232,19 @@ function ScannerContent() {
           setQuantityEditQrId(null);
         }}
         onClose={() => setQuantityEditQrId(null)}
+      />
+
+      {/* "Where do the units come from?": asked after the check-out confirm
+          for scanned pools kept at two or more locations. Stays open until
+          the server accepts. */}
+      <CheckoutSourceSheet
+        visible={sourcePrompt != null}
+        questions={sourcePrompt?.questions ?? []}
+        isSubmitting={isBookingSubmitting}
+        onConfirm={(sourceLocations) =>
+          sourcePrompt?.onConfirm(sourceLocations)
+        }
+        onClose={() => setSourcePrompt(null)}
       />
     </View>
   );
