@@ -296,15 +296,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         entity: PermissionEntity.asset,
         action: PermissionAction.delete,
       },
-      // Asset has no dedicated `archive` PermissionAction (it is granted only to
-      // bookings/audits); archiving is a state mutation, so gate it on `update`.
+      // Reinstating is the inverse of archiving, so one grant covers both.
       archive: {
         entity: PermissionEntity.asset,
-        action: PermissionAction.update,
+        action: PermissionAction.archive,
       },
       reinstate: {
         entity: PermissionEntity.asset,
-        action: PermissionAction.update,
+        action: PermissionAction.archive,
       },
       "relink-qr-code": {
         entity: PermissionEntity.asset,

@@ -3820,7 +3820,7 @@ export async function bulkArchiveAssets({
       organizationId,
       currentSearchParams,
       settings,
-      // Reachable only with the asset `update` permission, which BASE and
+      // Reachable only with the asset `archive` permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
@@ -3955,7 +3955,7 @@ export async function bulkUnarchiveAssets({
       organizationId,
       currentSearchParams,
       settings,
-      // Reachable only with the asset `update` permission, which BASE and
+      // Reachable only with the asset `archive` permission, which BASE and
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,

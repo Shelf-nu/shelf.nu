@@ -1,7 +1,7 @@
 /**
- * The Archived tab is the one place a user can see and reinstate archived
- * assets. Which roles get it is a product decision (issue #382), so it is
- * pinned here rather than left to whatever the permission matrix drifts to.
+ * Who may archive and reinstate assets, and so who sees the Archived tab
+ * (issue #382). The grant is `asset: archive`: ADMIN and OWNER hold it, BASE
+ * and SELF_SERVICE do not.
  *
  * BASE and SELF_SERVICE exist to consume the AVAILABLE inventory — BASE plans
  * bookings and runs audits, SELF_SERVICE runs a booking end to end. An
@@ -11,43 +11,48 @@
  * @see {@link file://./use-can-archive-assets.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
-import { describe, expect, it } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { useCanArchiveAssets } from "./use-can-archive-assets";
 
-/**
- * The exact check `useCanArchiveAssets` performs. Asserted directly so the
- * test needs no React route-loader context — the hook is a thin wrapper whose
- * only logic IS this call.
- */
-const canArchive = (roles: OrganizationRoles[]) =>
-  userHasPermission({
-    roles,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+const mockRoles = vi.hoisted(() => ({
+  current: undefined as OrganizationRoles[] | undefined,
+}));
+
+// why: the real hook reads the `_layout` route loader, which needs a data
+// router; the roles it returns are the only input this hook has.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockRoles.current,
+}));
+
+/** Renders the hook for a membership and returns its answer. */
+const canArchive = (roles: OrganizationRoles[] | undefined) => {
+  mockRoles.current = roles;
+  return renderHook(() => useCanArchiveAssets()).result.current;
+};
+
+describe("who may archive and reinstate assets", () => {
+  beforeEach(() => {
+    mockRoles.current = undefined;
   });
 
-describe("who sees the Archived tab", () => {
-  it("shows it to OWNER and ADMIN, who can archive and reinstate", () => {
+  it("allows OWNER and ADMIN", () => {
     expect(canArchive([OrganizationRoles.OWNER])).toBe(true);
     expect(canArchive([OrganizationRoles.ADMIN])).toBe(true);
   });
 
-  it("hides it from BASE, who plans bookings and cannot reinstate", () => {
+  it("refuses BASE, who plans bookings and cannot reinstate", () => {
     expect(canArchive([OrganizationRoles.BASE])).toBe(false);
   });
 
-  it("hides it from SELF_SERVICE, who books and takes custody for themselves", () => {
+  it("refuses SELF_SERVICE, who books and takes custody for themselves", () => {
     expect(canArchive([OrganizationRoles.SELF_SERVICE])).toBe(false);
   });
 
-  it("hides it when the role list is empty", () => {
-    // why: `useOrganizationRoles` returns undefined roles before the layout
-    // loader resolves; the gate must fail closed, not flash the tab.
+  it("refuses while the layout data has not loaded", () => {
+    // The gate must fail closed, not flash the Archived tab.
+    expect(canArchive(undefined)).toBe(false);
     expect(canArchive([])).toBe(false);
   });
 });

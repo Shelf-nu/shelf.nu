@@ -40,9 +40,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
       userId,
       entity: PermissionEntity.asset,
-      // Asset has no dedicated `archive` PermissionAction (it is granted only to
-      // bookings/audits); archiving is a state mutation, so gate it on `update`.
-      action: PermissionAction.update,
+      action: PermissionAction.archive,
     });
 
     // Fetch asset index settings to resolve "select all" in the right mode.

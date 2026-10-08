@@ -5,6 +5,7 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -115,6 +116,8 @@ function ConditionalDropdown() {
     : false;
 
   const roles = useOrganizationRoles();
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAssets = useCanArchiveAssets();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
@@ -211,10 +214,13 @@ function ConditionalDropdown() {
         <BulkDeleteDialog />
         <BulkMarkAvailabilityDialog type="available" />
         <BulkMarkAvailabilityDialog type="unavailable" />
-        <BulkArchiveDialog type="archive" />
-        <BulkArchiveDialog type="reinstate" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
+      </When>
+      {/* Archive and Reinstate share their own grant, `asset: archive`. */}
+      <When truthy={canArchiveAssets}>
+        <BulkArchiveDialog type="archive" />
+        <BulkArchiveDialog type="reinstate" />
       </When>
 
       <BulkDownloadQrDialog
@@ -482,33 +488,35 @@ function ConditionalDropdown() {
                 />
               </DropdownMenuItem>
 
-              <DropdownMenuItem className="py-1 lg:p-0">
-                <BulkUpdateDialogTrigger
-                  type="archive"
-                  label="Archive"
-                  onClick={closeMenu}
-                  disabled={
-                    archivedView
-                      ? { reason: "These assets are already archived." }
-                      : isLoading
-                  }
-                />
-              </DropdownMenuItem>
-              <DropdownMenuItem className="border-b py-1 lg:p-0">
-                <BulkUpdateDialogTrigger
-                  type="reinstate"
-                  label="Reinstate"
-                  onClick={closeMenu}
-                  disabled={
-                    archivedView
-                      ? isLoading
-                      : {
-                          reason:
-                            "Switch to the Archived view to reinstate assets.",
-                        }
-                  }
-                />
-              </DropdownMenuItem>
+              <When truthy={canArchiveAssets}>
+                <DropdownMenuItem className="py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="archive"
+                    label="Archive"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? { reason: "These assets are already archived." }
+                        : isLoading
+                    }
+                  />
+                </DropdownMenuItem>
+                <DropdownMenuItem className="border-b py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="reinstate"
+                    label="Reinstate"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? isLoading
+                        : {
+                            reason:
+                              "Switch to the Archived view to reinstate assets.",
+                          }
+                    }
+                  />
+                </DropdownMenuItem>
+              </When>
 
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger

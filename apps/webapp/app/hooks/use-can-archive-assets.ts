@@ -1,28 +1,22 @@
 /**
  * Whether the current user can archive and reinstate assets.
  *
- * Gates the Active/Archived/All view toggle on the asset index (issue #382),
- * and the wording of the "nothing matched your search" empty state, so the two
- * never disagree about whether an Archived tab exists.
+ * Gates every archive surface on the client (issue #382): the Archive /
+ * Reinstate item in the asset Actions menu, the two bulk-menu items and their
+ * dialogs, the Active/Archived/All view toggle on the asset index, and the
+ * wording of the "nothing matched your search" empty state. Keying them all off
+ * one check keeps the view and the actions in step: you see the Archived tab if
+ * and only if you can act on what is in it.
  *
- * ## Why this is a role gate and not just a permission check
+ * The grant is `asset: archive`, the same one the server enforces on the detail
+ * action and on `POST /api/assets/bulk-archive`. ADMIN and OWNER hold it through
+ * the allow-all short-circuit; BASE and SELF_SERVICE do not. Those two roles
+ * consume the AVAILABLE inventory, and an archived asset is out of service and
+ * not theirs to reinstate, so the tab would only show them things they can
+ * neither use nor fix.
  *
- * BASE and SELF_SERVICE exist to consume the AVAILABLE inventory: BASE plans
- * bookings and runs audits (it holds no `checkout`/`checkin`), SELF_SERVICE
- * runs a booking end to end and takes custody. Both are asking "what can I
- * book / take right now?".
- *
- * An archived asset is never the answer to that question — it is out of
- * service, and neither role can reinstate it. Showing them a tab full of
- * things they can neither use nor fix works against the point of archiving,
- * which is to clear exactly that clutter out of their way.
- *
- * `asset: update` is the permission archiving and reinstating are gated on
- * (see the asset actions dropdown and the bulk actions dropdown), so keying
- * the toggle off the same one keeps the view and the actions in step: you see
- * the tab if and only if you can act on what is in it.
- *
- * @returns `true` for ADMIN / OWNER, `false` for BASE / SELF_SERVICE.
+ * @returns `true` when the member holds `asset: archive`, `false` otherwise
+ *   (including while the layout data is still loading).
  */
 
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -38,6 +32,6 @@ export function useCanArchiveAssets(): boolean {
   return userHasPermission({
     roles,
     entity: PermissionEntity.asset,
-    action: PermissionAction.update,
+    action: PermissionAction.archive,
   });
 }
