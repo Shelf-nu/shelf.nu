@@ -120,6 +120,8 @@ export async function action({ request }: ActionFunctionArgs) {
       organizationId,
       hints,
       userId: user.id,
+      // "Check In All": the phone's one tap.
+      provenance: { surface: "phone", method: "quick" },
     });
 
     return data({

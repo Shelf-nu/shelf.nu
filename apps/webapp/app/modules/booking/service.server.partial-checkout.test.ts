@@ -679,6 +679,122 @@ describe("partialCheckoutBooking", () => {
     );
   });
 
+  it("records the method the phone declared, and null when the bundle sent none", async () => {
+    expect.assertions(2);
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(reservedBooking);
+
+    // A current bundle on the Select to Check Out path.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1"],
+      provenance: { surface: "phone", method: "selected" },
+    });
+    // An older bundle: the route knows the surface but was told no method.
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-2"],
+      provenance: { surface: "phone", method: null },
+    });
+
+    const metas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKOUT")
+      .map((event) => event.meta);
+
+    expect(metas[0]).toEqual(
+      expect.objectContaining({ method: "selected", surface: "phone" })
+    );
+    // Never guessed: the method is recorded as null, the surface still as phone.
+    expect(metas[1]).toEqual(
+      expect.objectContaining({ method: null, surface: "phone" })
+    );
+  });
+
+  it("keeps the scan's method on the events when the batch covers the whole booking and delegates to the full check-out", async () => {
+    expect.assertions(1);
+
+    // Every asset of the reserved booking scanned at once: the partial path
+    // hands the batch to `checkoutBooking`, whose events must still say the
+    // rows were scanned on the web rather than nothing at all.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValueOnce(reservedBooking)
+      .mockResolvedValue({ ...reservedBooking, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    const checkedOutMetas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT")
+      .map((event) => event.meta);
+
+    expect(checkedOutMetas).toEqual([
+      { method: "scanned", surface: "web" },
+      { method: "scanned", surface: "web" },
+      { method: "scanned", surface: "web" },
+    ]);
+  });
+
+  it("keeps a ticked slice selected when the batch closes the booking through the full check-out", async () => {
+    expect.assertions(2);
+
+    // Every row of the reserved booking in one web batch: ba-2 was ticked
+    // "without scanning", the rest scanned. The partial path hands the batch
+    // to `checkoutBooking`, whose per-asset events must still resolve each
+    // asset's slice rather than stamp the batch's method on every row.
+    const withSlices = {
+      ...reservedBooking,
+      bookingAssets: reservedBooking.bookingAssets.map((ba, i) => ({
+        ...ba,
+        id: `ba-${i + 1}`,
+      })),
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValueOnce(withSlices)
+      .mockResolvedValue({ ...withSlices, status: BookingStatus.ONGOING });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      assetIds: ["asset-1", "asset-2", "asset-3"],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-2"],
+      },
+    });
+
+    const checkedOutMetas = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT")
+      .map((event) => [event.assetId, event.meta]);
+
+    expect(checkedOutMetas).toEqual([
+      ["asset-1", { method: "scanned", surface: "web" }],
+      ["asset-2", { method: "selected", surface: "web" }],
+      ["asset-3", { method: "scanned", surface: "web" }],
+    ]);
+    // The booking's status line names both ways.
+    expect(createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("(scanned and selected on the web)"),
+      })
+    );
+  });
+
   it("records BOOKING_STATUS_CHANGED RESERVED → ONGOING on the batch that checks the booking out", async () => {
     expect.assertions(1);
 
@@ -1795,6 +1911,114 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         data: { status: AssetStatus.CHECKED_OUT },
       })
     );
+  });
+
+  it("records a ticked slice as selected and a scanned slice of the same asset as scanned", async () => {
+    expect.assertions(1);
+
+    // The batteries sit on two slices of the booking: standalone (10) and
+    // kit-driven (20). The web scan page scanned the standalone slice and
+    // ticked the kit slice "without scanning", so each slice's event must
+    // carry its own method even though both name the same asset.
+    const multiSliceBooking = {
+      ...qtyOnlyBooking,
+      status: BookingStatus.ONGOING,
+      _count: { bookingAssets: 2 },
+      bookingAssets: [
+        {
+          id: "ba-standalone",
+          quantity: 10,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [],
+          },
+        },
+        {
+          id: "ba-kit",
+          quantity: 20,
+          asset: {
+            id: "asset-battery",
+            status: AssetStatus.AVAILABLE,
+            type: AssetType.QUANTITY_TRACKED,
+            title: "Batteries",
+            unitOfMeasure: null,
+            assetKits: [{ kitId: "kit-1" }],
+          },
+        },
+      ],
+    };
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(multiSliceBooking);
+    // why: the slice helper resolves each slice by id and pools the two
+    // same-asset claims; both pivot rows are needed for that.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([
+      {
+        id: "ba-standalone",
+        assetId: "asset-battery",
+        quantity: 10,
+        assetKitId: null,
+      },
+      {
+        id: "ba-kit",
+        assetId: "asset-battery",
+        quantity: 20,
+        assetKitId: "kit-1",
+      },
+    ]);
+    // why: the qty loop locks the asset per disposition; return the battery.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-battery",
+      title: "Batteries",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      quantity: 30,
+    });
+
+    await partialCheckoutBooking({
+      ...baseParams,
+      checkouts: [
+        {
+          assetId: "asset-battery",
+          bookingAssetId: "ba-standalone",
+          quantity: 3,
+        },
+        { assetId: "asset-battery", bookingAssetId: "ba-kit", quantity: 4 },
+      ],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-kit"],
+      },
+    });
+
+    const checkoutEvents = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKOUT")
+      .map((event) => [event.assetId, event.meta]);
+
+    // One event per disposition, in submit order; keying the tick by asset
+    // would have marked both slices the same way.
+    expect(checkoutEvents).toEqual([
+      [
+        "asset-battery",
+        expect.objectContaining({ method: "scanned", surface: "web" }),
+      ],
+      [
+        "asset-battery",
+        expect.objectContaining({ method: "selected", surface: "web" }),
+      ],
+    ]);
   });
 
   /**

@@ -443,6 +443,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // QUANTITY_TRACKED assets. The schema extension lives on
     // `partialCheckoutAssetsSchema` (imported by `checkoutAssets`), so
     // forwarding the FormData unchanged is sufficient.
+    // Everything on this page went through the scanner, except the slices the
+    // drawer names in `selectedBookingAssetIds`: those were checked "without
+    // scanning" and are recorded as selected.
     return await checkoutAssets({
       formData,
       request,
@@ -450,6 +453,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       userId,
       authSession,
+      provenance: { surface: "web", method: "scanned" },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

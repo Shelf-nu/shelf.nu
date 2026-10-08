@@ -108,6 +108,19 @@ describe("checkin-assets action", () => {
     vi.clearAllMocks();
   });
 
+  it("records the page's batch as scanned on the web, leaving ticked rows to the form", async () => {
+    // The page is the scanner: everything on it was scanned unless the drawer
+    // named the slice in `selectedBookingAssetIds[]`, which the sink reads off
+    // the form.
+    await postCheckin({ role: OrganizationRoles.ADMIN });
+
+    expect(checkinAssetsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "web", method: "scanned" },
+      })
+    );
+  });
+
   it("refuses SELF_SERVICE on a booking they neither created nor hold, with a 403 and no check-in", async () => {
     const response = await postCheckin({
       role: OrganizationRoles.SELF_SERVICE,

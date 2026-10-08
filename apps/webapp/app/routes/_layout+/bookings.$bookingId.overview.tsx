@@ -1804,6 +1804,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           from: basicBookingInfo.from,
           to: basicBookingInfo.to,
           userId: user.id,
+          // The booking header's one-click "Check out".
+          provenance: { surface: "web", method: "quick" },
           // The confirm dialog's "From location" picks, one per pool at two
           // or more placements. Absent when the dialog asked nothing.
           sourceLocations: parseSourceLocationsFromFormData(formData),
@@ -1849,6 +1851,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           userId,
           authSession,
+          provenance: { surface: "web", method: "quick" },
         });
       }
       case "checkIn": {
@@ -1900,6 +1903,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           userId: user.id,
           specificAssetIds:
             specificAssetIds.length > 0 ? specificAssetIds : undefined,
+          // The header's one-click check-in. The "Check in selected items"
+          // dialog posts `partial-checkin` on every path, the early final one
+          // included, so this intent is always quick and the explicit-rule
+          // guard above is right to refuse it.
+          provenance: { surface: "web", method: "quick" },
         });
 
         // Only write notes for assets that were actually checked out before
@@ -1933,6 +1941,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
       }
       case "partial-checkin": {
+        // The "Check in selected items" dialog over the booking's list.
         return await checkinAssets({
           formData,
           request,
@@ -1940,9 +1949,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           userId,
           authSession,
+          provenance: { surface: "web", method: "selected" },
         });
       }
       case "partial-checkout": {
+        // The "Check out selected items" dialog over the booking's list.
         return await checkoutAssets({
           formData,
           request,
@@ -1950,6 +1961,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           userId,
           authSession,
+          provenance: { surface: "web", method: "selected" },
         });
       }
       case "removeAsset": {

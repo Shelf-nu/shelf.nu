@@ -164,9 +164,58 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       checkouts: undefined,
       userId: "user-1",
       hints: { timeZone: "UTC", locale: "en-US" },
+      // Legacy clients omit `method` too; it is recorded as null, never guessed.
+      provenance: { surface: "phone", method: null },
       // No `sourceLocations` in the body: no answers, so the default applies.
       sourceLocations: new Map(),
     });
+  });
+
+  it("hands the service the method the app declared, on the phone", async () => {
+    (partialCheckoutBooking as any).mockResolvedValue({
+      checkedOutAssetCount: 1,
+      remainingAssetCount: 1,
+      isComplete: false,
+      booking: { id: "booking-1", name: "Test Booking", status: "ONGOING" },
+    });
+
+    for (const method of ["scanned", "selected"]) {
+      await action(
+        createActionArgs({
+          request: createPartialCheckoutRequest({
+            bookingId: "booking-1",
+            assetIds: [assetCuid1],
+            method,
+          }),
+        })
+      );
+      expect(partialCheckoutBooking).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          provenance: { surface: "phone", method },
+        })
+      );
+    }
+  });
+
+  it("records a method the server does not know as null, and still hands the batch over", async () => {
+    // "quick" is server-only, so a client declaring it is not believed. The
+    // field only labels the batch, so it must not refuse a real hand-over.
+    const response = await action(
+      createActionArgs({
+        request: createPartialCheckoutRequest({
+          bookingId: "booking-1",
+          assetIds: [assetCuid1],
+          method: "quick",
+        }),
+      })
+    );
+
+    expect((response as unknown as Response).status).toBe(200);
+    expect(partialCheckoutBooking).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: null },
+      })
+    );
   });
 
   it("passes new { checkouts: [{ assetId, quantity }] } payload through to the service", async () => {
@@ -209,6 +258,7 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       userId: "user-1",
       // Body-supplied timeZone overrides the Accept-Language/cookie hints.
       hints: expect.objectContaining({ timeZone: "Europe/Berlin" }),
+      provenance: { surface: "phone", method: null },
       sourceLocations: new Map(),
     });
   });

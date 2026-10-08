@@ -1,4 +1,7 @@
-import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
+import {
+  BOOKING_RESERVE_BLOCKED_LABELS,
+  EXPLICIT_REQUIREMENT_LABELS,
+} from "@shelf/labels";
 import { useState, useCallback, useMemo, useRef } from "react";
 import {
   View,
@@ -60,6 +63,7 @@ import { announce } from "@/lib/a11y";
 import { submitFromSheet } from "@/lib/sheet-submit";
 import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
+import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
 import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
@@ -132,6 +136,12 @@ export default function BookingDetailScreen() {
   // completes the booking whatever went out. The workspace's explicit-check-in
   // policy is already folded in by the server.
   const [canCheckinAll, setCanCheckinAll] = useState(false);
+  // Whether the workspace allows this role the quick check-in at all. Kept
+  // apart from `canCheckinAll` (which also folds in the booking's state and
+  // the permission) so the screen can say WHY "Check In All" is missing when
+  // it is the workspace's explicit-check-in rule that hides it. An older
+  // server omits the flag; read that as allowed, like `canCheckinAll` does.
+  const [canQuickCheckin, setCanQuickCheckin] = useState(true);
   // The check-out twin: false hides "Check Out All Assets". Read through
   // canOfferQuickCheckout, which keeps the button for servers without the flag.
   const [canQuickCheckout, setCanQuickCheckout] = useState(true);
@@ -253,6 +263,7 @@ export default function BookingDetailScreen() {
     setCanCheckinAll(
       data.canCheckinAll ?? (data.canCheckin && data.canQuickCheckin)
     );
+    setCanQuickCheckin(data.canQuickCheckin ?? true);
     setCanQuickCheckout(canOfferQuickCheckout(data));
     setBookingActions(data.bookingActions);
     setSourceQuestions(data.checkoutSourceQuestions ?? []);
@@ -467,7 +478,9 @@ export default function BookingDetailScreen() {
           bookingId,
           assetIds,
           getTimeZone(),
-          checkins.length > 0 ? checkins : undefined
+          checkins.length > 0 ? checkins : undefined,
+          // Rows ticked in this screen's list, never scanned.
+          BOOKING_METHOD.selected
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -563,7 +576,9 @@ export default function BookingDetailScreen() {
           assetIds,
           getTimeZone(),
           checkouts.length > 0 ? checkouts : undefined,
-          sourceLocations
+          sourceLocations,
+          // Rows ticked in this screen's list, never scanned.
+          BOOKING_METHOD.selected
         ),
       onAccepted: ({ data }) => {
         closeSheet?.();
@@ -1972,6 +1987,16 @@ export default function BookingDetailScreen() {
               </TouchableOpacity>
             )}
 
+            {/* The one line that says why the one-tap check-out is missing:
+                the workspace's rule for this role. The scan and select paths
+                below are how they check out. Same words as the web's settings
+                card, from @shelf/labels. */}
+            {canCheckout && !canQuickCheckout && (
+              <Text style={styles.explicitRequirementHint}>
+                {EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.PHONE_HINT}
+              </Text>
+            )}
+
             {/* Progressive check-out persists while reserved assets remain, even
                 after the booking has gone ONGOING (canPartialCheckout, not
                 canCheckout) so the user can keep taking the rest. Scanning is
@@ -2113,6 +2138,13 @@ export default function BookingDetailScreen() {
                     />
                     <Text style={styles.actionButtonText}>Check In All</Text>
                   </TouchableOpacity>
+                )}
+
+                {/* The check-in twin of the line above "Scan to Check Out". */}
+                {canCheckin && !canQuickCheckin && (
+                  <Text style={styles.explicitRequirementHint}>
+                    {EXPLICIT_REQUIREMENT_LABELS.CHECKIN.PHONE_HINT}
+                  </Text>
                 )}
 
                 {canCheckin && (
@@ -2745,6 +2777,13 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   checkinActions: {
     gap: spacing.sm,
+  },
+  // Why a one-tap button is missing, under the place it would have been.
+  explicitRequirementHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+    textAlign: "center",
+    paddingHorizontal: spacing.md,
   },
   // Lifecycle actions overflow menu (Android)
   overflowBackdrop: {
