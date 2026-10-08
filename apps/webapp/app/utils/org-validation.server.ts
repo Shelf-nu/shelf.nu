@@ -155,6 +155,7 @@ export async function assertAssetsBelongToOrg(
   const uniqueIds = [...new Set(assetIds)];
 
   const found = await client.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership guard; archived assets still belong to the org and are refused by the archived guard instead
     where: { id: { in: uniqueIds }, organizationId },
     select: { id: true },
   });

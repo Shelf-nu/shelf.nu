@@ -5945,6 +5945,7 @@ export async function updateKitAssets({
     // child Custody row instead of defaulting to 1.
     const allAssetsForKit = await db.asset
       .findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the picker submits the kit's whole membership; archived members may be kept or removed (the guard below refuses only adds and quantity changes)
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
@@ -7514,6 +7515,7 @@ export async function bulkRemoveAssetsFromKits({
     // `assetKits.kit`, then flatten back into a synthetic `asset.kit`
     // shape so the rest of this function reads as it did pre-pivot.
     const assetRows = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing assets from kits is allowed for archived assets
       where: { id: { in: resolvedIds }, organizationId },
       select: {
         id: true,

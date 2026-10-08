@@ -128,6 +128,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       db.asset.count({
         where: {
           organizationId,
+          // Dashboard KPI: active inventory only, like the status groupBy.
+          archivedAt: null,
           custody: {
             some: {
               custodian: {

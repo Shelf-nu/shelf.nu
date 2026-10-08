@@ -10,4 +10,5 @@ module.exports = {
   "no-test-files-in-routes": require("./eslint-local-rules/no-test-files-in-routes.cjs"),
   "no-direct-role-checks": require("./eslint-local-rules/no-direct-role-checks.cjs"),
   "no-hand-coerced-numeric-transform": require("./eslint-local-rules/no-hand-coerced-numeric-transform.cjs"),
+  "require-archived-at-check-on-asset-queries": require("./eslint-local-rules/require-archived-at-check-on-asset-queries.cjs"),
 };

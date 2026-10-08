@@ -384,7 +384,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (standaloneAssetIds.length === 1) {
         const [singleAssetId] = standaloneAssetIds;
         const addedAsset = await db.asset.findFirst({
-          where: { id: singleAssetId, organizationId },
+          // createBooking already refused archived assets.
+          where: { id: singleAssetId, organizationId, archivedAt: null },
           select: { id: true, type: true },
         });
         if (addedAsset && isQuantityTracked(addedAsset)) {

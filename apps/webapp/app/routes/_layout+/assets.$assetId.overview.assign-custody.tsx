@@ -234,6 +234,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * missing asset as a 500.
      */
     const targetAsset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence lookup ahead of the archived guard below, which must see archived rows to answer 'archived' rather than 'not found'
       where: { id: assetId, organizationId },
       select: { type: true },
     });
@@ -395,6 +396,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         if (claimed.count === 0) {
           const blocked = await tx.asset.findFirst({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: tells the zero-row claim's causes apart, so it must read an archived row's archivedAt
             where: { id: assetId, organizationId },
             select: { title: true, archivedAt: true },
           });

@@ -66,6 +66,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify asset exists and belongs to org
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: lookup ahead of the location write; the archive guard must see the row to refuse with the archived message
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -332,7 +333,7 @@ export async function action({ request }: ActionFunctionArgs) {
       );
 
       const refreshed = await tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` already org-verified by the `db.asset.findUnique({ where: { id, organizationId } })` guard at the top of this action; this is the in-tx re-read; why: response re-read of the asset this action just wrote
         where: { id: assetId },
         select: {
           id: true,

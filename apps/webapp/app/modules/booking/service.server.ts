@@ -1132,6 +1132,7 @@ export async function createBooking({
     let individualOverlapAssetIds = new Set<string>();
     if (overlapAssetIds.length > 0) {
       const overlapTypes = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup runs before the archive guard below, which must be the one to refuse archived ids
         where: {
           id: { in: overlapAssetIds },
           organizationId: booking.organizationId,
@@ -1362,6 +1363,7 @@ export async function createBooking({
         if (eventAssetIds.length > 0) {
           const assetTypes = await tx.asset.findMany({
             where: {
+              archivedAt: null,
               id: { in: eventAssetIds },
               organizationId: booking.organizationId,
             },
@@ -6491,6 +6493,7 @@ export async function checkinBooking({
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in note names assets already on the booking, archived ones included
           where: { id: { in: specificAssetIds }, organizationId },
           select: {
             id: true,
@@ -7387,6 +7390,7 @@ export async function partialCheckinBooking({
     );
 
     const scannedAssets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must reach assets already on the booking, archived ones included
       where: { id: { in: effectiveAssetIds }, organizationId },
       select: { id: true, title: true },
     });
@@ -8681,7 +8685,7 @@ export async function partialCheckinBooking({
       const assetsWithKitInfo =
         assetIdsTouched.length > 0
           ? await db.asset.findMany({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking; why: check-in note names assets already on the booking, archived ones included
               where: { id: { in: assetIdsTouched } },
               select: {
                 id: true,
@@ -9124,6 +9128,14 @@ export async function partialCheckoutBooking({
       });
     }
 
+    // An archived asset is out of service and must never go out (issue #382).
+    // Partial check-out is its own path, so it needs the same backstop the
+    // full check-out has.
+    await assertAssetsAreNotArchived({
+      assetIds: effectiveAssetIds,
+      organizationId,
+    });
+
     // QUANTITY_TRACKED dispositions must carry a positive `quantity`. INDIVIDUAL
     // rows always get implicit `quantity = 1` upstream, so this guard only fires
     // on malformed qty payloads from a direct API caller.
@@ -9360,6 +9372,7 @@ export async function partialCheckoutBooking({
     // look at conflicting BookingAsset rows (the `asset.bookings[]`
     // implicit relation no longer exists).
     const scannedAssetsWithConflicts = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: conflict read for scanned assets already on the booking; dropping archived ids here would skip their checks silently
       where: { id: { in: assetIds }, organizationId },
       include: {
         bookingAssets: {
@@ -9933,6 +9946,7 @@ export async function partialCheckoutBooking({
             // Error path only — resolve the titles for a message that names
             // what was lost instead of failing anonymously.
             const taken = await tx.asset.findMany({
+              // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: error-path title lookup for ids this call just tried to flip
               where: {
                 id: { in: individualToFlip },
                 organizationId,
@@ -10398,6 +10412,7 @@ export async function partialCheckoutBooking({
         // related kit through the pivot row (kits-as-bag-of-assets still treats
         // each asset as a member of at most one kit in this code path).
         const assetsWithKitInfo = await tx.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: activity note names the assets this check-out touched, by id
           where: { id: { in: assetIdsToCheckOut }, organizationId },
           select: {
             id: true,
@@ -10973,7 +10988,7 @@ export async function updateBookingAssets({
       // shortfall message without a second read, and `assetModelId` groups
       // the new standalone rows by model for the model reservation guard.
       const validAssets = await tx.asset.findMany({
-        where: { id: { in: uniqueAssetIds }, organizationId },
+        where: { id: { in: uniqueAssetIds }, organizationId, archivedAt: null },
         select: {
           id: true,
           type: true,
@@ -11395,7 +11410,11 @@ export async function updateBookingAssets({
         // `title` + `assetModelId` widen this select purely so the same rows
         // can feed model-request fulfilment below without a second round-trip.
         const assetTypeRows = await tx.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             type: true,
@@ -11544,7 +11563,11 @@ export async function updateBookingAssets({
         // the booking"). The multi-asset summary uses
         // `wrapAssetsWithDataForNote`'s popover unchanged.
         const assets = await db.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,
@@ -13296,6 +13319,7 @@ export async function removeAssets({
       }
 
       const removedAssets = await tx.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing assets from a booking must reach archived ones it holds
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
@@ -14897,6 +14921,7 @@ export async function getBookingFlags(
   const assets = await db.asset.findMany({
     // why: organizationId scoping prevents flag computation from reading
     // assets that belong to another tenant.
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: flags are computed over assets already on the booking, archived ones included
     where: {
       id: { in: booking.assetIds },
       organizationId: booking.organizationId,
@@ -15827,6 +15852,7 @@ async function createNotesForScannedAssetsAndKits({
   // a qty-tracked unit count via wrapAssetWithCountForNote.
   const [assets, scannedKits, bookedRows] = await Promise.all([
     db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: note title lookup for assets already scanned onto the booking
       where: { id: { in: assetIds }, organizationId },
       select: {
         id: true,
@@ -16231,7 +16257,11 @@ async function addScannedAssetsToBookingWithinTx(
     bookingWindow.to
   ) {
     const candidates = await tx.asset.findMany({
-      where: { id: { in: allScannedAssetIds }, organizationId },
+      where: {
+        id: { in: allScannedAssetIds },
+        organizationId,
+        archivedAt: null,
+      },
       select: {
         id: true,
         title: true,
@@ -16332,7 +16362,11 @@ async function addScannedAssetsToBookingWithinTx(
   const scannedAssetsMeta: ScannedAssetMeta[] =
     allScannedAssetIds.length > 0
       ? await tx.asset.findMany({
-          where: { id: { in: allScannedAssetIds }, organizationId },
+          where: {
+            id: { in: allScannedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,

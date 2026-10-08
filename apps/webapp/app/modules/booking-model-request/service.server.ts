@@ -618,6 +618,7 @@ export async function readOwnNamedUnits({
   tx: Pick<ModelReservationGuardClient, "asset">;
 }): Promise<Map<string, OwnNamedUnits>> {
   const rows = await tx.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: units the booking already holds count toward its footprint whether or not archived since
     where: {
       organizationId,
       assetModelId: { in: assetModelIds },

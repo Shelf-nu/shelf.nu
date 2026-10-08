@@ -139,7 +139,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }),
       assetIds.length > 0
         ? db.asset.findMany({
-            where: { id: { in: assetIds }, organizationId },
+            // Bookable pool: archived assets are out of service.
+            where: { id: { in: assetIds }, organizationId, archivedAt: null },
             select: {
               id: true,
               sequentialId: true,

@@ -103,6 +103,7 @@ async function assertAssetsInOrganization({
   if (ids.length === 0) return;
 
   const authorizedCount = await db.asset.count({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership guard; must count archived assets too
     where: { id: { in: ids }, organizationId },
   });
 
@@ -321,6 +322,7 @@ export async function getLocation(
 
       /** Count them */
       db.asset.count({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a location's own page lists archived assets with a badge; the count must match that list
         where: {
           assetLocations: { some: { locationId: id } },
         },
@@ -2162,6 +2164,7 @@ export async function updateLocationAssets({
      */
     const modifiedAssets = await db.asset
       .findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: before-state read for assets moved in or out; archived assets can still be removed from a location
         where: {
           id: {
             in: [

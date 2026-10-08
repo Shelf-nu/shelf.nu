@@ -309,6 +309,7 @@ async function fetchAssetBeforeUpdate({
   }
 
   return db.asset.findUnique({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id before-state snapshot for updateAsset, which refuses archived assets via assertAssetsAreNotArchived
     where: { id, organizationId },
     select: ASSET_BEFORE_UPDATE_SELECT,
   });
@@ -564,6 +565,7 @@ export async function getAsset<T extends Prisma.AssetInclude | undefined>({
     );
 
     const asset = await db.asset.findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: serves the asset detail page and its sub-pages, which archived assets keep
       where: {
         OR: [
           { id, organizationId },
@@ -1663,7 +1665,7 @@ export async function createAsset({
         // (the initial create's include came back empty for it).
         return locationId
           ? tx.asset.findUniqueOrThrow({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `created.id` is from the `tx.asset.create` above (org-scoped via the create payload's organizationId); re-read of our own just-created row; why: re-read of the row just created in this transaction
               where: { id: created.id },
               include: {
                 assetLocations: { include: { location: true } },
@@ -2094,6 +2096,7 @@ export async function updateAsset({
     } | null = null;
     if (shouldUpdatePlacement) {
       const assetWithKit = await db.asset.findUnique({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
         where: { id, organizationId },
         select: {
           type: true,
@@ -2267,6 +2270,7 @@ export async function updateAsset({
       // Reads `type` directly off the asset row — sub-millisecond
       // org-scoped index lookup, only on the link branch.
       const currentAsset = await db.asset.findUnique({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id type check after assertAssetsAreNotArchived already refused archived assets
         where: { id, organizationId },
         select: { type: true },
       });
@@ -2806,6 +2810,7 @@ export async function updateAsset({
       // Re-read so the returned `assetLocations` reflects the pivot ops.
       return shouldUpdatePlacement
         ? tx.asset.findUniqueOrThrow({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id re-read of the row this transaction just updated
             where: { id, organizationId },
             include: {
               assetLocations: { include: { location: true } },
@@ -2862,6 +2867,7 @@ export async function updateAsset({
       // write — that would misattribute someone else's change to this actor.
       const wroteOrAudited = await db.$transaction(async (tx) => {
         const current = await tx.asset.findUniqueOrThrow({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
           where: { id, organizationId },
           select: { preferredBarcodeId: true },
         });
@@ -3465,6 +3471,7 @@ async function archivedMidWriteError(
 
   // A read of the archive state itself, so it must reach archived rows.
   const current = await db.asset.findFirst({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reads the archive state itself, so it must reach archived rows
     where: { id: asset.id, organizationId: asset.organizationId },
     select: { archivedAt: true },
   });
@@ -3591,6 +3598,7 @@ export async function archiveAsset({
 }) {
   try {
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archive service reads archivedAt to answer 409 already archived
       where: { id, organizationId },
       select: { id: true, type: true, status: true, archivedAt: true },
     });
@@ -3753,6 +3761,7 @@ export async function unarchiveAsset({
 }) {
   try {
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reinstate service must find archived assets and 409 on active ones
       where: { id, organizationId },
       select: { id: true, archivedAt: true },
     });
@@ -4157,6 +4166,7 @@ export async function replaceAssetPlacements({
     await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
 
     const asset = await db.asset.findUniqueOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
       where: { id: assetId, organizationId },
       select: {
         id: true,
@@ -5505,6 +5515,7 @@ export async function fetchAssetsForExport({
 }) {
   try {
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the backup CSV export includes archived assets
       where: {
         organizationId,
       },
@@ -7146,6 +7157,7 @@ export async function bulkDeleteAssets({
      * activity feeds where the asset row no longer exists to JOIN against).
      */
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: permanent delete is allowed on archived assets, and their images must be cleaned up
       where: {
         id: { in: resolvedIds },
         organizationId,
@@ -7303,6 +7315,7 @@ export async function bulkCheckOutAssets({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: { id: true, title: true, status: true, type: true },
       }),
@@ -7602,6 +7615,7 @@ export async function bulkCheckInAssets({
      */
     const [allAssets, user] = await Promise.all([
       db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: unchanged behaviour; archived assets never hold custody, so they hit the existing without-custody error rather than being silently dropped
         where: {
           id: { in: resolvedIds },
           organizationId,
@@ -7843,6 +7857,7 @@ export async function bulkUpdateAssetLocation({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: {
           id: true,
@@ -8176,6 +8191,7 @@ export async function bulkUpdateAssetCategory({
       where: {
         id: { in: resolvedIds },
         organizationId,
+        archivedAt: null,
       },
       select: {
         id: true,
@@ -8405,7 +8421,7 @@ export async function bulkUpdateAssetModel({
      * checked them against this organization yet.
      */
     const assetsBeforeUpdate = await db.asset.findMany({
-      where: { id: { in: resolvedIds }, organizationId },
+      where: { id: { in: resolvedIds }, organizationId, archivedAt: null },
       select: {
         id: true,
         type: true,
@@ -8498,6 +8514,7 @@ export async function bulkUpdateAssetModel({
             where: {
               id: { in: assetsThatChange.map((asset) => asset.id) },
               organizationId,
+              archivedAt: null,
             },
             select: {
               id: true,
@@ -8701,6 +8718,7 @@ export async function bulkAssignAssetTags({
         where: {
           id: { in: resolvedIds },
           organizationId,
+          archivedAt: null,
         },
         select: {
           id: true,
@@ -8908,6 +8926,7 @@ export async function relinkAssetQrCode({
       } satisfies Prisma.UserSelect,
     }),
     db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
       where: { id: assetId, organizationId },
       select: { qrCodes: { select: { id: true } } },
     }),
@@ -9327,6 +9346,7 @@ export async function getActiveCustomFieldsForAsset({
   organizationId: string;
 }) {
   const asset = await db.asset.findUnique({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership lookup for the asset overview, which archived assets keep
     where: { id, organizationId },
     select: { categoryId: true },
   });
@@ -9859,7 +9879,7 @@ export async function checkOutQuantity({
 
       /** Step 10: Return the refreshed asset and the recorded source */
       const refreshed = await tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function; why: re-read of the row this transaction just updated
         where: { id: assetId },
       });
 
@@ -10508,7 +10528,7 @@ export async function releaseQuantity({
 
       /** Step 9: Return the refreshed asset plus the split that was applied */
       const updatedAsset = await tx.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified earlier via lockAssetForQuantityUpdate + the organizationId guard in this function; why: re-read of the row this transaction just updated
         where: { id: assetId },
       });
 

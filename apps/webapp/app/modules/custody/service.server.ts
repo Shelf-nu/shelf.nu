@@ -370,6 +370,7 @@ export async function releaseCustody({
       // `findUniqueOrThrow` rather than the update's return value: the status
       // write above is conditional, so only the row itself is authoritative.
       const asset = await tx.asset.findUniqueOrThrow({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: re-read of the asset whose custody was just released, by id
         where: { id: assetId, organizationId },
         include: {
           user: {

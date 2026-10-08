@@ -4300,6 +4300,7 @@ export async function assetActivityReport(
     let assetIdsInCategory: string[] | undefined;
     if (categoryId) {
       const assetsInCategory = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; archived assets keep their events
         where: { organizationId, categoryId },
         select: { id: true },
       });
@@ -4327,6 +4328,7 @@ export async function assetActivityReport(
       ...new Set(events.map((e) => e.assetId).filter(Boolean)),
     ] as string[];
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; events on archived assets still render their asset
       where: { id: { in: assetIds }, organizationId },
       select: {
         id: true,
@@ -4394,6 +4396,7 @@ export async function assetActivityReport(
     let mostActiveName = "—";
     if (assetActivityCounts.length > 0 && assetActivityCounts[0].assetId) {
       const mostActiveAsset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: Activity is a history report; the most active asset may be archived since
         where: { id: assetActivityCounts[0].assetId, organizationId },
         select: { title: true },
       });
