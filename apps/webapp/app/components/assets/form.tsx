@@ -1558,7 +1558,7 @@ function TrackingMethodGuideLink({ isEditMode }: { isEditMode: boolean }) {
   );
 }
 
-/** Radio card options for the tracking method selector. */
+/**
  * Radio card options for the tracking method selector.
  *
  * Titles come from `@shelf/labels` so the picker, the CSV importer's errors and
