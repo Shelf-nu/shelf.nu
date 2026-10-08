@@ -10,22 +10,24 @@
  * "Check In All" taps declare nothing; the server knows those routes are the
  * one-tap actions.
  *
+ * The values come from `@shelf/labels`, the same list the server's routes
+ * validate against, so the two cannot drift: `scanned` is a row that went
+ * through the Scan tab (camera or typed code), `selected` a row ticked in a
+ * list on the booking screen.
+ *
  * Pure, so the request bodies can be tested under Node without Expo.
  *
  * @see ../../webapp/app/modules/booking/checkout-method.ts the server's side
  */
+import {
+  BOOKING_METHOD,
+  type ClientDeclaredBookingMethod,
+} from "@shelf/labels";
 
-/** The two methods the app can declare. */
-export const BOOKING_METHOD = Object.freeze({
-  /** The row went through the Scan tab (camera or typed code). */
-  scanned: "scanned",
-  /** The row was ticked in a list on the booking screen. */
-  selected: "selected",
-});
+export { BOOKING_METHOD };
 
 /** A method the app declares on a check-in or check-out request. */
-export type BookingMethod =
-  (typeof BOOKING_METHOD)[keyof typeof BOOKING_METHOD];
+export type BookingMethod = ClientDeclaredBookingMethod;
 
 /**
  * Adds the declared method to a request body, when there is one.

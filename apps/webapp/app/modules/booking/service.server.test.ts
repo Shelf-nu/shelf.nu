@@ -7081,12 +7081,13 @@ describe("checkinBooking", () => {
     );
   });
 
-  it("records the check-in's method only on the slice it brings back, not on one returned earlier", async () => {
+  it("writes a check-in event only for the slice it brings back, not for one returned earlier", async () => {
     expect.assertions(1);
 
     // The pens sit on two slices: ba-q0 came back in an earlier partial
-    // check-in, ba-q1 is still out. The one-click check-in brings back ba-q1;
-    // ba-q0 keeps its event, but this check-in's method is not its method.
+    // check-in, ba-q1 is still out. The one-click check-in brings back ba-q1
+    // only, so ba-q0 already has its event and must not get a second one that
+    // would blank the receipt's method for the pens.
     const pens = {
       id: "asset-pens",
       type: AssetType.QUANTITY_TRACKED,
@@ -7175,10 +7176,7 @@ describe("checkinBooking", () => {
         const meta = event.meta as Record<string, unknown>;
         return { method: meta.method, surface: meta.surface };
       });
-    expect(checkedIn).toEqual([
-      { method: null, surface: "web" },
-      { method: "quick", surface: "web" },
-    ]);
+    expect(checkedIn).toEqual([{ method: "quick", surface: "web" }]);
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {

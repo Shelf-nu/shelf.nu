@@ -543,6 +543,91 @@ describe("fetchCheckinReceiptData", () => {
     expect(receipt.checkedInHow).toBeNull();
   });
 
+  it("keeps every trip's return of a quantity slice that went out twice", async () => {
+    // One slice of five rolls: three went out and came back scanned on the
+    // phone, then the other two went out and came back ticked on the web. The
+    // row prints all five, so a boundary at the second departure would lend
+    // the three scanned rolls the later method. Both returns count, they
+    // disagree, and the row stays blank.
+    const firstDepartureAt = CHECKED_OUT_AT;
+    const firstReturnAt = new Date(
+      CHECKED_IN_AT.getTime() - 2 * 60 * 60 * 1000
+    );
+    const secondDepartureAt = new Date(
+      CHECKED_IN_AT.getTime() - 60 * 60 * 1000
+    );
+    mockOf(fetchAllPdfRelatedData).mockResolvedValue(
+      pdfResultWith(
+        [pdfRow("ba-1", "asset-qty", "Gaffer tape")],
+        BookingStatus.COMPLETE
+      )
+    );
+    mockOf(db.bookingAsset.findMany).mockResolvedValue([
+      {
+        id: "ba-1",
+        assetId: "asset-qty",
+        quantity: 5,
+        assetKitId: null,
+        checkedOutAt: firstDepartureAt,
+        checkedOutById: "user-1",
+        checkedOutQuantity: 5,
+        checkedInAt: CHECKED_IN_AT,
+        checkedInById: "user-1",
+        asset: { type: AssetType.QUANTITY_TRACKED },
+      },
+    ]);
+    mockOf(db.consumptionLog.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 3,
+        createdAt: firstReturnAt,
+        userId: "user-1",
+      },
+      {
+        assetId: "asset-qty",
+        bookingAssetId: "ba-1",
+        category: "RETURN",
+        quantity: 2,
+        createdAt: CHECKED_IN_AT,
+        userId: "user-1",
+      },
+    ]);
+    mockOf(db.activityEvent.findMany).mockResolvedValue([
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKOUT",
+        occurredAt: firstDepartureAt,
+        meta: { quantity: 3, method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: firstReturnAt,
+        meta: { method: "scanned", surface: "phone" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKOUT",
+        occurredAt: secondDepartureAt,
+        meta: { quantity: 2, method: "scanned", surface: "web" },
+      },
+      {
+        assetId: "asset-qty",
+        action: "BOOKING_PARTIAL_CHECKIN",
+        occurredAt: CHECKED_IN_AT,
+        meta: { method: "selected", surface: "web" },
+      },
+    ]);
+    mockOf(db.user.findMany).mockResolvedValue([]);
+
+    const receipt = await run();
+
+    expect(receipt.rows.map((row) => row.checkedInHow)).toEqual([null]);
+    expect(receipt.checkedInHow).toBeNull();
+  });
+
   it("gives the header one method line when every returned row agrees", async () => {
     mockOf(fetchAllPdfRelatedData).mockResolvedValue(
       pdfResultWith(

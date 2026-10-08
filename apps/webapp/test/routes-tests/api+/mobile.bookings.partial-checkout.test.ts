@@ -197,12 +197,9 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
     }
   });
 
-  it("refuses a method the server does not know", async () => {
-    (makeShelfError as any).mockImplementation((cause: any) => ({
-      message: cause?.message ?? "Validation error",
-      status: 400,
-    }));
-
+  it("records a method the server does not know as null, and still hands the batch over", async () => {
+    // "quick" is server-only, so a client declaring it is not believed. The
+    // field only labels the batch, so it must not refuse a real hand-over.
     const response = await action(
       createActionArgs({
         request: createPartialCheckoutRequest({
@@ -213,8 +210,12 @@ describe("POST /api/mobile/bookings/partial-checkout", () => {
       })
     );
 
-    expect((response as unknown as Response).status).toBe(400);
-    expect(partialCheckoutBooking).not.toHaveBeenCalled();
+    expect((response as unknown as Response).status).toBe(200);
+    expect(partialCheckoutBooking).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: null },
+      })
+    );
   });
 
   it("passes new { checkouts: [{ assetId, quantity }] } payload through to the service", async () => {

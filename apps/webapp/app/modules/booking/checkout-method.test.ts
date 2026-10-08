@@ -19,6 +19,7 @@ import {
   describeBookingMethod,
   describeBookingMethodCapitalised,
   narrowSelectedBookingAssetIds,
+  outstandingSliceIds,
   readBookingMethodMeta,
   resolveBookingMethod,
   resolveBookingMethodForSlices,
@@ -112,6 +113,39 @@ describe("narrowSelectedBookingAssetIds", () => {
   it("is empty without ticked slices", () => {
     expect(narrowSelectedBookingAssetIds(undefined, ["ba-1"])).toEqual([]);
     expect(narrowSelectedBookingAssetIds([], ["ba-1"])).toEqual([]);
+  });
+});
+
+describe("outstandingSliceIds", () => {
+  it("keeps only the slices out and not yet back", () => {
+    const at = new Date("2026-09-01T09:00:00.000Z");
+    expect(
+      outstandingSliceIds([
+        { id: "out", checkedOutAt: at, checkedInAt: null },
+        { id: "back-earlier", checkedOutAt: at, checkedInAt: at },
+        { id: "never-left", checkedOutAt: null, checkedInAt: null },
+      ])
+    ).toEqual(["out"]);
+  });
+
+  it("stops a sibling returned earlier from mixing a ticked batch's method", () => {
+    // ba-1 came back scanned earlier; this batch ticked ba-2, the one still
+    // out. Over every slice the line would read "scanned and selected".
+    const at = new Date("2026-09-01T09:00:00.000Z");
+    const provenance = {
+      surface: "web" as const,
+      method: "scanned" as const,
+      selectedBookingAssetIds: ["ba-2"],
+    };
+    expect(
+      bookingMethodClause(
+        provenance,
+        outstandingSliceIds([
+          { id: "ba-1", checkedOutAt: at, checkedInAt: at },
+          { id: "ba-2", checkedOutAt: at, checkedInAt: null },
+        ])
+      )
+    ).toBe(" (selected on the web)");
   });
 });
 

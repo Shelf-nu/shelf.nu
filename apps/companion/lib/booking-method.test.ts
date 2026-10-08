@@ -16,6 +16,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
+import { CLIENT_DECLARED_BOOKING_METHODS } from "@shelf/labels";
+
 import { BOOKING_METHOD, withBookingMethod } from "./booking-method";
 
 test("a declared method travels in the body", () => {
@@ -37,13 +39,18 @@ test("an undeclared method leaves the body exactly as before", () => {
   assert.equal("method" in body, false);
 });
 
-test("the two declared values are the two the server accepts", () => {
-  // The server's CLIENT_DECLARED_BOOKING_METHODS; "quick" is deliberately not
-  // declarable, the server knows which routes are the one-tap actions.
-  assert.deepEqual(Object.values(BOOKING_METHOD).sort(), [
-    "scanned",
-    "selected",
-  ]);
+test("the declared values are exactly the list the server accepts", () => {
+  // The server's routes validate against CLIENT_DECLARED_BOOKING_METHODS;
+  // "quick" is deliberately not declarable, the server knows which routes are
+  // the one-tap actions.
+  assert.deepEqual(
+    Object.values(BOOKING_METHOD).sort(),
+    [...CLIENT_DECLARED_BOOKING_METHODS].sort()
+  );
+  assert.equal(
+    (CLIENT_DECLARED_BOOKING_METHODS as readonly string[]).includes("quick"),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------

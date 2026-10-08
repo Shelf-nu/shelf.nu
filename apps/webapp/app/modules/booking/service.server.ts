@@ -174,6 +174,7 @@ import {
   bookingMethodClause,
   bookingMethodMeta,
   narrowSelectedBookingAssetIds,
+  outstandingSliceIds,
   scannedRowPredicate,
   type BatchSliceId,
   type BookingMethodProvenance,
@@ -481,7 +482,7 @@ export async function createStatusTransitionNote({
   custodianUserId?: string;
   /**
    * How the user made the transition, as {@link bookingMethodClause} words it
-   * (", scanned on the phone"). Appended to the action text of a user-initiated
+   * (" (scanned on the phone)"). Appended to the action text of a user-initiated
    * note; a system transition has no method.
    */
   methodClause?: string;
@@ -4043,6 +4044,11 @@ export async function fulfilModelRequestsAndCheckout({
      * early-date adjustment, and the status transition are all reverted
      * together.
      */
+    // Whether the scan named every row that went out, set inside the
+    // transaction. The activity line names the batch's method only then: a
+    // row the scan did not name is recorded with its method not said, and the
+    // line must not claim it was scanned.
+    let everyRowScanned = true;
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -4176,6 +4182,7 @@ export async function fulfilModelRequestsAndCheckout({
             addedAssetIds,
             claimedAssetIds,
           });
+          everyRowScanned = postScanBookingAssets.every(wasScanned);
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4227,7 +4234,10 @@ export async function fulfilModelRequestsAndCheckout({
       hints,
       organizationId,
       isExpired,
-      provenance,
+      provenance:
+        provenance && !everyRowScanned
+          ? { ...provenance, method: null }
+          : provenance,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -6431,15 +6441,19 @@ export async function checkinBooking({
           });
         }
 
-        // Activity events — one BOOKING_CHECKED_IN per BookingAsset ROW that
-        // was actually checked in. Progressive checkout can leave some assets
-        // never-checked-out; those must NOT get a check-in event. Walk the
-        // `bookingAssets` pivot (filtered by assetsToCheckin) so per-row
-        // `meta.quantity` is sourced from the pivot row (qty-tracked only via
-        // assetQtyMeta). Atomic with the booking status update for audit
-        // trail consistency.
-        const checkedInBookingAssets = bookingFound.bookingAssets.filter((ba) =>
-          assetsToCheckinSet.has(ba.asset.id)
+        // Activity events: one BOOKING_CHECKED_IN per slice this check-in
+        // reconciles, which is the same scope as the marker write below (out,
+        // not yet back). A slice that never left, or came back on an earlier
+        // return, gets no event: `Asset.status` is global, so filtering by
+        // asset alone would also emit for a sibling slice and claim it came
+        // back now. Per-row `meta.quantity` is sourced from the pivot row
+        // (qty-tracked only via assetQtyMeta). Atomic with the booking status
+        // update for audit trail consistency.
+        const checkedInBookingAssets = bookingFound.bookingAssets.filter(
+          (ba) =>
+            assetsToCheckinSet.has(ba.asset.id) &&
+            Boolean(ba.checkedOutAt) &&
+            !ba.checkedInAt
         );
         if (checkedInBookingAssets.length > 0) {
           await recordEvents(
@@ -6453,16 +6467,7 @@ export async function checkinBooking({
               assetId: ba.asset.id,
               meta: {
                 ...assetQtyMeta(ba.asset, ba.quantity),
-                // Only a slice this check-in reconciles (out, not yet back:
-                // the same scope as the marker write below) came back by this
-                // method. A slice returned earlier, or one that never left,
-                // keeps its event with the method not said.
-                ...bookingMethodMeta(
-                  provenance && !(ba.checkedOutAt && !ba.checkedInAt)
-                    ? { ...provenance, method: null }
-                    : provenance,
-                  [ba.id]
-                ),
+                ...bookingMethodMeta(provenance, [ba.id]),
               },
             })),
             tx
@@ -6621,9 +6626,11 @@ export async function checkinBooking({
             user!
           )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
             provenance,
-            bookingFound.bookingAssets
-              .filter((ba) => specificAssetIds.includes(ba.asset.id))
-              .map((ba) => ba.id)
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                specificAssetIds.includes(ba.asset.id)
+              )
+            )
           )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
 
@@ -6650,7 +6657,7 @@ export async function checkinBooking({
           custodianUserId: updatedBooking.custodianUserId || undefined,
           methodClause: bookingMethodClause(
             provenance,
-            bookingFound.bookingAssets.map((ba) => ba.id)
+            outstandingSliceIds(bookingFound.bookingAssets)
           ),
         });
       }
@@ -7599,9 +7606,11 @@ export async function partialCheckinBooking({
         await createNotes({
           content: `${actor} checked in the last items still out${bookingMethodClause(
             provenance,
-            bookingFound.bookingAssets
-              .filter((ba) => effectiveAssetIds.includes(ba.assetId))
-              .map((ba) => ba.id)
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                effectiveAssetIds.includes(ba.assetId)
+              )
+            )
           )}, which completed the booking.`,
           type: "UPDATE",
           userId,

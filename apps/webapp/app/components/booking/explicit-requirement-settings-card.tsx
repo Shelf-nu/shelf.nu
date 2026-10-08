@@ -105,12 +105,17 @@ export function ExplicitRequirementSettingsCard({
         >
           {switches.map((item, index) => {
             const switchId = `${intent}-${item.name}`;
+            // Both cards sit on one page and label their switches by role
+            // alone, so the description (which names the role AND the
+            // direction) is what tells a screen reader user the check-in
+            // "Admins" switch from the check-out one.
+            const descriptionId = `${switchId}-description`;
 
             return (
               <FormRow
                 key={item.name}
                 rowLabel={item.label}
-                subHeading={<div>{item.description}</div>}
+                subHeading={<div id={descriptionId}>{item.description}</div>}
                 className={tw("border-b-0 pb-[10px] pt-0", index > 0 && "mt-4")}
               >
                 <div className="flex items-center gap-3 lg:flex-col lg:gap-2">
@@ -120,6 +125,7 @@ export function ExplicitRequirementSettingsCard({
                     disabled={!isOwner}
                     defaultChecked={item.defaultChecked}
                     title={item.label}
+                    aria-describedby={descriptionId}
                   />
                   {/* FormRow shows its row label from the lg breakpoint only,
                       and a card holds one switch per role, so below lg this

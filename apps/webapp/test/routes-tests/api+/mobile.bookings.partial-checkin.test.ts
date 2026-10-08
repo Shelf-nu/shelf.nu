@@ -200,12 +200,9 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
     }
   });
 
-  it("refuses a method the server does not know, so nothing wrong is ever recorded", async () => {
-    (makeShelfError as any).mockImplementation((cause: any) => ({
-      message: cause?.message ?? "Validation error",
-      status: 400,
-    }));
-
+  it("records a method the server does not know as null, and still hands the batch over", async () => {
+    // "quick" is server-only, so a client declaring it is not believed. The
+    // field only labels the batch, so it must not refuse a real hand-over.
     const response = await action(
       createActionArgs({
         request: createPartialCheckinRequest({
@@ -216,8 +213,12 @@ describe("POST /api/mobile/bookings/partial-checkin", () => {
       })
     );
 
-    expect((response as unknown as Response).status).toBe(400);
-    expect(partialCheckinBooking).not.toHaveBeenCalled();
+    expect((response as unknown as Response).status).toBe(200);
+    expect(partialCheckinBooking).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: null },
+      })
+    );
   });
 
   it("should return 403 when user lacks checkin permission", async () => {

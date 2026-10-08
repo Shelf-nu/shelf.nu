@@ -27,11 +27,13 @@ import {
   AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  BOOKING_METHOD,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_ADJECTIVES,
   CONSUMPTION_TYPE_DESCRIPTIONS,
   CONSUMPTION_TYPE_LABELS,
+  CLIENT_DECLARED_BOOKING_METHODS,
   EXPLICIT_REQUIREMENT_LABELS,
   EXPLICIT_REQUIREMENT_ROLE_LABELS,
   explicitRequirementSwitchDescription,
@@ -338,4 +340,14 @@ test("the multi-member refusal counts the members and names the first three", ()
     ),
     '5 of the selected assets are part of a kit: "Tripod", "Gimbal", "Mic" and 2 more. Assign custody to the kit, or remove them from the kit first.'
   );
+});
+
+test("the declarable booking methods are BOOKING_METHOD's values, never quick", () => {
+  // The server validates the request field against the tuple and the app sends
+  // BOOKING_METHOD values, so the two must list the same words.
+  assert.deepEqual(
+    [...CLIENT_DECLARED_BOOKING_METHODS].sort(),
+    Object.values(BOOKING_METHOD).sort()
+  );
+  assert.equal(CLIENT_DECLARED_BOOKING_METHODS.includes("quick"), false);
 });

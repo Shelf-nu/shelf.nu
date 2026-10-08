@@ -19,7 +19,7 @@
  * @see {@link file://./../../routes/api+/bookings.$bookingId.generate-checkin-receipt.tsx}
  */
 
-import { BookingStatus } from "@prisma/client";
+import { AssetType, BookingStatus } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { resolveCheckInTimes } from "~/modules/reports/check-in-time.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
@@ -261,18 +261,31 @@ export async function fetchCheckinReceiptData(
       }
     }
 
-    // How many slices each asset holds on the booking. Events name the asset,
-    // not the slice, so the dispatch boundary can only be trusted for an asset
-    // with ONE slice: with several, a later departure of one slice would
-    // discard the other slice's return and lend it the later method. Such an
-    // asset keeps every check-in event, and all of them must agree.
+    // The assets whose latest dispatch bounds which check-in events count.
+    // Events name the asset, not the slice, so the boundary holds only for an
+    // INDIVIDUAL asset with ONE slice: one unit, one trip per printed row.
+    // - With several slices, a later departure of one slice would discard the
+    //   other slice's return and lend it the later method.
+    // - A QUANTITY_TRACKED row counts the units of every trip
+    //   (`checkedOutQuantity` grows on each check-out), so an earlier trip's
+    //   return is part of what it prints.
+    // Every other asset keeps all its check-in events, and all must agree.
     const sliceCountByAsset = new Map<string, number>();
+    const individualAssetIds = new Set<string>();
     for (const slice of slices) {
       sliceCountByAsset.set(
         slice.assetId,
         (sliceCountByAsset.get(slice.assetId) ?? 0) + 1
       );
+      if (slice.asset.type === AssetType.INDIVIDUAL) {
+        individualAssetIds.add(slice.assetId);
+      }
     }
+    const dispatchBoundedAssetIds = new Set(
+      [...individualAssetIds].filter(
+        (assetId) => sliceCountByAsset.get(assetId) === 1
+      )
+    );
 
     // The method each asset's check-in events of the current dispatch recorded,
     // in the order they were written. An event without a readable method
@@ -289,7 +302,7 @@ export async function fetchCheckinReceiptData(
       const dispatchedAt = latestDispatchAtByAsset.get(event.assetId);
       if (
         dispatchedAt &&
-        (sliceCountByAsset.get(event.assetId) ?? 0) <= 1 &&
+        dispatchBoundedAssetIds.has(event.assetId) &&
         event.occurredAt < dispatchedAt
       ) {
         continue;

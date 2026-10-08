@@ -193,6 +193,22 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
         provenance: { surface: "phone", method: null },
       })
     );
+
+    // The fulfil scanner never ticks rows, so "selected" is not believed.
+    await action(
+      createActionArgs({
+        request: createRequest({
+          bookingId: "booking-1",
+          assetIds: ["dell-1"],
+          method: "selected",
+        }),
+      })
+    );
+    expect(fulfilAndCheckOut).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        provenance: { surface: "phone", method: null },
+      })
+    );
   });
 
   it("judges the switch by the most privileged role of the membership", async () => {

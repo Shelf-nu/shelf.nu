@@ -27,15 +27,15 @@ export const BOOKING_METHODS = ["quick", "scanned", "selected"] as const;
 export type BookingMethod = (typeof BOOKING_METHODS)[number];
 
 /**
- * The methods a client may declare in a request body. `"quick"` is not among
+ * The methods a client may declare in a request body, from `@shelf/labels` so
+ * the companion sends exactly what the routes accept. `"quick"` is not among
  * them: the server knows which routes are the one-click actions and asserts it
  * itself, so a client cannot label a scan as quick or the other way round.
  */
-export const CLIENT_DECLARED_BOOKING_METHODS = ["scanned", "selected"] as const;
-
-/** A method a client may declare. */
-export type ClientDeclaredBookingMethod =
-  (typeof CLIENT_DECLARED_BOOKING_METHODS)[number];
+export {
+  CLIENT_DECLARED_BOOKING_METHODS,
+  type ClientDeclaredBookingMethod,
+} from "@shelf/labels";
 
 /** Where the request came from. */
 export type BookingSurface = "web" | "phone";
@@ -342,6 +342,29 @@ export function bookingMethodClause(
 ): string {
   if (!provenance) return "";
   return ` (${describeBatchMethod(provenance, bookingAssetIds)})`;
+}
+
+/**
+ * The slices a check-in is bringing back now: out and not yet back.
+ *
+ * A note about a check-in resolves its method over these only. A sibling slice
+ * of the same asset that came back on an earlier return was handled by that
+ * return's method, and counting it would word a ticked batch as "scanned and
+ * selected".
+ *
+ * @param slices - The booking's slices, as read before this check-in wrote
+ * @returns The ids of the slices still out
+ */
+export function outstandingSliceIds(
+  slices: ReadonlyArray<{
+    id: string;
+    checkedOutAt: Date | null;
+    checkedInAt: Date | null;
+  }>
+): string[] {
+  return slices
+    .filter((slice) => Boolean(slice.checkedOutAt) && !slice.checkedInAt)
+    .map((slice) => slice.id);
 }
 
 /**

@@ -283,3 +283,48 @@ describe("what the cards say", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("both cards on one page", () => {
+  it("tells the check-in switch from the check-out switch of the same role", () => {
+    // Settings > Bookings renders both cards, so two switches are named
+    // "Admins". Each one's description names the direction, which is what a
+    // screen reader user hears to tell them apart.
+    render(
+      <>
+        <ExplicitCheckinSettings
+          header={{ title: EXPLICIT_REQUIREMENT_LABELS.CHECKIN.TITLE }}
+          defaultValues={{
+            requireExplicitCheckinForAdmin: false,
+            requireExplicitCheckinForSelfService: false,
+          }}
+        />
+        <ExplicitCheckoutSettings
+          header={checkoutHeader}
+          defaultValues={{
+            requireExplicitCheckoutForAdmin: false,
+            requireExplicitCheckoutForSelfService: false,
+          }}
+        />
+      </>
+    );
+
+    const admins = screen.getAllByRole("switch", { name: "Admins" });
+    expect(admins).toHaveLength(2);
+    expect(admins[0]).toHaveAccessibleDescription(
+      "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+    );
+    expect(admins[1]).toHaveAccessibleDescription(
+      "Removes the one-click check-out for Admins. They check items out by scanning them or by selecting them from the list."
+    );
+
+    const selfService = screen.getAllByRole("switch", {
+      name: "Self Service users",
+    });
+    expect(selfService[0]).toHaveAccessibleDescription(
+      /one-click check-in for Self Service users/
+    );
+    expect(selfService[1]).toHaveAccessibleDescription(
+      /one-click check-out for Self Service users/
+    );
+  });
+});

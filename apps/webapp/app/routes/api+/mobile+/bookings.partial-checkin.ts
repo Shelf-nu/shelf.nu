@@ -84,9 +84,13 @@ export async function action({ request }: ActionFunctionArgs) {
           /**
            * How the app collected the rows: Scan to Check In sends `"scanned"`,
            * Select to Check In sends `"selected"`. Optional so older bundles
-           * keep working; they are recorded as `null`.
+           * keep working, and an unknown value is recorded as `null` too: the
+           * field only labels the batch, so it never refuses a hand-over.
            */
-          method: z.enum(CLIENT_DECLARED_BOOKING_METHODS).optional(),
+          method: z
+            .enum(CLIENT_DECLARED_BOOKING_METHODS)
+            .optional()
+            .catch(undefined),
           timeZone: z.string().optional(),
         }),
         request,

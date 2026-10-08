@@ -313,3 +313,22 @@ export declare function explicitRequirementSwitchDescription(
   direction: ExplicitRequirementDirection,
   role: ExplicitRequirementRole
 ): string;
+
+/**
+ * The booking check-in / check-out methods an app may declare in a request
+ * body. `quick` is server-only: the server records it for the one-click routes.
+ */
+export declare const BOOKING_METHOD: {
+  readonly scanned: "scanned";
+  readonly selected: "selected";
+};
+
+/** {@link BOOKING_METHOD} as a tuple, the shape a validation enum takes. */
+export declare const CLIENT_DECLARED_BOOKING_METHODS: readonly [
+  "scanned",
+  "selected",
+];
+
+/** A method an app may declare on a check-in or check-out request. */
+export type ClientDeclaredBookingMethod =
+  (typeof CLIENT_DECLARED_BOOKING_METHODS)[number];

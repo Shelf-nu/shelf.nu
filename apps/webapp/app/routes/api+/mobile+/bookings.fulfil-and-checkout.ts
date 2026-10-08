@@ -1,3 +1,4 @@
+import { BOOKING_METHOD } from "@shelf/labels";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -9,7 +10,6 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import {
   mobileSourceLocationsSchema,
   sourceSubmissionFromRecord,
@@ -51,7 +51,7 @@ import { isExplicitScanRequired } from "~/utils/permissions/role-access";
  *   bookingId: string,
  *   assetIds: string[],   // concrete assets the operator scanned
  *   kitIds?: string[],    // scanned kits; the server resolves their members, whose INDIVIDUAL units answer reservations
- *   method?: "scanned" | "selected", // how the app collected the units; absent = recorded as null
+ *   method?: "scanned",   // the fulfil scanner's declaration; absent or anything else = recorded as null
  *   timeZone?: string,    // device tz for scheduler/email timestamps
  * }
  *
@@ -82,9 +82,10 @@ export async function action({ request }: ActionFunctionArgs) {
           bookingId: z.string().min(1),
           assetIds: z.array(z.string()).default([]),
           kitIds: z.array(z.string()).optional().default([]),
-          // The fulfil scanner declares `"scanned"`; older bundles send nothing
-          // and are recorded as null rather than guessed.
-          method: z.enum(CLIENT_DECLARED_BOOKING_METHODS).optional(),
+          // The fulfil scanner only ever declares `"scanned"`. Anything else,
+          // or nothing (an older bundle), is recorded as null rather than
+          // guessed, and never refuses the hand-over.
+          method: z.literal(BOOKING_METHOD.scanned).optional().catch(undefined),
           timeZone: z.string().optional(),
           // Where each scanned pool's units leave from, keyed by `assetId`
           // (the slice may be created by this request) or `bookingAssetId`;

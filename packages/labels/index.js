@@ -461,3 +461,27 @@ export function explicitRequirementSwitchDescription(direction, role) {
   }
   return `Removes the one-click check-out for ${roleLabel}. They check items out by scanning them or by selecting them from the list.`;
 }
+
+/**
+ * The booking check-in / check-out methods an app may declare in a request
+ * body, keyed by themselves so call sites read `BOOKING_METHOD.scanned`.
+ *
+ * `scanned` is an item that went through a scanner, `selected` an item ticked
+ * in a list. `quick` (the one-click whole-booking action) is not among them:
+ * the server knows which routes are the one-click actions and records that
+ * itself, so a client cannot label a scan as quick or the other way round.
+ *
+ * Shared because the server validates the field against exactly this list and
+ * the companion sends it: a value one side renames without the other would
+ * refuse every check-in and check-out from the phone.
+ */
+export const BOOKING_METHOD = Object.freeze({
+  scanned: "scanned",
+  selected: "selected",
+});
+
+/** {@link BOOKING_METHOD} as a tuple, the shape a validation enum takes. */
+export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
+  BOOKING_METHOD.scanned,
+  BOOKING_METHOD.selected,
+]);

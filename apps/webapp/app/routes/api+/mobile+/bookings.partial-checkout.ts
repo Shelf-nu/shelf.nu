@@ -98,9 +98,14 @@ export async function action({ request }: ActionFunctionArgs) {
         /**
          * How the app collected the rows: the Scan to Check Out path sends
          * `"scanned"`, Select to Check Out sends `"selected"`. Optional so
-         * older bundles keep working; they are recorded as `null`.
+         * older bundles keep working, and an unknown value is recorded as
+         * `null` too: the field only labels the batch, so it never refuses a
+         * hand-over.
          */
-        method: z.enum(CLIENT_DECLARED_BOOKING_METHODS).optional(),
+        method: z
+          .enum(CLIENT_DECLARED_BOOKING_METHODS)
+          .optional()
+          .catch(undefined),
         timeZone: z.string().optional(),
         /**
          * Where each pool's units leave from, keyed by `bookingAssetId` or
