@@ -49,7 +49,7 @@ export const NotesSection = memo(function NotesSection({
         Activity{notes?.length ? ` (${notes.length})` : ""}
       </Text>
 
-      {/* Add note input — hidden for roles without asset:update (server
+      {/* Add note input: hidden for members without note:create (the server
           requires it); read-only activity feed still renders below. */}
       {canPostNote && (
         <View style={styles.noteInputContainer}>

@@ -5,7 +5,14 @@ import { Provider as JotaiProvider } from "jotai";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
+import { isUnsupportedBrowser } from "~/utils/browser-support";
+import { SENTRY_TUNNEL_PATH } from "~/utils/constants";
+import { installDomMutationGuard } from "~/utils/dom-mutation-guard";
+import { maskEmailsInSentryPayload } from "~/utils/sentry-email-mask";
 import { handleClientBeforeSend } from "~/utils/sentry-filters";
+
+// Must run before hydration so every React commit goes through the guard.
+installDomMutationGuard();
 
 if (window.env?.SENTRY_DSN) {
   Sentry.init({
@@ -15,7 +22,7 @@ if (window.env?.SENTRY_DSN) {
     // FLY_RELEASE_VERSION aren't set (local dev).
     release: window.env.SENTRY_RELEASE || undefined,
     environment: window.env.NODE_ENV,
-    tunnel: "/api/sentry-tunnel",
+    tunnel: SENTRY_TUNNEL_PATH,
     integrations: [Sentry.reactRouterTracingIntegration()],
     tracesSampleRate: 0.1,
     beforeSendTransaction(event) {
@@ -42,8 +49,7 @@ if (window.env?.SENTRY_DSN) {
       // chains form submit + revalidation + image upload across multiple
       // HTTP spans, which Sentry's perf detector groups as
       // `performance_consecutive_http`. Drop any transaction on this route
-      // that includes the form-data submit span — the previous threshold
-      // (`> 1` matching spans) was too narrow and let most events through.
+      // that includes the form-data submit span, however many there are.
       if (event.transaction === "/assets/new") {
         const hasAssetNewDataSpan = spans.some(
           (s) => s.description?.includes("/assets/new.data")
@@ -53,30 +59,44 @@ if (window.env?.SENTRY_DSN) {
         }
       }
 
-      return event;
+      return maskEmailsInSentryPayload(event);
     },
     // Drop/keep rules live in `handleClientBeforeSend` (a pure, unit-tested
     // function) so they can be exercised without hydrating this entry module.
-    beforeSend: handleClientBeforeSend,
+    // Kept events have email addresses masked before they are sent.
+    beforeSend(event) {
+      const kept = handleClientBeforeSend(event);
+      return kept && maskEmailsInSentryPayload(kept);
+    },
   });
 }
 
-React.startTransition(() => {
-  hydrateRoot(
-    document,
-    <React.StrictMode>
-      <JotaiProvider>
-        <HydratedRouter />
-      </JotaiProvider>
-    </React.StrictMode>,
-    {
-      onRecoverableError(error, errorInfo) {
-        if (window.env?.SENTRY_DSN) {
-          Sentry.captureException(error, {
-            extra: { componentStack: errorInfo.componentStack },
-          });
-        }
-      },
-    }
-  );
-});
+if (isUnsupportedBrowser()) {
+  // The inline check in `root.tsx` flagged a browser that cannot run this
+  // bundle. Leave the server-rendered "browser out of date" screen in place
+  // rather than hydrating an app that would crash behind it, and record the
+  // visit so the size of that audience stays visible.
+  if (window.env?.SENTRY_DSN) {
+    Sentry.captureMessage("Unsupported browser blocked", "info");
+  }
+} else {
+  React.startTransition(() => {
+    hydrateRoot(
+      document,
+      <React.StrictMode>
+        <JotaiProvider>
+          <HydratedRouter />
+        </JotaiProvider>
+      </React.StrictMode>,
+      {
+        onRecoverableError(error, errorInfo) {
+          if (window.env?.SENTRY_DSN) {
+            Sentry.captureException(error, {
+              extra: { componentStack: errorInfo.componentStack },
+            });
+          }
+        },
+      }
+    );
+  });
+}

@@ -9,17 +9,20 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { fulfilModelRequestsAndCheckout } from "~/modules/booking/service.server";
 import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+  mobileSourceLocationsSchema,
+  sourceSubmissionFromRecord,
+} from "~/modules/booking/checkout-source-location";
+import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/fulfil-and-checkout
@@ -28,23 +31,25 @@ import {
  * (`_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx`).
  *
  * A book-by-model booking reserves N units of an `AssetModel` up front as
- * intent (`BookingModelRequest`), with no concrete assets behind them yet.
- * The server hard-blocks a plain checkout (RESERVED → ONGOING) while any of
- * those requests are unfulfilled, so on mobile the operator scans the actual
- * units they're taking and this endpoint, in ONE atomic transaction:
+ * intent (`BookingModelRequest`), with no concrete assets behind them yet. The
+ * operator scans the actual units they're taking and this endpoint delegates
+ * to `fulfilAndCheckOut`, which:
  *   1. matches each scanned asset against the outstanding model requests
  *      (materialising them into real `BookingAsset` rows), and
- *   2. transitions the booking RESERVED → ONGOING (full checkout).
+ *   2. checks the booking out — the whole booking, or, under the
+ *      workspace's explicit check-out requirement, only the scanned units.
  *
- * This is the "scan to assign + check out" flow — the whole point of
- * book-by-model — done in a single motion, mirroring web. Off-model scans
- * that don't match a reservation land as direct `BookingAsset`s (same as web);
- * the server rejects the submit if any request is still outstanding afterwards.
+ * This is the "scan to assign + check out" flow, done in a single motion and
+ * mirroring web. Off-model scans that don't match a reservation land as direct
+ * `BookingAsset`s (same as web). Reserved units no scan covered stay open on
+ * the ongoing booking: a check-out needs at least one item to go out, and under
+ * the explicit check-out requirement that item has to be scanned.
+ * `remainingCount` says how many booked assets are still to check out.
  *
  * Body: {
  *   bookingId: string,
  *   assetIds: string[],   // concrete assets the operator scanned
- *   kitIds?: string[],    // scanned kits (attribution only — no model requests)
+ *   kitIds?: string[],    // scanned kits; the server resolves their members, whose INDIVIDUAL units answer reservations
  *   timeZone?: string,    // device tz for scheduler/email timestamps
  * }
  *
@@ -52,7 +57,7 @@ import {
  * checkout: mobile never sends a `checkoutIntentChoice`, so an early checkout
  * keeps the booking's original `from` rather than rewriting it to "now".
  *
- * @see {@link file://../../../modules/booking/service.server.ts} — `fulfilModelRequestsAndCheckout`
+ * @see {@link file://../../../modules/booking/fulfil-and-checkout.server.ts} — `fulfilAndCheckOut`
  * @see {@link file://./bookings.checkout.ts} — the plain (no model requests) checkout
  */
 export async function action({ request }: ActionFunctionArgs) {
@@ -69,18 +74,23 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds, timeZone } = await parseMobileBody(
-      z.object({
-        bookingId: z.string().min(1),
-        assetIds: z.array(z.string()).default([]),
-        kitIds: z.array(z.string()).optional().default([]),
-        timeZone: z.string().optional(),
-      }),
-      request,
-      "Booking"
-    );
+    const { bookingId, assetIds, kitIds, timeZone, sourceLocations } =
+      await parseMobileBody(
+        z.object({
+          bookingId: z.string().min(1),
+          assetIds: z.array(z.string()).default([]),
+          kitIds: z.array(z.string()).optional().default([]),
+          timeZone: z.string().optional(),
+          // Where each scanned pool's units leave from, keyed by `assetId`
+          // (the slice may be created by this request) or `bookingAssetId`;
+          // `null` = Unplaced. Omitted by older apps: the default applies.
+          sourceLocations: mobileSourceLocationsSchema,
+        }),
+        request,
+        "Booking"
+      );
 
-    // Load the booking's reservation window so the service can run its
+    // Load the booking's reservation window so the full check-out can run its
     // asset-conflict guard (gated on `from && to`, exactly as the plain
     // checkout endpoint does). Org-scoped, so a foreign-org id 404s.
     // `creatorId`/`custodianUserId` feed the ownership guard below.
@@ -103,18 +113,30 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: SELF_SERVICE/BASE hold `booking:checkout` in the
     // permission map, so the role gate above passes for ANY booking id they
-    // send — they may only fulfil + check out bookings they created or are
-    // custodian of. No-op for ADMIN/OWNER. Web enforces the equivalent via
-    // `canUserManageBookingAssets` in the fulfil-and-checkout loader, and
-    // `fulfilModelRequestsAndCheckout` does NOT check ownership itself (unlike
-    // the scan-add path, whose guard lives in `processBooking`), so without
-    // this the mobile route would be more permissive than web.
-    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // send. They may only fulfil + check out bookings they created or are
+    // custodian of. No-op when `access.bookings.writeAll`. Web enforces the
+    // equivalent via `validateBookingOwnership` in the fulfil-and-checkout
+    // loader and action, and `fulfilAndCheckOut` does NOT check ownership
+    // itself (unlike the scan-add path, whose guard lives in `processBooking`),
+    // so without this the mobile route would be more permissive than web.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check out",
+    });
+
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers 404. Judged by the caller's access (its effective role),
+    // like the loader's `canQuickCheckout`. Under the requirement only the scanned
+    // units are checked out.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
     });
 
     // Same hint derivation as the plain checkout endpoint: native clients can't
@@ -124,27 +146,31 @@ export async function action({ request }: ActionFunctionArgs) {
       ...(timeZone ? { timeZone } : {}),
     };
 
-    const booking = await fulfilModelRequestsAndCheckout({
+    const result = await fulfilAndCheckOut({
       bookingId,
       organizationId,
       userId: user.id,
       assetIds,
       kitIds,
       hints,
-      // Pass the booking's own window: enables the conflict guard without
-      // adjusting any dates (adjustment needs a checkoutIntentChoice, which
-      // mobile never sends → stays a "without-adjusted-date" checkout).
+      requireExplicitCheckout,
+      // Pass the booking's own window: enables the full check-out's conflict
+      // guard without adjusting any dates (adjustment needs a
+      // checkoutIntentChoice, which mobile never sends → stays a
+      // "without-adjusted-date" checkout).
       from: existingBooking.from,
       to: existingBooking.to,
+      sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
     return data({
       success: true,
       booking: {
-        id: booking.id,
-        name: booking.name,
-        status: booking.status,
+        id: result.booking.id,
+        name: result.booking.name,
+        status: result.booking.status,
       },
+      remainingCount: result.remainingAssetCount,
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

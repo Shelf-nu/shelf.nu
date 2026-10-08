@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
+import { generateClientId } from "~/utils/id/client-id";
 import { tw } from "~/utils/tw";
 import DynamicSelect from "../dynamic-select/dynamic-select";
 import InlineEntityCreationDialog from "../inline-entity-creation-dialog/inline-entity-creation-dialog";
@@ -23,7 +24,7 @@ type CategoriesInputProps = {
 type CategoryRow = { clientKey: string; value: string };
 
 /** Generate a stable key for a new/incoming category row. */
-const makeCategoryKey = (): string => crypto.randomUUID();
+const makeCategoryKey = (): string => generateClientId();
 
 export default function CategoriesInput({
   className,

@@ -5,8 +5,9 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import type {
@@ -20,7 +21,12 @@ import {
   resolveBookingRowQtyState,
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import { mayRemoveBookingItems } from "~/utils/bookings";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
@@ -28,6 +34,7 @@ import {
   InsufficientStockBadge,
   PendingReturnBadge,
 } from "./availability-label";
+import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
@@ -92,7 +99,8 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
@@ -144,20 +152,28 @@ export default function ListAssetContent({
     // Never show actions if asset is part of a kit
     if (isPartOfKit) return false;
 
-    // Admins and owners can always see actions
-    if (!isBaseOrSelfService) return true;
+    // Members who write every booking see the menu on every row; others only
+    // on a booking they hold, within their removable statuses.
+    if (roleAccess.bookings.writeAll) return true;
 
-    // Check if user is the custodian of the item
     const isUserCustodian = booking?.custodianUser?.id === user?.id;
     if (!isUserCustodian) return false;
 
     /**
-     * BASE stops at DRAFT, SELF_SERVICE at RESERVED. Resolved through the
-     * shared helper rather than spelled out inline, so this menu, the bulk
-     * actions menu and the two server-side remove gates cannot drift apart.
+     * Resolved through the shared helper rather than spelled out inline, so
+     * this menu, the bulk actions menu and the two server-side remove gates
+     * cannot drift apart.
      */
-    return canRoleRemoveBookingAssets({ roles, booking });
-  }, [isPartOfKit, booking, user?.id, roles, isBaseOrSelfService]);
+    return mayRemoveBookingItems({
+      canUpdateBooking: userHasPermission({
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      }),
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+  }, [isPartOfKit, booking, user?.id, roles, roleAccess]);
 
   /**
    * Qty-tracked partial dispositioning.
@@ -240,14 +256,18 @@ export default function ListAssetContent({
    *    or (partially) fulfilled (`contextStatus`, computed above) — at
    *    that point the stock signal has nothing left to warn about for it.
    *
-   * Each row evaluates independently against the SAME per-asset workspace
-   * headroom, so a multi-row asset can have several rows each light up.
+   * Each standalone row evaluates independently against the SAME per-asset
+   * workspace headroom, so a multi-row asset can have several rows each
+   * light up. A kit-driven row (`item.isKitDriven`) gets neither badge: its
+   * units are bounded by the kit's allocation, which that headroom already
+   * excludes.
    */
   const stockBadgeVariant = resolveQtyStockBadgeVariant({
     rowQty: qtyBooked,
     availability,
     contextStatus,
     bookingStatus: booking.status,
+    isKitDriven: Boolean(item.isKitDriven),
   });
 
   // Per-asset partial check-OUT record (if any). Presence of a record drives
@@ -356,6 +376,26 @@ export default function ListAssetContent({
                     once the booking is finished — exactly where these rows are
                     most common. Flag is resolved in the overview loader. */}
                 {item.isRemovedFromKit ? <RemovedFromKitBadge /> : null}
+                {/* Which reserved model this row answered, when it answered
+                    one. Without it the reservations section counts down with
+                    nothing on the row to connect it to — most confusing when
+                    the unit arrived inside a kit the operator added. Name is
+                    resolved in the overview loader. */}
+                {item.fulfilsModelName ? (
+                  <FulfilsModelBadge modelName={item.fulfilsModelName} />
+                ) : null}
+                {/* Where this pool slice's units left from. Recorded only when
+                    the slice goes out, so its presence alone means it went
+                    out (the row's unit counter is session-derived and reads 0
+                    after a one-click check-out). Resolved in the overview
+                    loader, only for pools at two or more placements. It is
+                    also what check-in takes used-up units off, so a location
+                    picked by default is never a silent guess. */}
+                {item.sourceLocation ? (
+                  <span className="text-xs text-gray-500">
+                    from {item.sourceLocation.name}
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>

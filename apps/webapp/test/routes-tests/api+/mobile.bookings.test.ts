@@ -1,3 +1,4 @@
+import { OrganizationRoles } from "@prisma/client";
 import { loader } from "~/routes/api+/mobile+/bookings";
 import { createLoaderArgs } from "@mocks/remix";
 
@@ -30,13 +31,21 @@ vi.mock("react-router", async () => ({
   data: createDataMock(),
 }));
 
-// why: external auth — the tests must not reach Supabase, and the role is the
+// why: external auth; the tests must not reach Supabase, and the role is the
 // input that decides which scoping branch runs.
-vi.mock("~/modules/api/mobile-auth.server", () => ({
-  requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
-  requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
-  getMobileUserContext: vi.fn().mockResolvedValue({ roles: ["ADMIN"] }),
-}));
+vi.mock("~/modules/api/mobile-auth.server", async () => {
+  // Hoisted factories run before the imports, so the helper is loaded here.
+  // Every test overrides this in `beforeEach`; the default only has to be a
+  // valid, complete shape.
+  const { mobileUserContext } = await import("@helpers/mobile-user-context");
+  return {
+    requireMobileAuth: vi.fn().mockResolvedValue({ user: { id: "user-1" } }),
+    requireOrganizationAccess: vi.fn().mockResolvedValue("org-1"),
+    getMobileUserContext: vi
+      .fn()
+      .mockResolvedValue(mobileUserContext({ roles: ["ADMIN"] })),
+  };
+});
 
 // why: the shared visibility helpers. Stubbed to sentinels so the assertions
 // are about what the route delegates, not about a copy of their logic.
@@ -72,6 +81,7 @@ vi.mock("~/utils/error", () => ({
 
 import { db } from "~/database/db.server";
 import { getMobileUserContext } from "~/modules/api/mobile-auth.server";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import {
   custodianScopeClause,
   resolveCustodianScope,
@@ -80,28 +90,44 @@ import {
 const request = () =>
   new Request("http://localhost/api/mobile/bookings?orgId=org-1");
 
-/** The `where` the list query actually ran with. */
-function lastWhere(): any {
-  return (db.booking.findMany as any).mock.calls.at(-1)?.[0]?.where;
+/**
+ * The `where` the list query actually ran with.
+ *
+ * Typed as a plain record rather than `Prisma.BookingWhereInput`: the generated
+ * `Exact<>` wrapper on the call signature does not assign back to the bare
+ * input type, and the assertions here only read keys.
+ */
+function lastWhere(): Record<string, unknown> {
+  const where = vi.mocked(db.booking.findMany).mock.calls.at(-1)?.[0]?.where;
+  if (!where) {
+    throw new Error("the list query never ran");
+  }
+  return where;
 }
 
 describe("GET /api/mobile/bookings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (db.booking.findMany as any).mockResolvedValue([]);
-    (db.booking.count as any).mockResolvedValue(0);
-    (getMobileUserContext as any).mockResolvedValue({ roles: ["ADMIN"] });
-    (resolveCustodianScope as any).mockResolvedValue({
+    vi.mocked(db.booking.findMany).mockResolvedValue([]);
+    vi.mocked(db.booking.count).mockResolvedValue(0);
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
+    vi.mocked(resolveCustodianScope).mockResolvedValue({
       userId: "user-1",
       teamMemberIds: ["tm-1", "tm-2"],
     });
-    (custodianScopeClause as any).mockReturnValue({ __custodianClause: true });
+    // A sentinel, not a real clause: the assertions are about whether the
+    // route delegates to the helper, not about the helper's own output.
+    vi.mocked(custodianScopeClause).mockReturnValue({
+      __custodianClause: true,
+    } as never);
   });
 
   it("scopes a SELF_SERVICE user through the shared custodian clause", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["SELF_SERVICE"],
-    });
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE"] })
+    );
 
     await loader(createLoaderArgs({ request: request() }));
 
@@ -121,12 +147,151 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("scopes a BASE user the same way", async () => {
-    (getMobileUserContext as any).mockResolvedValue({ roles: ["BASE"] });
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE"] })
+    );
 
     await loader(createLoaderArgs({ request: request() }));
 
     expect(custodianScopeClause).toHaveBeenCalled();
     expect(lastWhere().AND).toContainEqual({ __custodianClause: true });
+  });
+
+  it.each([["SELF_SERVICE"], ["BASE"]])(
+    "stops scoping a %s user once the workspace override is on",
+    async (role) => {
+      // The workspace override, not the role, is the deciding input. With it
+      // on, the restriction is not merely widened — it is never resolved.
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileUserContext({
+          roles: [role as OrganizationRoles],
+          workspace: {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          },
+        })
+      );
+
+      await loader(createLoaderArgs({ request: request() }));
+
+      expect(resolveCustodianScope).not.toHaveBeenCalled();
+      expect(lastWhere().AND).not.toContainEqual({ __custodianClause: true });
+    }
+  );
+
+  it("keeps drafts private even when the override is on", async () => {
+    // The override widens WHOSE bookings are visible. A draft stays private to
+    // its creator either way, exactly as on web.
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeBookings: true },
+      })
+    );
+
+    await loader(createLoaderArgs({ request: request() }));
+
+    expect(lastWhere().AND).toContainEqual({ __draftClause: true });
+  });
+
+  it("hides a colleague's custodian name when only the booking override is on", async () => {
+    // Two independent settings. Seeing a booking does not mean seeing who
+    // holds it; web draws the literal "private" in that case.
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeBookings: true },
+      })
+    );
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      {
+        id: "b-1",
+        name: "Someone else's booking",
+        status: "ONGOING",
+        from: new Date(0),
+        to: new Date(0),
+        createdAt: new Date(0),
+        custodianUser: { id: "other-user", profilePicture: "pic.jpg" },
+        custodianTeamMember: { name: "Mario", userId: "other-user" },
+        _count: { bookingAssets: 1, modelRequests: 0 },
+        modelRequests: [],
+      },
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
+
+    const response = (await loader(
+      createLoaderArgs({ request: request() })
+    )) as unknown as Response;
+    const body = await response.json();
+
+    expect(body.bookings[0].custodianName).toBe("private");
+    expect(body.bookings[0].custodianImage).toBeNull();
+  });
+
+  it("reports a booking with no custodian as null, not private", async () => {
+    // Three distinct answers. "private" claims a custodian exists and is being
+    // withheld; an unassigned booking must not make that claim.
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeBookings: true },
+      })
+    );
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      {
+        id: "b-3",
+        name: "Unassigned booking",
+        status: "DRAFT",
+        from: new Date(0),
+        to: new Date(0),
+        createdAt: new Date(0),
+        custodianUser: null,
+        custodianTeamMember: null,
+        _count: { bookingAssets: 0, modelRequests: 0 },
+        modelRequests: [],
+      },
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
+
+    const response = (await loader(
+      createLoaderArgs({ request: request() })
+    )) as unknown as Response;
+    const body = await response.json();
+
+    expect(body.bookings[0].custodianName).toBeNull();
+  });
+
+  it("still shows the caller their OWN custodian name with custody off", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({
+        roles: ["BASE"],
+        workspace: { baseUserCanSeeBookings: true },
+      })
+    );
+    vi.mocked(db.booking.findMany).mockResolvedValue([
+      {
+        id: "b-2",
+        name: "My booking",
+        status: "ONGOING",
+        from: new Date(0),
+        to: new Date(0),
+        createdAt: new Date(0),
+        custodianUser: null,
+        // Custody through a team-member row that IS the caller. Matching only
+        // the user link would print "private" on their own booking.
+        custodianTeamMember: { name: "Caller", userId: "user-1" },
+        _count: { bookingAssets: 1, modelRequests: 0 },
+        modelRequests: [],
+      },
+    ] as never);
+    vi.mocked(db.booking.count).mockResolvedValue(1);
+
+    const response = (await loader(
+      createLoaderArgs({ request: request() })
+    )) as unknown as Response;
+    const body = await response.json();
+
+    expect(body.bookings[0].custodianName).toBe("Caller");
   });
 
   it("does not narrow an ADMIN to their own bookings", async () => {
@@ -141,9 +306,9 @@ describe("GET /api/mobile/bookings", () => {
     // membership stored `[SELF_SERVICE, ADMIN]` resolved to SELF_SERVICE and a
     // genuine admin was narrowed to bookings they are custodian of. The
     // calendar lens shares this scoping and has to reach the same verdict.
-    (getMobileUserContext as any).mockResolvedValue({
-      roles: ["SELF_SERVICE", "ADMIN"],
-    });
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+    );
 
     await loader(createLoaderArgs({ request: request() }));
 
@@ -152,11 +317,17 @@ describe("GET /api/mobile/bookings", () => {
   });
 
   it("always applies draft privacy, whatever the role", async () => {
-    for (const role of ["ADMIN", "SELF_SERVICE", "BASE"]) {
+    for (const role of [
+      OrganizationRoles.ADMIN,
+      OrganizationRoles.SELF_SERVICE,
+      OrganizationRoles.BASE,
+    ]) {
       vi.clearAllMocks();
-      (db.booking.findMany as any).mockResolvedValue([]);
-      (db.booking.count as any).mockResolvedValue(0);
-      (getMobileUserContext as any).mockResolvedValue({ roles: [role] });
+      vi.mocked(db.booking.findMany).mockResolvedValue([]);
+      vi.mocked(db.booking.count).mockResolvedValue(0);
+      vi.mocked(getMobileUserContext).mockResolvedValue(
+        mobileUserContext({ roles: [role] })
+      );
 
       await loader(createLoaderArgs({ request: request() }));
 

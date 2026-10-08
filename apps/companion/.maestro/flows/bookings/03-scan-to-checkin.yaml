@@ -12,7 +12,20 @@
 # Fixture (set up via DB before the run):
 #   "QA Scan Booking" ONGOING containing the standalone asset + the kit's
 #   member asset, both CHECKED_OUT; one outsider asset CHECKED_OUT but NOT
-#   in the booking; no PartialBookingCheckin rows.
+#   in the booking; no PartialBookingCheckin rows. The member is on the
+#   booking through its kit: its BookingAsset row carries the AssetKit id, so
+#   the booking lists the kit and the drawer counts it as one thing.
+#
+#   A booking seeded before kit slices holds the member as a standalone row,
+#   and the drawer then reads "2 assets to check in". Convert that row once,
+#   with the kit's QR id in place of <KIT_QR_ID>:
+#     UPDATE "BookingAsset" ba SET "assetKitId" = ak.id, "sourceKitId" = ak."kitId"
+#     FROM "AssetKit" ak, "Booking" b, "Qr" q
+#     WHERE ba."bookingId" = b.id AND b.name = 'QA Scan Booking'
+#       AND q.id = '<KIT_QR_ID>' AND ak."kitId" = q."kitId"
+#       AND ak."assetId" = ba."assetId" AND ba."assetKitId" IS NULL;
+#   This fixture is shared with flows 02 and 03b and the kit flows through the
+#   same QR env vars, so it is not reseeded by scripts/seed-e2e.sh.
 #
 # Env: SHELF_TEST_EMAIL / SHELF_TEST_PASSWORD / SHELF_TEST_ASSET_QR_ID
 #      SHELF_TEST_KIT_QR_ID / SHELF_TEST_OUTSIDER_QR_ID
@@ -89,8 +102,9 @@ appId: com.shelf.companion.carlos
     id: "dev-scan-input"
 - inputText: ${SHELF_TEST_KIT_QR_ID}
 - pressKey: Enter
+# The kit's one booked member completes it, so the kit counts as one thing.
 - extendedWaitUntil:
-    visible: "2 assets to check in"
+    visible: "1 kit and 1 asset to check in"
     timeout: 15000
 - tapOn:
     text: ".*amera paused.*"

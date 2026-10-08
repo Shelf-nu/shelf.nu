@@ -6,6 +6,7 @@ import {
   action,
   loader,
 } from "~/routes/_layout+/assets.$assetId.overview.assign-custody";
+import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 import { getAsset } from "~/modules/asset/service.server";
@@ -13,6 +14,7 @@ import { getUserByID } from "~/modules/user/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { createTeamMember } from "@factories";
+import { accessFor } from "@helpers/role-access";
 
 const dbMocks = vi.hoisted(() => {
   return {
@@ -36,6 +38,15 @@ const dbMocks = vi.hoisted(() => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    assetKit: {
+      // why: the loader and the action refuse an individually tracked kit
+      // member, and read its kit membership here. Defaults to [] (in no kit)
+      // so every other case exercises the ordinary assignment path.
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    // why: the client-level raw query, so the loader case can assert that
+    // opening the page takes no row lock.
+    queryRaw: vi.fn().mockResolvedValue([]),
     custody: {
       // why: action now clears stale custody before assignment
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -68,9 +79,15 @@ vi.mock("~/database/db.server", () => ({
       deleteMany: dbMocks.custody.deleteMany,
       findFirst: dbMocks.custody.findFirst,
     },
+    assetKit: { findMany: dbMocks.assetKit.findMany },
+    // why: the action's kit-member guard locks the asset row with a raw
+    // `SELECT ... FOR UPDATE`; the loader must never reach this one.
+    $queryRaw: dbMocks.queryRaw,
     // why: action wraps custody cleanup + assignment in a transaction
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        assetKit: { findMany: dbMocks.assetKit.findMany },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,
           findFirst: dbMocks.custody.findFirst,
@@ -196,8 +213,19 @@ beforeEach(() => {
   // — no kit custody — the same way the other mocks above are reset.
   dbMocks.custody.findFirst.mockReset();
   dbMocks.custody.findFirst.mockResolvedValue(null);
+  dbMocks.assetKit.findMany.mockReset();
+  dbMocks.assetKit.findMany.mockResolvedValue([]);
   dbMocks.custody.deleteMany.mockReset();
   dbMocks.custody.deleteMany.mockResolvedValue({ count: 0 });
+  // The action reads the asset's `type` before the transaction and the same
+  // mock answers the in-tx title read, so a test that overrides it must not
+  // leak into the next one. Default: an existing individual asset.
+  dbMocks.asset.findFirst.mockReset();
+  dbMocks.asset.findFirst.mockResolvedValue({
+    type: "INDIVIDUAL",
+    status: "AVAILABLE",
+    title: "Test Asset",
+  });
 
   // Reset service mocks
   getAssetMock.mockReset();
@@ -217,6 +245,7 @@ describe("assets.$assetId.overview.assign-custody loader", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -249,6 +278,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
     } as any);
 
     // Valid custodian from same org
@@ -294,13 +324,8 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
-    } as any);
-
-    // Asset validation passes (same org)
-    getAssetMock.mockResolvedValue({
-      id: "asset-123",
-      organizationId: "org-1",
     } as any);
 
     // Custodian validation fails (different org)
@@ -355,6 +380,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -403,6 +429,7 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: "org-1" }],
     } as any);
 
@@ -488,12 +515,8 @@ describe("assets.$assetId.overview.assign-custody action", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
       role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
       userOrganizations: [{ organizationId: "org-1" }],
-    } as any);
-
-    getAssetMock.mockResolvedValue({
-      id: "asset-123",
-      organizationId: "org-1",
     } as any);
 
     // Valid team member from same org, but different user
@@ -547,6 +570,7 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: TEST_ORG_ID,
       role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
       userOrganizations: [{ organizationId: TEST_ORG_ID }],
     } as unknown as Awaited<ReturnType<typeof requirePermission>>);
 
@@ -638,8 +662,322 @@ describe("assign-custody — CHECKED_OUT conflict", () => {
       data: { status: AssetStatus.IN_CUSTODY },
     });
 
-    // The happy path must not pay for a status read — it only runs when the
-    // claim is refused.
-    expect(dbMocks.asset.findFirst).not.toHaveBeenCalled();
+    // The happy path reads only the asset's type, before the transaction. The
+    // title read runs only when the claim is refused.
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledTimes(1);
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledWith({
+      where: { id: TEST_ASSET_ID, organizationId: TEST_ORG_ID },
+      select: { type: true },
+    });
+  });
+});
+
+/**
+ * Quantity-tracked assets never reach this route's custody write.
+ *
+ * The route gives the whole asset to one custodian; quantity custody is held
+ * per unit and has its own routes. The refusal must land before the
+ * transaction opens, for every role that holds `asset:custody`, including a
+ * SELF_SERVICE user naming their own team member.
+ */
+describe("assign-custody — quantity-tracked assets", () => {
+  const QT_MESSAGE = "Quantity-tracked assets use the quantity custody dialog";
+
+  function postCustodian(custodian: { id: string; name: string }) {
+    const formData = new FormData();
+    formData.set("custodian", JSON.stringify(custodian));
+    return createActionArgs({
+      request: new Request(
+        "https://example.com/assets/asset-123/overview/assign-custody",
+        { method: "POST", body: formData }
+      ),
+    });
+  }
+
+  function expectNoCustodyWrites() {
+    expect(vi.mocked(db.$transaction)).not.toHaveBeenCalled();
+    expect(dbMocks.custody.deleteMany).not.toHaveBeenCalled();
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+    // The only toast is the refusal itself, never the "now in custody" one.
+    expect(sendNotificationMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ icon: { name: "success", variant: "success" } })
+    );
+  }
+
+  it("refuses an admin's POST against a quantity-tracked asset with a 400", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
+    mockGetTeamMember.mockResolvedValue({
+      id: TEST_TEAM_MEMBER_ID,
+      userId: "user-456",
+    });
+
+    const response = (await action(
+      postCustodian({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    )) as Response;
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.message).toContain(QT_MESSAGE);
+
+    // The type is read org-scoped.
+    expect(dbMocks.asset.findFirst).toHaveBeenCalledWith({
+      where: { id: TEST_ASSET_ID, organizationId: TEST_ORG_ID },
+      select: { type: true },
+    });
+    expectNoCustodyWrites();
+  });
+
+  it("refuses a self-service user taking custody of a quantity-tracked asset for themselves", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.SELF_SERVICE,
+      access: accessFor([OrganizationRoles.SELF_SERVICE]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "QUANTITY_TRACKED" });
+    // Their own team member: the self-service check alone would let this pass.
+    mockGetTeamMember.mockResolvedValue({
+      id: "own-team-member",
+      userId: "user-123",
+      user: { id: "user-123", firstName: "Test", lastName: "User" },
+    });
+
+    const response = (await action(
+      postCustodian({ id: "own-team-member", name: "Test User" })
+    )) as Response;
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.message).toContain(QT_MESSAGE);
+    expectNoCustodyWrites();
+  });
+
+  it("assigns an individual asset exactly as before", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    dbMocks.asset.findFirst.mockResolvedValue({ type: "INDIVIDUAL" });
+    mockGetTeamMember.mockResolvedValue({
+      id: TEST_TEAM_MEMBER_ID,
+      userId: "user-456",
+    });
+    dbMocks.asset.updateMany.mockResolvedValue({ count: 1 });
+    mockAssetUpdate.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      title: "Test Asset",
+    });
+
+    const response = (await action(
+      postCustodian({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    )) as Response;
+
+    expect(response.status).toBe(302);
+    expect(dbMocks.custody.deleteMany).toHaveBeenCalledWith({
+      where: {
+        assetId: TEST_ASSET_ID,
+        asset: { organizationId: TEST_ORG_ID },
+        kitCustodyId: null,
+      },
+    });
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          custody: {
+            create: {
+              custodian: { connect: { id: TEST_TEAM_MEMBER_ID } },
+            },
+          },
+        },
+      })
+    );
+    expect(createNoteMock).toHaveBeenCalled();
+  });
+
+  it("answers 404 when the asset is not in the workspace", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    // why: null is what the org-scoped read returns for a deleted asset or one
+    // in another workspace.
+    dbMocks.asset.findFirst.mockResolvedValue(null);
+
+    const response = (await action(
+      postCustodian({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    )) as Response;
+
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body.error.message).toContain("could not be found");
+    expectNoCustodyWrites();
+  });
+
+  it("does not serve the page for a quantity-tracked asset", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    // No custody yet, so without the guard the loader would render the modal.
+    getAssetMock.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      organizationId: TEST_ORG_ID,
+      type: "QUANTITY_TRACKED",
+      custody: [],
+      bookingAssets: [],
+    } as any);
+
+    const thrown = await loader(createLoaderArgs()).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(400);
+    const body = await (thrown as Response).json();
+    expect(body.error.message).toContain(QT_MESSAGE);
+    expect(mockTeamMemberFindMany).not.toHaveBeenCalled();
+  });
+
+  it("still serves the page for an individual asset", async () => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    getAssetMock.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      organizationId: TEST_ORG_ID,
+      type: "INDIVIDUAL",
+      custody: [],
+      bookingAssets: [],
+    } as any);
+    mockTeamMemberFindMany.mockResolvedValue([]);
+    mockTeamMemberCount.mockResolvedValue(0);
+
+    const result = await loader(createLoaderArgs());
+
+    expect(result).toMatchObject({ showModal: true });
+    expect(mockTeamMemberFindMany).toHaveBeenCalled();
+  });
+});
+
+/**
+ * An individually tracked asset that belongs to a kit cannot be put into
+ * custody on its own: custody of it comes from the kit. The page refuses to
+ * open for such an asset, and the action refuses a direct POST, because a POST
+ * does not have to come from the rendered page.
+ */
+describe("assign-custody: kit members", () => {
+  const KIT_MEMBER_MESSAGE =
+    '"Tripod" is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.';
+
+  /** The membership row the guard reads for an individual kit member. */
+  const TRIPOD_IN_CAMERA_KIT = {
+    asset: { id: TEST_ASSET_ID, title: "Tripod" },
+    kit: { id: "kit-camera", name: "Camera Kit" },
+  };
+
+  function postCustodian() {
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    );
+    return createActionArgs({
+      request: new Request(
+        "https://example.com/assets/asset-123/overview/assign-custody",
+        { method: "POST", body: formData }
+      ),
+    });
+  }
+
+  beforeEach(() => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    mockGetTeamMember.mockResolvedValue({
+      id: TEST_TEAM_MEMBER_ID,
+      userId: "user-456",
+    });
+    mockAssetUpdate.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      title: "Tripod",
+    });
+  });
+
+  it("does not serve the page for a kit member", async () => {
+    // No custody yet, so without the guard the loader would render the modal.
+    getAssetMock.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      organizationId: TEST_ORG_ID,
+      type: "INDIVIDUAL",
+      custody: [],
+      bookingAssets: [],
+    } as any);
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
+    // A picker to render, so the only thing standing between this request and
+    // the modal is the kit-member guard.
+    mockTeamMemberFindMany.mockResolvedValue([]);
+    mockTeamMemberCount.mockResolvedValue(0);
+
+    const thrown = await loader(createLoaderArgs()).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(400);
+    const body = await (thrown as Response).json();
+    expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
+    expect(mockTeamMemberFindMany).not.toHaveBeenCalled();
+    // Opening a page reads membership without locking the asset row.
+    expect(dbMocks.queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("refuses a direct POST for a kit member and writes nothing", async () => {
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
+
+    const response = (await action(postCustodian())) as Response;
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
+    // The guard runs first in the transaction, before the status claim: its
+    // row lock has to come before this transaction writes the asset, or it can
+    // deadlock with a concurrent "add to kit".
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("still assigns an asset that is in no kit", async () => {
+    // `assetKit.findMany` keeps its [] default: the asset is in no kit.
+    const response = (await action(postCustodian())) as Response;
+
+    expect(response.status).toBe(302);
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          custody: {
+            create: {
+              custodian: { connect: { id: TEST_TEAM_MEMBER_ID } },
+            },
+          },
+        },
+      })
+    );
   });
 });

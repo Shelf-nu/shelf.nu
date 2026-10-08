@@ -1,3 +1,17 @@
+/**
+ * Invite Service
+ *
+ * Creates workspace invites (single and CSV import), accepts or rejects them,
+ * checks that the signed-in user is the invitee, and lists pending invites
+ * for the team settings page.
+ *
+ * Invitee emails are stored lowercased, and every match against a stored
+ * email ignores letter case, because stored rows can still hold capitals.
+ *
+ * @see {@link file://./helpers.ts}
+ * @see {@link file://./../../routes/_auth+/accept-invite.$inviteId.tsx}
+ * @see {@link file://./../../routes/api+/settings.import-users.ts}
+ */
 import type {
   Invite,
   Organization,
@@ -5,18 +19,12 @@ import type {
   TeamMember,
   User,
 } from "@prisma/client";
-import { InviteStatuses, OrganizationRoles } from "@prisma/client";
-import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
+import { InviteStatuses } from "@prisma/client";
 import jwt from "jsonwebtoken";
-import lodash from "lodash";
 import type { AppLoadContext, LoaderFunctionArgs } from "react-router";
-import invariant from "tiny-invariant";
-import type { z } from "zod";
-import type { InviteUserFormSchema } from "~/components/settings/invite-user-dialog";
 import { db } from "~/database/db.server";
 import { invitationTemplateString } from "~/emails/invite-template";
 import { sendEmail } from "~/emails/mail.server";
-import { organizationRolesMap } from "~/routes/_layout+/settings.team";
 import { INVITE_EXPIRY_TTL_DAYS } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import type { DetectedFormatPrefs } from "~/utils/date-format";
@@ -25,9 +33,25 @@ import { INVITE_TOKEN_SECRET } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
+import { id } from "~/utils/id/id.server";
+import type { ImportPreflightResult } from "~/utils/import-row-errors";
 import { getParamsValues } from "~/utils/list";
+import { validEmail } from "~/utils/misc";
+import { ROLE_LABELS, resolveRole } from "~/utils/permissions/role-access";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { checkDomainSSOStatus, doesSSOUserExist } from "~/utils/sso.server";
-import { generateRandomCode, inviteEmailText, splitName } from "./helpers";
+import {
+  caseInsensitiveEmailFilter,
+  generateRandomCode,
+  inviteEmailText,
+  normalizeInviteEmail,
+  splitName,
+} from "./helpers";
+import {
+  type ImportUserCsvRow,
+  MAX_IMPORT_USERS_ROWS,
+  validateImportUserRows,
+} from "./import-users-preflight.server";
 import { processInvitationMessage } from "./message-validator.server";
 import { isInvitableRole } from "./roles";
 import { createTeamMember } from "../team-member/service.server";
@@ -40,6 +64,104 @@ const INVITE_EMAIL_BATCH_DELAY_MS = 1_000;
 const INVITE_EMAIL_SPACING_MS = Math.ceil(
   INVITE_EMAIL_BATCH_DELAY_MS / INVITE_EMAIL_BATCH_SIZE
 );
+
+/**
+ * How many email domains a bulk import checks against SSO at once. Each check
+ * holds a database connection, so an unbounded fan-out over a file with many
+ * domains would starve the pool for every other request.
+ */
+export const SSO_DOMAIN_CHECK_CONCURRENCY = 5;
+
+/** Why an address on a domain this workspace manages through SCIM is refused. */
+const SCIM_MANAGED_DOMAIN_MESSAGE =
+  "This email domain uses SCIM SSO for this workspace. Users are managed automatically through your identity provider.";
+
+/** Why an address on a Pure SSO domain, with no SSO account yet, is refused. */
+const PURE_SSO_DOMAIN_MESSAGE =
+  "This email domain uses SSO authentication. The user needs to sign up via SSO to get access to the organization.";
+
+/**
+ * The bulk counterpart of {@link validateInvite}: which of `emails` SSO
+ * refuses, and why, applying the same rules.
+ *
+ * Costs one SSO status check per distinct email DOMAIN, not per address (an
+ * import is usually one or two domains), and one query for every address on a
+ * Pure SSO domain together, rather than one per address.
+ *
+ * @param args.emails - Normalized, valid addresses to check
+ * @param args.organizationId - The workspace the invites are for
+ * @returns Normalized address to refusal message, for refused addresses only
+ */
+async function resolveSsoInviteRefusals({
+  emails,
+  organizationId,
+}: {
+  emails: string[];
+  organizationId: string;
+}): Promise<Map<string, string>> {
+  const refusals = new Map<string, string>();
+
+  const emailsByDomain = new Map<string, string[]>();
+  for (const email of emails) {
+    const domain = email.split("@")[1];
+    if (!domain) continue;
+    const domainEmails = emailsByDomain.get(domain) ?? [];
+    domainEmails.push(email);
+    emailsByDomain.set(domain, domainEmails);
+  }
+
+  const pureSsoEmails: string[] = [];
+  const checkDomain = async (domainEmails: string[]) => {
+    // Any address on the domain answers for all of them.
+    const domainStatus = await checkDomainSSOStatus(domainEmails[0]);
+    if (!domainStatus.isConfiguredForSSO) return;
+
+    // Tested against every owner: a domain can be claimed by several
+    // organizations, and matching only one exempts the rest from the rule.
+    if (
+      domainStatus.linkedOrganizations.some((org) => org.id === organizationId)
+    ) {
+      for (const email of domainEmails) {
+        refusals.set(email, SCIM_MANAGED_DOMAIN_MESSAGE);
+      }
+      return;
+    }
+
+    pureSsoEmails.push(...domainEmails);
+  };
+
+  // A few domains at a time: each check holds a database connection, and a
+  // file can name hundreds of domains.
+  const domainGroups = [...emailsByDomain.values()];
+  for (
+    let start = 0;
+    start < domainGroups.length;
+    start += SSO_DOMAIN_CHECK_CONCURRENCY
+  ) {
+    await Promise.all(
+      domainGroups
+        .slice(start, start + SSO_DOMAIN_CHECK_CONCURRENCY)
+        .map(checkDomain)
+    );
+  }
+
+  if (pureSsoEmails.length > 0) {
+    const ssoUsers = await db.user.findMany({
+      where: { email: caseInsensitiveEmailFilter(pureSsoEmails), sso: true },
+      select: { email: true },
+    });
+    const withSsoAccount = new Set(
+      ssoUsers.map((user) => normalizeInviteEmail(user.email))
+    );
+    for (const email of pureSsoEmails) {
+      if (!withSsoAccount.has(email)) {
+        refusals.set(email, PURE_SSO_DOMAIN_MESSAGE);
+      }
+    }
+  }
+
+  return refusals;
+}
 
 /**
  * Validates invite based on SSO configuration, considering target organization
@@ -67,8 +189,7 @@ async function validateInvite(
   ) {
     throw new ShelfError({
       cause: null,
-      message:
-        "This email domain uses SCIM SSO for this workspace. Users are managed automatically through your identity provider.",
+      message: SCIM_MANAGED_DOMAIN_MESSAGE,
       label: "Invite",
       status: 400,
       shouldBeCaptured: false,
@@ -81,8 +202,7 @@ async function validateInvite(
     if (!ssoUserExists) {
       throw new ShelfError({
         cause: null,
-        message:
-          "This email domain uses SSO authentication. The user needs to sign up via SSO to get access to the organization.",
+        message: PURE_SSO_DOMAIN_MESSAGE,
         label: "Invite",
         status: 400,
         shouldBeCaptured: false,
@@ -100,7 +220,7 @@ export async function getExistingActiveInvite({
     return await db.invite.findFirst({
       where: {
         organizationId,
-        inviteeEmail,
+        inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
         OR: [
           //invite is either not rejected or not expired
           {
@@ -130,6 +250,11 @@ export async function createInvite(
     teamMemberId?: Invite["teamMemberId"];
     userId: string;
     extraMessage?: string | null;
+    /**
+     * `access.ownsWorkspace` of the inviter; only the owner may grant an
+     * owner-only role.
+     */
+    actorOwnsWorkspace: boolean;
   }
 ) {
   let {
@@ -141,9 +266,15 @@ export async function createInvite(
     teamMemberId,
     userId,
     extraMessage,
+    actorOwnsWorkspace,
   } = payload;
 
+  inviteeEmail = normalizeInviteEmail(inviteeEmail);
+
   try {
+    // Authorize the actor before any read or write.
+    assertCanAssignRoles({ actorOwnsWorkspace, roles, organizationId });
+
     // Add SSO validation before proceeding with invite
     await validateInvite(inviteeEmail, organizationId);
 
@@ -162,7 +293,7 @@ export async function createInvite(
 
     const existingUser = await db.user.findFirst({
       where: {
-        email: inviteeEmail,
+        email: caseInsensitiveEmailFilter(inviteeEmail),
         userOrganizations: {
           some: { organizationId },
         },
@@ -184,11 +315,16 @@ export async function createInvite(
     }
 
     if (!teamMemberId) {
+      /**
+       * The oldest earlier invite decides the team member, so a person who was
+       * invited more than once keeps the record that holds their history.
+       */
       const previousInvite = await db.invite.findFirst({
         where: {
           organizationId,
-          inviteeEmail,
+          inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
         },
+        orderBy: { createdAt: "asc" },
       });
 
       if (previousInvite?.teamMemberId) {
@@ -206,7 +342,7 @@ export async function createInvite(
       const previousActiveInvite = await db.invite.findFirst({
         where: {
           organizationId,
-          inviteeEmail,
+          inviteeEmail: caseInsensitiveEmailFilter(inviteeEmail),
           status: InviteStatuses.PENDING,
           expiresAt: { gt: new Date() },
         },
@@ -404,7 +540,9 @@ export async function updateInviteStatus({
       const { firstName, lastName } = splitName(invite.inviteeTeamMember.name);
 
       const user = await createUserOrAttachOrg({
-        email: invite.inviteeEmail,
+        // A stored invite can hold capitals; the account is keyed on the
+        // normalised address.
+        email: normalizeInviteEmail(invite.inviteeEmail),
         organizationId: invite.organizationId,
         roles: invite.roles,
         password,
@@ -454,7 +592,7 @@ export async function updateInviteStatus({
     await db.invite.updateMany({
       where: {
         status: InviteStatuses.PENDING,
-        inviteeEmail: invite.inviteeEmail,
+        inviteeEmail: caseInsensitiveEmailFilter(invite.inviteeEmail),
         organizationId: invite.organizationId,
       },
       data: { status: InviteStatuses.INVALIDATED },
@@ -474,7 +612,12 @@ export async function updateInviteStatus({
 }
 
 /**
- * Checks if the user is already signed in and if the invite is for the same user
+ * Checks that the signed-in user is the person the invite was sent to.
+ *
+ * Emails are compared without regard to letter case, because a stored invite
+ * can keep the capitals of the address it was created with.
+ *
+ * @throws {ShelfError} "Wrong user" when the addresses differ
  */
 export async function checkUserAndInviteMatch({
   context,
@@ -498,7 +641,12 @@ export async function checkUserAndInviteMatch({
     })
     .catch(() => null);
 
-  if (user?.email !== invite?.inviteeEmail) {
+  const isInvitedUser =
+    !!user &&
+    normalizeInviteEmail(user.email) ===
+      normalizeInviteEmail(invite.inviteeEmail);
+
+  if (!isInvitedUser) {
     throw new ShelfError({
       cause: null,
       title: "Wrong user",
@@ -594,15 +742,17 @@ export async function getPaginatedAndFilterableSettingInvites({
      * Create the same structure for the invites
      */
     const items = invites.map((invite) => {
-      const roleEnum = invite.roles[0] ?? OrganizationRoles.BASE;
+      // The invite's effective role; an invite with no role resolves to BASE.
+      const roleEnum = resolveRole(invite.roles);
       return {
         id: invite.id,
         name: invite.inviteeTeamMember.name,
         img: "/static/images/default_pfp.jpg",
         email: invite.inviteeEmail,
         status: invite.status,
-        role: organizationRolesMap[roleEnum],
+        role: ROLE_LABELS[roleEnum],
         roleEnum,
+        roles: invite.roles,
         userId: null,
         sso: false,
         inviteMessage: invite.inviteMessage,
@@ -629,18 +779,53 @@ export async function getPaginatedAndFilterableSettingInvites({
   }
 }
 
-type InviteUserSchema = z.infer<typeof InviteUserFormSchema>;
+/**
+ * Refuses a users CSV with the problems its pre-flight found, as the 400 the
+ * import dialog renders as a row list.
+ *
+ * @param args.preflight - The pre-flight result, with at least one error
+ * @param args.organizationId - The importing workspace, for the log line
+ * @throws {ShelfError} Always: 400, not captured, row errors in additionalData
+ */
+function throwImportFileErrors({
+  preflight,
+  organizationId,
+}: {
+  preflight: ImportPreflightResult;
+  organizationId: string;
+}): never {
+  throw new ShelfError({
+    cause: null,
+    title: "Import file has errors",
+    message: `Found ${preflight.totalErrors} problem(s) in your file. Nothing was imported. Fix the rows below and upload again.`,
+    additionalData: {
+      organizationId,
+      rowErrors: preflight.errors,
+      totalErrors: preflight.totalErrors,
+    },
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
 
 export async function bulkInviteUsers({
   users,
   userId,
   organizationId,
   extraMessage,
+  actorOwnsWorkspace,
 }: {
-  users: InviteUserSchema[];
+  /** The CSV rows as parsed, before any validation. */
+  users: ImportUserCsvRow[];
   userId: User["id"];
   organizationId: Organization["id"];
   extraMessage?: string | null;
+  /**
+   * `access.ownsWorkspace` of the inviter; only the owner may grant an
+   * owner-only role.
+   */
+  actorOwnsWorkspace: boolean;
 }) {
   try {
     // Validate and sanitize invitation message
@@ -661,72 +846,89 @@ export async function bulkInviteUsers({
     }
     const sanitizedMessage = messageResult.message;
 
-    // Filter out entries with missing or invalid email/role
-    const validUsers = users.filter(
-      (user) =>
-        user.email &&
-        user.role &&
-        user.email.trim() !== "" &&
-        user.role.trim() !== ""
-    );
-
     /**
-     * Defense in depth: `users` is typed as `InviteUserSchema[]`, but that type
-     * comes from `z.infer` and is never enforced at runtime — the CSV import
-     * hands over raw strings parsed out of an uploaded file. The route
-     * validates them, and so must this, because `payload.role` is written
-     * straight into `Invite.roles` below and permissions resolve from
-     * `UserOrganization.roles` after acceptance.
+     * Validate the whole file before anything is written, as the asset import
+     * does: every row is checked and every problem reported, and a file with
+     * any problem imports nothing. The facts that need the database are read
+     * once for the whole file, so the cost does not grow per row: one team
+     * member lookup, and the SSO checks, which run once per email domain.
      */
-    const disallowedRoles = validUsers
-      .map((user) => user.role)
-      .filter((role) => !isInvitableRole(role));
-
-    if (disallowedRoles.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        message: `Invites cannot grant these roles: ${[
-          ...new Set(disallowedRoles),
-        ].join(", ")}. Ownership moves only through ownership transfer.`,
-        additionalData: { organizationId, disallowedRoles },
-        label,
-        status: 400,
-        shouldBeCaptured: false,
+    // An oversized file is refused before anything is read, so its size
+    // cannot drive the lookups below.
+    if (users.length > MAX_IMPORT_USERS_ROWS) {
+      throwImportFileErrors({
+        preflight: validateImportUserRows({
+          rows: users,
+          workspaceTeamMemberIds: new Set(),
+          ssoRefusalByEmail: new Map(),
+        }),
+        organizationId,
       });
     }
 
-    // Filter out duplicate emails
-    const uniquePayloads = lodash.uniqBy(validUsers, (user) => user.email);
-
-    // Batch validate all emails against SS
-    await Promise.all(
-      uniquePayloads.map((payload) =>
-        validateInvite(payload.email, organizationId)
-      )
-    );
-
-    const teamMemberIds = uniquePayloads
-      .filter((user) => !!user.teamMemberId)
-      .map((user) => user.teamMemberId!);
-
-    const teamMembers = await db.teamMember.findMany({
-      where: { id: { in: teamMemberIds }, organizationId },
-      select: { id: true, userId: true },
+    // The actor rule, before any lookup: only the workspace owner may grant an
+    // owner-only role, and one such row refuses the whole file. Rows whose
+    // role is not invitable at all are left to the preflight to report.
+    assertCanAssignRoles({
+      actorOwnsWorkspace,
+      roles: users
+        .map((user) => (user.role ?? "").trim().toUpperCase())
+        .filter(isInvitableRole),
+      organizationId,
     });
+
+    const csvTeamMemberIds = [
+      ...new Set(
+        users
+          .map((user) => user.teamMemberId?.trim())
+          .filter((id): id is string => Boolean(id))
+      ),
+    ];
+    const candidateEmails = [
+      ...new Set(
+        users
+          .map((user) => normalizeInviteEmail(user.email ?? ""))
+          .filter((email) => validEmail(email))
+      ),
+    ];
+
+    const [workspaceTeamMembers, ssoRefusalByEmail] = await Promise.all([
+      csvTeamMemberIds.length > 0
+        ? db.teamMember.findMany({
+            // Scoped to the importing workspace, so an id from another
+            // workspace is not found and its row is refused.
+            where: { id: { in: csvTeamMemberIds }, organizationId },
+            select: { id: true, userId: true },
+          })
+        : Promise.resolve([]),
+      resolveSsoInviteRefusals({ emails: candidateEmails, organizationId }),
+    ]);
+
+    const preflight = validateImportUserRows({
+      rows: users,
+      workspaceTeamMemberIds: new Set(workspaceTeamMembers.map((tm) => tm.id)),
+      ssoRefusalByEmail,
+    });
+
+    if (preflight.totalErrors > 0) {
+      throwImportFileErrors({ preflight, organizationId });
+    }
+
+    const uniquePayloads = preflight.validRows;
 
     /**
      * These teamMembers has a user already associated.
      * So we will skip them from the invite process.
      * */
-    const teamMembersWithUserId = teamMembers
+    const teamMembersWithUserId = workspaceTeamMembers
       .filter((tm) => !!tm.userId)
-      .map((tm) => tm.id!);
+      .map((tm) => tm.id);
 
     // Batch check for existing users
     const emails = uniquePayloads.map((p) => p.email);
     const existingUsers = await db.user.findMany({
       where: {
-        email: { in: emails },
+        email: caseInsensitiveEmailFilter(emails),
         userOrganizations: {
           some: { organizationId },
         },
@@ -734,13 +936,16 @@ export async function bulkInviteUsers({
       select: { email: true },
     });
 
-    const existingEmailsInOrg = new Set(existingUsers.map((u) => u.email));
+    // Stored emails can contain capitals; compare in normalised form.
+    const existingEmailsInOrg = new Set(
+      existingUsers.map((u) => normalizeInviteEmail(u.email))
+    );
 
     // Batch check for existing invites in one query
     const existingInvites = await db.invite.findMany({
       where: {
         organizationId,
-        inviteeEmail: { in: emails },
+        inviteeEmail: caseInsensitiveEmailFilter(emails),
         status: InviteStatuses.PENDING,
         expiresAt: { gt: new Date() },
       },
@@ -755,8 +960,17 @@ export async function bulkInviteUsers({
       },
     });
 
+    /**
+     * One person can have several pending invites (for example, the same
+     * address stored with different capitals), so the "all skipped" checks
+     * below compare sets of addresses, not row counts.
+     */
+    const existingInviteEmails = new Set(
+      existingInvites.map((i) => normalizeInviteEmail(i.inviteeEmail))
+    );
+
     /* All emails are already invited */
-    if (existingInvites.length === emails.length) {
+    if (emails.every((email) => existingInviteEmails.has(email))) {
       sendNotification({
         title: "Users already invited",
         message:
@@ -774,7 +988,7 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are already in organization */
-    if (existingUsers.length === emails.length) {
+    if (emails.every((email) => existingEmailsInOrg.has(email))) {
       sendNotification({
         title: "Users already member of organization",
         message: "All user in csv file are already part of your organization.",
@@ -791,7 +1005,12 @@ export async function bulkInviteUsers({
     }
 
     /* All emails are either in organization already or invited already */
-    if (existingInvites.length + existingUsers.length === emails.length) {
+    if (
+      emails.every(
+        (email) =>
+          existingInviteEmails.has(email) || existingEmailsInOrg.has(email)
+      )
+    ) {
       sendNotification({
         title: "0 users invited",
         message:
@@ -808,8 +1027,6 @@ export async function bulkInviteUsers({
       };
     }
 
-    const existingInviteEmails = existingInvites.map((i) => i.inviteeEmail);
-
     /**
      * We only have to send invite to the
      * - users who have not PENDING invitation and
@@ -817,8 +1034,7 @@ export async function bulkInviteUsers({
      */
     let validPayloads = uniquePayloads.filter(
       (p) =>
-        !existingInviteEmails.includes(p.email) &&
-        !existingEmailsInOrg.has(p.email)
+        !existingInviteEmails.has(p.email) && !existingEmailsInOrg.has(p.email)
     );
 
     /** Remove the users with teamMemberId who already have a user associated */
@@ -829,11 +1045,6 @@ export async function bulkInviteUsers({
 
       return !teamMembersWithUserId.includes(payload.teamMemberId);
     });
-
-    const validPayloadsWithName = validPayloads.map((p) => ({
-      ...p,
-      name: p.email.split("@")[0],
-    }));
 
     // Prepare invite data
     const expiresAt = new Date();
@@ -888,39 +1099,35 @@ export async function bulkInviteUsers({
       });
     };
 
+    /**
+     * Each invitee without a team member gets a new one, with its id generated
+     * here so every row maps to its own member. Matching them back by name
+     * would merge two invitees whose addresses start the same way.
+     */
+    const invitees = validPayloads.map((payload) => ({
+      ...payload,
+      isNewTeamMember: !payload.teamMemberId,
+      teamMemberId: payload.teamMemberId ?? id(),
+    }));
+
     await db.$transaction(async (tx) => {
-      // Bulk create all required team members
-      const createdTeamMembers = await tx.teamMember.createManyAndReturn({
-        data: validPayloadsWithName.map((p) => ({
-          name: p.name,
+      const newTeamMembers = invitees
+        .filter((invitee) => invitee.isNewTeamMember)
+        .map((invitee) => ({
+          id: invitee.teamMemberId,
+          name: invitee.name,
           organizationId,
-        })),
-      });
+        }));
 
-      /**
-       * This helper function returns the correct  teamMemberId required for creating an invite
-       */
-      function getTeamMemberId(payload: InviteUserSchema & { name: string }) {
-        if (payload.teamMemberId) {
-          return payload.teamMemberId;
-        }
-
-        const createdTm = createdTeamMembers.find(
-          (tm) => tm.name === payload.name
-        );
-        invariant(
-          createdTm,
-          "Unexpected situation! Could not find teamMember in createdTeamMembers."
-        );
-
-        return createdTm.id;
+      if (newTeamMembers.length > 0) {
+        await tx.teamMember.createMany({ data: newTeamMembers });
       }
 
-      const invitesToCreate = validPayloadsWithName.map((payload) => ({
+      const invitesToCreate = invitees.map((payload) => ({
         inviterId: userId,
         organizationId,
         inviteeEmail: payload.email,
-        teamMemberId: getTeamMemberId(payload),
+        teamMemberId: payload.teamMemberId,
         roles: [payload.role],
         expiresAt,
         inviteCode: generateRandomCode(6),
@@ -947,11 +1154,13 @@ export async function bulkInviteUsers({
     });
 
     const skippedUsers = users.filter((user) => {
-      if (existingInviteEmails.includes(user.email)) {
+      const email = user.email ? normalizeInviteEmail(user.email) : "";
+
+      if (existingInviteEmails.has(email)) {
         return true;
       }
 
-      if (existingEmailsInOrg.has(user.email)) {
+      if (existingEmailsInOrg.has(email)) {
         return true;
       }
 
@@ -974,24 +1183,19 @@ export async function bulkInviteUsers({
           : undefined,
     };
   } catch (cause) {
-    let message = "Something went wrong while inviting users.";
-
+    // A ShelfError already says what went wrong and carries what the caller
+    // needs, such as the row errors the import dialog lists, so it passes
+    // through unchanged.
     if (isLikeShelfError(cause)) {
-      message = cause.message;
+      throw cause;
     }
 
-    if (
-      cause instanceof PrismaClientKnownRequestError &&
-      cause.code === "P2003"
-    ) {
-      message = "Received invalid teamMemberId in csv";
-    }
-
+    // The rows themselves stay out: they are the file's email addresses.
     throw new ShelfError({
       cause,
-      message,
+      message: "Something went wrong while inviting users.",
       label,
-      additionalData: { users, userId, organizationId, extraMessage },
+      additionalData: { userId, organizationId, rowCount: users.length },
     });
   }
 }

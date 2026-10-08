@@ -95,7 +95,7 @@ export function generateWhereClause(
 
     if (terms.length > 0) {
       // Search = "asset id is in the org-scoped UNION of matching ids". Each
-      // of the 10 sources is its own index-driven, org-scoped branch inside
+      // of the 11 sources is its own index-driven, org-scoped branch inside
       // the UNION (see buildAssetSearchUnion), replacing the old multi-table
       // OR that forced cross-org seq scans.
       whereClause = Prisma.sql`${whereClause} AND a."id" IN ${buildAssetSearchUnion(
@@ -285,12 +285,25 @@ function addCustomFieldOptionFilter(
         valuesArray = [];
       }
 
-      // Construct the PostgreSQL array literal
-      const arrayLiteral = `{${valuesArray
-        .map((val: string) => `"${val}"`)
-        .join(",")}}`;
+      // Nothing to match against. `Prisma.join` throws on an empty array, and
+      // a bare `ARRAY[]` has no inferable element type, so the empty case is
+      // spelled out: a typed empty array, which matches no row — the same
+      // answer the filter gave before.
+      if (valuesArray.length === 0) {
+        return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[]::text[])`;
+      }
 
-      return Prisma.sql`${whereClause} AND ${subquery} = ANY(${arrayLiteral}::text[])`;
+      // Bind each value as its own parameter. An option's text is free-form —
+      // a quote, a backslash or a comma in it is ordinary — and assembling a
+      // `{"a","b"}` literal cannot carry those: the value's own quote closes
+      // the element and Postgres rejects the whole literal. Matches the
+      // `matchesAny` branch above.
+      const boundValues = Prisma.join(
+        valuesArray.map((val: string) => Prisma.sql`${val}`),
+        ", "
+      );
+
+      return Prisma.sql`${whereClause} AND ${subquery} = ANY(ARRAY[${boundValues}]::text[])`;
     }
     default:
       return whereClause;
@@ -2010,7 +2023,13 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
             END,
             'assetKitId', atb."assetKitId",
             'quantity', atb."quantity",
-            'kitName', bk_kit.name
+            'kitName', bk_kit.name,
+            -- Slice markers the availability bar reads to end a returned
+            -- asset's bar at its check-in instead of the booking's end.
+            -- Unwrapped like from/to above: timestamptz serialises with its
+            -- offset and the hook parses it with new Date().
+            'checkedOutAt', atb."checkedOutAt",
+            'checkedInAt', atb."checkedInAt"
           )
         ),
         '[]'::jsonb
@@ -2606,17 +2625,20 @@ const CHEAP_LOCATION_JOIN = Prisma.sql`
     ) l ON TRUE`;
 
 /**
- * Cheap-phase custody joins: the per-asset custody aggregation (`custody_agg`)
- * plus the active-booking LATERAL (`b`) and its custodian joins (`bu`/`btm`).
- * Injected only when a custody FILTER or a custody SORT is active — the custody
- * WHERE predicates reference `jsonb_array_length(custody_agg.custody)` and the
- * custody sort key references the full CASE (which needs `b`/`bu`/`btm`).
- * Verbatim mirror of the custody joins in {@link assetQueryJoins} — including
- * the `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` that makes
- * element 0 (the primary custodian used by the sort key `custody->0->>'name'`)
- * deterministic and consistent with the heavy phase's rendered badge.
+ * The per-asset custody aggregation (`custody_agg`).
+ *
+ * Every custody WHERE predicate in {@link generateWhereClause} tests
+ * `jsonb_array_length(custody_agg.custody)`, so any query that splices in a
+ * custody filter must also carry this join or Postgres raises "missing
+ * FROM-clause entry for table custody_agg". Exported so surfaces that build
+ * their own FROM — the asset-model rollup — share this fragment rather than
+ * keeping a copy that can drift from the predicates it has to satisfy.
+ *
+ * The `ORDER BY cu."createdAt" ASC, cu.id ASC` inside `jsonb_agg` is
+ * load-bearing: it makes element 0 the primary custodian, which the custody
+ * sort key (`custody->0->>'name'`) and the rendered badge both read.
  */
-const CHEAP_CUSTODY_JOINS = Prisma.sql`
+export const CUSTODY_AGG_JOIN = Prisma.sql`
     LEFT JOIN LATERAL (
       SELECT COALESCE(
         jsonb_agg(
@@ -2646,7 +2668,16 @@ const CHEAP_CUSTODY_JOINS = Prisma.sql`
       LEFT JOIN public."TeamMember" tm ON cu."teamMemberId" = tm.id
       LEFT JOIN public."User" u ON tm."userId" = u.id
       WHERE cu."assetId" = a.id
-    ) custody_agg ON TRUE
+    ) custody_agg ON TRUE`;
+
+/**
+ * Cheap-phase custody joins: {@link CUSTODY_AGG_JOIN} plus the active-booking
+ * LATERAL (`b`) and its custodian joins (`bu`/`btm`). Injected only when a
+ * custody FILTER or a custody SORT is active — the filter needs the
+ * aggregation, and the sort key's CASE additionally needs `b`/`bu`/`btm`.
+ */
+const CHEAP_CUSTODY_JOINS = Prisma.sql`
+    ${CUSTODY_AGG_JOIN}
     LEFT JOIN LATERAL (
       SELECT b.*
       FROM public."Booking" b

@@ -511,20 +511,21 @@ function BookingsListContent() {
 
           {isActive && (
             <View style={styles.actionHint}>
-              {/* A RESERVED booking is only "ready to check out" when it has
-                  concrete assets AND no outstanding book-by-model reservations
-                  (the server hard-blocks checkout until every reserved unit is
-                  assigned). Otherwise the honest next step is to assign/add
-                  assets, so the hint points there instead of promising a
-                  checkout that isn't possible yet. */}
+              {/* A RESERVED booking is "ready to check out" as soon as it holds
+                  a concrete asset: check-out needs one item to go out, and
+                  reserved units still unassigned stay open on the booking
+                  (the card's "N reserved" already shows them). With no asset
+                  yet, the honest next step is to assign reserved units or
+                  add assets, so the hint points there instead of promising
+                  a check-out that has nothing to send out. */}
               <Ionicons
                 name={
                   item.status !== "RESERVED"
                     ? "log-in-outline"
-                    : (item.outstandingModelCount ?? 0) > 0
-                    ? "cube-outline"
                     : item.assetCount > 0
                     ? "log-out-outline"
+                    : (item.outstandingModelCount ?? 0) > 0
+                    ? "cube-outline"
                     : "add-outline"
                 }
                 size={14}
@@ -533,10 +534,10 @@ function BookingsListContent() {
               <Text style={styles.actionHintText}>
                 {item.status !== "RESERVED"
                   ? "Tap to check in"
-                  : (item.outstandingModelCount ?? 0) > 0
-                  ? "Assign assets to check out"
                   : item.assetCount > 0
                   ? "Ready to check out"
+                  : (item.outstandingModelCount ?? 0) > 0
+                  ? "Assign assets to check out"
                   : "Add assets to check out"}
               </Text>
             </View>

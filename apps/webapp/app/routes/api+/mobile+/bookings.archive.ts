@@ -30,9 +30,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * archive action via `userHasPermission(archive)`). BASE has `booking:update`
  * but NOT `booking:archive`, so the looser `update` gate would let a BASE user
  * archive via the API even though the UI/permission map deny it. We also add the
- * shared `validateBookingOwnership` guard (no-op for admin/owner; creator-or-
- * custodian for self-service) since the web relies on the page loader's read-
- * filter that a direct POST bypasses. Mobile must never be more permissive.
+ * shared `validateBookingOwnership` guard (no-op when the caller's access
+ * writes every booking; creator-or-custodian otherwise) since the web relies on
+ * the page loader's read-filter that a direct POST bypasses. Mobile must never
+ * be more permissive.
  *
  * Body: { bookingId: string }
  * Query: ?orgId=...
@@ -63,7 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { bookingId } = await parseMobileBody(BodySchema, request, "Booking");
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
@@ -80,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
     validateBookingOwnership({
       booking,
       userId: user.id,
-      role,
+      access,
       action: "archive",
     });
 

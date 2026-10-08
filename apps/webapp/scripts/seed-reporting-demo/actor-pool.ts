@@ -22,6 +22,19 @@ import type { ExtendedPrismaClient } from "@shelf/database";
 import { weightedPick, zipfWeights, type RNG } from "./distributions";
 import { NAME_SUFFIX } from "./markers";
 import type { ActorSnapshot } from "../../app/modules/activity-event/types";
+import type { WorkspaceAccessSettings } from "../../app/utils/permissions/role-access";
+import { resolveRoleAccess } from "../../app/utils/permissions/role-access";
+
+/**
+ * Every workspace visibility toggle off. The ranking reads only ownership and
+ * booking write scope, which the toggles never widen.
+ */
+const TOGGLES_OFF: WorkspaceAccessSettings = {
+  selfServiceCanSeeBookings: false,
+  baseUserCanSeeBookings: false,
+  selfServiceCanSeeCustody: false,
+  baseUserCanSeeCustody: false,
+};
 
 /**
  * A single actor resolvable into `ActivityEvent.actorUserId` / `.teamMemberId`
@@ -95,13 +108,16 @@ async function resolveRealUsers(
     },
   });
 
-  // Prefer OWNER first, then any ADMIN, then anyone else.
+  // Prefer the owner, then members who manage every booking, then anyone else.
   const ranked = rows
     .map((r) => {
       const roles = r.roles ?? [];
-      let priority = 2;
-      if (roles.includes("OWNER")) priority = 0;
-      else if (roles.includes("ADMIN")) priority = 1;
+      const access = resolveRoleAccess({ roles, workspace: TOGGLES_OFF });
+      const priority = access.ownsWorkspace
+        ? 0
+        : access.bookings.writeAll
+        ? 1
+        : 2;
       return { priority, row: r };
     })
     .sort((a, b) => a.priority - b.priority)
