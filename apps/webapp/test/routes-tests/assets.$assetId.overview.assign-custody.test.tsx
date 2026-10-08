@@ -38,6 +38,15 @@ const dbMocks = vi.hoisted(() => {
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    assetKit: {
+      // why: the loader and the action refuse an individually tracked kit
+      // member, and read its kit membership here. Defaults to [] (in no kit)
+      // so every other case exercises the ordinary assignment path.
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    // why: the client-level raw query, so the loader case can assert that
+    // opening the page takes no row lock.
+    queryRaw: vi.fn().mockResolvedValue([]),
     custody: {
       // why: action now clears stale custody before assignment
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -70,9 +79,15 @@ vi.mock("~/database/db.server", () => ({
       deleteMany: dbMocks.custody.deleteMany,
       findFirst: dbMocks.custody.findFirst,
     },
+    assetKit: { findMany: dbMocks.assetKit.findMany },
+    // why: the action's kit-member guard locks the asset row with a raw
+    // `SELECT ... FOR UPDATE`; the loader must never reach this one.
+    $queryRaw: dbMocks.queryRaw,
     // why: action wraps custody cleanup + assignment in a transaction
     $transaction: vi.fn((cb: (tx: unknown) => unknown) =>
       cb({
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        assetKit: { findMany: dbMocks.assetKit.findMany },
         custody: {
           deleteMany: dbMocks.custody.deleteMany,
           findFirst: dbMocks.custody.findFirst,
@@ -198,6 +213,8 @@ beforeEach(() => {
   // — no kit custody — the same way the other mocks above are reset.
   dbMocks.custody.findFirst.mockReset();
   dbMocks.custody.findFirst.mockResolvedValue(null);
+  dbMocks.assetKit.findMany.mockReset();
+  dbMocks.assetKit.findMany.mockResolvedValue([]);
   dbMocks.custody.deleteMany.mockReset();
   dbMocks.custody.deleteMany.mockResolvedValue({ count: 0 });
   // The action reads the asset's `type` before the transaction and the same
@@ -854,5 +871,113 @@ describe("assign-custody — quantity-tracked assets", () => {
 
     expect(result).toMatchObject({ showModal: true });
     expect(mockTeamMemberFindMany).toHaveBeenCalled();
+  });
+});
+
+/**
+ * An individually tracked asset that belongs to a kit cannot be put into
+ * custody on its own: custody of it comes from the kit. The page refuses to
+ * open for such an asset, and the action refuses a direct POST, because a POST
+ * does not have to come from the rendered page.
+ */
+describe("assign-custody: kit members", () => {
+  const KIT_MEMBER_MESSAGE =
+    '"Tripod" is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.';
+
+  /** The membership row the guard reads for an individual kit member. */
+  const TRIPOD_IN_CAMERA_KIT = {
+    asset: { id: TEST_ASSET_ID, title: "Tripod" },
+    kit: { id: "kit-camera", name: "Camera Kit" },
+  };
+
+  function postCustodian() {
+    const formData = new FormData();
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: TEST_TEAM_MEMBER_ID, name: "Test Team Member" })
+    );
+    return createActionArgs({
+      request: new Request(
+        "https://example.com/assets/asset-123/overview/assign-custody",
+        { method: "POST", body: formData }
+      ),
+    });
+  }
+
+  beforeEach(() => {
+    requirePermissionMock.mockResolvedValue({
+      organizationId: TEST_ORG_ID,
+      role: OrganizationRoles.ADMIN,
+      access: accessFor([OrganizationRoles.ADMIN]),
+      userOrganizations: [{ organizationId: TEST_ORG_ID }],
+    } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+    mockGetTeamMember.mockResolvedValue({
+      id: TEST_TEAM_MEMBER_ID,
+      userId: "user-456",
+    });
+    mockAssetUpdate.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      title: "Tripod",
+    });
+  });
+
+  it("does not serve the page for a kit member", async () => {
+    // No custody yet, so without the guard the loader would render the modal.
+    getAssetMock.mockResolvedValue({
+      id: TEST_ASSET_ID,
+      organizationId: TEST_ORG_ID,
+      type: "INDIVIDUAL",
+      custody: [],
+      bookingAssets: [],
+    } as any);
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
+    // A picker to render, so the only thing standing between this request and
+    // the modal is the kit-member guard.
+    mockTeamMemberFindMany.mockResolvedValue([]);
+    mockTeamMemberCount.mockResolvedValue(0);
+
+    const thrown = await loader(createLoaderArgs()).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(Response);
+    expect((thrown as Response).status).toBe(400);
+    const body = await (thrown as Response).json();
+    expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
+    expect(mockTeamMemberFindMany).not.toHaveBeenCalled();
+    // Opening a page reads membership without locking the asset row.
+    expect(dbMocks.queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("refuses a direct POST for a kit member and writes nothing", async () => {
+    dbMocks.assetKit.findMany.mockResolvedValue([TRIPOD_IN_CAMERA_KIT]);
+
+    const response = (await action(postCustodian())) as Response;
+
+    expect(response.status).toBe(400);
+    const body = await response.json();
+    expect(body.error.message).toBe(KIT_MEMBER_MESSAGE);
+    // The guard runs first in the transaction, before the status claim: its
+    // row lock has to come before this transaction writes the asset, or it can
+    // deadlock with a concurrent "add to kit".
+    expect(dbMocks.asset.updateMany).not.toHaveBeenCalled();
+    expect(mockAssetUpdate).not.toHaveBeenCalled();
+    expect(createNoteMock).not.toHaveBeenCalled();
+  });
+
+  it("still assigns an asset that is in no kit", async () => {
+    // `assetKit.findMany` keeps its [] default: the asset is in no kit.
+    const response = (await action(postCustodian())) as Response;
+
+    expect(response.status).toBe(302);
+    expect(mockAssetUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          custody: {
+            create: {
+              custodian: { connect: { id: TEST_TEAM_MEMBER_ID } },
+            },
+          },
+        },
+      })
+    );
   });
 });

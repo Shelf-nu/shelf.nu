@@ -22,6 +22,8 @@ import { createStyles } from "@/lib/create-styles";
  * @param props.icon - Ionicons glyph name shown beside the label.
  * @param props.label - The field label.
  * @param props.value - The field value (right-aligned).
+ * @param props.hint - Optional muted line under the value, for detail that
+ *   would not fit the value's two lines (e.g. where a holder's units came from).
  * @param props.onPress - When set, the row becomes tappable and shows a chevron.
  * @param props.accessibilityLabel - A11y label for a tappable row (defaults to `value`).
  * @returns The detail row element.
@@ -30,15 +32,26 @@ export const InfoRow = memo(function InfoRow({
   icon,
   label,
   value,
+  hint,
   onPress,
   accessibilityLabel,
 }: {
   icon: string;
   label: string;
   value: string;
+  /**
+   * Optional muted line under the value, right-aligned with it. Used for
+   * detail that would truncate the value (a holder's sources). Rows without
+   * it render exactly as before.
+   */
+  hint?: string;
   /** When set, the row becomes tappable and shows a chevron affordance. */
   onPress?: () => void;
-  /** A11y label for the tappable row (defaults to the value text). */
+  /**
+   * A11y label for the tappable row (defaults to the value text). The hint,
+   * when set, is appended: an explicit label replaces the children's text for
+   * screen readers, so the hint would otherwise never be announced.
+   */
   accessibilityLabel?: string;
 }) {
   const { colors } = useTheme();
@@ -51,9 +64,24 @@ export const InfoRow = memo(function InfoRow({
         <Text style={styles.infoLabelText}>{label}</Text>
       </View>
       {/* why: selectable text claims touches — only enable it on static rows */}
-      <Text style={styles.infoValue} numberOfLines={2} selectable={!onPress}>
-        {value}
-      </Text>
+      {hint ? (
+        <View style={styles.infoValueColumn}>
+          <Text
+            style={styles.infoValueInColumn}
+            numberOfLines={2}
+            selectable={!onPress}
+          >
+            {value}
+          </Text>
+          <Text style={styles.infoHint} numberOfLines={3} selectable={!onPress}>
+            {hint}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.infoValue} numberOfLines={2} selectable={!onPress}>
+          {value}
+        </Text>
+      )}
       {onPress && (
         <Ionicons name="chevron-forward" size={16} color={colors.mutedLight} />
       )}
@@ -67,7 +95,11 @@ export const InfoRow = memo(function InfoRow({
         onPress={onPress}
         activeOpacity={0.6}
         accessibilityRole="button"
-        accessibilityLabel={accessibilityLabel ?? value}
+        accessibilityLabel={
+          hint
+            ? `${accessibilityLabel ?? value}. ${hint}`
+            : accessibilityLabel ?? value
+        }
       >
         {content}
       </TouchableOpacity>
@@ -106,6 +138,23 @@ const useStyles = createStyles((colors) => ({
     fontSize: fontSize.base,
     fontWeight: "600",
     color: colors.foreground,
+    textAlign: "right",
+  },
+  // Value + hint stacked, hugging the right edge like a plain value does.
+  infoValueColumn: {
+    flex: 1,
+    alignItems: "flex-end",
+    gap: 2,
+  },
+  infoValueInColumn: {
+    fontSize: fontSize.base,
+    fontWeight: "600",
+    color: colors.foreground,
+    textAlign: "right",
+  },
+  infoHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
     textAlign: "right",
   },
 }));
