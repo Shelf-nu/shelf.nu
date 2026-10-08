@@ -44,7 +44,10 @@ Special files:
   current branch's dependency changes are re-applied against the merged
   manifests.
 - `packages/database/prisma/migrations/`: never edit or renumber a migration
-  that is on the incoming branch. If both sides added migrations, keep both. Run
+  that is on the incoming branch. If both sides added migrations, read both
+  sides' `migration.sql` and check whether they touch the same table, column,
+  index or enum. Keep both only when they are independent. If they overlap, do not edit, rename or write any
+  migration: leave it and ask me, quoting the overlapping statements. Run
   `pnpm db:generate` if the schema changed. Never run `db:prepare-migration` or
   `db:deploy-migration`.
 - Generated files (route typegen, Prisma client): regenerate, do not merge.
