@@ -61,7 +61,10 @@ export function createBlockers({
 
     return (
       <m.div
-        className="bg-gray-25 px-4 pt-4 text-[12px]"
+        // A bordered panel with a soft upward shadow: it sits over the
+        // scrolling list, and without them its top edge reads as a row
+        // cut off mid-list.
+        className="relative rounded-t-md border border-b-0 border-gray-200 bg-gray-25 px-4 pt-4 text-[12px] shadow-[0_-4px_8px_-4px_rgba(16,24,40,0.08)]"
         transition={{ duration: 0.2 }}
         exit={{ opacity: 0 }}
       >

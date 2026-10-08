@@ -85,7 +85,8 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
-import { PendingItemsList, SectionHeader } from "./pending-items-list";
+import { ScanItemGroup } from "../scan-item-group";
+import { PendingItemsList } from "./pending-items-list";
 
 /**
  * Shape of a single per-asset disposition submitted by the check-in drawer.
@@ -1000,7 +1001,7 @@ export default function PartialCheckinDrawer({
       /**
        * Scanning a kit QR counts as "I've got all the assets in this
        * kit". The pending / progress logic has to honour that —
-       * otherwise the kit row lands in "Checked in this session" but
+       * otherwise the kit row lands in "Scanned this session" but
        * each of its child assets still shows up under Pending, and
        * `0/N units checked in` stays unchanged.
        *
@@ -1251,12 +1252,12 @@ export default function PartialCheckinDrawer({
   }, [expectedKits]);
 
   /**
-   * Unified renderer: interleave all buckets in the order described on
-   * `buckets`. Pending buckets render via their own `Tr`-wrapped
-   * components; scanned buckets render through `GenericItemRow` which
-   * uses its own `Tr`.
+   * Renders the drawer list as foldable groups, each its own card, in the
+   * bucket order described on `buckets`: "Scanned this session" (reopens on
+   * a new scan), "Pending", and "Already checked in" (folded by default). A
+   * group with nothing in it is not rendered.
    */
-  const customRenderAllItems = useCallback((): ReactNode => {
+  const renderGroups = useCallback((): ReactNode => {
     const {
       scannedWithPending,
       scannedComplete,
@@ -1285,49 +1286,51 @@ export default function PartialCheckinDrawer({
 
     return (
       <>
-        {/* Header for scanned section — only render when non-empty so
-            an empty drawer doesn't show a "Checked in (0)" label. */}
+        {/* Scanned group: only when non-empty, so an empty drawer shows no
+            "Scanned this session" card. */}
         {scannedCount > 0 ? (
-          <SectionHeader
-            label={`Checked in this session (${scannedCount})`}
+          <ScanItemGroup
+            label="Scanned this session"
+            count={scannedCount}
             tone="active"
-          />
-        ) : null}
-
-        {/* Scanned rows (buckets 1–3). A scanned kit also renders an
+            openWhenCountGrows
+          >
+            {/* Scanned rows (buckets 1–3). A scanned kit also renders an
             editable disposition row for each of its qty-tracked members
             (Polish-7b) so the operator can split their consumption log —
             individuals are covered by the kit row's summary. */}
-        {scannedQrIdsInOrder.map((qrId) => {
-          const item = items[qrId];
-          const kitId =
-            item?.type === "kit"
-              ? (item.data as { id?: string } | undefined)?.id
-              : undefined;
-          const qtyMembers = kitId
-            ? expectedAssets.filter(
-                (a): a is QtyExpectedAsset =>
-                  a.kind === "QUANTITY_TRACKED" &&
-                  a.kitId === kitId &&
-                  activatedQtyBookingAssetIds.has(a.bookingAssetId)
-              )
-            : [];
-          return (
-            <Fragment key={qrId}>
-              <ScannedItemRow
-                qrId={qrId}
-                item={item}
-                onRemove={onRemoveScanned}
-              />
-              {qtyMembers.map((member) => (
-                <ScannedKitQtyMemberRow
-                  key={`scanned-kit-qty-${member.bookingAssetId}`}
-                  asset={member}
-                />
-              ))}
-            </Fragment>
-          );
-        })}
+            {scannedQrIdsInOrder.map((qrId) => {
+              const item = items[qrId];
+              const kitId =
+                item?.type === "kit"
+                  ? (item.data as { id?: string } | undefined)?.id
+                  : undefined;
+              const qtyMembers = kitId
+                ? expectedAssets.filter(
+                    (a): a is QtyExpectedAsset =>
+                      a.kind === "QUANTITY_TRACKED" &&
+                      a.kitId === kitId &&
+                      activatedQtyBookingAssetIds.has(a.bookingAssetId)
+                  )
+                : [];
+              return (
+                <Fragment key={qrId}>
+                  <ScannedItemRow
+                    qrId={qrId}
+                    item={item}
+                    onRemove={onRemoveScanned}
+                  />
+                  {qtyMembers.map((member) => (
+                    <ScannedKitQtyMemberRow
+                      key={`scanned-kit-qty-${member.bookingAssetId}`}
+                      asset={member}
+                    />
+                  ))}
+                </Fragment>
+              );
+            })}
+          </ScanItemGroup>
+        ) : null}
 
         {/**
          * Pending section (Polish-7b — grouped by each entry's OWN
@@ -1343,21 +1346,32 @@ export default function PartialCheckinDrawer({
          * Renderer lives in `pending-items-list.tsx` so the check-out
          * drawer can reuse it under `mode="checkout"`.
          */}
-        <PendingItemsList
-          mode="checkin"
-          pendingIndividuals={pendingIndividuals}
-          pendingQtyTracked={pendingQtyTracked}
-          kitMetaById={kitMetaById}
-          onQuickAction={handleQuickCheckin}
-          pendingCount={pendingCount}
-        />
+        {pendingCount > 0 ? (
+          <ScanItemGroup label="Pending" count={pendingCount} tone="muted">
+            <PendingItemsList
+              mode="checkin"
+              pendingIndividuals={pendingIndividuals}
+              pendingQtyTracked={pendingQtyTracked}
+              kitMetaById={kitMetaById}
+              onQuickAction={handleQuickCheckin}
+            />
+          </ScanItemGroup>
+        ) : null}
 
-        {/* Bucket 6: already fully reconciled (dimmed, collapsed). */}
+        {/* Bucket 6: already fully reconciled. Folded by default: the
+            operator usually only cares about what is still outstanding. */}
         {alreadyReconciled.length > 0 ? (
-          <AlreadyReconciledCollapser
-            assets={alreadyReconciled}
-            kitMetaById={kitMetaById}
-          />
+          <ScanItemGroup
+            label="Already checked in"
+            count={alreadyReconciled.length}
+            tone="done"
+            defaultOpen={false}
+          >
+            <AlreadyReconciledRows
+              assets={alreadyReconciled}
+              kitMetaById={kitMetaById}
+            />
+          </ScanItemGroup>
         ) : null}
       </>
     );
@@ -1404,7 +1418,7 @@ export default function PartialCheckinDrawer({
         }
         title={progressLabel}
         isLoading={isLoading}
-        customRenderAllItems={customRenderAllItems}
+        renderGroups={renderGroups}
         // Render body even when nothing has been scanned yet — pending
         // rows still need to be visible so the operator knows what's
         // expected.
@@ -1471,11 +1485,10 @@ function ScannedItemRow({
 }
 
 /**
- * Collapser wrapping the "already fully reconciled" rows at the bottom
- * of the drawer. Closed by default — the operator usually only cares
- * about what's still outstanding.
+ * The "already fully reconciled" rows, grouped by kit. The caller boxes them in
+ * a folded `ScanItemGroup`.
  */
-function AlreadyReconciledCollapser({
+function AlreadyReconciledRows({
   assets,
   kitMetaById,
 }: {
@@ -1485,10 +1498,6 @@ function AlreadyReconciledCollapser({
     { id: string; name: string; mainImage: string | null }
   >;
 }) {
-  // `<details>` doesn't make sense inside a <tbody>, so we fall back
-  // to a button-toggled state.
-  const [open, setOpen] = useState(false);
-
   /**
    * Group reconciled assets by kit (mirror of the pending section) so a
    * checked-in kit reads as one unit instead of N scattered green rows.
@@ -1522,34 +1531,14 @@ function AlreadyReconciledCollapser({
 
   return (
     <>
-      <Tr key="already-reconciled-header" skipEntrance>
-        <td
-          colSpan={2}
-          className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600"
-        >
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            className="flex w-full items-center gap-2"
-            aria-expanded={open}
-          >
-            <span>{open ? "▾" : "▸"}</span>
-            <span>Already checked in ({assets.length})</span>
-          </button>
-        </td>
-      </Tr>
-      {open ? (
-        <>
-          {kitGroups.map(({ kit, assets: kitAssets }) => (
-            <ReconciledKitGroup
-              key={`reconciled-kit-${kit.id}`}
-              kit={kit}
-              assets={kitAssets}
-            />
-          ))}
-          {looseAssets.map((asset) => renderAlreadyReconciledAsset(asset))}
-        </>
-      ) : null}
+      {kitGroups.map(({ kit, assets: kitAssets }) => (
+        <ReconciledKitGroup
+          key={`reconciled-kit-${kit.id}`}
+          kit={kit}
+          assets={kitAssets}
+        />
+      ))}
+      {looseAssets.map((asset) => renderAlreadyReconciledAsset(asset))}
     </>
   );
 }

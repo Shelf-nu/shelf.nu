@@ -782,7 +782,7 @@ describe("PartialCheckoutDrawer", () => {
    * Regression for the checkout-drawer twin of the check-in fix at
    * `partial-checkin-drawer.tsx:1060-1097`: scanning a kit must remove
    * its INDIVIDUAL members from the Pending section so the kit doesn't
-   * double-render (once under "Checked out this session" via `KitRow`
+   * double-render (once under "Scanned this session" via `KitRow`
    * AND again as a pending kit-group whose 3 members are still loose).
    *
    * Pre-fix `scannedAssetIds` was built from `assets` only (no kit-

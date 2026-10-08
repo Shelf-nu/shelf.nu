@@ -49,11 +49,12 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
+import { ScanItemGroup } from "../scan-item-group";
 import {
   buildPartialCheckoutBlockers,
   isAssetFullyCheckedOut,
 } from "./partial-checkout-blockers";
-import { PendingItemsList, SectionHeader } from "./pending-items-list";
+import { PendingItemsList } from "./pending-items-list";
 
 /** Narrowed alias used when classifying expected qty-tracked slices below. */
 type QtyExpectedAsset = Extract<
@@ -413,7 +414,7 @@ export default function PartialCheckoutDrawer({
    * `partial-checkin-drawer.tsx:1060-1097`). Without the kit-member
    * contribution, scanning a kit leaves its INDIVIDUAL members in the
    * pending bucket and they double-render under the kit's name there
-   * even though the kit already appears in "Checked out this session".
+   * even though the kit already appears in "Scanned this session".
    *
    * Synthetic `qty-checkout:<bookingAssetId>` keys are intentionally
    * NOT contributed here — those track per-slice quick-checkout
@@ -685,64 +686,63 @@ export default function PartialCheckoutDrawer({
   );
 
   /**
-   * Unified renderer: drive both buckets in a single pass. Scanned
-   * rows render through `GenericItemRow` (existing behaviour);
-   * pending rows go through the shared `PendingItemsList` under
-   * `mode="checkout"`.
-   *
-   * Render order (top → bottom):
-   *  1. Active section header (when ≥1 scanned this session).
-   *  2. Scanned rows (asset + kit, in iteration order of `items`).
-   *  3. PendingItemsList header + grouped pending rows.
+   * Renders the drawer list as two foldable groups, each its own card:
+   *  1. "Scanned this session": scanned rows through `GenericItemRow`, in
+   *     the order of `items`. Reopens on a new scan so it is never hidden.
+   *  2. "Pending": the shared `PendingItemsList` under `mode="checkout"`.
+   * A group with nothing in it is not rendered.
    */
-  const customRenderAllItems = useCallback((): ReactNode => {
+  const renderGroups = useCallback((): ReactNode => {
     const scannedQrIdsInOrder = Object.keys(items);
     const scannedCount = scannedQrIdsInOrder.length;
 
     return (
       <>
         {scannedCount > 0 ? (
-          <SectionHeader
-            label={`Checked out this session (${scannedCount})`}
+          <ScanItemGroup
+            label="Scanned this session"
+            count={scannedCount}
             tone="active"
-          />
+            openWhenCountGrows
+          >
+            {scannedQrIdsInOrder.map((qrId) => {
+              const item = items[qrId];
+              return (
+                <GenericItemRow
+                  key={qrId}
+                  qrId={qrId}
+                  item={item}
+                  onRemove={onRemoveScanned}
+                  renderLoading={(pendingQrId, error) => (
+                    <DefaultLoadingState qrId={pendingQrId} error={error} />
+                  )}
+                  renderItem={(data) => {
+                    if (item?.type === "asset") {
+                      return <AssetRow asset={data as AssetFromQr} />;
+                    } else if (item?.type === "kit") {
+                      return <KitRow kit={data as KitFromQr} />;
+                    }
+                    return null;
+                  }}
+                />
+              );
+            })}
+          </ScanItemGroup>
         ) : null}
 
-        {scannedQrIdsInOrder.map((qrId) => {
-          const item = items[qrId];
-          return (
-            <GenericItemRow
-              key={qrId}
-              qrId={qrId}
-              item={item}
-              onRemove={onRemoveScanned}
-              renderLoading={(pendingQrId, error) => (
-                <DefaultLoadingState qrId={pendingQrId} error={error} />
-              )}
-              renderItem={(data) => {
-                if (item?.type === "asset") {
-                  return <AssetRow asset={data as AssetFromQr} />;
-                } else if (item?.type === "kit") {
-                  return <KitRow kit={data as KitFromQr} />;
-                }
-                return null;
-              }}
+        {/* Pending rows are grouped by each entry's OWN `kitId`; the
+            renderer is shared with check-in through `mode`. */}
+        {pendingCount > 0 ? (
+          <ScanItemGroup label="Pending" count={pendingCount} tone="muted">
+            <PendingItemsList
+              mode="checkout"
+              pendingIndividuals={buckets.pendingIndividuals}
+              pendingQtyTracked={buckets.pendingQtyTracked}
+              kitMetaById={kitMetaById}
+              onQuickAction={handleQuickCheckout}
             />
-          );
-        })}
-
-        {/* Pending section (Polish-7b — grouped by each entry's OWN
-            `kitId`). Renderer lives in `pending-items-list.tsx`; we
-            wire `mode="checkout"` so the copy + key prefixes match the
-            checkout direction. */}
-        <PendingItemsList
-          mode="checkout"
-          pendingIndividuals={buckets.pendingIndividuals}
-          pendingQtyTracked={buckets.pendingQtyTracked}
-          kitMetaById={kitMetaById}
-          onQuickAction={handleQuickCheckout}
-          pendingCount={pendingCount}
-        />
+          </ScanItemGroup>
+        ) : null}
       </>
     );
   }, [
@@ -798,7 +798,7 @@ export default function PartialCheckoutDrawer({
           </div>
         }
         isLoading={isLoading}
-        customRenderAllItems={customRenderAllItems}
+        renderGroups={renderGroups}
         // Render body even when nothing has been scanned yet — pending
         // rows still need to be visible so the operator knows what's
         // still owed on the booking.

@@ -66,6 +66,12 @@ type ConfigurableDrawerProps<T> = {
   headerContent?: ReactNode;
   // Optional custom render function for all items (if you need full control over rendering)
   customRenderAllItems?: () => ReactNode;
+  /**
+   * Renders the list as separate groups (e.g. `ScanItemGroup` cards) instead of
+   * one table. Each group brings its own table, so the drawer does not wrap
+   * them in one. Takes precedence over `customRenderAllItems` and `renderItem`.
+   */
+  renderGroups?: () => ReactNode;
   // Custom height for the collapsed state when items are present (default: 170)
   collapsedHeight?: number;
 };
@@ -97,6 +103,7 @@ export default function ConfigurableDrawer<T>({
   form,
   headerContent,
   customRenderAllItems,
+  renderGroups,
   collapsedHeight,
 }: ConfigurableDrawerProps<T>) {
   const zo = useZorm(formName, schema);
@@ -205,29 +212,33 @@ export default function ConfigurableDrawer<T>({
         </>
       )}
     >
-      {() => (
-        <>
-          {/* Item List */}
-          <Table className="overflow-y-auto">
-            <ListHeader hideFirstColumn className="border-none">
-              <Th className="p-0"> </Th>
-              <Th className="p-0"> </Th>
-            </ListHeader>
+      {() =>
+        renderGroups ? (
+          <div className="flex flex-col gap-2 py-2">{renderGroups()}</div>
+        ) : (
+          <>
+            {/* Item List */}
+            <Table className="overflow-y-auto">
+              <ListHeader hideFirstColumn className="border-none">
+                <Th className="p-0"> </Th>
+                <Th className="p-0"> </Th>
+              </ListHeader>
 
-            <tbody>
-              <AnimatePresence>
-                {customRenderAllItems
-                  ? customRenderAllItems()
-                  : renderItem
-                  ? Object.entries(items).map(([qrId, item]) =>
-                      renderItem(qrId, item)
-                    )
-                  : null}
-              </AnimatePresence>
-            </tbody>
-          </Table>
-        </>
-      )}
+              <tbody>
+                <AnimatePresence>
+                  {customRenderAllItems
+                    ? customRenderAllItems()
+                    : renderItem
+                    ? Object.entries(items).map(([qrId, item]) =>
+                        renderItem(qrId, item)
+                      )
+                    : null}
+                </AnimatePresence>
+              </tbody>
+            </Table>
+          </>
+        )
+      }
     </BaseDrawer>
   );
 }
