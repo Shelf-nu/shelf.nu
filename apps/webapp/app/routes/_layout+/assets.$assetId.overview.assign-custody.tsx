@@ -22,7 +22,11 @@ import { recordEvent } from "~/modules/activity-event/service.server";
 import { getAsset } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { AssignCustodySchema } from "~/modules/custody/schema";
-import { assertNoKitDerivedCustody } from "~/modules/custody/service.server";
+import {
+  assertNoKitDerivedCustody,
+  assertNotKitMembers,
+  refuseKitMembers,
+} from "~/modules/custody/service.server";
 import { hasCustody } from "~/modules/custody/utils";
 import { createNote } from "~/modules/note/service.server";
 import { getTeamMember } from "~/modules/team-member/service.server";
@@ -139,6 +143,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     if (asset && hasCustody(asset.custody)) {
       return redirect(`/assets/${assetId}`);
     }
+
+    // An individually tracked kit member takes custody through its kit, so the
+    // page refuses to open for one, with the same 400 the action gives. A plain
+    // read: opening a page must not lock the asset row.
+    await refuseKitMembers(db, [assetId], organizationId);
 
     const searchParams = getCurrentSearchParams(request);
 
@@ -317,6 +326,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
+        // Custody of an individually tracked kit member comes from its kit.
+        // First in the transaction, before the status claim below: the guard's
+        // row lock must be taken before this transaction writes the asset row,
+        // or it can deadlock with a concurrent "add to kit" (see
+        // `assertNotKitMembers`).
+        await assertNotKitMembers(tx, [assetId], organizationId);
+
         /**
          * Refuse to take custody of an asset that is checked out on a booking.
          *
@@ -422,8 +438,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         return updated;
       })
       .catch((cause) => {
-        // Deliberate, user-facing failures (the CHECKED_OUT conflict above)
-        // must survive this wrapper. `ShelfError` inherits `title` and `status`
+        // Deliberate, user-facing failures (the CHECKED_OUT conflict and the
+        // kit guards above) must survive this wrapper. `ShelfError` inherits `title` and `status`
         // from its cause but ALWAYS assigns its own `message`
         // (`~/utils/error.ts`), and the form renders only
         // `actionData.error.message` — so wrapping would swap the specific

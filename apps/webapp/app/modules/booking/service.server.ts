@@ -170,6 +170,15 @@ import {
   computeDispatchedUnitsTotalByAsset,
   computeSlicesRemainingToCheckOut,
 } from "./checkout-attribution";
+import {
+  bookingMethodClause,
+  bookingMethodMeta,
+  narrowSelectedBookingAssetIds,
+  outstandingSliceIds,
+  scannedRowPredicate,
+  type BatchSliceId,
+  type BookingMethodProvenance,
+} from "./checkout-method";
 import type { SourceLocationSubmission } from "./checkout-source-location";
 import {
   checkinPlacementSources,
@@ -462,6 +471,7 @@ export async function createStatusTransitionNote({
   userId,
   action,
   custodianUserId,
+  methodClause = "",
 }: {
   bookingId: string;
   organizationId: string;
@@ -470,6 +480,12 @@ export async function createStatusTransitionNote({
   userId?: string;
   action?: string;
   custodianUserId?: string;
+  /**
+   * How the user made the transition, as {@link bookingMethodClause} words it
+   * (" (scanned on the phone)"). Appended to the action text of a user-initiated
+   * note; a system transition has no method.
+   */
+  methodClause?: string;
 }) {
   const fromStatusBadge = wrapBookingStatusForNote(fromStatus, custodianUserId);
   const toStatusBadge = wrapBookingStatusForNote(toStatus, custodianUserId);
@@ -490,7 +506,7 @@ export async function createStatusTransitionNote({
 
     const actionText =
       action || getActionTextFromTransition(fromStatus, toStatus);
-    content = `${userLink} ${actionText}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
+    content = `${userLink} ${actionText}${methodClause}. Status changed from ${fromStatusBadge} to ${toStatusBadge}`;
   } else {
     // System-initiated transition
     const actionText = getSystemActionText(fromStatus, toStatus);
@@ -3297,6 +3313,8 @@ async function runCheckoutSideEffects({
   hints,
   organizationId,
   isExpired,
+  provenance,
+  bookingSliceIds,
 }: {
   bookingFound: BookingForEmail;
   userId?: string;
@@ -3305,6 +3323,14 @@ async function runCheckoutSideEffects({
   hints: ClientHint;
   organizationId: Booking["organizationId"];
   isExpired: boolean;
+  /** How the check-out was made, for the activity line; see {@link checkoutBooking}. */
+  provenance?: BookingMethodProvenance;
+  /**
+   * The booking's slices, so a batch that scanned some rows and ticked others
+   * before closing the booking reads "scanned and selected" rather than one of
+   * the two. The one-click actions pass none.
+   */
+  bookingSliceIds?: readonly BatchSliceId[];
 }) {
   // Create status transition note. `organizationId` is required by
   // the hardened signature merged from `main` (cross-org safety
@@ -3317,6 +3343,7 @@ async function runCheckoutSideEffects({
       toStatus: effectiveStatus,
       userId,
       custodianUserId: bookingFound.custodianUserId || undefined,
+      methodClause: bookingMethodClause(provenance, bookingSliceIds),
     });
   }
 
@@ -3359,6 +3386,7 @@ export async function checkoutBooking({
   from,
   to,
   userId,
+  provenance,
   sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
@@ -3366,6 +3394,12 @@ export async function checkoutBooking({
   from?: Date | null;
   to?: Date | null;
   userId?: string;
+  /**
+   * How and from where the check-out was made. Recorded on every
+   * `BOOKING_CHECKED_OUT` event and said on the booking's activity line. The
+   * routes always pass it; the one-click actions are `method: "quick"`.
+   */
+  provenance?: BookingMethodProvenance;
   /**
    * Where each pool's units come from, keyed by slice or asset id. Only
    * pools at two or more placements are asked; anything missing resolves to
@@ -3688,7 +3722,18 @@ export async function checkoutBooking({
                 entityId: bookingFound.id,
                 bookingId: bookingFound.id,
                 assetId,
-                meta: asset ? assetQtyMeta(asset, totalQty) : {},
+                meta: {
+                  ...(asset ? assetQtyMeta(asset, totalQty) : {}),
+                  // A batch that closes the booking through this path may have
+                  // ticked one of the asset's slices and scanned another, so
+                  // the asset's event resolves over all of its slices.
+                  ...bookingMethodMeta(
+                    provenance,
+                    bookingFound.bookingAssets
+                      .filter((ba) => ba.asset.id === assetId)
+                      .map((ba) => ba.id)
+                  ),
+                },
               };
             }),
             tx
@@ -3722,6 +3767,8 @@ export async function checkoutBooking({
       hints,
       organizationId,
       isExpired,
+      provenance,
+      bookingSliceIds: bookingFound.bookingAssets.map((ba) => ba.id),
     });
   } catch (cause) {
     throw new ShelfError({
@@ -3792,6 +3839,7 @@ export async function fulfilModelRequestsAndCheckout({
   hints,
   from,
   to,
+  provenance,
   sourceLocations,
 }: {
   bookingId: Booking["id"];
@@ -3810,6 +3858,8 @@ export async function fulfilModelRequestsAndCheckout({
   hints: ClientHint;
   from?: Date | null;
   to?: Date | null;
+  /** How the scan was made; see {@link checkoutBooking}. */
+  provenance?: BookingMethodProvenance;
   /**
    * Where each pool's units come from. Keyed by asset id when the scan adds
    * the slice in this same request (the slice id does not exist yet), or by
@@ -3973,6 +4023,11 @@ export async function fulfilModelRequestsAndCheckout({
 
     /** The assets the scan actually put on the booking, for the notes below. */
     let addedAssetIds: string[] = [];
+    /**
+     * Assets whose row was already on the booking and answered a reservation
+     * when scanned. They went through the scanner without gaining a row.
+     */
+    let claimedAssetIds: string[] = [];
 
     /**
      * Single atomic transaction:
@@ -3989,6 +4044,11 @@ export async function fulfilModelRequestsAndCheckout({
      * early-date adjustment, and the status transition are all reverted
      * together.
      */
+    // Whether the scan named every row that went out, set inside the
+    // transaction. The activity line names the batch's method only then: a
+    // row the scan did not name is recorded with its method not said, and the
+    // line must not claim it was scanned.
+    let everyRowScanned = true;
     await db.$transaction(
       async (tx) => {
         // Hold the booking and its model requests for the rest of the
@@ -4024,6 +4084,7 @@ export async function fulfilModelRequestsAndCheckout({
         // Read post-commit, for the notes below. A scan that only claimed a
         // unit already on the booking added nothing to narrate.
         addedAssetIds = scanResult.addedAssetIds;
+        claimedAssetIds = scanResult.claimedAssetIds;
 
         /**
          * Post-scan snapshot of every booking asset that needs
@@ -4033,6 +4094,10 @@ export async function fulfilModelRequestsAndCheckout({
         const postScanBookingAssets = await tx.bookingAsset.findMany({
           where: { bookingId },
           select: {
+            id: true,
+            // The kit a kit-driven slice came from, so a scanned kit label
+            // marks its members' rows as scanned below.
+            sourceKitId: true,
             quantity: true,
             // Needed to exclude kit-driven slices from the standalone
             // availability guard below (#2790) — see the filter's rationale.
@@ -4105,6 +4170,19 @@ export async function fulfilModelRequestsAndCheckout({
           // One event per BookingAsset ROW (not deduped). For multi-row
           // qty-tracked, each event carries that row's own quantity in
           // `meta.quantity` (no-op for INDIVIDUAL).
+          // A row went through the scanner when the scan named that row: see
+          // `scannedRowPredicate` for how a quantity asset's sibling slices
+          // are told apart. Rows the scan did not name go out with the batch
+          // unscanned, so their method is recorded as not said rather than as
+          // the batch's.
+          const wasScanned = scannedRowPredicate({
+            assetIds,
+            kitSlices,
+            kitIds,
+            addedAssetIds,
+            claimedAssetIds,
+          });
+          everyRowScanned = postScanBookingAssets.every(wasScanned);
           await recordEvents(
             postScanBookingAssets.map((ba) => ({
               organizationId,
@@ -4114,7 +4192,15 @@ export async function fulfilModelRequestsAndCheckout({
               entityId: bookingId,
               bookingId,
               assetId: ba.asset.id,
-              meta: assetQtyMeta(ba.asset, ba.quantity),
+              meta: {
+                ...assetQtyMeta(ba.asset, ba.quantity),
+                ...bookingMethodMeta(
+                  provenance && !wasScanned(ba)
+                    ? { ...provenance, method: null }
+                    : provenance,
+                  [ba.id]
+                ),
+              },
             })),
             tx
           );
@@ -4148,6 +4234,10 @@ export async function fulfilModelRequestsAndCheckout({
       hints,
       organizationId,
       isExpired,
+      provenance:
+        provenance && !everyRowScanned
+          ? { ...provenance, method: null }
+          : provenance,
     });
   } catch (cause) {
     throw new ShelfError({
@@ -5512,10 +5602,18 @@ export async function checkinBooking({
   userId,
   specificAssetIds,
   checkins,
+  provenance,
 }: Pick<Booking, "id" | "organizationId"> & {
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
   userId?: string;
+  /**
+   * How and from where the check-in was made. Recorded on every
+   * `BOOKING_CHECKED_IN` event and said on the booking's activity line. The
+   * routes always pass it: the one-click check-in is `method: "quick"`, a
+   * "Check in selected items" that closes the booking is `"selected"`.
+   */
+  provenance?: BookingMethodProvenance;
   specificAssetIds?: string[];
   /**
    * Optional per-asset dispositions. When omitted, qty-tracked assets
@@ -5548,6 +5646,9 @@ export async function checkinBooking({
               // Whether the slice left, which bounds what the auto-default may
               // consume on it.
               checkedOutAt: true,
+              // Whether the slice already came back, so its check-in event does
+              // not claim the method of this check-in.
+              checkedInAt: true,
               // Where the slice's units left from at check-out: consumed, lost
               // and damaged units come off that placement below.
               sourceLocationId: true,
@@ -6340,15 +6441,19 @@ export async function checkinBooking({
           });
         }
 
-        // Activity events — one BOOKING_CHECKED_IN per BookingAsset ROW that
-        // was actually checked in. Progressive checkout can leave some assets
-        // never-checked-out; those must NOT get a check-in event. Walk the
-        // `bookingAssets` pivot (filtered by assetsToCheckin) so per-row
-        // `meta.quantity` is sourced from the pivot row (qty-tracked only via
-        // assetQtyMeta). Atomic with the booking status update for audit
-        // trail consistency.
-        const checkedInBookingAssets = bookingFound.bookingAssets.filter((ba) =>
-          assetsToCheckinSet.has(ba.asset.id)
+        // Activity events: one BOOKING_CHECKED_IN per slice this check-in
+        // reconciles, which is the same scope as the marker write below (out,
+        // not yet back). A slice that never left, or came back on an earlier
+        // return, gets no event: `Asset.status` is global, so filtering by
+        // asset alone would also emit for a sibling slice and claim it came
+        // back now. Per-row `meta.quantity` is sourced from the pivot row
+        // (qty-tracked only via assetQtyMeta). Atomic with the booking status
+        // update for audit trail consistency.
+        const checkedInBookingAssets = bookingFound.bookingAssets.filter(
+          (ba) =>
+            assetsToCheckinSet.has(ba.asset.id) &&
+            Boolean(ba.checkedOutAt) &&
+            !ba.checkedInAt
         );
         if (checkedInBookingAssets.length > 0) {
           await recordEvents(
@@ -6360,7 +6465,10 @@ export async function checkinBooking({
               entityId: bookingFound.id,
               bookingId: bookingFound.id,
               assetId: ba.asset.id,
-              meta: assetQtyMeta(ba.asset, ba.quantity),
+              meta: {
+                ...assetQtyMeta(ba.asset, ba.quantity),
+                ...bookingMethodMeta(provenance, [ba.id]),
+              },
             })),
             tx
           );
@@ -6516,7 +6624,14 @@ export async function checkinBooking({
           organizationId,
           content: `${wrapUserLinkForNote(
             user!
-          )} performed a partial check-in: ${itemsDescription} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          )} performed a partial check-in: ${itemsDescription}${bookingMethodClause(
+            provenance,
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                specificAssetIds.includes(ba.asset.id)
+              )
+            )
+          )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
 
         // Record the canonical status transition event for reports.
@@ -6540,6 +6655,10 @@ export async function checkinBooking({
           toStatus: BookingStatus.COMPLETE,
           userId,
           custodianUserId: updatedBooking.custodianUserId || undefined,
+          methodClause: bookingMethodClause(
+            provenance,
+            outstandingSliceIds(bookingFound.bookingAssets)
+          ),
         });
       }
     }
@@ -7032,6 +7151,7 @@ export async function partialCheckinBooking({
   userId,
   hints,
   intentChoice,
+  provenance,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. */
   assetIds?: Asset["id"][];
@@ -7040,6 +7160,15 @@ export async function partialCheckinBooking({
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckinIntentEnum;
+  /**
+   * How and from where the batch was made. Recorded on every
+   * `BOOKING_PARTIAL_CHECKIN` event and said on the booking's activity line.
+   * The web scan page passes `"scanned"` with the ticked slices in
+   * `selectedBookingAssetIds`; the list dialog passes `"selected"`; the phone
+   * passes what the app declared, or `null` when an older bundle declared
+   * nothing.
+   */
+  provenance?: BookingMethodProvenance;
 }) {
   try {
     // Dedupe once up front so counts, the PartialBookingCheckin record, and the
@@ -7467,11 +7596,22 @@ export async function partialCheckinBooking({
         outstandingAssetIds.length > 0 &&
         outstandingAssetIds.every((assetId) => providedAssetIds.has(assetId))
       ) {
-        // Don't create a PartialBookingCheckin row — the redirect to
-        // `checkinBooking` handles completion itself.
+        // No PartialBookingCheckin row: `checkinBooking` handles completion
+        // itself. The asset-side note says how this batch was made, as the
+        // provenance recorded it; the batch may have been scanned, selected
+        // from the list, or both. Resolved over the booking's own slices for
+        // the batch's assets, as the delegated events are: a bare asset-id
+        // payload names no slice itself.
         const actor = wrapUserLinkForNote({ ...user, id: userId });
         await createNotes({
-          content: `${actor} checked in via explicit check-in scanner. All assets were scanned, so complete check-in was performed.`,
+          content: `${actor} checked in the last items still out${bookingMethodClause(
+            provenance,
+            outstandingSliceIds(
+              bookingFound.bookingAssets.filter((ba) =>
+                effectiveAssetIds.includes(ba.assetId)
+              )
+            )
+          )}, which completed the booking.`,
           type: "UPDATE",
           userId,
           assetIds: effectiveAssetIds,
@@ -7485,6 +7625,9 @@ export async function partialCheckinBooking({
           intentChoice,
           userId,
           specificAssetIds: effectiveAssetIds,
+          // The batch closes the booking through the full check-in, which
+          // writes the events; the rows were still scanned or selected here.
+          provenance,
         });
 
         return {
@@ -8377,6 +8520,17 @@ export async function partialCheckinBooking({
           ...qtySummaries.map((s) => s.assetId),
         ]),
       ];
+      /**
+       * The slices each asset's dispositions named. The asset's one event
+       * covers all of them, so its method is the one they share, or `null`
+       * when a ticked slice met a scanned one in the same batch.
+       */
+      const sliceIdsByAssetId = new Map<string, BatchSliceId[]>();
+      for (const d of dispositions) {
+        const slices = sliceIdsByAssetId.get(d.assetId) ?? [];
+        slices.push(d.bookingAssetId);
+        sliceIdsByAssetId.set(d.assetId, slices);
+      }
       if (assetIdsTouchedInTx.length > 0) {
         await recordEvents(
           assetIdsTouchedInTx.map((assetId) => ({
@@ -8387,6 +8541,10 @@ export async function partialCheckinBooking({
             entityId: id,
             bookingId: id,
             assetId,
+            meta: bookingMethodMeta(
+              provenance,
+              sliceIdsByAssetId.get(assetId) ?? []
+            ),
           })),
           tx
         );
@@ -8627,6 +8785,10 @@ export async function partialCheckinBooking({
         ...txResult.individualAssetIds,
         ...txResult.qtySummaries.map((s) => s.assetId),
       ];
+      /** The slice of every disposition that touched an asset in this batch. */
+      const touchedSliceIds = dispositions
+        .filter((d) => assetIdsTouched.includes(d.assetId))
+        .map((d) => d.bookingAssetId);
       const assetsWithKitInfo =
         assetIdsTouched.length > 0
           ? await db.asset.findMany({
@@ -8714,13 +8876,19 @@ export async function partialCheckinBooking({
           // the `qtyTail` suffix surfaces per-disposition counts
           // (returned / consumed / lost / damaged) when present.
           organizationId,
-          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}${bookingMethodClause(
+            provenance,
+            touchedSliceIds
+          )} and completed the booking. Status changed from ${fromStatusBadge} to ${toStatusBadge}`,
         });
       } else {
         await createSystemBookingNote({
           bookingId: id,
           organizationId,
-          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}.`,
+          content: `${actor} performed a partial check-in: ${itemsDescription}${qtyTail}${bookingMethodClause(
+            provenance,
+            touchedSliceIds
+          )}.`,
         });
       }
     } catch (noteError) {
@@ -8854,6 +9022,7 @@ export async function partialCheckoutBooking({
   userId,
   hints,
   intentChoice,
+  provenance,
   sourceLocations,
 }: Pick<Booking, "id" | "organizationId"> & {
   /** Legacy payload — asset IDs only, no per-asset quantities. INDIVIDUAL rows
@@ -8866,6 +9035,12 @@ export async function partialCheckoutBooking({
   userId: User["id"];
   hints: ClientHint;
   intentChoice?: CheckoutIntentEnum;
+  /**
+   * How and from where the batch was made. Recorded on every
+   * `BOOKING_PARTIAL_CHECKOUT` event and said on the booking's activity line;
+   * see {@link partialCheckinBooking} for who passes what.
+   */
+  provenance?: BookingMethodProvenance;
   /**
    * Where each pool's units come from, keyed by slice or asset id. Recorded
    * on a slice the first time it goes out; see
@@ -9243,6 +9418,10 @@ export async function partialCheckoutBooking({
         from: bookingFound.from,
         to: bookingFound.to,
         userId,
+        // The batch takes the whole booking out through the full check-out,
+        // which writes the events; the rows were still scanned or selected
+        // here, so what the route said about them travels with the delegate.
+        provenance,
         sourceLocations,
       });
 
@@ -10293,6 +10472,7 @@ export async function partialCheckoutBooking({
               meta: {
                 ...qtyMeta,
                 partialCheckoutSessionId: createdSession.id,
+                ...bookingMethodMeta(provenance, [d.bookingAssetId]),
               },
             };
           });
@@ -10469,7 +10649,12 @@ export async function partialCheckoutBooking({
             organizationId,
             content: `${wrapUserLinkForNote(
               user!
-            )} performed a partial check-out: ${itemsBody}${statusNote}.`,
+            )} performed a partial check-out: ${itemsBody}${statusNote}${bookingMethodClause(
+              provenance,
+              dispositions
+                .filter((d) => assetIdsToCheckOut.includes(d.assetId))
+                .map((d) => d.bookingAssetId)
+            )}.`,
           },
           tx
         );
@@ -18044,6 +18229,7 @@ export async function checkinAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -18051,8 +18237,21 @@ export async function checkinAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /**
+   * How the route knows this batch was made: `"scanned"` from the scan page,
+   * `"selected"` from the list dialog. Slices the scan page's form names in
+   * `selectedBookingAssetIds` were ticked rather than scanned and are merged
+   * in here.
+   */
+  provenance: BookingMethodProvenance;
 }) {
-  const { assetIds, checkins, checkinIntentChoice, returnJson } = parseData(
+  const {
+    assetIds,
+    checkins,
+    selectedBookingAssetIds,
+    checkinIntentChoice,
+    returnJson,
+  } = parseData(
     formData,
     partialCheckinAssetsSchema.extend({
       checkinIntentChoice: z.nativeEnum(CheckinIntentEnum).optional(),
@@ -18091,6 +18290,11 @@ export async function checkinAssets({
     userId,
     hints,
     intentChoice: checkinIntentChoice,
+    provenance: withSelectedBookingAssetIds(
+      provenance,
+      selectedBookingAssetIds,
+      (checkins ?? []).map((checkin) => checkin.bookingAssetId)
+    ),
   });
 
   /** Effective count of assets touched in this session — for toast messaging. */
@@ -18269,6 +18473,7 @@ export async function checkoutAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -18276,8 +18481,16 @@ export async function checkoutAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /** How the route knows this batch was made; see {@link checkinAssets}. */
+  provenance: BookingMethodProvenance;
 }) {
-  const { assetIds, checkouts, checkoutIntentChoice, returnJson } = parseData(
+  const {
+    assetIds,
+    checkouts,
+    selectedBookingAssetIds,
+    checkoutIntentChoice,
+    returnJson,
+  } = parseData(
     formData,
     partialCheckoutAssetsSchema.extend({
       checkoutIntentChoice: z.nativeEnum(CheckoutIntentEnum).optional(),
@@ -18316,6 +18529,11 @@ export async function checkoutAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    provenance: withSelectedBookingAssetIds(
+      provenance,
+      selectedBookingAssetIds,
+      (checkouts ?? []).map((checkout) => checkout.bookingAssetId)
+    ),
     sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 
@@ -18325,6 +18543,40 @@ export async function checkoutAssets({
     authSession,
     returnJson,
   });
+}
+
+/**
+ * Adds the slices a scan page's form marked as ticked to the route's
+ * provenance.
+ *
+ * The scan drawers post `selectedBookingAssetIds[]` for the quantity rows
+ * checked "without scanning"; the list dialogs post none. Only slices that are
+ * part of the batch are kept ({@link narrowSelectedBookingAssetIds}), and an
+ * empty result leaves the provenance as the route stated it.
+ *
+ * @param provenance - What the route knows about the batch
+ * @param selectedBookingAssetIds - The ticked slices, from the form
+ * @param batchBookingAssetIds - The slice of every disposition the batch
+ *   submits; asset-id-only rows name none and can never have been ticked
+ * @returns The provenance with the ticked slices named
+ */
+function withSelectedBookingAssetIds(
+  provenance: BookingMethodProvenance,
+  selectedBookingAssetIds: string[] | undefined,
+  batchBookingAssetIds: BatchSliceId[]
+): BookingMethodProvenance {
+  const ticked = narrowSelectedBookingAssetIds(
+    selectedBookingAssetIds,
+    batchBookingAssetIds
+  );
+  if (ticked.length === 0) return provenance;
+  return {
+    ...provenance,
+    selectedBookingAssetIds: [
+      ...(provenance.selectedBookingAssetIds ?? []),
+      ...ticked,
+    ],
+  };
 }
 
 /**
@@ -18584,6 +18836,7 @@ export async function checkoutRemainingAssets({
   organizationId,
   userId,
   authSession,
+  provenance,
 }: {
   formData: FormData;
   request: Request;
@@ -18591,6 +18844,8 @@ export async function checkoutRemainingAssets({
   organizationId: string;
   userId: string;
   authSession: AuthSession;
+  /** One click on the web, as the route states it. */
+  provenance: BookingMethodProvenance;
 }) {
   const { checkoutIntentChoice, returnJson } = parseData(
     formData,
@@ -18628,6 +18883,7 @@ export async function checkoutRemainingAssets({
     userId,
     hints,
     intentChoice: checkoutIntentChoice,
+    provenance,
     sourceLocations: parseSourceLocationsFromFormData(formData),
   });
 

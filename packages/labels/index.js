@@ -230,6 +230,69 @@ export const BOOKING_RESERVE_BLOCKED_LABELS = Object.freeze({
 export const BOOKING_EMPTY_RESERVED_MESSAGE =
   "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
+// Why an individually tracked asset that belongs to a kit cannot be put into
+// custody on its own. Custody of such an asset comes from its kit: assign
+// custody to the kit, or take the asset out of the kit first. One register for
+// every surface that states the rule: the server's 400 on every assign path,
+// the web asset page and assets index menus, and the companion asset screen.
+//
+// Quantity-tracked assets are not covered. A kit holds only a slice of a pool,
+// and the units outside every kit can still be assigned on their own.
+export const KIT_MEMBER_CUSTODY_BLOCKED_TITLE = "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param {string} kitName - the name of the kit the asset belongs to
+ * @returns {string}
+ */
+export function kitMemberCustodyBlockedReason(kitName) {
+  return `This asset is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param {{ assetTitle: string; kitName: string }} names
+ * @returns {string}
+ */
+export function kitMemberCustodyRefusal({ assetTitle, kitName }) {
+  return `"${assetTitle}" is part of kit "${kitName}". Assign custody to the kit, or remove the asset from the kit first.`;
+}
+
+/** How many kit members a refusal names before summarising the rest. */
+const KIT_MEMBERS_NAMED_IN_REFUSAL = 3;
+
+/**
+ * The server's refusal when an assign request names several kit members.
+ *
+ * A "select all" request can hold many, and the operator cannot see which from
+ * the menu, so the refusal gives the count and names the first few. One member
+ * reads exactly as {@link kitMemberCustodyRefusal}.
+ *
+ * @param {{ assetTitle: string; kitName: string }[]} members - at least one
+ * @returns {string}
+ */
+export function kitMembersCustodyRefusal(members) {
+  if (members.length === 1) return kitMemberCustodyRefusal(members[0]);
+
+  const named = members
+    .slice(0, KIT_MEMBERS_NAMED_IN_REFUSAL)
+    .map((m) => `"${m.assetTitle}"`);
+  const rest = members.length - named.length;
+  const list =
+    rest > 0
+      ? `${named.join(", ")} and ${rest} more`
+      : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+
+  return `${members.length} of the selected assets are part of a kit: ${list}. Assign custody to the kit, or remove them from the kit first.`;
+}
+
+// The reason a bulk "Assign custody" action is disabled when the selection
+// holds at least one kit member.
+export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
+  "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
 /**
  * The semantic weight a status badge carries, independent of any palette.
  *
@@ -339,3 +402,86 @@ export const CONSUMPTION_TYPE_ADJECTIVES = Object.freeze({
   ONE_WAY: "used up",
   TWO_WAY: "returnable",
 });
+
+/**
+ * How the explicit check-in and check-out requirement is explained, on the
+ * website's two settings cards and on the phone where the quick button is
+ * hidden by it.
+ *
+ * The two directions carry the same sentences with only the verb changed, so a
+ * reader who learned one card can read the other without re-reading it. The
+ * exemption is stated in full on every surface: the workspace owner is never
+ * restricted by either switch, and Base users hold no booking check-in or
+ * check-out permission at all, so neither switch applies to them.
+ *
+ * `TITLE` names the card, `EXEMPTION` is the sentence every card shows below
+ * its heading, `PHONE_HINT` is the one line the companion renders where the
+ * one-tap button is hidden. Per-role switch text comes from
+ * {@link explicitRequirementSwitchDescription}.
+ */
+export const EXPLICIT_REQUIREMENT_LABELS = Object.freeze({
+  CHECKIN: Object.freeze({
+    TITLE: "Check-in needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check in.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check in.",
+  }),
+  CHECKOUT: Object.freeze({
+    TITLE: "Check-out needs each item scanned or selected",
+    EXEMPTION:
+      "The workspace owner is never restricted. Base users cannot check out.",
+    PHONE_HINT:
+      "Your workspace requires each item to be scanned or selected to check out.",
+  }),
+});
+
+/**
+ * The two roles the explicit requirement can be switched on for, named as the
+ * settings cards show them. OWNER and BASE are absent on purpose: see the
+ * exemption sentence in {@link EXPLICIT_REQUIREMENT_LABELS}.
+ */
+export const EXPLICIT_REQUIREMENT_ROLE_LABELS = Object.freeze({
+  ADMIN: "Admins",
+  SELF_SERVICE: "Self Service users",
+});
+
+/**
+ * Describes what one switch on an explicit-requirement card does for its role.
+ *
+ * @param {"CHECKIN"|"CHECKOUT"} direction - which card the switch sits on
+ * @param {"ADMIN"|"SELF_SERVICE"} role - the role the switch covers
+ * @returns {string} e.g. "Removes the one-click check-in for Admins. They check
+ *   items in by scanning them or by selecting them from the list."
+ */
+export function explicitRequirementSwitchDescription(direction, role) {
+  const roleLabel = EXPLICIT_REQUIREMENT_ROLE_LABELS[role];
+  if (direction === "CHECKIN") {
+    return `Removes the one-click check-in for ${roleLabel}. They check items in by scanning them or by selecting them from the list.`;
+  }
+  return `Removes the one-click check-out for ${roleLabel}. They check items out by scanning them or by selecting them from the list.`;
+}
+
+/**
+ * The booking check-in / check-out methods an app may declare in a request
+ * body, keyed by themselves so call sites read `BOOKING_METHOD.scanned`.
+ *
+ * `scanned` is an item that went through a scanner, `selected` an item ticked
+ * in a list. `quick` (the one-click whole-booking action) is not among them:
+ * the server knows which routes are the one-click actions and records that
+ * itself, so a client cannot label a scan as quick or the other way round.
+ *
+ * Shared because the server validates the field against exactly this list and
+ * the companion sends it: a value one side renames without the other would
+ * refuse every check-in and check-out from the phone.
+ */
+export const BOOKING_METHOD = Object.freeze({
+  scanned: "scanned",
+  selected: "selected",
+});
+
+/** {@link BOOKING_METHOD} as a tuple, the shape a validation enum takes. */
+export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
+  BOOKING_METHOD.scanned,
+  BOOKING_METHOD.selected,
+]);

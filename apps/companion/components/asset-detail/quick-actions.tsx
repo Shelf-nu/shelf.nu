@@ -6,10 +6,12 @@ import {
   ActivityIndicator,
   Platform,
   ActionSheetIOS,
+  Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import type { AssetDetail } from "@/lib/api";
+import { kitMemberCustodyBlock } from "@/lib/kit-member-custody";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -95,6 +97,10 @@ export const QuickActions = memo(function QuickActions({
     isQtyTracked &&
     typeof custodyAvailable === "number" &&
     custodyAvailable <= 0;
+  // An individually tracked kit member takes custody through its kit. The
+  // button stays tappable so a tap can say why; the server refuses the request
+  // either way.
+  const kitBlock = kitMemberCustodyBlock(asset);
 
   if (isActionLoading) {
     return (
@@ -172,29 +178,43 @@ export const QuickActions = memo(function QuickActions({
             <Text style={styles.primaryActionText}>Release Custody</Text>
           </TouchableOpacity>
         ) : isAvailable ? (
-          <TouchableOpacity
-            style={styles.primaryActionBlack}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onAssignCustody();
-            }}
-            activeOpacity={0.7}
-            accessibilityLabel={
-              isSelfService
-                ? "Take custody of asset"
-                : "Assign custody of asset"
-            }
-            accessibilityRole="button"
-          >
-            <Ionicons
-              name="person-add-outline"
-              size={20}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.primaryActionText}>
-              {isSelfService ? "Take Custody" : "Assign Custody"}
-            </Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={[
+                styles.primaryActionBlack,
+                kitBlock && styles.primaryActionDisabled,
+              ]}
+              onPress={() => {
+                if (kitBlock) {
+                  Alert.alert(kitBlock.title, kitBlock.reason);
+                  return;
+                }
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onAssignCustody();
+              }}
+              activeOpacity={0.7}
+              accessibilityLabel={
+                isSelfService
+                  ? "Take custody of asset"
+                  : "Assign custody of asset"
+              }
+              accessibilityHint={kitBlock?.reason}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!kitBlock }}
+            >
+              <Ionicons
+                name="person-add-outline"
+                size={20}
+                color={colors.primaryForeground}
+              />
+              <Text style={styles.primaryActionText}>
+                {isSelfService ? "Take Custody" : "Assign Custody"}
+              </Text>
+            </TouchableOpacity>
+            {kitBlock && (
+              <Text style={styles.assignDisabledHint}>{kitBlock.reason}</Text>
+            )}
+          </>
         ) : null)}
 
       {/* Secondary actions row */}

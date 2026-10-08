@@ -27,6 +27,14 @@ type CheckinDialogProps = {
   portalContainer?: HTMLElement;
   /** Form ID for explicit form association when buttons render in a portal */
   formId?: string;
+  /**
+   * The form `intent` the buttons submit. Defaults to the header's
+   * whole-booking `checkIn`. The "Check in selected items" dialog passes
+   * `partial-checkin`, so the overview routes its early final check-in through
+   * `checkinAssets`, which records the batch as selected and applies the date
+   * choice, rather than the one-click path the explicit-rule guard refuses.
+   */
+  intent?: string;
 
   /** Callback to close parent dropdown/menu */
   onClose?: () => void;
@@ -45,6 +53,7 @@ export default function CheckinDialog({
   booking,
   portalContainer,
   formId,
+  intent = "checkIn",
   label = "Check-in",
   variant = "default",
   specificAssetIds,
@@ -57,7 +66,7 @@ export default function CheckinDialog({
         disabled={disabled}
         type="submit"
         name="intent"
-        value="checkIn"
+        value={intent}
         form={formId}
         className={tw(
           "whitespace-nowrap",
@@ -155,7 +164,7 @@ export default function CheckinDialog({
             </Button>
           </AlertDialogCancel>
 
-          <input type="hidden" name="intent" value="checkIn" form={formId} />
+          <input type="hidden" name="intent" value={intent} form={formId} />
 
           {/* Pass specific asset IDs for enhanced completion messaging */}
           {specificAssetIds?.map((assetId) => (

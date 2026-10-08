@@ -181,6 +181,47 @@ export declare const BOOKING_RESERVE_BLOCKED_LABELS: {
 export declare const BOOKING_EMPTY_RESERVED_MESSAGE: "A reserved booking must keep at least one asset or model reservation. Cancel the booking instead, or add a replacement first.";
 
 /**
+ * Title of the refusal and disabled reasons for custody of an individually
+ * tracked kit member. Custody of such an asset comes from its kit. Shared by
+ * the server's 400, the web menus and the companion asset screen.
+ */
+export declare const KIT_MEMBER_CUSTODY_BLOCKED_TITLE: "Asset is part of a kit";
+
+/**
+ * The reason a single kit member's "Assign custody" action is disabled.
+ *
+ * @param kitName - the name of the kit the asset belongs to
+ */
+export declare function kitMemberCustodyBlockedReason(kitName: string): string;
+
+/**
+ * The server's refusal when an assign request names a kit member.
+ *
+ * @param names - the asset's title and its kit's name
+ */
+export declare function kitMemberCustodyRefusal(names: {
+  assetTitle: string;
+  kitName: string;
+}): string;
+
+/**
+ * The server's refusal when an assign request names several kit members: the
+ * count plus the first few titles. One member reads exactly as
+ * {@link kitMemberCustodyRefusal}.
+ *
+ * @param members - at least one kit member, with its title and kit's name
+ */
+export declare function kitMembersCustodyRefusal(
+  members: { assetTitle: string; kitName: string }[]
+): string;
+
+/**
+ * The reason a bulk "Assign custody" action is disabled when the selection
+ * holds at least one kit member.
+ */
+export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
+
+/**
  * The semantic weight a status badge carries, independent of any palette. Each
  * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
  * the companion's light/dark theme), so the VALUES stay app-owned while the
@@ -224,3 +265,70 @@ export declare const CONSUMPTION_TYPE_ADJECTIVES: {
   readonly ONE_WAY: "used up";
   readonly TWO_WAY: "returnable";
 };
+
+/**
+ * How the explicit check-in and check-out requirement is explained on the
+ * website's settings cards and on the phone. The two directions carry the same
+ * sentences with only the verb changed. `TITLE` names the card, `EXEMPTION` is
+ * the always-visible sentence under its heading (the owner is never restricted,
+ * Base users hold no check-in or check-out permission), `PHONE_HINT` is the one
+ * line the companion renders where the one-tap button is hidden.
+ */
+export declare const EXPLICIT_REQUIREMENT_LABELS: {
+  readonly CHECKIN: {
+    readonly TITLE: "Check-in needs each item scanned or selected";
+    readonly EXEMPTION: "The workspace owner is never restricted. Base users cannot check in.";
+    readonly PHONE_HINT: "Your workspace requires each item to be scanned or selected to check in.";
+  };
+  readonly CHECKOUT: {
+    readonly TITLE: "Check-out needs each item scanned or selected";
+    readonly EXEMPTION: "The workspace owner is never restricted. Base users cannot check out.";
+    readonly PHONE_HINT: "Your workspace requires each item to be scanned or selected to check out.";
+  };
+};
+
+/** The card the explicit requirement is being described for. */
+export type ExplicitRequirementDirection =
+  keyof typeof EXPLICIT_REQUIREMENT_LABELS;
+
+/** The two roles a switch can cover, named as the settings cards show them. */
+export declare const EXPLICIT_REQUIREMENT_ROLE_LABELS: {
+  readonly ADMIN: "Admins";
+  readonly SELF_SERVICE: "Self Service users";
+};
+
+/** A role an explicit-requirement switch can cover. */
+export type ExplicitRequirementRole =
+  keyof typeof EXPLICIT_REQUIREMENT_ROLE_LABELS;
+
+/**
+ * Describes what one switch on an explicit-requirement card does for its role,
+ * e.g. "Removes the one-click check-in for Admins. They check items in by
+ * scanning them or by selecting them from the list."
+ *
+ * @param direction - which card the switch sits on
+ * @param role - the role the switch covers
+ */
+export declare function explicitRequirementSwitchDescription(
+  direction: ExplicitRequirementDirection,
+  role: ExplicitRequirementRole
+): string;
+
+/**
+ * The booking check-in / check-out methods an app may declare in a request
+ * body. `quick` is server-only: the server records it for the one-click routes.
+ */
+export declare const BOOKING_METHOD: {
+  readonly scanned: "scanned";
+  readonly selected: "selected";
+};
+
+/** {@link BOOKING_METHOD} as a tuple, the shape a validation enum takes. */
+export declare const CLIENT_DECLARED_BOOKING_METHODS: readonly [
+  "scanned",
+  "selected",
+];
+
+/** A method an app may declare on a check-in or check-out request. */
+export type ClientDeclaredBookingMethod =
+  (typeof CLIENT_DECLARED_BOOKING_METHODS)[number];

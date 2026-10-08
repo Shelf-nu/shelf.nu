@@ -19,6 +19,7 @@ import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
+import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
@@ -2173,7 +2174,9 @@ function ScannerContent() {
         assetIds,
         kitIds,
         timeZone,
-        sourceLocations
+        sourceLocations,
+        // Every unit here came through the Scan tab.
+        BOOKING_METHOD.scanned
       )
       .finally(() => {
         bookingSubmitLock.current = false;
@@ -2419,7 +2422,10 @@ function ScannerContent() {
               currentOrg.id,
               bookingId,
               assetIds,
-              timeZone
+              timeZone,
+              undefined,
+              // Every row here came through the Scan tab.
+              BOOKING_METHOD.scanned
             );
             setIsBookingSubmitting(false);
 
@@ -2517,7 +2523,9 @@ function ScannerContent() {
         assetIds,
         timeZone,
         undefined,
-        sourceLocations
+        sourceLocations,
+        // Every row here came through the Scan tab.
+        BOOKING_METHOD.scanned
       )
       .finally(() => {
         bookingSubmitLock.current = false;
