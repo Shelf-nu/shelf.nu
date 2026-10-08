@@ -208,6 +208,7 @@ function buildAsset() {
           user: {
             firstName: "Alice",
             lastName: "Holder",
+            displayName: null as string | null,
             email: "alice@example.com",
             profilePicture: null,
           },
@@ -226,6 +227,7 @@ function buildAsset() {
           user: {
             firstName: "Test",
             lastName: "User",
+            displayName: null as string | null,
             email: "test@example.com",
             profilePicture: null,
           },
@@ -590,6 +592,43 @@ describe("GET /api/mobile/assets/:assetId — custody visibility", () => {
     expect(mine.sources).toEqual([
       { locationId: null, unrecorded: true, name: null, quantity: 3 },
     ]);
+  });
+
+  it("names a registered holder by their user when the stored member name is empty", async () => {
+    const asset = buildAsset();
+    const alice = asset.custody[0];
+    if (!alice.custodian.user) throw new Error("fixture: Alice is registered");
+    // A registered member whose TeamMember.name was never filled in.
+    asset.custody[0] = {
+      ...alice,
+      custodian: {
+        ...alice.custodian,
+        name: "",
+        user: { ...alice.custodian.user, displayName: "Ally" },
+      },
+    };
+    assetFindUniqueMock.mockResolvedValue(asset);
+
+    const result = await loader(
+      createLoaderArgs({
+        request: createDetailRequest(),
+        params: { assetId: "asset-1" },
+      })
+    );
+    const body = await (result as unknown as Response).json();
+    const nameOf = (id: string) =>
+      body.asset.custodyList.find(
+        (entry: { custodian: { id: string } }) => entry.custodian.id === id
+      ).custodian.name;
+
+    // The custody card and every list row print `custodian.name` as sent,
+    // so the display name has to arrive in that field.
+    expect(body.asset.custody.custodian.name).toBe("Ally");
+    expect(nameOf("tm-alice")).toBe("Ally");
+    // Without a display name, the user's first and last name.
+    expect(nameOf("tm-me")).toBe("Test User");
+    // A non-registered member has no user, so the stored name stands.
+    expect(nameOf("tm-nrm")).toBe("Bob NonRegistered");
   });
 
   it("returns the full custody list to callers who can see all custody", async () => {
