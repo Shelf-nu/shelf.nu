@@ -25,9 +25,15 @@
  * @see {@link file://./../../components/assets/assets-index/asset-model-assets-sheet.tsx}
  */
 import { AssetType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { ArchivedFilter } from "~/modules/asset/types";
+import {
+  applyArchivedFilter,
+  getArchivedFilterFromParams,
+} from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
@@ -92,25 +98,32 @@ function stringifyFilters(params: URLSearchParams): string {
  *   never from the request
  * @param availableToBookOnly - Restricts the count to assets the viewer may
  *   reserve, matching the asset query beside it
+ * @param archivedFilter - The index's Active / Archived / All view (issue #382).
+ *   Not a filter the user can clear, so it scopes this count too: counting
+ *   archived assets in the Active view would promise rows that clearing every
+ *   filter still never shows.
  * @returns How many assets the bucket holds, filters aside
  */
 async function countBucketAssetsIgnoringFilters({
   bucket,
   organizationId,
   availableToBookOnly,
+  archivedFilter,
 }: {
   bucket: AssetModelBucket;
   organizationId: string;
   availableToBookOnly: boolean;
+  archivedFilter: ArchivedFilter;
 }): Promise<number> {
-  return db.asset.count({
-    where: {
-      organizationId,
-      type: AssetType.INDIVIDUAL,
-      assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
-      ...(availableToBookOnly ? { availableToBook: true } : {}),
-    },
-  });
+  const where: Prisma.AssetWhereInput = {
+    organizationId,
+    type: AssetType.INDIVIDUAL,
+    assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
+    ...(availableToBookOnly ? { availableToBook: true } : {}),
+  };
+  applyArchivedFilter(where, archivedFilter);
+
+  return db.asset.count({ where });
 }
 
 /**
@@ -231,6 +244,7 @@ export async function loadAssetModelBucketAssets({
             bucket,
             organizationId,
             availableToBookOnly,
+            archivedFilter: getArchivedFilterFromParams(forwarded),
           })
         : null;
 

@@ -238,12 +238,31 @@ describe("asset model assets endpoint", () => {
       // count including stock pools would not describe the same set.
       type: "INDIVIDUAL",
       assetModelId: "am-1",
+      // The index's default Active view hides archived assets, and clearing
+      // filters never shows them, so they are not "hidden by your filters".
+      archivedAt: null,
     });
 
     const body = (await response.json()) as { unfilteredAssets: number | null };
     // What separates "your filters exclude everything in this model" from "this
     // model is empty" in the sheet's one empty-state sentence.
     expect(body.unfilteredAssets).toBe(52);
+  });
+
+  it("counts within the index's Archived view when the caller is in it (issue #382)", async () => {
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    // The view is not a filter the user can clear, so it scopes this count too.
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: { not: null },
+    });
   });
 
   it("skips the unfiltered count when the filtered set has rows", async () => {

@@ -48,7 +48,10 @@ import {
   refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
-import { getAllSelectedValuesFromFilters } from "./utils.server";
+import {
+  getAllSelectedValuesFromFilters,
+  getArchivedFilterFromParams,
+} from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -592,6 +595,9 @@ async function getAssetModelRollupPage({
     ? new URLSearchParams(filters)
     : getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
+  // The Active / Archived / All toggle applies to the model view too, so the
+  // rollup counts the same assets the list would show (issue #382).
+  const archivedFilter = getArchivedFilterFromParams(searchParams);
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   // Clamp once, here, and report the clamped value. `per_page` reaches the
   // cookie straight from the URL with no upper bound, while the rollup caps its
@@ -613,6 +619,7 @@ async function getAssetModelRollupPage({
       page,
       perPage,
       availableToBookOnly,
+      archivedFilter,
       sortBy,
       sortDirection,
     });
