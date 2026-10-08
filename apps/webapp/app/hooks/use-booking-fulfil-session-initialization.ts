@@ -132,6 +132,10 @@ export function useBookingFulfilSessionInitialization(
       return;
     }
     initializedBookingIdRef.current = session.bookingId;
+    // A new booking is a new list to keep. The flag stays set for late
+    // resolutions belonging to the booking that was just submitted, because
+    // this only runs when the booking changes.
+    acceptedSubmitRef.current = false;
     setFulfilSession(session);
 
     // Restored entries carry no `data`, so each row resolves against the

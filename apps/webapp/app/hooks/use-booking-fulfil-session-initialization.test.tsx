@@ -43,9 +43,11 @@ const USER_ID = "user-1";
 const DRAFT_KEY = scanDraftKey("fulfil", USER_ID, BOOKING_ID);
 const SCANNER_PATH = `/bookings/${BOOKING_ID}/overview/fulfil-and-checkout`;
 
-function session(): NonNullable<FulfilSessionInfo> {
+function session(
+  bookingId: string = BOOKING_ID
+): NonNullable<FulfilSessionInfo> {
   return {
-    bookingId: BOOKING_ID,
+    bookingId,
     bookingName: "Shoot day 1",
     bookingFrom: "2026-01-01T09:00:00.000Z",
     bookingStatus: "RESERVED",
@@ -69,16 +71,23 @@ function scanned(): ScanListItem {
  * the booking ref — so a draft damaged on the first mount is gone for good by
  * the second. Mounting plainly hides that entirely.
  */
-function render(store: ReturnType<typeof createStore>) {
+function render(
+  store: ReturnType<typeof createStore>,
+  bookingId: string = BOOKING_ID
+) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <StrictMode>
       <Provider store={store}>{children}</Provider>
     </StrictMode>
   );
 
+  // `rerender()` with no argument passes undefined, which most cases here do.
   return renderHook(
-    () => useBookingFulfilSessionInitialization({ session: session() }),
-    { wrapper }
+    (props?: { bookingId?: string }) =>
+      useBookingFulfilSessionInitialization({
+        session: session(props?.bookingId ?? bookingId),
+      }),
+    { wrapper, initialProps: { bookingId } as { bookingId?: string } }
   );
 }
 
@@ -258,5 +267,36 @@ describe("keeping people apart on a shared device", () => {
     expect(
       Object.keys(localStorage).filter((k) => k.startsWith("shelf:scan-draft:"))
     ).toEqual([]);
+  });
+});
+
+/**
+ * The hook is written for one instance serving a different booking, which the
+ * unmount effect's guard already allows for. Leaving the accepted-submit flag
+ * set across that change would silently stop the next booking's list being
+ * kept at all.
+ */
+describe("moving on to another booking", () => {
+  it("keeps the next booking's list after a submit was accepted", () => {
+    const store = createStore();
+    const { rerender } = render(store);
+
+    mockNavigation.mockReturnValue({
+      state: "loading",
+      formMethod: "POST",
+      location: { pathname: `/bookings/${BOOKING_ID}` },
+    });
+    rerender({ bookingId: BOOKING_ID });
+
+    mockNavigation.mockReturnValue({ state: "idle" });
+    rerender({ bookingId: "booking-2" });
+    store.set(scannedItemsAtom, { "qr-9": scanned() });
+    rerender({ bookingId: "booking-2" });
+
+    expect(
+      Object.keys(
+        readScanDraft(scanDraftKey("fulfil", USER_ID, "booking-2")) ?? {}
+      )
+    ).toEqual(["qr-9"]);
   });
 });
