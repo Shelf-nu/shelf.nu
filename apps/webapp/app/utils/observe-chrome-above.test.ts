@@ -108,10 +108,49 @@ describe("observeChromeAbove", () => {
 
     const newBanner = document.createElement("div");
     main.insertBefore(newBanner, branch);
-    FakeMutationObserver.instances[0].fire();
+    FakeMutationObserver.instances.forEach((m) => m.fire());
 
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalled();
     expect(FakeResizeObserver.instances[0].observed.has(newBanner)).toBe(true);
+  });
+
+  it("watches chrome that shares a wrapper with the element, not the wrapper", () => {
+    // A parent route wraps its outlet, so the page header and the element sit
+    // inside one child of <main> rather than as siblings of each other there.
+    document.body.innerHTML = `
+      <main>
+        <div id="wrapper">
+          <header id="header"></header>
+          <section id="branch"><div id="panel"></div></section>
+        </div>
+      </main>`;
+    const byId = (id: string) => document.getElementById(id)!;
+    observeChromeAbove(byId("panel"), vi.fn());
+
+    const { observed } = FakeResizeObserver.instances[0];
+    expect(observed.has(byId("header"))).toBe(true);
+    expect(observed.has(byId("wrapper"))).toBe(false);
+    expect(observed.has(byId("branch"))).toBe(false);
+  });
+
+  it("starts watching chrome mounted inside the element's wrapper", () => {
+    document.body.innerHTML = `
+      <main>
+        <div id="wrapper">
+          <section id="branch"><div id="panel"></div></section>
+        </div>
+      </main>`;
+    const byId = (id: string) => document.getElementById(id)!;
+    const onChange = vi.fn();
+    observeChromeAbove(byId("panel"), onChange);
+
+    const banner = document.createElement("div");
+    byId("wrapper").insertBefore(banner, byId("branch"));
+    // One MutationObserver per level of the path; any of them may report it.
+    FakeMutationObserver.instances.forEach((m) => m.fire());
+
+    expect(onChange).toHaveBeenCalled();
+    expect(FakeResizeObserver.instances[0].observed.has(banner)).toBe(true);
   });
 
   it("disconnects everything on cleanup", () => {
@@ -120,6 +159,8 @@ describe("observeChromeAbove", () => {
     stop();
 
     expect(FakeResizeObserver.instances[0].observed.size).toBe(0);
-    expect(FakeMutationObserver.instances[0].connected).toBe(false);
+    expect(FakeMutationObserver.instances.every((m) => !m.connected)).toBe(
+      true
+    );
   });
 });

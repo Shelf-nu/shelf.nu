@@ -17,9 +17,12 @@
  * (`<main>`, else the document root) resizes, mounts or unmounts, and when the
  * container itself resizes.
  *
- * Observation stops at the container child that holds `element`: chrome below
- * cannot move its top, and a caller that writes the element's own height must
- * not have that write fed back in as a resize.
+ * "Above" means every earlier sibling along the path from `element` up to the
+ * container, so a page header that shares a route wrapper with the element is
+ * watched as well as chrome directly inside the container. The element and its
+ * ancestors are never observed: a caller that writes the element's own height
+ * must not have that write fed back in as a resize, and chrome below the
+ * element cannot move its top.
  *
  * @param element - The element whose position the caller depends on
  * @param onChange - Runs on every change; the caller re-measures there
@@ -32,6 +35,18 @@ export function observeChromeAbove(
   const container = element.closest("main") ?? document.documentElement;
   const observer = new ResizeObserver(() => onChange());
 
+  // The element's ancestors up to and including the container. Chrome lives
+  // among their earlier siblings, and mounts by changing their child lists.
+  const path: Element[] = [];
+  for (
+    let node = element.parentElement;
+    node && container.contains(node);
+    node = node.parentElement
+  ) {
+    path.push(node);
+    if (node === container) break;
+  }
+
   // The container is `h-dvh`, so chrome that grows taller overflows it
   // instead of resizing it: each piece of chrome has to be watched itself.
   // The container still matters for viewport and sidebar-width changes.
@@ -39,11 +54,18 @@ export function observeChromeAbove(
     observer.disconnect();
     observer.observe(container);
 
-    for (const child of Array.from(container.children)) {
-      if (child.contains(element)) {
-        break;
+    for (
+      let node: Element | null = element;
+      node && node !== container;
+      node = node.parentElement
+    ) {
+      for (
+        let sibling = node.previousElementSibling;
+        sibling;
+        sibling = sibling.previousElementSibling
+      ) {
+        observer.observe(sibling);
       }
-      observer.observe(child);
     }
   };
 
@@ -55,7 +77,9 @@ export function observeChromeAbove(
     subscribe();
     onChange();
   });
-  chromeListObserver.observe(container, { childList: true });
+  for (const node of path) {
+    chromeListObserver.observe(node, { childList: true });
+  }
 
   return () => {
     observer.disconnect();

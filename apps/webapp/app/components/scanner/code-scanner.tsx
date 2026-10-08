@@ -480,13 +480,13 @@ function ScannerMode({
       <RadialBg />
       <div
         data-scanner-input-panel
-        className="relative flex flex-col items-center"
+        className="relative flex w-full flex-col items-center px-4"
       >
-        <div className="relative flex items-center gap-3">
+        <div className="relative flex w-full max-w-[360px] items-center gap-3">
           <Input
             ref={inputRef}
-            className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
-            inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
+            className="w-full items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white [&_.input-wrapper]:w-full"
+            inputClassName="scanner-mode-input w-full pr-[56px]"
             disabled={paused}
             name="code"
             label={
