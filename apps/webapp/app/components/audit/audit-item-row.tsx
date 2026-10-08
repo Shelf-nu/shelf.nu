@@ -46,6 +46,7 @@ import {
 import { Button } from "~/components/shared/button";
 import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
+import { AUDIT_KIT_REJECTED_MESSAGE } from "./audit-blockers";
 
 /**
  * Shared styling for the "asset"/"kit" type chip rendered on every audit row.
@@ -121,7 +122,7 @@ export function AuditItemRow({
       // persistence attempt. See `use-audit-scan-persistence.ts` for the
       // matching defensive skip.
       rejectItemType="kit"
-      rejectItemMessage="Audits track assets, not kits — scan the kit's individual assets."
+      rejectItemMessage={AUDIT_KIT_REJECTED_MESSAGE}
       renderLoading={(pendingQrId: string, error?: string) => (
         <DefaultLoadingState qrId={pendingQrId} error={error} />
       )}
@@ -371,20 +372,16 @@ type RenderAuditItemsArgs = {
 };
 
 /**
- * Renders the full audit item list: scanned rows first (in scan order),
- * followed by the pending (expected but not scanned) assets.
+ * Renders the scanned audit rows, in scan order.
  *
- * Returns a React fragment rather than a wrapper component so the keyed rows
- * stay the direct children passed to `<AnimatePresence>`, preserving the
- * drawer's original presence-tracking behaviour exactly.
+ * Returns a fragment rather than a wrapper component so the keyed rows stay the
+ * direct children of the group's `<AnimatePresence>`.
  *
  * @param args - See {@link RenderAuditItemsArgs}.
- * @returns The scanned and pending rows as a fragment.
+ * @returns The scanned rows as a fragment.
  */
-export function renderAuditItems({
+export function renderAuditScannedRows({
   items,
-  expectedAssets,
-  scannedAssetIds,
   onRemove,
   highlightedQrId,
   auditSession,
@@ -392,12 +389,6 @@ export function renderAuditItems({
   auditAssetMeta,
   showLocation,
 }: RenderAuditItemsArgs): ReactNode {
-  // Pending = expected assets that have not been scanned yet.
-  const pendingAssets = expectedAssets.filter(
-    (asset) => !scannedAssetIds.has(asset.id)
-  );
-
-  // Render scanned items first, then pending assets at the bottom.
   return (
     <>
       {Object.entries(items).map(([qrId, item]) => (
@@ -413,15 +404,50 @@ export function renderAuditItems({
           showLocation={showLocation}
         />
       ))}
-      {pendingAssets.map((asset) => (
-        <AuditPendingRow
-          key={`pending-${asset.id}`}
-          asset={asset}
-          auditSession={auditSession}
-          auditAssetMeta={auditAssetMeta}
-          showLocation={showLocation}
-        />
-      ))}
+    </>
+  );
+}
+
+/**
+ * The expected assets that have not been scanned yet.
+ *
+ * @param args.expectedAssets - Every asset the audit expects
+ * @param args.scannedAssetIds - Asset ids scanned so far
+ * @returns The expected assets still pending
+ */
+export function getPendingAuditAssets({
+  expectedAssets,
+  scannedAssetIds,
+}: Pick<RenderAuditItemsArgs, "expectedAssets" | "scannedAssetIds">) {
+  return expectedAssets.filter((asset) => !scannedAssetIds.has(asset.id));
+}
+
+/**
+ * Renders the pending rows: expected assets that have not been scanned yet.
+ *
+ * @param args - See {@link RenderAuditItemsArgs}.
+ * @returns The pending rows as a fragment.
+ */
+export function renderAuditPendingRows({
+  expectedAssets,
+  scannedAssetIds,
+  auditSession,
+  auditAssetMeta,
+  showLocation,
+}: RenderAuditItemsArgs): ReactNode {
+  return (
+    <>
+      {getPendingAuditAssets({ expectedAssets, scannedAssetIds }).map(
+        (asset) => (
+          <AuditPendingRow
+            key={`pending-${asset.id}`}
+            asset={asset}
+            auditSession={auditSession}
+            auditAssetMeta={auditAssetMeta}
+            showLocation={showLocation}
+          />
+        )
+      )}
     </>
   );
 }

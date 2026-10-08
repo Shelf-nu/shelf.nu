@@ -17,6 +17,7 @@ import {
   DRAWER_TOP_GAP,
   MIN_DRAWER_HEIGHT,
   resolveDrawerHeight,
+  SCANNER_DRAWER_SPACING,
   SCANNER_INPUT_GAP,
   SCANNER_INPUT_PANEL_HEIGHT,
 } from "./drawer-height";
@@ -108,6 +109,31 @@ describe("resolveDrawerHeight", () => {
           ...baseArgs,
           expanded: true,
           isScannerMode: true,
+        })
+      ).toBe(VH - SCANNER_INPUT_GAP);
+    });
+
+    it("starts just below the measured code-entry panel in scanner mode", () => {
+      // Pages put the code input at different heights (the QR scanner page has
+      // no breadcrumb bar), so the drawer follows where the panel really ends
+      // instead of a fixed gap sized for one page.
+      expect(
+        resolveDrawerHeight({
+          ...baseArgs,
+          expanded: true,
+          isScannerMode: true,
+          scannerInputBottom: 160,
+        })
+      ).toBe(VH - 160 - SCANNER_DRAWER_SPACING);
+    });
+
+    it("falls back to the fixed scanner gap until the panel is measured", () => {
+      expect(
+        resolveDrawerHeight({
+          ...baseArgs,
+          expanded: true,
+          isScannerMode: true,
+          scannerInputBottom: null,
         })
       ).toBe(VH - SCANNER_INPUT_GAP);
     });

@@ -875,7 +875,8 @@ export default function PartialCheckinDrawer({
       count: errors.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+          {count > 1 ? "are" : "is"} invalid.
         </>
       ),
       onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
@@ -915,19 +916,6 @@ export default function PartialCheckinDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInBookingIds]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsNotInBooking,
-        ...qrIdsOfRedundantAssets,
-        ...qrIdsOfAlreadyCheckedInAssets,
-        ...qrIdsOfNeverCheckedOutAssets,
-        ...qrIdsOfAlreadyCheckedInKits,
-        ...qrIdsOfZeroDispositionQty,
-        ...qrIdsOfOverReturnQty,
-      ]);
-    },
   });
 
   /**

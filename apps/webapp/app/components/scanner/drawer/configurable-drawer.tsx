@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode, ComponentType, FormEvent } from "react";
+import type { CSSProperties, ReactNode, FormEvent } from "react";
 import { AnimatePresence } from "framer-motion";
 import { Form } from "react-router";
 import { useZorm } from "react-zorm";
@@ -10,6 +10,8 @@ import { Table, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { tw } from "~/utils/tw";
 import BaseDrawer from "./base-drawer";
+import type { BlockersVariant } from "./blockers-factory";
+import { ScanItemGroup } from "./scan-item-group";
 
 // Props for the configurable drawer
 type ConfigurableDrawerProps<T> = {
@@ -35,8 +37,12 @@ type ConfigurableDrawerProps<T> = {
   isLoading?: boolean;
   // Item rendering function
   renderItem?: (qrId: string, item: T) => ReactNode;
-  // Blockers component (from createBlockers)
-  Blockers?: ComponentType;
+  /**
+   * The blockers from `createBlockers`. Called as a function, never rendered
+   * as `<Blockers />`: it is recreated on every render of the drawer, and a
+   * component type that changes each render would remount the card.
+   */
+  Blockers?: (props?: { variant?: BlockersVariant }) => ReactNode;
   // Whether form submission should be disabled
   disableSubmit?: boolean;
 
@@ -110,9 +116,15 @@ export default function ConfigurableDrawer<T>({
   const itemsLength = Object.keys(items).length;
   const hasItems = itemsLength > 0;
 
-  // Create the title with item count
+  // Drawers that render one row per item get their rows in a "Scanned this
+  // session" card, which carries the count. Custom renderers keep a table.
+  const rowsInCard = !renderGroups && !customRenderAllItems && !!renderItem;
+
+  // A string title gets the item count, unless a card already shows it.
   const drawerTitle =
-    typeof title === "string" ? `${title} (${itemsLength})` : title;
+    typeof title === "string" && !rowsInCard && !renderGroups
+      ? `${title} (${itemsLength})`
+      : title;
 
   // Default empty state content if none provided
   const defaultEmptyState = (expanded: boolean) => (
@@ -148,8 +160,8 @@ export default function ConfigurableDrawer<T>({
       collapsedHeight={collapsedHeight}
       footer={(expanded) => (
         <>
-          {/* Blockers */}
-          {Blockers && <Blockers />}
+          {/* Why the action is disabled; the fixes are in the list's card. */}
+          {Blockers ? Blockers({ variant: "note" }) : null}
 
           {/* Action form */}
           {form ? (
@@ -212,12 +224,26 @@ export default function ConfigurableDrawer<T>({
         </>
       )}
     >
-      {() =>
-        renderGroups ? (
-          <div className="flex flex-col gap-2 py-2">{renderGroups()}</div>
-        ) : (
-          <>
-            {/* Item List */}
+      {() => (
+        <div className="flex flex-col gap-2 py-2">
+          {/* Blockers lead the list: they are what stands between the
+              operator and the action. */}
+          {Blockers ? Blockers({ variant: "card" }) : null}
+
+          {renderGroups ? (
+            renderGroups()
+          ) : rowsInCard ? (
+            <ScanItemGroup
+              label="Scanned this session"
+              count={itemsLength}
+              tone="active"
+              openWhenCountGrows
+            >
+              {Object.entries(items).map(
+                ([qrId, item]) => renderItem?.(qrId, item)
+              )}
+            </ScanItemGroup>
+          ) : (
             <Table className="overflow-y-auto">
               <ListHeader hideFirstColumn className="border-none">
                 <Th className="p-0"> </Th>
@@ -226,19 +252,13 @@ export default function ConfigurableDrawer<T>({
 
               <tbody>
                 <AnimatePresence>
-                  {customRenderAllItems
-                    ? customRenderAllItems()
-                    : renderItem
-                    ? Object.entries(items).map(([qrId, item]) =>
-                        renderItem(qrId, item)
-                      )
-                    : null}
+                  {customRenderAllItems ? customRenderAllItems() : null}
                 </AnimatePresence>
               </tbody>
             </Table>
-          </>
-        )
-      }
+          )}
+        </div>
+      )}
     </BaseDrawer>
   );
 }

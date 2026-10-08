@@ -102,7 +102,7 @@ export default function ReleaseCustodyDrawer({
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
-  const { blockerConfigs, onResolveAll } = buildReleaseCustodyBlockers({
+  const { blockerConfigs } = buildReleaseCustodyBlockers({
     items,
     removeAssetsFromList,
     removeItemsFromList,
@@ -111,7 +111,6 @@ export default function ReleaseCustodyDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   // Render item row
@@ -306,7 +305,7 @@ function ReleaseCustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className={tw("mb-4 flex gap-3")}>
+          <div className="my-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"

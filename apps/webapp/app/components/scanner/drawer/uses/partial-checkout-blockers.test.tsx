@@ -124,6 +124,11 @@ function activeIds(built: PartialCheckoutBlockers): string[] {
   return built.blockerConfigs.filter((b) => b.condition).map((b) => b.id ?? "");
 }
 
+/** Every id a remove spy was asked to drop, across all its calls. */
+function removedBy(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls.flatMap(([ids]) => ids as string[]);
+}
+
 describe("buildPartialCheckoutBlockers", () => {
   it("declares exactly the blockers this suite covers", () => {
     const built = build({});
@@ -301,10 +306,13 @@ describe("buildPartialCheckoutBlockers", () => {
       qrBad: { error: "No such code" },
     });
 
-    built.onResolveAll();
+    // What "Resolve all" runs: every shown blocker's own fix.
+    built.blockerConfigs
+      .filter((b) => b.condition)
+      .forEach((b) => b.onResolve());
 
-    expect(built.removeAssetsFromList).toHaveBeenCalledWith(["other"]);
-    expect(built.removeItemsFromList).toHaveBeenCalledWith(
+    expect(removedBy(built.removeAssetsFromList)).toEqual(["other"]);
+    expect(removedBy(built.removeItemsFromList)).toEqual(
       expect.arrayContaining(["qr2", "qrKit", "qrBad"])
     );
   });

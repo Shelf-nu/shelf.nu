@@ -7,7 +7,7 @@ import {
   selectionIsFormStateAtom,
   setDisabledBulkItemsAtom,
 } from "./list";
-import { clearScannedItemsAtom } from "./qr-scanner";
+import { clearScannedItemsAtom, scannedItemsAtom } from "./qr-scanner";
 
 /**
  * Query-string keys that do not change which rows the selection was made from.
@@ -78,18 +78,44 @@ export function AtomsResetHandler() {
   const resetScannedItems = useSetAtom(clearScannedItemsAtom);
   const setSelectionIsFormState = useSetAtom(selectionIsFormStateAtom);
   const selectionIsFormState = useAtomValue(selectionIsFormStateAtom);
+  const hasScans = Object.keys(useAtomValue(scannedItemsAtom)).length > 0;
 
   const lastPathnameRef = useRef<string | undefined>(undefined);
   const lastFilterRef = useRef<string | undefined>(undefined);
+  // The page a child-route dialog was opened from, while it is open. The
+  // scanned list belongs to that page, so it survives the trip into the
+  // dialog and back.
+  const dialogParentRef = useRef<string | undefined>(undefined);
   const nextFilter = filterSignature(location.search);
 
   if (lastPathnameRef.current !== location.pathname) {
-    lastPathnameRef.current = location.pathname;
+    const previous = lastPathnameRef.current;
+    const next = location.pathname;
+    lastPathnameRef.current = next;
     lastFilterRef.current = nextFilter;
+
+    // Keep the scanned list only for a dialog opened as a child route of a
+    // page holding scans (an audit's "Add comment" is `…/scan/:id/details`)
+    // and for the return to exactly that page. Every other move clears it, so
+    // one scan page's list can never reach a sibling (check-out to check-in).
+    // "Holding scans" matters: the booking overview is a parent of every
+    // booking scan page, and without it a return to the overview would carry
+    // the check-out list on into check-in.
+    const openingDialog =
+      hasScans && previous !== undefined && next.startsWith(`${previous}/`);
+    const closingDialog =
+      dialogParentRef.current !== undefined && next === dialogParentRef.current;
+    if (openingDialog) {
+      dialogParentRef.current ??= previous;
+    } else {
+      const keepsScans = closingDialog;
+      dialogParentRef.current = undefined;
+      if (!keepsScans) resetScannedItems();
+    }
+
     resetDisabledItems([]);
     resetSelectedItems();
     resetFileAtom(undefined);
-    resetScannedItems();
     // A route that opted out does so during ITS render, which happens after
     // this one. Clearing the flag here means an opt-out cannot outlive the
     // route that asked for it.

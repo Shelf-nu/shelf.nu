@@ -484,7 +484,8 @@ export default function AddAssetsToBookingDrawer({
       count: errors.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+          {count > 1 ? "are" : "is"} invalid.
         </>
       ),
       onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
@@ -494,20 +495,6 @@ export default function AddAssetsToBookingDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsPartOfKitIds,
-        ...unavailableAssetsIds,
-        ...checkedOutAssetsIds,
-        ...noUnitsAvailableIds,
-      ]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfUnavailableKits,
-        ...qrIdsOfCheckedOutKits,
-      ]);
-    },
   });
 
   // Render item row
@@ -610,7 +597,7 @@ function AssignReservationHeader({
           idPrefix="assign"
         />
         {pendingModelRows.length > 0 ? (
-          <ul className="flex max-h-[176px] flex-col gap-2 overflow-y-auto border-t border-gray-200 pt-3 pr-1">
+          <ul className="flex max-h-[176px] flex-col gap-2 overflow-y-auto border-t border-gray-200 pr-1 pt-3">
             {pendingModelRows.map((row) => (
               <PendingModelRowItem
                 key={row.key}

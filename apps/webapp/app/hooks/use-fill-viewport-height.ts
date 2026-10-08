@@ -37,6 +37,11 @@ export type ResolveFillHeightArgs = {
   containerHeight: number;
   /** The pane's distance from the top of that container's content. */
   elementOffsetTop: number;
+  /**
+   * The container's own bottom padding. It sits below the pane inside the
+   * scroll area, so ignoring it makes the container scroll by that much.
+   */
+  containerPaddingBottom?: number;
   /** Smallest height worth rendering, so a mismeasurement can't collapse it. */
   minHeight?: number;
 };
@@ -50,9 +55,13 @@ export type ResolveFillHeightArgs = {
 export function resolveFillHeight({
   containerHeight,
   elementOffsetTop,
+  containerPaddingBottom = 0,
   minHeight = 0,
 }: ResolveFillHeightArgs): number {
-  return Math.max(containerHeight - elementOffsetTop, minHeight);
+  return Math.max(
+    containerHeight - elementOffsetTop - containerPaddingBottom,
+    minHeight
+  );
 }
 
 /**
@@ -99,6 +108,8 @@ export function useFillViewportHeight<T extends HTMLElement>({
       const next = resolveFillHeight({
         containerHeight: container.clientHeight,
         elementOffsetTop,
+        containerPaddingBottom:
+          parseFloat(getComputedStyle(container).paddingBottom) || 0,
         minHeight,
       });
 

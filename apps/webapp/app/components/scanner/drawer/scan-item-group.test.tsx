@@ -107,6 +107,29 @@ describe("ScanItemGroup", () => {
     expect(document.body).toHaveTextContent("Kit A");
   });
 
+  it("renders a header action beside the fold toggle, not inside it", () => {
+    let resolved = 0;
+    render(
+      renderGroup({
+        label: "Needs attention",
+        tone: "attention",
+        headerAction: (
+          <button type="button" onClick={() => resolved++}>
+            Resolve all
+          </button>
+        ),
+      })
+    );
+    const toggle = screen.getByRole("button", { name: /Needs attention/ });
+    const action = screen.getByRole("button", { name: "Resolve all" });
+
+    // A button inside a button is invalid and swallows the inner click.
+    expect(toggle.contains(action)).toBe(false);
+    fireEvent.click(action);
+    expect(resolved).toBe(1);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("stays folded when rows are added, unless asked to reopen", () => {
     const { rerender } = render(renderGroup());
     const toggle = screen.getByRole("button", { name: /Pending/ });

@@ -28,11 +28,20 @@ export type ScanItemGroupProps = {
   /** Number of items in the group, shown as a badge beside the label. */
   count: number;
   /**
-   * `active` marks what this session has done (green dot), `muted` what is
-   * still outstanding (gray dot), `done` what was finished before this session
-   * (hollow dot).
+   * What the group holds, shown by its dot (and, for `attention`, its frame):
+   * - `active`: done this session (green dot)
+   * - `muted`: still outstanding (gray dot)
+   * - `done`: finished before this session (hollow dot)
+   * - `notice`: worth a look but not blocking, e.g. an unexpected audit find
+   *   (amber dot)
+   * - `attention`: blocks the drawer's action (amber frame and header)
    */
-  tone: "active" | "muted" | "done";
+  tone: "active" | "muted" | "done" | "notice" | "attention";
+  /**
+   * A control shown at the right of the header, beside the fold toggle (never
+   * inside it: a button inside a button is invalid and swallows the click).
+   */
+  headerAction?: ReactNode;
   /** Whether the group starts open. Defaults to open. */
   defaultOpen?: boolean;
   /**
@@ -54,6 +63,7 @@ export function ScanItemGroup({
   tone,
   openWhenCountGrows = false,
   defaultOpen = true,
+  headerAction,
   children,
 }: ScanItemGroupProps) {
   const bodyId = useId();
@@ -70,38 +80,58 @@ export function ScanItemGroup({
   }
 
   return (
-    <section className="overflow-hidden rounded-md border border-gray-200">
-      <button
-        type="button"
-        aria-expanded={open}
-        // Only while the body is mounted: it is gone when folded.
-        aria-controls={open ? bodyId : undefined}
-        onClick={() => setOpen((current) => !current)}
+    <section
+      className={tw(
+        "overflow-hidden rounded-md border",
+        tone === "attention" ? "border-warning-200" : "border-gray-200"
+      )}
+    >
+      <div
         // Above the rows: a new row slides in from above its final position,
         // and would otherwise pass over this header on its way in.
-        className="relative z-10 flex w-full items-center gap-2 bg-gray-50 px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-700 hover:bg-gray-100"
+        className={tw(
+          "relative z-10 flex items-center gap-2 pr-2",
+          tone === "attention" ? "bg-warning-25" : "bg-gray-50"
+        )}
       >
-        <ChevronDownIcon
-          aria-hidden="true"
+        <button
+          type="button"
+          aria-expanded={open}
+          // Only while the body is mounted: it is gone when folded.
+          aria-controls={open ? bodyId : undefined}
+          onClick={() => setOpen((current) => !current)}
           className={tw(
-            "size-4 shrink-0 text-gray-500 transition-transform",
-            !open && "-rotate-90"
+            "flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-3 text-left text-xs font-semibold uppercase tracking-wide",
+            tone === "attention"
+              ? "text-warning-700 hover:bg-warning-50"
+              : "text-gray-700 hover:bg-gray-100"
           )}
-        />
-        <span
-          aria-hidden="true"
-          className={tw(
-            "size-2 shrink-0 rounded-full",
-            tone === "active" && "bg-green-500",
-            tone === "muted" && "bg-gray-400",
-            tone === "done" && "border border-gray-400 bg-white"
-          )}
-        />
-        <span>{label}</span>
-        <span className="ml-auto rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium normal-case tracking-normal text-gray-600">
-          {count}
-        </span>
-      </button>
+        >
+          <ChevronDownIcon
+            aria-hidden="true"
+            className={tw(
+              "size-4 shrink-0 transition-transform",
+              tone === "attention" ? "text-warning-600" : "text-gray-500",
+              !open && "-rotate-90"
+            )}
+          />
+          <span
+            aria-hidden="true"
+            className={tw(
+              "size-2 shrink-0 rounded-full",
+              tone === "active" && "bg-green-500",
+              tone === "muted" && "bg-gray-400",
+              tone === "done" && "border border-gray-400 bg-white",
+              (tone === "notice" || tone === "attention") && "bg-warning-500"
+            )}
+          />
+          <span className="truncate">{label}</span>
+          <span className="ml-auto shrink-0 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-xs font-medium normal-case tracking-normal text-gray-600">
+            {count}
+          </span>
+        </button>
+        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+      </div>
 
       {open ? (
         <table id={bodyId} className="w-full">

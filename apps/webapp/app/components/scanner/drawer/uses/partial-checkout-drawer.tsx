@@ -561,7 +561,7 @@ export default function PartialCheckoutDrawer({
 
   // The blocker list is derived in a pure builder so its ids can be pinned by
   // a test; see `partial-checkout-blockers.test.tsx`.
-  const { blockerConfigs, onResolveAll } = buildPartialCheckoutBlockers({
+  const { blockerConfigs } = buildPartialCheckoutBlockers({
     items,
     bookingAssetIds,
     remainingByAssetId,
@@ -575,7 +575,6 @@ export default function PartialCheckoutDrawer({
   });
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   /**

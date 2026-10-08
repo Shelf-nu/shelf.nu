@@ -39,6 +39,9 @@ export const SCANNER_INPUT_PANEL_HEIGHT = 88;
  */
 export const SCANNER_INPUT_GAP = DRAWER_TOP_GAP + SCANNER_INPUT_PANEL_HEIGHT;
 
+/** Space between the bottom of the measured code-entry panel and the drawer. */
+export const SCANNER_DRAWER_SPACING = 8;
+
 /**
  * Floor for the resolved height: enough for the drag handle and one line of
  * title, so the drawer is always recognisable and re-openable.
@@ -55,6 +58,13 @@ export type ResolveDrawerHeightArgs = {
   expanded: boolean;
   /** Whether scanner (code-entry) mode is active; the input panel needs room. */
   isScannerMode: boolean;
+  /**
+   * Viewport-relative bottom of the code-entry panel (`data-scanner-input-panel`),
+   * or `null` before it has been measured. Pages place the input at different
+   * heights, so the drawer follows the real panel; {@link SCANNER_INPUT_GAP} is
+   * only the fallback for the first frame.
+   */
+  scannerInputBottom?: number | null;
   /** `window.innerHeight`, or `0` before the browser has reported one. */
   viewportHeight: number;
   /**
@@ -85,6 +95,7 @@ export type ResolveDrawerHeightArgs = {
 export function resolveDrawerHeight({
   expanded,
   isScannerMode,
+  scannerInputBottom = null,
   viewportHeight,
   chromeHeight,
   footerHeight,
@@ -105,7 +116,12 @@ export function resolveDrawerHeight({
 
   const natural = expanded
     ? Math.max(
-        viewportHeight - (isScannerMode ? SCANNER_INPUT_GAP : DRAWER_TOP_GAP),
+        viewportHeight -
+          (isScannerMode
+            ? scannerInputBottom === null
+              ? SCANNER_INPUT_GAP
+              : scannerInputBottom + SCANNER_DRAWER_SPACING
+            : DRAWER_TOP_GAP),
         unshrinkableChrome
       )
     : chromeHeight ??

@@ -200,14 +200,6 @@ export default function AddAssetsToKitDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...assetsAlreadyAddedIds,
-        ...assetsWithCustodyIds,
-        ...assetsCheckedOutIds,
-      ]);
-      removeItemsFromList([...errors.map(([qrId]) => qrId), ...kitQrIds]);
-    },
   });
 
   // Render item row

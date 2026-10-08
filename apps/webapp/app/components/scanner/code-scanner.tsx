@@ -468,9 +468,9 @@ function ScannerMode({
   return (
     // Pinned to the top and kept to one input and one hint line. `pt-[68px]`
     // clears the back-link / mode-switch bar overlaid on the scanner (52px)
-    // with a 16px gap. The scanner drawer reserves exactly
-    // `SCANNER_INPUT_PANEL_HEIGHT` above itself for this panel (see
-    // `drawer/drawer-height.ts`), so change the two together.
+    // with a 16px gap. The scanner drawer starts just below the element marked
+    // `data-scanner-input-panel` (measured in `drawer/base-drawer.tsx`), so the
+    // input and hint stay visible on every page whatever chrome sits above.
     <div
       className={tw(
         "flex h-full flex-col items-center justify-start bg-slate-800 pt-[68px] text-center",
@@ -478,44 +478,49 @@ function ScannerMode({
       )}
     >
       <RadialBg />
-      <div className="relative flex items-center gap-3">
-        <Input
-          ref={inputRef}
-          className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
-          inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
-          disabled={paused}
-          name="code"
-          label={
-            paused
-              ? "Scanner paused"
-              : inputIsFocused
-              ? "Waiting for scan..."
-              : "Please click on the text field before scanning"
-          }
-          icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
-          iconClassName={tw(
-            "text-gray-600",
-            !inputIsFocused && "animate-bounce"
-          )}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleEnterPress}
-          onFocus={() => setInputIsFocused(true)}
-          onBlur={() => setInputIsFocused(false)}
-        />
-        <Button
-          type="button"
-          onClick={handleButtonClick}
-          disabled={paused || !inputValue.trim()}
-          variant="secondary"
-          className="absolute bottom-1 right-1"
-          aria-label={`Submit scanned code: ${inputValue}`}
-        >
-          <ArrowRight className="size-4" />
-        </Button>
+      <div
+        data-scanner-input-panel
+        className="relative flex flex-col items-center"
+      >
+        <div className="relative flex items-center gap-3">
+          <Input
+            ref={inputRef}
+            className="items-center [&_.inner-label]:font-normal [&_.inner-label]:text-white"
+            inputClassName="scanner-mode-input max-w-[460px] min-w-[360px] pr-[56px]"
+            disabled={paused}
+            name="code"
+            label={
+              paused
+                ? "Scanner paused"
+                : inputIsFocused
+                ? "Waiting for scan..."
+                : "Please click on the text field before scanning"
+            }
+            icon={inputIsFocused ? "qr-code" : "mouse-pointer-click"}
+            iconClassName={tw(
+              "text-gray-600",
+              !inputIsFocused && "animate-bounce"
+            )}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleEnterPress}
+            onFocus={() => setInputIsFocused(true)}
+            onBlur={() => setInputIsFocused(false)}
+          />
+          <Button
+            type="button"
+            onClick={handleButtonClick}
+            disabled={paused || !inputValue.trim()}
+            variant="secondary"
+            className="absolute bottom-1 right-1"
+            aria-label={`Submit scanned code: ${inputValue}`}
+          >
+            <ArrowRight className="size-4" />
+          </Button>
+        </div>
+        <p className="relative mt-2 text-xs text-white/70">
+          Scan with your barcode scanner, or type a code and press Enter.
+        </p>
       </div>
-      <p className="relative mt-2 text-xs text-white/70">
-        Scan with your barcode scanner, or type a code and press Enter.
-      </p>
     </div>
   );
 }
