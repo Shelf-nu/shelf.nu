@@ -563,7 +563,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
     .object({
       id: z.string(),
       adminGroupId: z.string().optional(),
-      custodyManagerGroupId: z.string().optional(),
+      managerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
     })
@@ -688,27 +688,25 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
         </FormRow>
 
         <FormRow
-          rowLabel={`Custody manager role group`}
+          rowLabel={`Manager role group`}
           subHeading={
             <div>
-              The group identifier that should be mapped to the{" "}
-              <b>Custody manager</b> role.
+              The group identifier that should be mapped to the <b>Manager</b>{" "}
+              role.
             </div>
           }
           className="border-b-0 pb-[10px]"
         >
           <Input
-            label={"Custody manager role group"}
+            label={"Manager role group"}
             hideLabel
             className="w-full"
-            name={zo.fields.custodyManagerGroupId()}
+            name={zo.fields.managerGroupId()}
             error={
-              validationErrors?.custodyManagerGroupId?.message ||
-              zo.errors.custodyManagerGroupId()?.message
+              validationErrors?.managerGroupId?.message ||
+              zo.errors.managerGroupId()?.message
             }
-            defaultValue={
-              organization.ssoDetails.custodyManagerGroupId || undefined
-            }
+            defaultValue={organization.ssoDetails.managerGroupId || undefined}
           />
         </FormRow>
 

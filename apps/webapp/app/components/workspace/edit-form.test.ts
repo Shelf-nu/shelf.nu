@@ -59,20 +59,20 @@ describe("EditWorkspaceSSOSettingsFormSchema", () => {
       expect(result.success).toBe(true);
     });
 
-    it("accepts a submission whose only mapping is the Custody manager group", () => {
+    it("accepts a submission whose only mapping is the Manager group", () => {
       const result = schema.safeParse({
         id: "org-1",
-        custodyManagerGroupId: "cm",
+        managerGroupId: "managers",
       });
 
       expect(result.success).toBe(true);
     });
 
-    it("rejects a submission whose Custody manager group is whitespace only", () => {
+    it("rejects a submission whose Manager group is whitespace only", () => {
       const result = schema.safeParse({
         id: "org-1",
         adminGroupId: "",
-        custodyManagerGroupId: "  ",
+        managerGroupId: "  ",
         selfServiceGroupId: "",
         baseUserGroupId: "",
       });
@@ -84,7 +84,7 @@ describe("EditWorkspaceSSOSettingsFormSchema", () => {
       const result = schema.safeParse({
         id: "org-1",
         adminGroupId: "shelf-admins",
-        custodyManagerGroupId: "shelf-custody-managers",
+        managerGroupId: "shelf-managers",
         selfServiceGroupId: "shelf-self-service",
         baseUserGroupId: "shelf-base",
       });

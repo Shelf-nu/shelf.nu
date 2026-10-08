@@ -31,7 +31,7 @@ const ROLE_NAMES = new Set([
   "ADMIN",
   "SELF_SERVICE",
   "BASE",
-  "CUSTODY_MANAGER",
+  "MANAGER",
 ]);
 
 /** Operators that compare a role against a value. */

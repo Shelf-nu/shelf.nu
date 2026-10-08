@@ -51,9 +51,9 @@ export function ExplicitCheckinSettings({
       switches={[
         {
           name: "requireExplicitCheckinForAdmin" satisfies ExplicitCheckinField,
-          label: "Require explicit check-in for Admins",
+          label: "Require explicit check-in for Admins and Managers",
           description:
-            "When enabled, administrators must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
+            "When enabled, administrators and managers must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
           defaultChecked: defaultValues.requireExplicitCheckinForAdmin,
         },
         {

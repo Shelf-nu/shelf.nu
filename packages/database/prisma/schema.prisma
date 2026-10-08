@@ -1138,7 +1138,7 @@ enum OrganizationRoles {
   BASE
   OWNER
   SELF_SERVICE
-  CUSTODY_MANAGER
+  MANAGER
 }
 
 model SsoDetails {
@@ -1152,7 +1152,7 @@ model SsoDetails {
   baseUserGroupId       String? // The group id for BASE users
   selfServiceGroupId    String? // The group id for SELF_SERVICE users
   adminGroupId          String? // The group id for ADMIN users
-  custodyManagerGroupId String? // The group id for CUSTODY_MANAGER users
+  managerGroupId String? // The group id for MANAGER users
 
   // Whether legacy sign-in (password, email code, password reset) is refused
   // for unconverted accounts on this setup's domain. Owners of a linked

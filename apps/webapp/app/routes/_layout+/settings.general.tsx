@@ -424,7 +424,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           id,
           selfServiceGroupId,
           adminGroupId,
-          custodyManagerGroupId,
+          managerGroupId,
           baseUserGroupId,
         } = payload;
 
@@ -445,7 +445,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           ssoDetails: {
             selfServiceGroupId: selfServiceGroupId as string,
             adminGroupId: adminGroupId as string,
-            custodyManagerGroupId: custodyManagerGroupId as string,
+            managerGroupId: managerGroupId as string,
             baseUserGroupId: baseUserGroupId as string,
           },
         });

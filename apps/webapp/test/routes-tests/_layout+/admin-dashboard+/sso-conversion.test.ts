@@ -131,7 +131,7 @@ function linkedOrg(
       id: `sso-${id}`,
       domain: "acme.com",
       adminGroupId: groups.adminGroupId ?? null,
-      custodyManagerGroupId: groups.custodyManagerGroupId ?? null,
+      managerGroupId: groups.managerGroupId ?? null,
       selfServiceGroupId: groups.selfServiceGroupId ?? null,
       baseUserGroupId: groups.baseUserGroupId ?? null,
       requireSsoLogin,
@@ -230,11 +230,11 @@ describe("admin sso-conversion route", () => {
       );
     });
 
-    it("counts a workspace whose only mapping is the Custody manager group as mapped", async () => {
+    it("counts a workspace whose only mapping is the Manager group as mapped", async () => {
       vi.mocked(checkDomainSSOStatus).mockResolvedValue({
         isConfiguredForSSO: true,
         linkedOrganizations: [
-          linkedOrg("custody-only", { custodyManagerGroupId: "grp-cm" }),
+          linkedOrg("manager-only", { managerGroupId: "grp-manager" }),
         ],
         ssoProviderId: "provider-1",
       } as never);
@@ -246,7 +246,7 @@ describe("admin sso-conversion route", () => {
         expect.objectContaining({
           linkedWorkspaces: [
             expect.objectContaining({
-              id: "custody-only",
+              id: "manager-only",
               hasGroupMappings: true,
             }),
           ],

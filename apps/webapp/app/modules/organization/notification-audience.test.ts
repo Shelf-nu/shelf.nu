@@ -40,8 +40,8 @@ describe("getOrganizationNotificationAudience", () => {
   });
 
   it.each([
-    // The Custody manager receives booking broadcasts but not low-stock alerts.
-    ["orgBookingBroadcasts", ["OWNER", "ADMIN", "CUSTODY_MANAGER"]],
+    // The Manager receives booking broadcasts but not low-stock alerts.
+    ["orgBookingBroadcasts", ["OWNER", "ADMIN", "MANAGER"]],
     ["inventoryAlerts", ["OWNER", "ADMIN"]],
   ] as const)(
     "the %s audience is the roles whose policy grants it (%j)",

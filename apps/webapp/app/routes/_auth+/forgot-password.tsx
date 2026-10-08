@@ -77,7 +77,7 @@ export function loader({ context, request }: LoaderFunctionArgs) {
       : "Step 1 of 2: Enter your email";
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   return data(payload({ title, subHeading }));

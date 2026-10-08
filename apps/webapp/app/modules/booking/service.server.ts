@@ -253,7 +253,7 @@ const label: ErrorLabel = "Booking";
  * Sends an individual personalized email to each resolved notification
  * recipient. Each email includes a per-recipient footer that explains
  * why the person received the notification (e.g., "you are the custodian",
- * "you are an admin"), driven by `recipient.reason`.
+ * "you manage bookings in the workspace"), driven by `recipient.reason`.
  *
  * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
  * blocking the booking flow on slow SMTP delivery.

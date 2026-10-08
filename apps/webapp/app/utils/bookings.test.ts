@@ -87,12 +87,12 @@ describe("mayRemoveBookingItems", () => {
     expect(may(R.ADMIN, "ONGOING")).toBe(true);
   });
 
-  it("lets CUSTODY_MANAGER remove items in every open status, like ADMIN", () => {
+  it("lets MANAGER remove items in every open status, like ADMIN", () => {
     for (const bookingStatus of OPEN_STATUSES) {
       expect(
         mayRemoveBookingItems({
           canUpdateBooking: true,
-          access: accessFor([R.CUSTODY_MANAGER]),
+          access: accessFor([R.MANAGER]),
           bookingStatus,
         })
       ).toBe(
@@ -106,7 +106,7 @@ describe("mayRemoveBookingItems", () => {
     expect(
       mayRemoveBookingItems({
         canUpdateBooking: true,
-        access: accessFor([R.CUSTODY_MANAGER]),
+        access: accessFor([R.MANAGER]),
         bookingStatus: "OVERDUE",
       })
     ).toBe(true);
@@ -116,7 +116,7 @@ describe("mayRemoveBookingItems", () => {
 describe("bookingCustodianIsSelf", () => {
   it("fixes the custodian for SELF_SERVICE and BASE only", () => {
     expect(
-      [R.OWNER, R.ADMIN, R.CUSTODY_MANAGER, R.SELF_SERVICE, R.BASE].map((r) =>
+      [R.OWNER, R.ADMIN, R.MANAGER, R.SELF_SERVICE, R.BASE].map((r) =>
         bookingCustodianIsSelf(accessFor([r]))
       )
     ).toEqual([false, false, false, true, true]);

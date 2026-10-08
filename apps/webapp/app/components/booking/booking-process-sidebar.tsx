@@ -85,9 +85,9 @@ export default function BookingProcessSidebar({
 
         <div className="p-4">
           <p className="mb-8 border-b-2 border-blue-500 bg-blue-50 p-2 text-blue-500">
-            Base users reserve bookings that require admin approval and can be
+            Base users reserve bookings that require approval and can be
             cancelled at any time if there are conflicts with other bookings.
-            Admins handle equipment check-out and check-in.
+            Administrators and managers handle equipment check-out and check-in.
           </p>
 
           <div className="mb-8 flex flex-col gap-4">
@@ -122,12 +122,12 @@ export default function BookingProcessSidebar({
                 out.
               </li>
               <li>
-                If you need to extend your booking, contact an administrator
-                before your booking end date.
+                If you need to extend your booking, contact an administrator or
+                manager before your booking end date.
               </li>
               <li>
-                Administrators have final say on booking approvals based on
-                equipment availability and priorities.
+                Administrators and managers have final say on booking approvals
+                based on equipment availability and priorities.
               </li>
             </ul>
           </div>

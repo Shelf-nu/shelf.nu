@@ -66,7 +66,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -211,7 +211,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -240,7 +240,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -293,7 +293,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -348,7 +348,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -359,7 +359,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -394,7 +394,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -449,7 +449,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -460,7 +460,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -495,7 +495,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -550,7 +550,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -561,7 +561,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -642,7 +642,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -787,7 +787,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -816,7 +816,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -869,7 +869,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -924,7 +924,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -935,7 +935,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -970,7 +970,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1025,7 +1025,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1036,7 +1036,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1071,7 +1071,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1126,7 +1126,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1137,7 +1137,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1218,7 +1218,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1363,7 +1363,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1392,7 +1392,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1445,7 +1445,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1500,7 +1500,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1511,7 +1511,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1546,7 +1546,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1601,7 +1601,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1612,7 +1612,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -1647,7 +1647,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1702,7 +1702,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1713,7 +1713,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1794,7 +1794,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1939,7 +1939,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -1968,7 +1968,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2021,7 +2021,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2076,7 +2076,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2087,7 +2087,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2168,7 +2168,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2313,7 +2313,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2342,7 +2342,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2395,7 +2395,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2450,7 +2450,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2461,7 +2461,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2542,7 +2542,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2687,7 +2687,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2716,7 +2716,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2769,7 +2769,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2824,7 +2824,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2835,7 +2835,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -2916,7 +2916,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3061,7 +3061,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3090,7 +3090,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3143,7 +3143,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3198,7 +3198,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3209,7 +3209,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3290,7 +3290,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3435,7 +3435,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3464,7 +3464,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3517,7 +3517,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3572,7 +3572,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3583,7 +3583,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3664,7 +3664,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3809,7 +3809,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3838,7 +3838,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3891,7 +3891,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3946,7 +3946,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -3957,7 +3957,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -4038,7 +4038,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4183,7 +4183,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4212,7 +4212,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4265,7 +4265,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4320,7 +4320,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4331,7 +4331,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "denied",
             "RESERVED": "allowed",
@@ -4412,7 +4412,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4557,7 +4557,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4586,7 +4586,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4639,7 +4639,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4694,7 +4694,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4705,7 +4705,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4740,7 +4740,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -4795,7 +4795,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -4806,7 +4806,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -4841,7 +4841,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4896,7 +4896,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4907,7 +4907,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -4988,7 +4988,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5133,7 +5133,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5162,7 +5162,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5215,7 +5215,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5270,7 +5270,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5281,7 +5281,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5316,7 +5316,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5371,7 +5371,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5382,7 +5382,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5417,7 +5417,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5472,7 +5472,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5483,7 +5483,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5564,7 +5564,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5709,7 +5709,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5738,7 +5738,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5791,7 +5791,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5846,7 +5846,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5857,7 +5857,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -5892,7 +5892,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5947,7 +5947,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5958,7 +5958,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "denied",
             "RESERVED": "denied",
@@ -5993,7 +5993,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6048,7 +6048,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6059,7 +6059,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6140,7 +6140,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6285,7 +6285,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6314,7 +6314,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6367,7 +6367,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6422,7 +6422,7 @@
             "CANCELLED": "denied"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6433,7 +6433,7 @@
             "CANCELLED": "denied"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6514,7 +6514,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6659,7 +6659,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6688,7 +6688,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6741,7 +6741,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6796,7 +6796,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6807,7 +6807,7 @@
             "CANCELLED": "allowed"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed",
             "RESERVED": "allowed",
@@ -6888,7 +6888,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7033,7 +7033,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7062,7 +7062,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7115,7 +7115,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7170,7 +7170,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7181,7 +7181,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "neither": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7216,7 +7216,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -7271,7 +7271,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -7282,7 +7282,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=true)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=true)",
             "RESERVED": "allowed (requireExplicitCheckout=true)",
@@ -7317,7 +7317,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER": {
+        "MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7372,7 +7372,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "SELF_SERVICE+CUSTODY_MANAGER": {
+        "SELF_SERVICE+MANAGER": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",
@@ -7383,7 +7383,7 @@
             "CANCELLED": "allowed (requireExplicitCheckout=false)"
           }
         },
-        "CUSTODY_MANAGER+SELF_SERVICE": {
+        "MANAGER+SELF_SERVICE": {
           "custodianNotCreator": {
             "DRAFT": "allowed (requireExplicitCheckout=false)",
             "RESERVED": "allowed (requireExplicitCheckout=false)",

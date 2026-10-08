@@ -59,7 +59,7 @@ describe("ChangeRoleDialog role options", () => {
   });
 
   it("does not offer Administrator to an administrator", () => {
-    expect(offeredRoles()).toEqual(["Custody manager", "Self service", "Base"]);
+    expect(offeredRoles()).toEqual(["Manager", "Self service", "Base"]);
   });
 
   it("offers Administrator to the workspace owner", () => {
@@ -67,7 +67,7 @@ describe("ChangeRoleDialog role options", () => {
 
     expect(offeredRoles()).toEqual([
       "Administrator",
-      "Custody manager",
+      "Manager",
       "Self service",
       "Base",
     ]);

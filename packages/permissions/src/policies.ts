@@ -220,11 +220,11 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     },
   },
   /**
-   * Runs bookings and custody for the whole workspace without administering
-   * it: the Administrator's booking and custody reach, none of its catalogue,
-   * settings, team or billing rights, and only the audits assigned to it.
+   * Runs bookings, custody and audits for the whole workspace without
+   * administering it: the Administrator's booking, custody and audit reach,
+   * and none of its catalogue, settings, team or billing rights.
    */
-  CUSTODY_MANAGER: {
+  MANAGER: {
     rank: 3,
     workspaceOverride: null,
     bookings: {
@@ -242,7 +242,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
     },
     assets: { listScope: "all" },
     custody: { see: "all", assign: "anyone" },
-    audits: { scope: "assigned", manageOthers: false },
+    audits: { scope: "all", manageOthers: true },
     notifications: {
       orgBookingBroadcasts: true,
       reservationAlertsAdmins: false,
@@ -256,7 +256,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       advancedAssetIndex: true,
     },
     membership: {
-      // Equal to ADMIN: an Administrator changed to Custody Manager keeps the
+      // Equal to ADMIN: an Administrator changed to Manager keeps the
       // ownership columns (a creator reference, granting no access).
       ownershipTier: 2,
       changeRequiresOwner: false,

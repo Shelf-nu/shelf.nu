@@ -225,7 +225,7 @@ restricted. Both styles compile and pass tests, and they disagree silently as
 soon as a role is added.
 
 **Reports**: a role name (`"OWNER" | "ADMIN" | "SELF_SERVICE" | "BASE" |
-"CUSTODY_MANAGER"` or `OrganizationRoles.X`, including aliases) used as an
+"MANAGER"` or `OrganizationRoles.X`, including aliases) used as an
 operand of `===`/`!==`/`==`/`!=`, a `case` test, an argument of
 `.includes/.indexOf/.lastIndexOf/.has/.some` (or an element of the array they
 are called on), the value of a Prisma `has`, an element of a Prisma

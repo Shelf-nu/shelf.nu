@@ -113,17 +113,25 @@ export default function LocationsIndexPage() {
       action: PermissionAction.create,
     });
 
+  const canCreateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
+
   return (
     <>
       <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new location`}
-          data-test-id="createNewLocation"
-        >
-          New location
-        </Button>
+        {canCreateLocation ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new location`}
+            data-test-id="createNewLocation"
+          >
+            New location
+          </Button>
+        ) : null}
       </Header>
       <ListContentWrapper>
         <Filters

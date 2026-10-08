@@ -698,7 +698,7 @@ describe("settings.general SSO settings write", () => {
     dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
   });
 
-  it("writes every group mapping, the Custody manager group included", async () => {
+  it("writes every group mapping, the Manager group included", async () => {
     const ssoOrganization = { ...baseOrganization(), enabledSso: true };
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-1",
@@ -714,7 +714,7 @@ describe("settings.general SSO settings write", () => {
       intent: "sso",
       id: "org-1",
       adminGroupId: "grp-admin",
-      custodyManagerGroupId: "grp-custody",
+      managerGroupId: "grp-manager",
       selfServiceGroupId: "grp-self-service",
       baseUserGroupId: "grp-base",
     });
@@ -736,7 +736,7 @@ describe("settings.general SSO settings write", () => {
         id: "org-1",
         ssoDetails: {
           adminGroupId: "grp-admin",
-          custodyManagerGroupId: "grp-custody",
+          managerGroupId: "grp-manager",
           selfServiceGroupId: "grp-self-service",
           baseUserGroupId: "grp-base",
         },

@@ -143,7 +143,7 @@ const org = {
   userId: OWNER,
   ssoDetails: {
     adminGroupId: "g-admin",
-    custodyManagerGroupId: "g-cm",
+    managerGroupId: "g-manager",
     selfServiceGroupId: "g-ss",
     baseUserGroupId: "g-base",
   },
@@ -306,13 +306,13 @@ describe("SSO role transition: the same transfers as a manual change", () => {
   });
 });
 
-describe("SSO role transition: into and out of Custody manager", () => {
-  it("SELF_SERVICE mapped to CUSTODY_MANAGER is promoted with nothing transferred", async () => {
-    await login(["SELF_SERVICE"], ["g-cm"]);
+describe("SSO role transition: into and out of Manager", () => {
+  it("SELF_SERVICE mapped to MANAGER is promoted with nothing transferred", async () => {
+    await login(["SELF_SERVICE"], ["g-manager"]);
 
     expect(dbMocks.membershipUpdate).toHaveBeenCalledWith({
       where: { userId_organizationId: { userId: USER, organizationId: ORG } },
-      data: { roles: { set: ["CUSTODY_MANAGER"] } },
+      data: { roles: { set: ["MANAGER"] } },
     });
     expect(dbMocks.booking).not.toHaveBeenCalled();
     expect(dbMocks.asset).not.toHaveBeenCalled();
@@ -324,13 +324,13 @@ describe("SSO role transition: into and out of Custody manager", () => {
         source: "SSO",
         organizationId: ORG,
         previousRole: "SELF_SERVICE",
-        newRole: "CUSTODY_MANAGER",
+        newRole: "MANAGER",
       },
     });
   });
 
-  it("CUSTODY_MANAGER mapped to SELF_SERVICE hands bookings made for others and ownership columns to the owner", async () => {
-    await login(["CUSTODY_MANAGER"], ["g-ss"]);
+  it("MANAGER mapped to SELF_SERVICE hands bookings made for others and ownership columns to the owner", async () => {
+    await login(["MANAGER"], ["g-ss"]);
 
     expect(dbMocks.membershipUpdate).toHaveBeenCalledWith({
       where: { userId_organizationId: { userId: USER, organizationId: ORG } },
@@ -355,7 +355,7 @@ describe("SSO role transition: into and out of Custody manager", () => {
         changedById: USER,
         source: "SSO",
         organizationId: ORG,
-        previousRole: "CUSTODY_MANAGER",
+        previousRole: "MANAGER",
         newRole: "SELF_SERVICE",
       },
     });

@@ -3,7 +3,7 @@
  *
  * The settings section manages the catalogue of models, so both its layout
  * and its index loader ask for `assetModel:update`. `assetModel:read` is held
- * by roles that only pick a model on an asset or a booking (a Custody manager,
+ * by roles that only pick a model on an asset or a booking (a Manager,
  * Base), and must not open this page. The permission mock answers from the
  * real matrix, so a loader that asks for `read` lets those roles through and
  * fails here.
@@ -105,7 +105,7 @@ describe("Settings > Asset models loaders", () => {
     ["layout", layoutLoader],
     ["index", indexLoader],
   ] as const)("the %s loader asks for assetModel:update", async (_, loader) => {
-    actAs(OrganizationRoles.CUSTODY_MANAGER);
+    actAs(OrganizationRoles.MANAGER);
 
     await thrownBy(() => loader(loaderArgs()));
 
@@ -118,9 +118,9 @@ describe("Settings > Asset models loaders", () => {
     ["layout", layoutLoader],
     ["index", indexLoader],
   ] as const)(
-    "the %s loader refuses a Custody manager with a 403",
+    "the %s loader refuses a Manager with a 403",
     async (_, loader) => {
-      actAs(OrganizationRoles.CUSTODY_MANAGER);
+      actAs(OrganizationRoles.MANAGER);
 
       const thrown = await thrownBy(() => loader(loaderArgs()));
 

@@ -1,7 +1,9 @@
 /**
  * Admin organization route: the "Require SSO login" switch
  * (`toggleRequireSsoLogin` intent), which writes `SsoDetails.requireSsoLogin`
- * on the workspace's SSO setup, and its admin gate.
+ * on the workspace's SSO setup; the SSO details form (`updateSsoDetails`
+ * intent), which maps IdP groups to each of the four assignable roles; and the
+ * admin gate.
  *
  * @see {@link file://./../../../../app/routes/_layout+/admin-dashboard+/org.$organizationId.tsx}
  * @see {@link file://./../../../../app/modules/organization/service.server.ts} setRequireSsoLogin
@@ -22,7 +24,7 @@ vi.mock("lottie-react", () => ({
 // SSO details row and reads back what was written.
 vi.mock("~/database/db.server", () => ({
   db: {
-    organization: { findUnique: vi.fn() },
+    organization: { findUnique: vi.fn(), update: vi.fn() },
     ssoDetails: { update: vi.fn() },
   },
 }));
@@ -146,5 +148,85 @@ describe("admin org route: toggleRequireSsoLogin", () => {
     expect(asResponse(response).status).toBe(403);
     expect(db.organization.findUnique).not.toHaveBeenCalled();
     expect(db.ssoDetails.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("admin org route: updateSsoDetails", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(requireAdmin).mockResolvedValue({ id: ADMIN_ID });
+  });
+
+  /** The group columns the action wrote, read from the upsert's create arm. */
+  function writtenGroups() {
+    const call = vi.mocked(db.organization.update).mock.calls[0]?.[0] as {
+      data: { ssoDetails: { upsert: { create: Record<string, unknown> } } };
+    };
+    return call.data.ssoDetails.upsert.create;
+  }
+
+  it("saves a workspace that maps only the Manager group", async () => {
+    const result = await action(
+      actionArgs({
+        intent: "updateSsoDetails",
+        domain: "example.com",
+        adminGroupId: "",
+        managerGroupId: "grp-manager",
+        selfServiceGroupId: "",
+        baseUserGroupId: "",
+      })
+    );
+
+    expect(writtenGroups()).toEqual({
+      domain: "example.com",
+      adminGroupId: null,
+      managerGroupId: "grp-manager",
+      selfServiceGroupId: null,
+      baseUserGroupId: null,
+    });
+    expect(result).toEqual(
+      expect.objectContaining({ message: "SSO details updated" })
+    );
+  });
+
+  it("saves all four role groups, trimmed", async () => {
+    await action(
+      actionArgs({
+        intent: "updateSsoDetails",
+        domain: "example.com",
+        adminGroupId: " grp-admin ",
+        managerGroupId: "grp-manager",
+        selfServiceGroupId: "grp-self-service",
+        baseUserGroupId: "grp-base",
+      })
+    );
+
+    expect(writtenGroups()).toEqual({
+      domain: "example.com",
+      adminGroupId: "grp-admin",
+      managerGroupId: "grp-manager",
+      selfServiceGroupId: "grp-self-service",
+      baseUserGroupId: "grp-base",
+    });
+  });
+
+  it("refuses a setup with no group mapped with 400 and writes nothing", async () => {
+    const response = await action(
+      actionArgs({
+        intent: "updateSsoDetails",
+        domain: "example.com",
+        adminGroupId: " ",
+        managerGroupId: "",
+        selfServiceGroupId: "",
+        baseUserGroupId: "",
+      })
+    );
+
+    expect(asResponse(response).status).toBe(400);
+    const body = await asResponse(response).json();
+    expect(body.error.message).toBe(
+      "Map at least one group to a role. Only the roles you use need a group."
+    );
+    expect(db.organization.update).not.toHaveBeenCalled();
   });
 });

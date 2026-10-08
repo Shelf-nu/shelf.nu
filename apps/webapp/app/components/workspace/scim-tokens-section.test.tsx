@@ -48,7 +48,7 @@ const ssoDetails = {
   selfServiceGroupId: "group-ss",
   baseUserGroupId: "group-base",
   adminGroupId: "group-admin",
-  custodyManagerGroupId: null,
+  managerGroupId: null,
 };
 
 function createLoaderData(overrides: Record<string, unknown> = {}) {

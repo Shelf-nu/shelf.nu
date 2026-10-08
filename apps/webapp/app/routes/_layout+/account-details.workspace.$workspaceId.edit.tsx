@@ -409,7 +409,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const {
           selfServiceGroupId,
           adminGroupId,
-          custodyManagerGroupId,
+          managerGroupId,
           baseUserGroupId,
         } = parsedData;
 
@@ -430,7 +430,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           ssoDetails: {
             selfServiceGroupId: normalizeGroupId(selfServiceGroupId),
             adminGroupId: normalizeGroupId(adminGroupId),
-            custodyManagerGroupId: normalizeGroupId(custodyManagerGroupId),
+            managerGroupId: normalizeGroupId(managerGroupId),
             baseUserGroupId: normalizeGroupId(baseUserGroupId),
           },
         });

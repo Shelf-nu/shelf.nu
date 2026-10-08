@@ -138,24 +138,6 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.create,
-          })}
-        >
-          <BulkStartAuditDialog />
-        </When>
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.update,
-          })}
-        >
-          <BulkAddToAuditDialog />
-        </When>
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -167,6 +149,27 @@ function ConditionalDropdown() {
         <BulkMarkAvailabilityDialog type="unavailable" />
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
+      </When>
+
+      {/* Audit dialogs follow the audit grants alone: a Manager runs audits
+          without editing assets. */}
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        })}
+      >
+        <BulkStartAuditDialog />
+      </When>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.update,
+        })}
+      >
+        <BulkAddToAuditDialog />
       </When>
 
       <BulkDownloadQrDialog

@@ -1092,7 +1092,7 @@
         "change-role"
       ]
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "asset": [
         "read",
         "custody"
@@ -1166,12 +1166,17 @@
         "delete"
       ],
       "audit": [
+        "create",
         "read",
-        "update"
+        "update",
+        "delete",
+        "archive"
       ],
       "auditNote": [
         "create",
-        "read"
+        "read",
+        "update",
+        "delete"
       ],
       "reports": [],
       "teamMemberNote": [],
@@ -1886,7 +1891,7 @@
         "change-role"
       ]
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "asset": [
         "create",
         "read",
@@ -4070,7 +4075,7 @@
         "change-role"
       ]
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "asset": [
         "create",
         "read",
@@ -5708,7 +5713,7 @@
         "change-role"
       ]
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "asset": [
         "create",
         "read",
@@ -6254,7 +6259,7 @@
         "change-role"
       ]
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "asset": [
         "create",
         "read",
@@ -6800,7 +6805,7 @@
         "change-role"
       ]
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "asset": [
         "read",
         "custody"
@@ -6874,12 +6879,17 @@
         "delete"
       ],
       "audit": [
+        "create",
         "read",
-        "update"
+        "update",
+        "delete",
+        "archive"
       ],
       "auditNote": [
         "create",
-        "read"
+        "read",
+        "update",
+        "delete"
       ],
       "reports": [],
       "teamMemberNote": [],
@@ -6903,7 +6913,7 @@
         "read"
       ]
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "asset": [
         "read",
         "custody"
@@ -6977,12 +6987,17 @@
         "delete"
       ],
       "audit": [
+        "create",
         "read",
-        "update"
+        "update",
+        "delete",
+        "archive"
       ],
       "auditNote": [
         "create",
-        "read"
+        "read",
+        "update",
+        "delete"
       ],
       "reports": [],
       "teamMemberNote": [],
@@ -8098,7 +8113,7 @@
         "change-role"
       ]
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "asset": [
         "read",
         "custody"
@@ -8172,12 +8187,17 @@
         "delete"
       ],
       "audit": [
+        "create",
         "read",
-        "update"
+        "update",
+        "delete",
+        "archive"
       ],
       "auditNote": [
         "create",
-        "read"
+        "read",
+        "update",
+        "delete"
       ],
       "reports": [],
       "teamMemberNote": [],
@@ -9370,7 +9390,7 @@
         "change-role"
       ]
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "asset": [
         "read",
         "custody"
@@ -9444,12 +9464,17 @@
         "delete"
       ],
       "audit": [
+        "create",
         "read",
-        "update"
+        "update",
+        "delete",
+        "archive"
       ],
       "auditNote": [
         "create",
-        "read"
+        "read",
+        "update",
+        "delete"
       ],
       "reports": [],
       "teamMemberNote": [],
@@ -9628,9 +9653,9 @@
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
-    "CUSTODY_MANAGER": {
-      "web": "CUSTODY_MANAGER",
-      "mobile": "CUSTODY_MANAGER"
+    "MANAGER": {
+      "web": "MANAGER",
+      "mobile": "MANAGER"
     },
     "SELF_SERVICE": {
       "web": "SELF_SERVICE",
@@ -9644,7 +9669,7 @@
       "web": "OWNER",
       "mobile": "OWNER"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "web": "OWNER",
       "mobile": "OWNER"
     },
@@ -9660,7 +9685,7 @@
       "web": "OWNER",
       "mobile": "OWNER"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
@@ -9672,21 +9697,21 @@
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "web": "OWNER",
       "mobile": "OWNER"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "web": "CUSTODY_MANAGER",
-      "mobile": "CUSTODY_MANAGER"
+    "MANAGER+SELF_SERVICE": {
+      "web": "MANAGER",
+      "mobile": "MANAGER"
     },
-    "CUSTODY_MANAGER+BASE": {
-      "web": "CUSTODY_MANAGER",
-      "mobile": "CUSTODY_MANAGER"
+    "MANAGER+BASE": {
+      "web": "MANAGER",
+      "mobile": "MANAGER"
     },
     "SELF_SERVICE+OWNER": {
       "web": "OWNER",
@@ -9696,9 +9721,9 @@
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
-      "web": "CUSTODY_MANAGER",
-      "mobile": "CUSTODY_MANAGER"
+    "SELF_SERVICE+MANAGER": {
+      "web": "MANAGER",
+      "mobile": "MANAGER"
     },
     "SELF_SERVICE+BASE": {
       "web": "SELF_SERVICE",
@@ -9712,9 +9737,9 @@
       "web": "ADMIN",
       "mobile": "ADMIN"
     },
-    "BASE+CUSTODY_MANAGER": {
-      "web": "CUSTODY_MANAGER",
-      "mobile": "CUSTODY_MANAGER"
+    "BASE+MANAGER": {
+      "web": "MANAGER",
+      "mobile": "MANAGER"
     },
     "BASE+SELF_SERVICE": {
       "web": "SELF_SERVICE",
@@ -9728,7 +9753,7 @@
   "D-01:precedence": [
     "OWNER",
     "ADMIN",
-    "CUSTODY_MANAGER",
+    "MANAGER",
     "SELF_SERVICE",
     "BASE"
   ],
@@ -9749,9 +9774,9 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "CUSTODY_MANAGER": {
-      "effectiveRole": "CUSTODY_MANAGER",
-      "label": "Custody manager",
+    "MANAGER": {
+      "effectiveRole": "MANAGER",
+      "label": "Manager",
       "ownsWorkspace": false,
       "changeRequiresOwner": false,
       "receivesTransfers": false,
@@ -9781,7 +9806,7 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "effectiveRole": "OWNER",
       "label": "Owner",
       "ownsWorkspace": true,
@@ -9813,7 +9838,7 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "effectiveRole": "ADMIN",
       "label": "Administrator",
       "ownsWorkspace": false,
@@ -9837,7 +9862,7 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "effectiveRole": "OWNER",
       "label": "Owner",
       "ownsWorkspace": true,
@@ -9845,7 +9870,7 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "effectiveRole": "ADMIN",
       "label": "Administrator",
       "ownsWorkspace": false,
@@ -9853,17 +9878,17 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "effectiveRole": "CUSTODY_MANAGER",
-      "label": "Custody manager",
+    "MANAGER+SELF_SERVICE": {
+      "effectiveRole": "MANAGER",
+      "label": "Manager",
       "ownsWorkspace": false,
       "changeRequiresOwner": false,
       "receivesTransfers": false,
       "eligibleAsNewOwner": false
     },
-    "CUSTODY_MANAGER+BASE": {
-      "effectiveRole": "CUSTODY_MANAGER",
-      "label": "Custody manager",
+    "MANAGER+BASE": {
+      "effectiveRole": "MANAGER",
+      "label": "Manager",
       "ownsWorkspace": false,
       "changeRequiresOwner": false,
       "receivesTransfers": false,
@@ -9885,9 +9910,9 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
-      "effectiveRole": "CUSTODY_MANAGER",
-      "label": "Custody manager",
+    "SELF_SERVICE+MANAGER": {
+      "effectiveRole": "MANAGER",
+      "label": "Manager",
       "ownsWorkspace": false,
       "changeRequiresOwner": false,
       "receivesTransfers": false,
@@ -9917,9 +9942,9 @@
       "receivesTransfers": true,
       "eligibleAsNewOwner": true
     },
-    "BASE+CUSTODY_MANAGER": {
-      "effectiveRole": "CUSTODY_MANAGER",
-      "label": "Custody manager",
+    "BASE+MANAGER": {
+      "effectiveRole": "MANAGER",
+      "label": "Manager",
       "ownsWorkspace": false,
       "changeRequiresOwner": false,
       "receivesTransfers": false,
@@ -9952,14 +9977,14 @@
   },
   "D-05:ssoAssignable": [
     "ADMIN",
-    "CUSTODY_MANAGER",
+    "MANAGER",
     "SELF_SERVICE",
     "BASE"
   ],
   "D-04:invitable": [
     "ADMIN",
     "BASE",
-    "CUSTODY_MANAGER",
+    "MANAGER",
     "SELF_SERVICE"
   ],
   "D-10:labels": {
@@ -9967,28 +9992,28 @@
     "OWNER": "Owner",
     "BASE": "Base",
     "SELF_SERVICE": "Self service",
-    "CUSTODY_MANAGER": "Custody manager"
+    "MANAGER": "Manager"
   },
   "D-02": {
     "OWNER->ADMIN": true,
-    "OWNER->CUSTODY_MANAGER": true,
+    "OWNER->MANAGER": true,
     "OWNER->SELF_SERVICE": true,
     "OWNER->BASE": true,
     "ADMIN->OWNER": false,
-    "ADMIN->CUSTODY_MANAGER": false,
+    "ADMIN->MANAGER": false,
     "ADMIN->SELF_SERVICE": true,
     "ADMIN->BASE": true,
-    "CUSTODY_MANAGER->OWNER": false,
-    "CUSTODY_MANAGER->ADMIN": false,
-    "CUSTODY_MANAGER->SELF_SERVICE": true,
-    "CUSTODY_MANAGER->BASE": true,
+    "MANAGER->OWNER": false,
+    "MANAGER->ADMIN": false,
+    "MANAGER->SELF_SERVICE": true,
+    "MANAGER->BASE": true,
     "SELF_SERVICE->OWNER": false,
     "SELF_SERVICE->ADMIN": false,
-    "SELF_SERVICE->CUSTODY_MANAGER": false,
+    "SELF_SERVICE->MANAGER": false,
     "SELF_SERVICE->BASE": false,
     "BASE->OWNER": false,
     "BASE->ADMIN": false,
-    "BASE->CUSTODY_MANAGER": false,
+    "BASE->MANAGER": false,
     "BASE->SELF_SERVICE": false
   },
   "D-14": {
@@ -10028,7 +10053,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10100,7 +10125,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10172,7 +10197,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10226,7 +10251,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10244,7 +10269,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10262,7 +10287,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10280,7 +10305,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10334,7 +10359,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10406,7 +10431,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10516,7 +10541,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10588,7 +10613,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10660,7 +10685,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10714,7 +10739,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10732,7 +10757,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10750,7 +10775,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10768,7 +10793,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10822,7 +10847,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10894,7 +10919,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -10996,7 +11021,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -11048,7 +11073,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -11140,7 +11165,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -11257,7 +11282,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -11340,7 +11365,7 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "CUSTODY_MANAGER": [
+    "MANAGER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11359,7 +11384,7 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "OWNER+CUSTODY_MANAGER": [
+    "OWNER+MANAGER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11383,7 +11408,7 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "ADMIN+CUSTODY_MANAGER": [
+    "ADMIN+MANAGER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11401,25 +11426,25 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "CUSTODY_MANAGER+OWNER": [
+    "MANAGER+OWNER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
       "OVERDUE"
     ],
-    "CUSTODY_MANAGER+ADMIN": [
+    "MANAGER+ADMIN": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
       "OVERDUE"
     ],
-    "CUSTODY_MANAGER+SELF_SERVICE": [
+    "MANAGER+SELF_SERVICE": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
       "OVERDUE"
     ],
-    "CUSTODY_MANAGER+BASE": [
+    "MANAGER+BASE": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11437,7 +11462,7 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "SELF_SERVICE+CUSTODY_MANAGER": [
+    "SELF_SERVICE+MANAGER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11459,7 +11484,7 @@
       "ONGOING",
       "OVERDUE"
     ],
-    "BASE+CUSTODY_MANAGER": [
+    "BASE+MANAGER": [
       "DRAFT",
       "RESERVED",
       "ONGOING",
@@ -11519,7 +11544,7 @@
       "neither|ARCHIVED": "allowed",
       "neither|CANCELLED": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "custodianNotCreator|ONGOING": "allowed",
@@ -11602,7 +11627,7 @@
       "admin=true|selfService=false": true,
       "admin=true|selfService=true": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "admin=false|selfService=false": false,
       "admin=false|selfService=true": false,
       "admin=true|selfService=false": true,
@@ -11624,7 +11649,7 @@
   "D-33": {
     "OWNER": "ADVANCED",
     "ADMIN": "ADVANCED",
-    "CUSTODY_MANAGER": "ADVANCED",
+    "MANAGER": "ADVANCED",
     "SELF_SERVICE": "SIMPLE",
     "BASE": "SIMPLE"
   },
@@ -11641,7 +11666,7 @@
       "baB": true,
       "ssB,baB": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11665,7 +11690,7 @@
       "baB": true,
       "ssB,baB": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11689,7 +11714,7 @@
       "baB": true,
       "ssB,baB": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11707,25 +11732,25 @@
       "baB": true,
       "ssB,baB": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "none": true,
       "ssB": true,
       "baB": true,
       "ssB,baB": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "none": true,
       "ssB": true,
       "baB": true,
       "ssB,baB": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "none": true,
       "ssB": true,
       "baB": true,
       "ssB,baB": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11743,7 +11768,7 @@
       "baB": true,
       "ssB,baB": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11767,7 +11792,7 @@
       "baB": true,
       "ssB,baB": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -11925,7 +11950,7 @@
         "canSeeAllCustody": true
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12189,7 +12214,7 @@
         "canSeeAllCustody": true
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12453,7 +12478,7 @@
         "canSeeAllCustody": true
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12651,7 +12676,7 @@
         "canSeeAllCustody": true
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12717,7 +12742,7 @@
         "canSeeAllCustody": true
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12783,7 +12808,7 @@
         "canSeeAllCustody": true
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -12849,7 +12874,7 @@
         "canSeeAllCustody": true
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -13047,7 +13072,7 @@
         "canSeeAllCustody": true
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -13311,7 +13336,7 @@
         "canSeeAllCustody": true
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "none": {
         "canSeeAllBookings": true,
         "canSeeAllCustody": true
@@ -13605,7 +13630,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13661,7 +13686,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13717,7 +13742,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13759,7 +13784,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13773,7 +13798,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13787,7 +13812,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13801,7 +13826,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13843,7 +13868,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13899,7 +13924,7 @@
       "neither|custodianOnly=true|blockBase=false": "allowed",
       "neither|custodianOnly=true|blockBase=true": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator|custodianOnly=false|blockBase=false": "allowed",
       "custodianNotCreator|custodianOnly=false|blockBase=true": "allowed",
       "custodianNotCreator|custodianOnly=true|blockBase=false": "allowed",
@@ -13965,7 +13990,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14017,7 +14042,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14033,7 +14058,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14045,19 +14070,19 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14069,7 +14094,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14103,7 +14128,7 @@
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "writeScopeClause": null,
       "bulkOwnershipScope": null
     },
@@ -14185,7 +14210,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14205,7 +14230,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14225,7 +14250,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14240,22 +14265,22 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14270,7 +14295,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14290,7 +14315,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14322,7 +14347,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14342,7 +14367,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14362,7 +14387,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14377,22 +14402,22 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14407,7 +14432,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14427,7 +14452,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14465,7 +14490,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14497,7 +14522,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14529,7 +14554,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14553,7 +14578,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14561,7 +14586,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14569,7 +14594,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14577,7 +14602,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14601,7 +14626,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14633,7 +14658,7 @@
       "neither|DRAFT": "allowed",
       "neither|RESERVED": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator|DRAFT": "allowed",
       "custodianNotCreator|RESERVED": "allowed",
       "creatorNotCustodian|DRAFT": "allowed",
@@ -14677,7 +14702,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14697,7 +14722,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14717,7 +14742,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14732,22 +14757,22 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14762,7 +14787,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14782,7 +14807,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14814,7 +14839,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14834,7 +14859,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14854,7 +14879,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14869,22 +14894,22 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14899,7 +14924,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14919,7 +14944,7 @@
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator": "allowed",
       "creatorNotCustodian": "allowed",
       "neither": "allowed"
@@ -14943,28 +14968,28 @@
   "B9:D-16:mobile-available-models": {
     "OWNER": "workspace",
     "ADMIN": "workspace",
-    "CUSTODY_MANAGER": "workspace",
+    "MANAGER": "workspace",
     "SELF_SERVICE": "custodian-scope",
     "BASE": "custodian-scope",
     "OWNER+ADMIN": "workspace",
-    "OWNER+CUSTODY_MANAGER": "workspace",
+    "OWNER+MANAGER": "workspace",
     "OWNER+SELF_SERVICE": "workspace",
     "OWNER+BASE": "workspace",
     "ADMIN+OWNER": "workspace",
-    "ADMIN+CUSTODY_MANAGER": "workspace",
+    "ADMIN+MANAGER": "workspace",
     "ADMIN+SELF_SERVICE": "workspace",
     "ADMIN+BASE": "workspace",
-    "CUSTODY_MANAGER+OWNER": "workspace",
-    "CUSTODY_MANAGER+ADMIN": "workspace",
-    "CUSTODY_MANAGER+SELF_SERVICE": "workspace",
-    "CUSTODY_MANAGER+BASE": "workspace",
+    "MANAGER+OWNER": "workspace",
+    "MANAGER+ADMIN": "workspace",
+    "MANAGER+SELF_SERVICE": "workspace",
+    "MANAGER+BASE": "workspace",
     "SELF_SERVICE+OWNER": "workspace",
     "SELF_SERVICE+ADMIN": "workspace",
-    "SELF_SERVICE+CUSTODY_MANAGER": "workspace",
+    "SELF_SERVICE+MANAGER": "workspace",
     "SELF_SERVICE+BASE": "custodian-scope",
     "BASE+OWNER": "workspace",
     "BASE+ADMIN": "workspace",
-    "BASE+CUSTODY_MANAGER": "workspace",
+    "BASE+MANAGER": "workspace",
     "BASE+SELF_SERVICE": "custodian-scope",
     "(none)": "custodian-scope",
     "UNKNOWN_ROLE": "custodian-scope"
@@ -14990,7 +15015,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15030,7 +15055,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15070,7 +15095,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15100,7 +15125,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15110,7 +15135,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15120,7 +15145,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15130,7 +15155,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15160,7 +15185,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15200,7 +15225,7 @@
         "bookingAssetsColumn": true
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "holder": {
         "editBookingForm": true,
         "bookingAssetsColumn": true
@@ -15284,7 +15309,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15374,7 +15399,7 @@
         "mode": "all"
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15458,7 +15483,7 @@
         "mode": "all"
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15521,7 +15546,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15542,7 +15567,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15563,7 +15588,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15584,7 +15609,7 @@
         "mode": "all"
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15647,7 +15672,7 @@
         "mode": "all"
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15735,7 +15760,7 @@
         "mode": "all"
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custody-filter|seeAll=false": {
         "mode": "self",
         "userId": "caller"
@@ -15831,28 +15856,28 @@
   "B9:D-19:mobile-team-members": {
     "OWNER": "all",
     "ADMIN": "all",
-    "CUSTODY_MANAGER": "all",
+    "MANAGER": "all",
     "SELF_SERVICE": "self",
     "BASE": "self",
     "OWNER+ADMIN": "all",
-    "OWNER+CUSTODY_MANAGER": "all",
+    "OWNER+MANAGER": "all",
     "OWNER+SELF_SERVICE": "all",
     "OWNER+BASE": "all",
     "ADMIN+OWNER": "all",
-    "ADMIN+CUSTODY_MANAGER": "all",
+    "ADMIN+MANAGER": "all",
     "ADMIN+SELF_SERVICE": "all",
     "ADMIN+BASE": "all",
-    "CUSTODY_MANAGER+OWNER": "all",
-    "CUSTODY_MANAGER+ADMIN": "all",
-    "CUSTODY_MANAGER+SELF_SERVICE": "all",
-    "CUSTODY_MANAGER+BASE": "all",
+    "MANAGER+OWNER": "all",
+    "MANAGER+ADMIN": "all",
+    "MANAGER+SELF_SERVICE": "all",
+    "MANAGER+BASE": "all",
     "SELF_SERVICE+OWNER": "all",
     "SELF_SERVICE+ADMIN": "all",
-    "SELF_SERVICE+CUSTODY_MANAGER": "all",
+    "SELF_SERVICE+MANAGER": "all",
     "SELF_SERVICE+BASE": "self",
     "BASE+OWNER": "all",
     "BASE+ADMIN": "all",
-    "BASE+CUSTODY_MANAGER": "all",
+    "BASE+MANAGER": "all",
     "BASE+SELF_SERVICE": "self",
     "(none)": "self",
     "UNKNOWN_ROLE": "self"
@@ -15878,7 +15903,7 @@
         "update": "allowed"
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -15918,7 +15943,7 @@
         "update": "allowed"
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -15958,7 +15983,7 @@
         "update": "allowed"
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -15988,7 +16013,7 @@
         "update": "allowed"
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -15998,7 +16023,7 @@
         "update": "allowed"
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -16008,7 +16033,7 @@
         "update": "allowed"
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -16018,7 +16043,7 @@
         "update": "allowed"
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -16048,7 +16073,7 @@
         "update": "allowed"
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -16088,7 +16113,7 @@
         "update": "allowed"
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "caller": {
         "create": "allowed",
         "update": "allowed"
@@ -16158,7 +16183,7 @@
         "reserve": "allowed"
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16214,7 +16239,7 @@
         "reserve": "allowed"
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16270,7 +16295,7 @@
         "reserve": "allowed"
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16312,7 +16337,7 @@
         "reserve": "allowed"
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16326,7 +16351,7 @@
         "reserve": "allowed"
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16340,7 +16365,7 @@
         "reserve": "allowed"
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16354,7 +16379,7 @@
         "reserve": "allowed"
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16396,7 +16421,7 @@
         "reserve": "allowed"
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16452,7 +16477,7 @@
         "reserve": "allowed"
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodianNotCreator": {
         "update": "allowed",
         "reserve": "allowed"
@@ -16520,7 +16545,7 @@
       "update": true,
       "reserve": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16540,7 +16565,7 @@
       "update": true,
       "reserve": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16560,7 +16585,7 @@
       "update": true,
       "reserve": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16575,22 +16600,22 @@
       "update": true,
       "reserve": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "create": true,
       "update": true,
       "reserve": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "create": true,
       "update": true,
       "reserve": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "create": true,
       "update": true,
       "reserve": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16605,7 +16630,7 @@
       "update": true,
       "reserve": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16625,7 +16650,7 @@
       "update": true,
       "reserve": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "create": true,
       "update": true,
       "reserve": true
@@ -16655,7 +16680,7 @@
       "web": false,
       "mobile": false
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "web": false,
       "mobile": false
     },
@@ -16671,7 +16696,7 @@
       "web": false,
       "mobile": false
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "web": false,
       "mobile": false
     },
@@ -16687,7 +16712,7 @@
       "web": false,
       "mobile": false
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "web": false,
       "mobile": false
     },
@@ -16699,19 +16724,19 @@
       "web": false,
       "mobile": false
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "web": false,
       "mobile": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "web": false,
       "mobile": false
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "web": false,
       "mobile": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "web": false,
       "mobile": false
     },
@@ -16723,7 +16748,7 @@
       "web": false,
       "mobile": false
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "web": false,
       "mobile": false
     },
@@ -16739,7 +16764,7 @@
       "web": false,
       "mobile": false
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "web": false,
       "mobile": false
     },
@@ -16767,7 +16792,7 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16787,7 +16812,7 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16807,7 +16832,7 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16822,22 +16847,22 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16852,7 +16877,7 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16872,7 +16897,7 @@
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "editBookingForm": false,
       "newBookingForm": false,
       "createBookingForSelectedAssets": false
@@ -16940,7 +16965,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17032,7 +17057,7 @@
         "restrictedFlag": false
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17124,7 +17149,7 @@
         "restrictedFlag": false
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17193,7 +17218,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17216,7 +17241,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17239,7 +17264,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17262,7 +17287,7 @@
         "restrictedFlag": false
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17331,7 +17356,7 @@
         "restrictedFlag": false
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17423,7 +17448,7 @@
         "restrictedFlag": false
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "DRAFT": {
         "restrictedFlag": true
       },
@@ -17549,7 +17574,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17613,7 +17638,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17677,7 +17702,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17725,7 +17750,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17741,7 +17766,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17757,7 +17782,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17773,7 +17798,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17821,7 +17846,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17885,7 +17910,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -17983,7 +18008,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18047,7 +18072,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18111,7 +18136,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18159,7 +18184,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18175,7 +18200,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18191,7 +18216,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18207,7 +18232,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18255,7 +18280,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18319,7 +18344,7 @@
       "custodian=someoneElse|ARCHIVED": "denied:status",
       "custodian=someoneElse|CANCELLED": "denied:status"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodian=caller|DRAFT": "allowed",
       "custodian=caller|RESERVED": "allowed",
       "custodian=caller|ONGOING": "allowed",
@@ -18397,7 +18422,7 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18421,7 +18446,7 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18445,7 +18470,7 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18463,25 +18488,25 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
       "OVERDUE": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
       "OVERDUE": false
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
       "OVERDUE": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18499,7 +18524,7 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18523,7 +18548,7 @@
       "ONGOING": false,
       "OVERDUE": false
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "DRAFT": false,
       "RESERVED": false,
       "ONGOING": false,
@@ -18581,7 +18606,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18645,7 +18670,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18709,7 +18734,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18757,7 +18782,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18773,7 +18798,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18789,7 +18814,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18805,7 +18830,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18853,7 +18878,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -18917,7 +18942,7 @@
       "custodian=someoneElse|ARCHIVED": true,
       "custodian=someoneElse|CANCELLED": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custodian=caller|DRAFT": true,
       "custodian=caller|RESERVED": true,
       "custodian=caller|ONGOING": true,
@@ -19001,7 +19026,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19037,7 +19062,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19073,7 +19098,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19100,7 +19125,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19109,7 +19134,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19118,7 +19143,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19127,7 +19152,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19154,7 +19179,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19190,7 +19215,7 @@
       "ARCHIVED": false,
       "CANCELLED": false
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "DRAFT": true,
       "RESERVED": true,
       "ONGOING": true,
@@ -19280,7 +19305,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19384,7 +19409,7 @@
         "mobileAndClientCheckin": false
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19488,7 +19513,7 @@
         "mobileAndClientCheckin": false
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19566,7 +19591,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19592,7 +19617,7 @@
         "mobileAndClientCheckin": false
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19618,7 +19643,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19644,7 +19669,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19722,7 +19747,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19826,7 +19851,7 @@
         "mobileAndClientCheckin": true
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "admin=false|selfService=false": {
         "webCheckout": false,
         "webCheckin": false,
@@ -19934,28 +19959,28 @@
   "B9:D-25:web-client-time-bypass": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": false,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": false,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -19963,28 +19988,28 @@
   "B9:D-17:web-bookings-bulk-menu": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": false,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": false,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -20000,7 +20025,7 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20020,7 +20045,7 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20040,7 +20065,7 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20055,22 +20080,22 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20085,7 +20110,7 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20105,7 +20130,7 @@
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "processSidebar": false,
       "reserveButtonLabel": false,
       "statusBadgeTooltip": false
@@ -20135,7 +20160,7 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20151,7 +20176,7 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20167,7 +20192,7 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20179,19 +20204,19 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "DRAFT": true,
       "RESERVED": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "DRAFT": true,
       "RESERVED": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "DRAFT": true,
       "RESERVED": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20203,7 +20228,7 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20219,7 +20244,7 @@
       "DRAFT": true,
       "RESERVED": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "DRAFT": true,
       "RESERVED": true
     },
@@ -20247,7 +20272,7 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20267,7 +20292,7 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20287,7 +20312,7 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20302,22 +20327,22 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20332,7 +20357,7 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20352,7 +20377,7 @@
       "someDraft": "enabled",
       "noneDraft": "enabled"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "allDraft": "enabled",
       "someDraft": "enabled",
       "noneDraft": "enabled"
@@ -20394,7 +20419,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20434,7 +20459,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20474,7 +20499,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20504,7 +20529,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20514,7 +20539,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20524,7 +20549,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20534,7 +20559,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20564,7 +20589,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20604,7 +20629,7 @@
       "bulk-release-custody": "anyone",
       "kits.bulk-actions": "anyone"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custody.assign": "anyone",
       "custody.release": "anyone",
       "custody.assign-quantity": "anyone",
@@ -20658,7 +20683,7 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20682,7 +20707,7 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20706,7 +20731,7 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20724,25 +20749,25 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "denied:gate"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20760,7 +20785,7 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20784,7 +20809,7 @@
       "bulk-release-custody": "ADVANCED",
       "bulk-update-location": "ADVANCED"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "custody.assign": "ADVANCED",
       "bulk-assign-custody": "ADVANCED",
       "bulk-release-custody": "ADVANCED",
@@ -20812,28 +20837,28 @@
   "B9:D-29:web-client-self-only": {
     "OWNER": false,
     "ADMIN": false,
-    "CUSTODY_MANAGER": false,
+    "MANAGER": false,
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": false,
-    "OWNER+CUSTODY_MANAGER": false,
+    "OWNER+MANAGER": false,
     "OWNER+SELF_SERVICE": false,
     "OWNER+BASE": false,
     "ADMIN+OWNER": false,
-    "ADMIN+CUSTODY_MANAGER": false,
+    "ADMIN+MANAGER": false,
     "ADMIN+SELF_SERVICE": false,
     "ADMIN+BASE": false,
-    "CUSTODY_MANAGER+OWNER": false,
-    "CUSTODY_MANAGER+ADMIN": false,
-    "CUSTODY_MANAGER+SELF_SERVICE": false,
-    "CUSTODY_MANAGER+BASE": false,
+    "MANAGER+OWNER": false,
+    "MANAGER+ADMIN": false,
+    "MANAGER+SELF_SERVICE": false,
+    "MANAGER+BASE": false,
     "SELF_SERVICE+OWNER": false,
     "SELF_SERVICE+ADMIN": false,
-    "SELF_SERVICE+CUSTODY_MANAGER": false,
+    "SELF_SERVICE+MANAGER": false,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": false,
     "BASE+ADMIN": false,
-    "BASE+CUSTODY_MANAGER": false,
+    "BASE+MANAGER": false,
     "BASE+SELF_SERVICE": true,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -20841,28 +20866,28 @@
   "B9:D-33:web-server": {
     "OWNER": "ADVANCED",
     "ADMIN": "ADVANCED",
-    "CUSTODY_MANAGER": "ADVANCED",
+    "MANAGER": "ADVANCED",
     "SELF_SERVICE": "SIMPLE",
     "BASE": "SIMPLE",
     "OWNER+ADMIN": "ADVANCED",
-    "OWNER+CUSTODY_MANAGER": "ADVANCED",
+    "OWNER+MANAGER": "ADVANCED",
     "OWNER+SELF_SERVICE": "ADVANCED",
     "OWNER+BASE": "ADVANCED",
     "ADMIN+OWNER": "ADVANCED",
-    "ADMIN+CUSTODY_MANAGER": "ADVANCED",
+    "ADMIN+MANAGER": "ADVANCED",
     "ADMIN+SELF_SERVICE": "ADVANCED",
     "ADMIN+BASE": "ADVANCED",
-    "CUSTODY_MANAGER+OWNER": "ADVANCED",
-    "CUSTODY_MANAGER+ADMIN": "ADVANCED",
-    "CUSTODY_MANAGER+SELF_SERVICE": "ADVANCED",
-    "CUSTODY_MANAGER+BASE": "ADVANCED",
+    "MANAGER+OWNER": "ADVANCED",
+    "MANAGER+ADMIN": "ADVANCED",
+    "MANAGER+SELF_SERVICE": "ADVANCED",
+    "MANAGER+BASE": "ADVANCED",
     "SELF_SERVICE+OWNER": "ADVANCED",
     "SELF_SERVICE+ADMIN": "ADVANCED",
-    "SELF_SERVICE+CUSTODY_MANAGER": "ADVANCED",
+    "SELF_SERVICE+MANAGER": "ADVANCED",
     "SELF_SERVICE+BASE": "SIMPLE",
     "BASE+OWNER": "ADVANCED",
     "BASE+ADMIN": "ADVANCED",
-    "BASE+CUSTODY_MANAGER": "ADVANCED",
+    "BASE+MANAGER": "ADVANCED",
     "BASE+SELF_SERVICE": "SIMPLE",
     "(none)": "SIMPLE",
     "UNKNOWN_ROLE": "SIMPLE"
@@ -20870,28 +20895,28 @@
   "B9:D-33:invite-accept": {
     "OWNER": "ADVANCED",
     "ADMIN": "ADVANCED",
-    "CUSTODY_MANAGER": "ADVANCED",
+    "MANAGER": "ADVANCED",
     "SELF_SERVICE": "SIMPLE",
     "BASE": "SIMPLE",
     "OWNER+ADMIN": "ADVANCED",
-    "OWNER+CUSTODY_MANAGER": "ADVANCED",
+    "OWNER+MANAGER": "ADVANCED",
     "OWNER+SELF_SERVICE": "ADVANCED",
     "OWNER+BASE": "ADVANCED",
     "ADMIN+OWNER": "ADVANCED",
-    "ADMIN+CUSTODY_MANAGER": "ADVANCED",
+    "ADMIN+MANAGER": "ADVANCED",
     "ADMIN+SELF_SERVICE": "ADVANCED",
     "ADMIN+BASE": "ADVANCED",
-    "CUSTODY_MANAGER+OWNER": "ADVANCED",
-    "CUSTODY_MANAGER+ADMIN": "ADVANCED",
-    "CUSTODY_MANAGER+SELF_SERVICE": "ADVANCED",
-    "CUSTODY_MANAGER+BASE": "ADVANCED",
+    "MANAGER+OWNER": "ADVANCED",
+    "MANAGER+ADMIN": "ADVANCED",
+    "MANAGER+SELF_SERVICE": "ADVANCED",
+    "MANAGER+BASE": "ADVANCED",
     "SELF_SERVICE+OWNER": "ADVANCED",
     "SELF_SERVICE+ADMIN": "ADVANCED",
-    "SELF_SERVICE+CUSTODY_MANAGER": "ADVANCED",
+    "SELF_SERVICE+MANAGER": "ADVANCED",
     "SELF_SERVICE+BASE": "SIMPLE",
     "BASE+OWNER": "ADVANCED",
     "BASE+ADMIN": "ADVANCED",
-    "BASE+CUSTODY_MANAGER": "ADVANCED",
+    "BASE+MANAGER": "ADVANCED",
     "BASE+SELF_SERVICE": "SIMPLE",
     "(none)": "SIMPLE",
     "UNKNOWN_ROLE": "SIMPLE"
@@ -20909,7 +20934,7 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
@@ -20933,7 +20958,7 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
@@ -20957,7 +20982,7 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
@@ -20975,25 +21000,25 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "codePreview": true,
       "sequentialIdPrompt": true,
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
       "scannerLocations": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
@@ -21011,7 +21036,7 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
@@ -21035,7 +21060,7 @@
       "sequentialIdEndpoint": true,
       "scannerLocations": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "codePreview": false,
       "sequentialIdPrompt": false,
       "sequentialIdEndpoint": false,
@@ -21063,28 +21088,28 @@
   "B9:D-35:assets-bulk-menu": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": true,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -21092,28 +21117,28 @@
   "B9:D-36:kits-bulk-menu": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": true,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -21121,28 +21146,28 @@
   "B9:D-37:set-reminder": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": false,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": false,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -21158,10 +21183,10 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "CUSTODY_MANAGER": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+    "MANAGER": {
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "SELF_SERVICE": {
       "audits": "assigned",
@@ -21178,7 +21203,7 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "audits": "all",
       "audits.complete": "all",
       "audits.record-scan": "all"
@@ -21198,7 +21223,7 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "audits": "all",
       "audits.complete": "all",
       "audits.record-scan": "all"
@@ -21213,25 +21238,25 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "audits": "all",
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "audits": "all",
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+    "MANAGER+SELF_SERVICE": {
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
-    "CUSTODY_MANAGER+BASE": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+    "MANAGER+BASE": {
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "SELF_SERVICE+OWNER": {
       "audits": "all",
@@ -21243,10 +21268,10 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+    "SELF_SERVICE+MANAGER": {
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "SELF_SERVICE+BASE": {
       "audits": "assigned",
@@ -21263,10 +21288,10 @@
       "audits.complete": "all",
       "audits.record-scan": "all"
     },
-    "BASE+CUSTODY_MANAGER": {
-      "audits": "assigned",
-      "audits.complete": "assigned",
-      "audits.record-scan": "assigned"
+    "BASE+MANAGER": {
+      "audits": "all",
+      "audits.complete": "all",
+      "audits.record-scan": "all"
     },
     "BASE+SELF_SERVICE": {
       "audits": "assigned",
@@ -21293,9 +21318,9 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "CUSTODY_MANAGER": {
-      "detailAndOverviewAllowList": false,
-      "effectiveRoleDenyList": false
+    "MANAGER": {
+      "detailAndOverviewAllowList": true,
+      "effectiveRoleDenyList": true
     },
     "SELF_SERVICE": {
       "detailAndOverviewAllowList": false,
@@ -21309,7 +21334,7 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
@@ -21325,7 +21350,7 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
@@ -21337,21 +21362,21 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "detailAndOverviewAllowList": false,
-      "effectiveRoleDenyList": false
+    "MANAGER+SELF_SERVICE": {
+      "detailAndOverviewAllowList": true,
+      "effectiveRoleDenyList": true
     },
-    "CUSTODY_MANAGER+BASE": {
-      "detailAndOverviewAllowList": false,
-      "effectiveRoleDenyList": false
+    "MANAGER+BASE": {
+      "detailAndOverviewAllowList": true,
+      "effectiveRoleDenyList": true
     },
     "SELF_SERVICE+OWNER": {
       "detailAndOverviewAllowList": true,
@@ -21361,9 +21386,9 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
-      "detailAndOverviewAllowList": false,
-      "effectiveRoleDenyList": false
+    "SELF_SERVICE+MANAGER": {
+      "detailAndOverviewAllowList": true,
+      "effectiveRoleDenyList": true
     },
     "SELF_SERVICE+BASE": {
       "detailAndOverviewAllowList": false,
@@ -21377,9 +21402,9 @@
       "detailAndOverviewAllowList": true,
       "effectiveRoleDenyList": true
     },
-    "BASE+CUSTODY_MANAGER": {
-      "detailAndOverviewAllowList": false,
-      "effectiveRoleDenyList": false
+    "BASE+MANAGER": {
+      "detailAndOverviewAllowList": true,
+      "effectiveRoleDenyList": true
     },
     "BASE+SELF_SERVICE": {
       "detailAndOverviewAllowList": false,
@@ -21411,7 +21436,7 @@
       "asset-models",
       "team"
     ],
-    "CUSTODY_MANAGER": [
+    "MANAGER": [
       "team"
     ],
     "SELF_SERVICE": [],
@@ -21424,7 +21449,7 @@
       "asset-models",
       "team"
     ],
-    "OWNER+CUSTODY_MANAGER": [
+    "OWNER+MANAGER": [
       "general",
       "bookings",
       "emails",
@@ -21456,7 +21481,7 @@
       "asset-models",
       "team"
     ],
-    "ADMIN+CUSTODY_MANAGER": [
+    "ADMIN+MANAGER": [
       "general",
       "bookings",
       "emails",
@@ -21480,7 +21505,7 @@
       "asset-models",
       "team"
     ],
-    "CUSTODY_MANAGER+OWNER": [
+    "MANAGER+OWNER": [
       "general",
       "bookings",
       "emails",
@@ -21488,7 +21513,7 @@
       "asset-models",
       "team"
     ],
-    "CUSTODY_MANAGER+ADMIN": [
+    "MANAGER+ADMIN": [
       "general",
       "bookings",
       "emails",
@@ -21496,10 +21521,10 @@
       "asset-models",
       "team"
     ],
-    "CUSTODY_MANAGER+SELF_SERVICE": [
+    "MANAGER+SELF_SERVICE": [
       "team"
     ],
-    "CUSTODY_MANAGER+BASE": [
+    "MANAGER+BASE": [
       "team"
     ],
     "SELF_SERVICE+OWNER": [
@@ -21518,7 +21543,7 @@
       "asset-models",
       "team"
     ],
-    "SELF_SERVICE+CUSTODY_MANAGER": [
+    "SELF_SERVICE+MANAGER": [
       "team"
     ],
     "SELF_SERVICE+BASE": [],
@@ -21538,7 +21563,7 @@
       "asset-models",
       "team"
     ],
-    "BASE+CUSTODY_MANAGER": [
+    "BASE+MANAGER": [
       "team"
     ],
     "BASE+SELF_SERVICE": [],
@@ -21570,7 +21595,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "home": false,
       "categories": false,
       "tags": false,
@@ -21618,7 +21643,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "home": true,
       "categories": true,
       "tags": true,
@@ -21666,7 +21691,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "home": true,
       "categories": true,
       "tags": true,
@@ -21702,7 +21727,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "home": true,
       "categories": true,
       "tags": true,
@@ -21714,7 +21739,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "home": true,
       "categories": true,
       "tags": true,
@@ -21726,7 +21751,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "home": false,
       "categories": false,
       "tags": false,
@@ -21738,7 +21763,7 @@
       "team": true,
       "workspaceSettings": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "home": false,
       "categories": false,
       "tags": false,
@@ -21774,7 +21799,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "home": false,
       "categories": false,
       "tags": false,
@@ -21822,7 +21847,7 @@
       "team": true,
       "workspaceSettings": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "home": false,
       "categories": false,
       "tags": false,
@@ -21890,7 +21915,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -21926,7 +21951,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -21962,7 +21987,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -21989,7 +22014,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -21998,7 +22023,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -22007,7 +22032,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -22016,7 +22041,7 @@
       "createKit": false,
       "inviteUser": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -22043,7 +22068,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -22079,7 +22104,7 @@
       "createKit": true,
       "inviteUser": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "audits": true,
       "team": true,
       "settings": true,
@@ -22133,10 +22158,10 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "categories": false,
       "tags": false,
-      "locations": false,
+      "locations": true,
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
@@ -22165,7 +22190,7 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "categories": true,
       "tags": true,
       "locations": true,
@@ -22197,7 +22222,7 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "categories": true,
       "tags": true,
       "locations": true,
@@ -22221,7 +22246,7 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "categories": true,
       "tags": true,
       "locations": true,
@@ -22229,7 +22254,7 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "categories": true,
       "tags": true,
       "locations": true,
@@ -22237,18 +22262,18 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "categories": false,
       "tags": false,
-      "locations": false,
+      "locations": true,
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "categories": false,
       "tags": false,
-      "locations": false,
+      "locations": true,
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
@@ -22269,10 +22294,10 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "categories": false,
       "tags": false,
-      "locations": false,
+      "locations": true,
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
@@ -22301,10 +22326,10 @@
       "assetModels": true,
       "nonRegisteredMembers": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "categories": false,
       "tags": false,
-      "locations": false,
+      "locations": true,
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
@@ -22332,6 +22357,224 @@
       "customFields": false,
       "assetModels": false,
       "nonRegisteredMembers": false
+    }
+  },
+  "B9:D-44:route-gated-controls": {
+    "OWNER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "ADMIN": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "MANAGER": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": true,
+      "exportSelection": false
+    },
+    "SELF_SERVICE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
+    },
+    "BASE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
+    },
+    "OWNER+ADMIN": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "OWNER+MANAGER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "OWNER+SELF_SERVICE": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "OWNER+BASE": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "ADMIN+OWNER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "ADMIN+MANAGER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "ADMIN+SELF_SERVICE": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "ADMIN+BASE": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "MANAGER+OWNER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "MANAGER+ADMIN": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "MANAGER+SELF_SERVICE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": true,
+      "exportSelection": false
+    },
+    "MANAGER+BASE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": true,
+      "exportSelection": false
+    },
+    "SELF_SERVICE+OWNER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "SELF_SERVICE+ADMIN": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "SELF_SERVICE+MANAGER": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": true,
+      "exportSelection": false
+    },
+    "SELF_SERVICE+BASE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
+    },
+    "BASE+OWNER": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "BASE+ADMIN": {
+      "newLocation": true,
+      "locationActivityTab": true,
+      "locationEdit": true,
+      "locationDelete": true,
+      "locationCreateAudit": true,
+      "exportSelection": true
+    },
+    "BASE+MANAGER": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": true,
+      "exportSelection": false
+    },
+    "BASE+SELF_SERVICE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
+    },
+    "(none)": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
+    },
+    "UNKNOWN_ROLE": {
+      "newLocation": false,
+      "locationActivityTab": false,
+      "locationEdit": false,
+      "locationDelete": false,
+      "locationCreateAudit": false,
+      "exportSelection": false
     }
   },
   "B9:D-01:membership-display": {
@@ -22371,23 +22614,23 @@
       },
       "calendarFeedRole": "ADMIN"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "teamList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "showActions": true
       },
-      "calendarFeedRole": "CUSTODY_MANAGER"
+      "calendarFeedRole": "MANAGER"
     },
     "SELF_SERVICE": {
       "teamList": {
@@ -22443,7 +22686,7 @@
       },
       "calendarFeedRole": "OWNER"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "teamList": {
         "roleEnum": "OWNER",
         "label": "Owner",
@@ -22515,7 +22758,7 @@
       },
       "calendarFeedRole": "OWNER"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "teamList": {
         "roleEnum": "ADMIN",
         "label": "Administrator",
@@ -22569,7 +22812,7 @@
       },
       "calendarFeedRole": "ADMIN"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "teamList": {
         "roleEnum": "OWNER",
         "label": "Owner",
@@ -22587,7 +22830,7 @@
       },
       "calendarFeedRole": "OWNER"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "teamList": {
         "roleEnum": "ADMIN",
         "label": "Administrator",
@@ -22605,41 +22848,41 @@
       },
       "calendarFeedRole": "ADMIN"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "teamList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "showActions": true
       },
-      "calendarFeedRole": "CUSTODY_MANAGER"
+      "calendarFeedRole": "MANAGER"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "teamList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "showActions": true
       },
-      "calendarFeedRole": "CUSTODY_MANAGER"
+      "calendarFeedRole": "MANAGER"
     },
     "SELF_SERVICE+OWNER": {
       "teamList": {
@@ -22677,23 +22920,23 @@
       },
       "calendarFeedRole": "ADMIN"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "teamList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "showActions": true
       },
-      "calendarFeedRole": "CUSTODY_MANAGER"
+      "calendarFeedRole": "MANAGER"
     },
     "SELF_SERVICE+BASE": {
       "teamList": {
@@ -22749,23 +22992,23 @@
       },
       "calendarFeedRole": "ADMIN"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "teamList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "inviteList": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "rowActions": true
       },
       "memberPage": {
-        "roleEnum": "CUSTODY_MANAGER",
-        "label": "Custody manager",
+        "roleEnum": "MANAGER",
+        "label": "Manager",
         "showActions": true
       },
-      "calendarFeedRole": "CUSTODY_MANAGER"
+      "calendarFeedRole": "MANAGER"
     },
     "BASE+SELF_SERVICE": {
       "teamList": {
@@ -22826,28 +23069,28 @@
     "OWNER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -22855,57 +23098,57 @@
     "ADMIN": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "OWNER": "no-menu",
       "ADMIN": "no-menu",
-      "CUSTODY_MANAGER": "no-menu",
+      "MANAGER": "no-menu",
       "SELF_SERVICE": "no-menu",
       "BASE": "no-menu",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "no-menu",
+      "ADMIN+MANAGER": "no-menu",
       "ADMIN+SELF_SERVICE": "no-menu",
       "ADMIN+BASE": "no-menu",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "no-menu",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-menu",
-      "CUSTODY_MANAGER+BASE": "no-menu",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "no-menu",
+      "MANAGER+SELF_SERVICE": "no-menu",
+      "MANAGER+BASE": "no-menu",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "no-menu",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-menu",
+      "SELF_SERVICE+MANAGER": "no-menu",
       "SELF_SERVICE+BASE": "no-menu",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "no-menu",
-      "BASE+CUSTODY_MANAGER": "no-menu",
+      "BASE+MANAGER": "no-menu",
       "BASE+SELF_SERVICE": "no-menu",
       "(none)": "no-menu",
       "UNKNOWN_ROLE": "no-menu"
@@ -22913,28 +23156,28 @@
     "SELF_SERVICE": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -22942,28 +23185,28 @@
     "BASE": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -22971,57 +23214,57 @@
     "OWNER+ADMIN": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23029,28 +23272,28 @@
     "OWNER+SELF_SERVICE": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23058,28 +23301,28 @@
     "OWNER+BASE": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23087,57 +23330,57 @@
     "ADMIN+OWNER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23145,28 +23388,28 @@
     "ADMIN+SELF_SERVICE": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23174,144 +23417,144 @@
     "ADMIN+BASE": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "OWNER": "no-menu",
       "ADMIN": "no-menu",
-      "CUSTODY_MANAGER": "no-menu",
+      "MANAGER": "no-menu",
       "SELF_SERVICE": "no-menu",
       "BASE": "no-menu",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "no-menu",
+      "ADMIN+MANAGER": "no-menu",
       "ADMIN+SELF_SERVICE": "no-menu",
       "ADMIN+BASE": "no-menu",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "no-menu",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-menu",
-      "CUSTODY_MANAGER+BASE": "no-menu",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "no-menu",
+      "MANAGER+SELF_SERVICE": "no-menu",
+      "MANAGER+BASE": "no-menu",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "no-menu",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-menu",
+      "SELF_SERVICE+MANAGER": "no-menu",
       "SELF_SERVICE+BASE": "no-menu",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "no-menu",
-      "BASE+CUSTODY_MANAGER": "no-menu",
+      "BASE+MANAGER": "no-menu",
       "BASE+SELF_SERVICE": "no-menu",
       "(none)": "no-menu",
       "UNKNOWN_ROLE": "no-menu"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "OWNER": "no-menu",
       "ADMIN": "no-menu",
-      "CUSTODY_MANAGER": "no-menu",
+      "MANAGER": "no-menu",
       "SELF_SERVICE": "no-menu",
       "BASE": "no-menu",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "no-menu",
+      "ADMIN+MANAGER": "no-menu",
       "ADMIN+SELF_SERVICE": "no-menu",
       "ADMIN+BASE": "no-menu",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "no-menu",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-menu",
-      "CUSTODY_MANAGER+BASE": "no-menu",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "no-menu",
+      "MANAGER+SELF_SERVICE": "no-menu",
+      "MANAGER+BASE": "no-menu",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "no-menu",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-menu",
+      "SELF_SERVICE+MANAGER": "no-menu",
       "SELF_SERVICE+BASE": "no-menu",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "no-menu",
-      "BASE+CUSTODY_MANAGER": "no-menu",
+      "BASE+MANAGER": "no-menu",
       "BASE+SELF_SERVICE": "no-menu",
       "(none)": "no-menu",
       "UNKNOWN_ROLE": "no-menu"
@@ -23319,28 +23562,28 @@
     "SELF_SERVICE+OWNER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23348,57 +23591,57 @@
     "SELF_SERVICE+ADMIN": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "OWNER": "no-menu",
       "ADMIN": "no-menu",
-      "CUSTODY_MANAGER": "no-menu",
+      "MANAGER": "no-menu",
       "SELF_SERVICE": "no-menu",
       "BASE": "no-menu",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "no-menu",
+      "ADMIN+MANAGER": "no-menu",
       "ADMIN+SELF_SERVICE": "no-menu",
       "ADMIN+BASE": "no-menu",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "no-menu",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-menu",
-      "CUSTODY_MANAGER+BASE": "no-menu",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "no-menu",
+      "MANAGER+SELF_SERVICE": "no-menu",
+      "MANAGER+BASE": "no-menu",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "no-menu",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-menu",
+      "SELF_SERVICE+MANAGER": "no-menu",
       "SELF_SERVICE+BASE": "no-menu",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "no-menu",
-      "BASE+CUSTODY_MANAGER": "no-menu",
+      "BASE+MANAGER": "no-menu",
       "BASE+SELF_SERVICE": "no-menu",
       "(none)": "no-menu",
       "UNKNOWN_ROLE": "no-menu"
@@ -23406,28 +23649,28 @@
     "SELF_SERVICE+BASE": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -23435,28 +23678,28 @@
     "BASE+OWNER": {
       "OWNER": "no-menu",
       "ADMIN": "open",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "open",
+      "ADMIN+MANAGER": "open",
       "ADMIN+SELF_SERVICE": "open",
       "ADMIN+BASE": "open",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "open",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "open",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "open",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "open",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
@@ -23464,57 +23707,57 @@
     "BASE+ADMIN": {
       "OWNER": "no-menu",
       "ADMIN": "locked",
-      "CUSTODY_MANAGER": "open",
+      "MANAGER": "open",
       "SELF_SERVICE": "open",
       "BASE": "open",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "locked",
+      "ADMIN+MANAGER": "locked",
       "ADMIN+SELF_SERVICE": "locked",
       "ADMIN+BASE": "locked",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "locked",
-      "CUSTODY_MANAGER+SELF_SERVICE": "open",
-      "CUSTODY_MANAGER+BASE": "open",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "locked",
+      "MANAGER+SELF_SERVICE": "open",
+      "MANAGER+BASE": "open",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "locked",
-      "SELF_SERVICE+CUSTODY_MANAGER": "open",
+      "SELF_SERVICE+MANAGER": "open",
       "SELF_SERVICE+BASE": "open",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "locked",
-      "BASE+CUSTODY_MANAGER": "open",
+      "BASE+MANAGER": "open",
       "BASE+SELF_SERVICE": "open",
       "(none)": "open",
       "UNKNOWN_ROLE": "open"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "OWNER": "no-menu",
       "ADMIN": "no-menu",
-      "CUSTODY_MANAGER": "no-menu",
+      "MANAGER": "no-menu",
       "SELF_SERVICE": "no-menu",
       "BASE": "no-menu",
       "OWNER+ADMIN": "no-menu",
-      "OWNER+CUSTODY_MANAGER": "no-menu",
+      "OWNER+MANAGER": "no-menu",
       "OWNER+SELF_SERVICE": "no-menu",
       "OWNER+BASE": "no-menu",
       "ADMIN+OWNER": "no-menu",
-      "ADMIN+CUSTODY_MANAGER": "no-menu",
+      "ADMIN+MANAGER": "no-menu",
       "ADMIN+SELF_SERVICE": "no-menu",
       "ADMIN+BASE": "no-menu",
-      "CUSTODY_MANAGER+OWNER": "no-menu",
-      "CUSTODY_MANAGER+ADMIN": "no-menu",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-menu",
-      "CUSTODY_MANAGER+BASE": "no-menu",
+      "MANAGER+OWNER": "no-menu",
+      "MANAGER+ADMIN": "no-menu",
+      "MANAGER+SELF_SERVICE": "no-menu",
+      "MANAGER+BASE": "no-menu",
       "SELF_SERVICE+OWNER": "no-menu",
       "SELF_SERVICE+ADMIN": "no-menu",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-menu",
+      "SELF_SERVICE+MANAGER": "no-menu",
       "SELF_SERVICE+BASE": "no-menu",
       "BASE+OWNER": "no-menu",
       "BASE+ADMIN": "no-menu",
-      "BASE+CUSTODY_MANAGER": "no-menu",
+      "BASE+MANAGER": "no-menu",
       "BASE+SELF_SERVICE": "no-menu",
       "(none)": "no-menu",
       "UNKNOWN_ROLE": "no-menu"
@@ -23522,28 +23765,28 @@
     "BASE+SELF_SERVICE": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -23551,28 +23794,28 @@
     "(none)": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -23580,28 +23823,28 @@
     "UNKNOWN_ROLE": {
       "OWNER": "no-page",
       "ADMIN": "no-page",
-      "CUSTODY_MANAGER": "no-page",
+      "MANAGER": "no-page",
       "SELF_SERVICE": "no-page",
       "BASE": "no-page",
       "OWNER+ADMIN": "no-page",
-      "OWNER+CUSTODY_MANAGER": "no-page",
+      "OWNER+MANAGER": "no-page",
       "OWNER+SELF_SERVICE": "no-page",
       "OWNER+BASE": "no-page",
       "ADMIN+OWNER": "no-page",
-      "ADMIN+CUSTODY_MANAGER": "no-page",
+      "ADMIN+MANAGER": "no-page",
       "ADMIN+SELF_SERVICE": "no-page",
       "ADMIN+BASE": "no-page",
-      "CUSTODY_MANAGER+OWNER": "no-page",
-      "CUSTODY_MANAGER+ADMIN": "no-page",
-      "CUSTODY_MANAGER+SELF_SERVICE": "no-page",
-      "CUSTODY_MANAGER+BASE": "no-page",
+      "MANAGER+OWNER": "no-page",
+      "MANAGER+ADMIN": "no-page",
+      "MANAGER+SELF_SERVICE": "no-page",
+      "MANAGER+BASE": "no-page",
       "SELF_SERVICE+OWNER": "no-page",
       "SELF_SERVICE+ADMIN": "no-page",
-      "SELF_SERVICE+CUSTODY_MANAGER": "no-page",
+      "SELF_SERVICE+MANAGER": "no-page",
       "SELF_SERVICE+BASE": "no-page",
       "BASE+OWNER": "no-page",
       "BASE+ADMIN": "no-page",
-      "BASE+CUSTODY_MANAGER": "no-page",
+      "BASE+MANAGER": "no-page",
       "BASE+SELF_SERVICE": "no-page",
       "(none)": "no-page",
       "UNKNOWN_ROLE": "no-page"
@@ -23616,7 +23859,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23632,7 +23875,7 @@
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "OWNER": "refused",
       "ADMIN": "refused"
     },
@@ -23648,7 +23891,7 @@
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
@@ -23660,19 +23903,19 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23684,7 +23927,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23700,7 +23943,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23726,7 +23969,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23742,7 +23985,7 @@
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "OWNER": "refused",
       "ADMIN": "refused"
     },
@@ -23758,7 +24001,7 @@
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
@@ -23770,19 +24013,19 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "OWNER": "refused",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23794,7 +24037,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23810,7 +24053,7 @@
       "OWNER": "allowed",
       "ADMIN": "refused"
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "OWNER": "allowed",
       "ADMIN": "allowed"
     },
@@ -23833,7 +24076,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -23851,7 +24094,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -23864,12 +24107,12 @@
         "dialog": true
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -23887,7 +24130,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -23905,7 +24148,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -23923,7 +24166,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -23936,12 +24179,12 @@
         "dialog": true
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "ADMIN": {
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -23959,7 +24202,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -23977,7 +24220,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -23995,7 +24238,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -24008,12 +24251,12 @@
         "dialog": true
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24031,7 +24274,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24049,7 +24292,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24062,12 +24305,12 @@
         "dialog": true
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "ADMIN": {
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -24080,12 +24323,12 @@
         "dialog": true
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24098,12 +24341,12 @@
         "dialog": true
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24116,12 +24359,12 @@
         "dialog": true
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24139,7 +24382,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -24157,7 +24400,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24170,12 +24413,12 @@
         "dialog": true
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24193,7 +24436,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24211,7 +24454,7 @@
         "server": true,
         "dialog": true
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": true,
         "dialog": true
       },
@@ -24229,7 +24472,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24242,12 +24485,12 @@
         "dialog": true
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "ADMIN": {
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24265,7 +24508,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24283,7 +24526,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24301,7 +24544,7 @@
         "server": false,
         "dialog": false
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "server": false,
         "dialog": false
       },
@@ -24327,7 +24570,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "OWNER"
         ],
@@ -24379,11 +24622,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24418,7 +24661,7 @@
         }
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -24429,11 +24672,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24479,11 +24722,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24529,11 +24772,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24580,7 +24823,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "OWNER",
           "ADMIN"
@@ -24625,11 +24868,11 @@
         }
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "ADMIN": {
         "rolesAfter": [
           "OWNER",
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
         "newRole": "OWNER",
         "transfers": {
@@ -24637,10 +24880,10 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "OWNER",
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
         "newRole": "OWNER",
         "transfers": {
@@ -24651,7 +24894,7 @@
       "SELF_SERVICE": {
         "rolesAfter": [
           "OWNER",
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
         "newRole": "OWNER",
         "transfers": {
@@ -24662,7 +24905,7 @@
       "BASE": {
         "rolesAfter": [
           "OWNER",
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
         "newRole": "OWNER",
         "transfers": {
@@ -24673,7 +24916,7 @@
       "none": {
         "rolesAfter": [
           "OWNER",
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
         "newRole": "OWNER",
         "transfers": {
@@ -24694,7 +24937,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "OWNER",
           "SELF_SERVICE"
@@ -24751,7 +24994,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "OWNER",
           "BASE"
@@ -24808,7 +25051,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "ADMIN",
           "OWNER"
@@ -24853,7 +25096,7 @@
         }
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -24864,11 +25107,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24914,11 +25157,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -24964,11 +25207,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25003,10 +25246,10 @@
         }
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "ADMIN": {
         "rolesAfter": [
-          "CUSTODY_MANAGER",
+          "MANAGER",
           "OWNER"
         ],
         "newRole": "OWNER",
@@ -25015,9 +25258,9 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER",
+          "MANAGER",
           "OWNER"
         ],
         "newRole": "OWNER",
@@ -25028,7 +25271,7 @@
       },
       "SELF_SERVICE": {
         "rolesAfter": [
-          "CUSTODY_MANAGER",
+          "MANAGER",
           "OWNER"
         ],
         "newRole": "OWNER",
@@ -25039,7 +25282,7 @@
       },
       "BASE": {
         "rolesAfter": [
-          "CUSTODY_MANAGER",
+          "MANAGER",
           "OWNER"
         ],
         "newRole": "OWNER",
@@ -25050,7 +25293,7 @@
       },
       "none": {
         "rolesAfter": [
-          "CUSTODY_MANAGER",
+          "MANAGER",
           "OWNER"
         ],
         "newRole": "OWNER",
@@ -25060,7 +25303,7 @@
         }
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -25071,61 +25314,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
-        "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
-        }
-      },
-      "SELF_SERVICE": {
-        "rolesAfter": [
-          "SELF_SERVICE"
-        ],
-        "newRole": "SELF_SERVICE",
-        "transfers": {
-          "ownership": true,
-          "bookingsCreatedForOthers": true
-        }
-      },
-      "BASE": {
-        "rolesAfter": [
-          "BASE"
-        ],
-        "newRole": "BASE",
-        "transfers": {
-          "ownership": true,
-          "bookingsCreatedForOthers": true
-        }
-      },
-      "none": {
-        "rolesAfter": null,
-        "newRole": null,
-        "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
-        }
-      }
-    },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "ADMIN": {
-        "rolesAfter": [
-          "ADMIN"
-        ],
-        "newRole": "ADMIN",
-        "transfers": {
-          "ownership": false,
-          "bookingsCreatedForOthers": false
-        }
-      },
-      "CUSTODY_MANAGER": {
-        "rolesAfter": [
-          "CUSTODY_MANAGER"
-        ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25160,7 +25353,7 @@
         }
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+SELF_SERVICE": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -25171,11 +25364,61 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
+        "transfers": {
+          "ownership": false,
+          "bookingsCreatedForOthers": false
+        }
+      },
+      "SELF_SERVICE": {
+        "rolesAfter": [
+          "SELF_SERVICE"
+        ],
+        "newRole": "SELF_SERVICE",
+        "transfers": {
+          "ownership": true,
+          "bookingsCreatedForOthers": true
+        }
+      },
+      "BASE": {
+        "rolesAfter": [
+          "BASE"
+        ],
+        "newRole": "BASE",
+        "transfers": {
+          "ownership": true,
+          "bookingsCreatedForOthers": true
+        }
+      },
+      "none": {
+        "rolesAfter": null,
+        "newRole": null,
+        "transfers": {
+          "ownership": false,
+          "bookingsCreatedForOthers": false
+        }
+      }
+    },
+    "MANAGER+BASE": {
+      "ADMIN": {
+        "rolesAfter": [
+          "ADMIN"
+        ],
+        "newRole": "ADMIN",
+        "transfers": {
+          "ownership": false,
+          "bookingsCreatedForOthers": false
+        }
+      },
+      "MANAGER": {
+        "rolesAfter": [
+          "MANAGER"
+        ],
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25222,7 +25465,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "SELF_SERVICE",
           "OWNER"
@@ -25278,11 +25521,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25317,7 +25560,7 @@
         }
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -25328,11 +25571,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25378,11 +25621,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25429,7 +25672,7 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
           "BASE",
           "OWNER"
@@ -25485,11 +25728,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25524,7 +25767,7 @@
         }
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "ADMIN": {
         "rolesAfter": [
           "ADMIN"
@@ -25535,11 +25778,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25585,11 +25828,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25635,11 +25878,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25685,11 +25928,11 @@
           "bookingsCreatedForOthers": false
         }
       },
-      "CUSTODY_MANAGER": {
+      "MANAGER": {
         "rolesAfter": [
-          "CUSTODY_MANAGER"
+          "MANAGER"
         ],
-        "newRole": "CUSTODY_MANAGER",
+        "newRole": "MANAGER",
         "transfers": {
           "ownership": false,
           "bookingsCreatedForOthers": false
@@ -25734,9 +25977,9 @@
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
-    "CUSTODY_MANAGER": {
-      "layoutBadgeRole": "CUSTODY_MANAGER",
-      "updatesPageRole": "CUSTODY_MANAGER"
+    "MANAGER": {
+      "layoutBadgeRole": "MANAGER",
+      "updatesPageRole": "MANAGER"
     },
     "SELF_SERVICE": {
       "layoutBadgeRole": "SELF_SERVICE",
@@ -25750,7 +25993,7 @@
       "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
@@ -25766,7 +26009,7 @@
       "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
@@ -25778,21 +26021,21 @@
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "layoutBadgeRole": "OWNER",
       "updatesPageRole": "OWNER"
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
-      "layoutBadgeRole": "CUSTODY_MANAGER",
-      "updatesPageRole": "CUSTODY_MANAGER"
+    "MANAGER+SELF_SERVICE": {
+      "layoutBadgeRole": "MANAGER",
+      "updatesPageRole": "MANAGER"
     },
-    "CUSTODY_MANAGER+BASE": {
-      "layoutBadgeRole": "CUSTODY_MANAGER",
-      "updatesPageRole": "CUSTODY_MANAGER"
+    "MANAGER+BASE": {
+      "layoutBadgeRole": "MANAGER",
+      "updatesPageRole": "MANAGER"
     },
     "SELF_SERVICE+OWNER": {
       "layoutBadgeRole": "OWNER",
@@ -25802,9 +26045,9 @@
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
-      "layoutBadgeRole": "CUSTODY_MANAGER",
-      "updatesPageRole": "CUSTODY_MANAGER"
+    "SELF_SERVICE+MANAGER": {
+      "layoutBadgeRole": "MANAGER",
+      "updatesPageRole": "MANAGER"
     },
     "SELF_SERVICE+BASE": {
       "layoutBadgeRole": "SELF_SERVICE",
@@ -25818,9 +26061,9 @@
       "layoutBadgeRole": "ADMIN",
       "updatesPageRole": "ADMIN"
     },
-    "BASE+CUSTODY_MANAGER": {
-      "layoutBadgeRole": "CUSTODY_MANAGER",
-      "updatesPageRole": "CUSTODY_MANAGER"
+    "BASE+MANAGER": {
+      "layoutBadgeRole": "MANAGER",
+      "updatesPageRole": "MANAGER"
     },
     "BASE+SELF_SERVICE": {
       "layoutBadgeRole": "SELF_SERVICE",
@@ -25838,28 +26081,28 @@
   "F4:announcementRole": {
     "OWNER": "OWNER",
     "ADMIN": "ADMIN",
-    "CUSTODY_MANAGER": "CUSTODY_MANAGER",
+    "MANAGER": "MANAGER",
     "SELF_SERVICE": "SELF_SERVICE",
     "BASE": "BASE",
     "OWNER+ADMIN": "OWNER",
-    "OWNER+CUSTODY_MANAGER": "OWNER",
+    "OWNER+MANAGER": "OWNER",
     "OWNER+SELF_SERVICE": "OWNER",
     "OWNER+BASE": "OWNER",
     "ADMIN+OWNER": "OWNER",
-    "ADMIN+CUSTODY_MANAGER": "ADMIN",
+    "ADMIN+MANAGER": "ADMIN",
     "ADMIN+SELF_SERVICE": "ADMIN",
     "ADMIN+BASE": "ADMIN",
-    "CUSTODY_MANAGER+OWNER": "OWNER",
-    "CUSTODY_MANAGER+ADMIN": "ADMIN",
-    "CUSTODY_MANAGER+SELF_SERVICE": "CUSTODY_MANAGER",
-    "CUSTODY_MANAGER+BASE": "CUSTODY_MANAGER",
+    "MANAGER+OWNER": "OWNER",
+    "MANAGER+ADMIN": "ADMIN",
+    "MANAGER+SELF_SERVICE": "MANAGER",
+    "MANAGER+BASE": "MANAGER",
     "SELF_SERVICE+OWNER": "OWNER",
     "SELF_SERVICE+ADMIN": "ADMIN",
-    "SELF_SERVICE+CUSTODY_MANAGER": "CUSTODY_MANAGER",
+    "SELF_SERVICE+MANAGER": "MANAGER",
     "SELF_SERVICE+BASE": "SELF_SERVICE",
     "BASE+OWNER": "OWNER",
     "BASE+ADMIN": "ADMIN",
-    "BASE+CUSTODY_MANAGER": "CUSTODY_MANAGER",
+    "BASE+MANAGER": "MANAGER",
     "BASE+SELF_SERVICE": "SELF_SERVICE",
     "(none)": null,
     "UNKNOWN_ROLE": "BASE"
@@ -25875,7 +26118,7 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": false,
       "receivesTransfers": false
@@ -25895,7 +26138,7 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "ownsWorkspace": true,
       "eligibleAsNewOwner": false,
       "receivesTransfers": true
@@ -25915,7 +26158,7 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
@@ -25930,22 +26173,22 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "ownsWorkspace": true,
       "eligibleAsNewOwner": false,
       "receivesTransfers": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": false,
       "receivesTransfers": false
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": false,
       "receivesTransfers": false
@@ -25960,7 +26203,7 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": false,
       "receivesTransfers": false
@@ -25980,7 +26223,7 @@
       "eligibleAsNewOwner": true,
       "receivesTransfers": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "ownsWorkspace": false,
       "eligibleAsNewOwner": false,
       "receivesTransfers": false
@@ -26016,7 +26259,7 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
       "bookingNotifyPicker": true,
@@ -26044,7 +26287,7 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
       "bookingNotifyPicker": true,
@@ -26072,7 +26315,7 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
       "bookingNotifyPicker": true,
@@ -26093,28 +26336,28 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "orgBookingBroadcasts": true,
       "lowStock": true,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
       "bookingNotifyPicker": true,
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
       "bookingNotifyPicker": true,
@@ -26135,7 +26378,7 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
       "bookingNotifyPicker": true,
@@ -26163,7 +26406,7 @@
       "reminderPicker": true,
       "modelFiltersRecipients": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "orgBookingBroadcasts": true,
       "lowStock": false,
       "bookingNotifyPicker": true,
@@ -26205,7 +26448,7 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26229,7 +26472,7 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26253,7 +26496,7 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26271,25 +26514,25 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26307,7 +26550,7 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26331,7 +26574,7 @@
       "overviewLoaderAndAction": true,
       "bookingsNewAction": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "actionsDropdown": true,
       "recipientsField": true,
       "overviewLoaderAndAction": true,
@@ -26431,7 +26674,7 @@
         "fulfilCta": false
       }
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26579,7 +26822,7 @@
         "fulfilCta": false
       }
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26727,7 +26970,7 @@
         "fulfilCta": false
       }
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26838,7 +27081,7 @@
         "fulfilCta": false
       }
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26875,7 +27118,7 @@
         "fulfilCta": false
       }
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26912,7 +27155,7 @@
         "fulfilCta": false
       }
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -26949,7 +27192,7 @@
         "fulfilCta": false
       }
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -27060,7 +27303,7 @@
         "fulfilCta": false
       }
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -27208,7 +27451,7 @@
         "fulfilCta": false
       }
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "DRAFT": {
         "add": true,
         "remove": true,
@@ -27360,28 +27603,28 @@
   "B8:D-15:companion-own-writes": {
     "OWNER": false,
     "ADMIN": false,
-    "CUSTODY_MANAGER": false,
+    "MANAGER": false,
     "SELF_SERVICE": true,
     "BASE": true,
     "OWNER+ADMIN": false,
-    "OWNER+CUSTODY_MANAGER": false,
+    "OWNER+MANAGER": false,
     "OWNER+SELF_SERVICE": false,
     "OWNER+BASE": false,
     "ADMIN+OWNER": false,
-    "ADMIN+CUSTODY_MANAGER": false,
+    "ADMIN+MANAGER": false,
     "ADMIN+SELF_SERVICE": false,
     "ADMIN+BASE": false,
-    "CUSTODY_MANAGER+OWNER": false,
-    "CUSTODY_MANAGER+ADMIN": false,
-    "CUSTODY_MANAGER+SELF_SERVICE": false,
-    "CUSTODY_MANAGER+BASE": false,
+    "MANAGER+OWNER": false,
+    "MANAGER+ADMIN": false,
+    "MANAGER+SELF_SERVICE": false,
+    "MANAGER+BASE": false,
     "SELF_SERVICE+OWNER": false,
     "SELF_SERVICE+ADMIN": false,
-    "SELF_SERVICE+CUSTODY_MANAGER": false,
+    "SELF_SERVICE+MANAGER": false,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": false,
     "BASE+ADMIN": false,
-    "BASE+CUSTODY_MANAGER": false,
+    "BASE+MANAGER": false,
     "BASE+SELF_SERVICE": true,
     "(none)": true,
     "UNKNOWN_ROLE": true
@@ -27389,28 +27632,28 @@
   "B8:D-29:companion-self-custody": {
     "OWNER": false,
     "ADMIN": false,
-    "CUSTODY_MANAGER": false,
+    "MANAGER": false,
     "SELF_SERVICE": true,
     "BASE": false,
     "OWNER+ADMIN": false,
-    "OWNER+CUSTODY_MANAGER": false,
+    "OWNER+MANAGER": false,
     "OWNER+SELF_SERVICE": false,
     "OWNER+BASE": false,
     "ADMIN+OWNER": false,
-    "ADMIN+CUSTODY_MANAGER": false,
+    "ADMIN+MANAGER": false,
     "ADMIN+SELF_SERVICE": false,
     "ADMIN+BASE": false,
-    "CUSTODY_MANAGER+OWNER": false,
-    "CUSTODY_MANAGER+ADMIN": false,
-    "CUSTODY_MANAGER+SELF_SERVICE": false,
-    "CUSTODY_MANAGER+BASE": false,
+    "MANAGER+OWNER": false,
+    "MANAGER+ADMIN": false,
+    "MANAGER+SELF_SERVICE": false,
+    "MANAGER+BASE": false,
     "SELF_SERVICE+OWNER": false,
     "SELF_SERVICE+ADMIN": false,
-    "SELF_SERVICE+CUSTODY_MANAGER": false,
+    "SELF_SERVICE+MANAGER": false,
     "SELF_SERVICE+BASE": true,
     "BASE+OWNER": false,
     "BASE+ADMIN": false,
-    "BASE+CUSTODY_MANAGER": false,
+    "BASE+MANAGER": false,
     "BASE+SELF_SERVICE": true,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -27418,28 +27661,28 @@
   "B8:D-42:companion-audit-scope": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": false,
+    "MANAGER": true,
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": false,
-    "CUSTODY_MANAGER+BASE": false,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": false,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": false,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": false,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": false,
     "(none)": false,
     "UNKNOWN_ROLE": false
@@ -27481,7 +27724,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER": {
+    "MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27553,7 +27796,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "OWNER+CUSTODY_MANAGER": {
+    "OWNER+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27625,7 +27868,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "ADMIN+CUSTODY_MANAGER": {
+    "ADMIN+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27679,7 +27922,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+OWNER": {
+    "MANAGER+OWNER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27697,7 +27940,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+ADMIN": {
+    "MANAGER+ADMIN": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27715,7 +27958,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+SELF_SERVICE": {
+    "MANAGER+SELF_SERVICE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27733,7 +27976,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "CUSTODY_MANAGER+BASE": {
+    "MANAGER+BASE": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27787,7 +28030,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "SELF_SERVICE+CUSTODY_MANAGER": {
+    "SELF_SERVICE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27859,7 +28102,7 @@
       "baB,ssC,baC": true,
       "ssB,baB,ssC,baC": true
     },
-    "BASE+CUSTODY_MANAGER": {
+    "BASE+MANAGER": {
       "none": true,
       "ssB": true,
       "baB": true,
@@ -27935,28 +28178,28 @@
   "D-29:assign": {
     "OWNER": "all",
     "ADMIN": "all",
-    "CUSTODY_MANAGER": "all",
+    "MANAGER": "all",
     "SELF_SERVICE": "self",
     "BASE": "none",
     "OWNER+ADMIN": "all",
-    "OWNER+CUSTODY_MANAGER": "all",
+    "OWNER+MANAGER": "all",
     "OWNER+SELF_SERVICE": "all",
     "OWNER+BASE": "all",
     "ADMIN+OWNER": "all",
-    "ADMIN+CUSTODY_MANAGER": "all",
+    "ADMIN+MANAGER": "all",
     "ADMIN+SELF_SERVICE": "all",
     "ADMIN+BASE": "all",
-    "CUSTODY_MANAGER+OWNER": "all",
-    "CUSTODY_MANAGER+ADMIN": "all",
-    "CUSTODY_MANAGER+SELF_SERVICE": "all",
-    "CUSTODY_MANAGER+BASE": "all",
+    "MANAGER+OWNER": "all",
+    "MANAGER+ADMIN": "all",
+    "MANAGER+SELF_SERVICE": "all",
+    "MANAGER+BASE": "all",
     "SELF_SERVICE+OWNER": "all",
     "SELF_SERVICE+ADMIN": "all",
-    "SELF_SERVICE+CUSTODY_MANAGER": "all",
+    "SELF_SERVICE+MANAGER": "all",
     "SELF_SERVICE+BASE": "self",
     "BASE+OWNER": "all",
     "BASE+ADMIN": "all",
-    "BASE+CUSTODY_MANAGER": "all",
+    "BASE+MANAGER": "all",
     "BASE+SELF_SERVICE": "self",
     "(none)": "none",
     "UNKNOWN_ROLE": "none"
@@ -27964,28 +28207,28 @@
   "D-31": {
     "OWNER": "all",
     "ADMIN": "all",
-    "CUSTODY_MANAGER": "all",
+    "MANAGER": "all",
     "SELF_SERVICE": "bookable",
     "BASE": "all",
     "OWNER+ADMIN": "all",
-    "OWNER+CUSTODY_MANAGER": "all",
+    "OWNER+MANAGER": "all",
     "OWNER+SELF_SERVICE": "all",
     "OWNER+BASE": "all",
     "ADMIN+OWNER": "all",
-    "ADMIN+CUSTODY_MANAGER": "all",
+    "ADMIN+MANAGER": "all",
     "ADMIN+SELF_SERVICE": "all",
     "ADMIN+BASE": "all",
-    "CUSTODY_MANAGER+OWNER": "all",
-    "CUSTODY_MANAGER+ADMIN": "all",
-    "CUSTODY_MANAGER+SELF_SERVICE": "all",
-    "CUSTODY_MANAGER+BASE": "all",
+    "MANAGER+OWNER": "all",
+    "MANAGER+ADMIN": "all",
+    "MANAGER+SELF_SERVICE": "all",
+    "MANAGER+BASE": "all",
     "SELF_SERVICE+OWNER": "all",
     "SELF_SERVICE+ADMIN": "all",
-    "SELF_SERVICE+CUSTODY_MANAGER": "all",
+    "SELF_SERVICE+MANAGER": "all",
     "SELF_SERVICE+BASE": "bookable",
     "BASE+OWNER": "all",
     "BASE+ADMIN": "all",
-    "BASE+CUSTODY_MANAGER": "all",
+    "BASE+MANAGER": "all",
     "BASE+SELF_SERVICE": "bookable",
     "(none)": "all",
     "UNKNOWN_ROLE": "all"
@@ -27993,28 +28236,28 @@
   "D-32": {
     "OWNER": true,
     "ADMIN": true,
-    "CUSTODY_MANAGER": true,
+    "MANAGER": true,
     "SELF_SERVICE": false,
     "BASE": false,
     "OWNER+ADMIN": true,
-    "OWNER+CUSTODY_MANAGER": true,
+    "OWNER+MANAGER": true,
     "OWNER+SELF_SERVICE": true,
     "OWNER+BASE": true,
     "ADMIN+OWNER": true,
-    "ADMIN+CUSTODY_MANAGER": true,
+    "ADMIN+MANAGER": true,
     "ADMIN+SELF_SERVICE": true,
     "ADMIN+BASE": true,
-    "CUSTODY_MANAGER+OWNER": true,
-    "CUSTODY_MANAGER+ADMIN": true,
-    "CUSTODY_MANAGER+SELF_SERVICE": true,
-    "CUSTODY_MANAGER+BASE": true,
+    "MANAGER+OWNER": true,
+    "MANAGER+ADMIN": true,
+    "MANAGER+SELF_SERVICE": true,
+    "MANAGER+BASE": true,
     "SELF_SERVICE+OWNER": true,
     "SELF_SERVICE+ADMIN": true,
-    "SELF_SERVICE+CUSTODY_MANAGER": true,
+    "SELF_SERVICE+MANAGER": true,
     "SELF_SERVICE+BASE": false,
     "BASE+OWNER": true,
     "BASE+ADMIN": true,
-    "BASE+CUSTODY_MANAGER": true,
+    "BASE+MANAGER": true,
     "BASE+SELF_SERVICE": false,
     "(none)": false,
     "UNKNOWN_ROLE": false

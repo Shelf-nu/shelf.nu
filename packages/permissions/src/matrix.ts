@@ -294,12 +294,12 @@ export const Role2PermissionMap: {
     [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
   },
   /**
-   * The Custody Manager holds no allow-all shortcut: every grant is listed.
-   * Bookings and custody as an Administrator; read-only catalogue, team and
-   * locations; notes, reminders and non-registered members to support the
-   * hand-overs it runs.
+   * The Manager holds no allow-all shortcut: every grant is listed.
+   * Bookings, custody and audits as an Administrator; read-only catalogue,
+   * team and locations; notes, reminders and non-registered members to
+   * support the hand-overs and audits it runs.
    */
-  CUSTODY_MANAGER: {
+  MANAGER: {
     [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
     [PermissionEntity.reports]: [],
     [PermissionEntity.assetIndexSettings]: [
@@ -329,8 +329,16 @@ export const Role2PermissionMap: {
     [PermissionEntity.auditNote]: [
       PermissionAction.read,
       PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
     ],
-    [PermissionEntity.audit]: [PermissionAction.read, PermissionAction.update],
+    [PermissionEntity.audit]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.archive,
+    ],
     [PermissionEntity.qr]: [PermissionAction.read],
     [PermissionEntity.category]: [],
     [PermissionEntity.customField]: [],

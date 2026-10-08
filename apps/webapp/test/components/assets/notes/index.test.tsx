@@ -316,8 +316,8 @@ describe("Notes: controls follow the viewer's note permissions", () => {
     useLoaderDataMock.mockReturnValue(OWN_AND_OTHER_NOTES);
   });
 
-  it("offers a Custody manager the new-note form and the menu on their own note", () => {
-    viewer.roles = ["CUSTODY_MANAGER"];
+  it("offers a Manager the new-note form and the menu on their own note", () => {
+    viewer.roles = ["MANAGER"];
     const { container } = renderNotes();
 
     expect(screen.getByTestId("new-note-form")).toBeInTheDocument();

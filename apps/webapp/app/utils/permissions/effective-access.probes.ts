@@ -64,7 +64,7 @@ const R = OrganizationRoles;
 const SINGLE_ROLES = [
   R.OWNER,
   R.ADMIN,
-  R.CUSTODY_MANAGER,
+  R.MANAGER,
   R.SELF_SERVICE,
   R.BASE,
 ] as const;
@@ -75,7 +75,7 @@ const D10_KEY_ORDER = [
   R.OWNER,
   R.BASE,
   R.SELF_SERVICE,
-  R.CUSTODY_MANAGER,
+  R.MANAGER,
 ] as const;
 
 /** Every role set the fixture evaluates: singles, every ordered pair, empty, unknown. */
@@ -1312,6 +1312,22 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
     nonRegisteredMembers: can(roles, E.nonRegisteredMember, A.delete),
   }));
 
+  // B9:D-44: controls shown with the grant their route enforces, so no role
+  // sees one that refuses it: locations._index.tsx "New location"
+  // (`location:create`, locations.new.tsx); locations.$locationId.tsx
+  // "Activity" tab (`locationNote:read`, locations.$locationId.activity.tsx);
+  // components/location/actions-dropdown.tsx Edit (`location:update`) and
+  // Delete (`location:delete`); components/list/index.tsx "Export selection"
+  // (`asset:export`, assets.export.$fileName[.csv].tsx).
+  snapshot["B9:D-44:route-gated-controls"] = perRoleSet((roles) => ({
+    newLocation: can(roles, E.location, A.create),
+    locationActivityTab: can(roles, E.locationNote, A.read),
+    locationEdit: can(roles, E.location, A.update),
+    locationDelete: can(roles, E.location, A.delete),
+    locationCreateAudit: can(roles, E.audit, A.create),
+    exportSelection: can(roles, E.asset, A.export),
+  }));
+
   // ===================== Membership =====================
 
   // B9:D-01/D-10: how a membership is shown, always as its effective role:
@@ -1394,14 +1410,11 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // components/workspace/change-role-dialog.tsx, from the member's full
   // membership. Both ask roleChangeTransfers; true when anything moves.
   snapshot["B9:D-02/D-03:role-change-transfers"] = perRoleSet((roles) =>
-    perCase(
-      [R.ADMIN, R.CUSTODY_MANAGER, R.SELF_SERVICE, R.BASE] as const,
-      (to) => {
-        const moves = roleChangeTransfers({ fromRoles: roles, to });
-        const transfers = moves.ownership || moves.bookingsCreatedForOthers;
-        return { server: transfers, dialog: transfers };
-      }
-    )
+    perCase([R.ADMIN, R.MANAGER, R.SELF_SERVICE, R.BASE] as const, (to) => {
+      const moves = roleChangeTransfers({ fromRoles: roles, to });
+      const transfers = moves.ownership || moves.bookingsCreatedForOthers;
+      return { server: transfers, dialog: transfers };
+    })
   );
 
   // B9:D-05 (+F6, F12): SSO group-claim transition, `reconcileSsoGroupMembership`
@@ -1413,7 +1426,7 @@ export function buildEffectiveAccessSnapshot(): Record<string, unknown> {
   // change from the effective role (F6, B9).
   snapshot["B9:D-05:sso-transition"] = perRoleSet((current) =>
     perCase(
-      ["ADMIN", "CUSTODY_MANAGER", "SELF_SERVICE", "BASE", "none"] as const,
+      ["ADMIN", "MANAGER", "SELF_SERVICE", "BASE", "none"] as const,
       (desired) => {
         if (isWorkspaceOwner(current)) {
           return {

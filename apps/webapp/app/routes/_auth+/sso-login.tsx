@@ -58,7 +58,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
   try {
     if (context.isAuthenticated && !isMobile) {
-      return redirect("/assets");
+      return redirect("/");
     }
 
     if (disableSSO) {

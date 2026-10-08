@@ -5,7 +5,7 @@
  * who receives email notifications for bookings across the entire workspace:
  *
  * 1. **Notify booking creator** — auto-submit toggle
- * 2. **Notify admins on new booking requests** — auto-submit toggle
+ * 2. **Notify on new booking requests**: auto-submit toggle
  * 3. **Always notify these users** — DynamicDropdown picker with explicit save
  *
  * @module
@@ -23,6 +23,7 @@ import { Card } from "~/components/shared/card";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
+import { describeRoleAudience } from "~/utils/permissions/role-audience";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "./notification-preview";
 
@@ -33,6 +34,16 @@ export const NotifyBookingCreatorSchema = z.object({
     .transform((val) => val === "on")
     .default("false"),
 });
+
+/** Who hears a new reservation, e.g. "owners, administrators and managers". */
+const RESERVATION_AUDIENCE = describeRoleAudience(
+  (policy) => policy.notifications.orgBookingBroadcasts
+);
+
+/** Who the "Always notify" picker offers. */
+const PICKABLE_AUDIENCE = describeRoleAudience(
+  (policy) => policy.notifications.selectableAsRecipient
+);
 
 /** Zod schema for the "notify admins on new booking" toggle form. */
 export const NotifyAdminsOnNewBookingSchema = z.object({
@@ -173,7 +184,7 @@ export function NotificationSettings({
         <input type="hidden" value="updateNotifyBookingCreator" name="intent" />
       </creatorFetcher.Form>
 
-      {/* Toggle: Notify all admins on new booking requests */}
+      {/* Toggle: notify the reservation audience on new booking requests */}
       <adminsFetcher.Form
         ref={adminsZo.ref}
         method="post"
@@ -182,13 +193,14 @@ export function NotificationSettings({
         }}
       >
         <FormRow
-          rowLabel="Notify all admins on new booking requests"
+          rowLabel={`Notify all ${RESERVATION_AUDIENCE} on new booking requests`}
           subHeading={
             <div>
-              When a booking is reserved, all workspace admins receive a
-              notification so someone can review and handle the request. Admins
-              will not receive subsequent updates (checkout, checkin, etc.)
-              unless they are added as a notification recipient on the booking.
+              When a booking is reserved, all workspace {RESERVATION_AUDIENCE}{" "}
+              receive a notification so someone can review and handle the
+              request. They will not receive subsequent updates (checkout,
+              checkin, etc.) unless they are added as a notification recipient
+              on the booking.
             </div>
           }
           className="border-b-0 pb-[10px] pt-0"
@@ -198,7 +210,7 @@ export function NotificationSettings({
               name={adminsZo.fields.notifyAdminsOnNewBooking()}
               disabled={adminsDisabled}
               defaultChecked={bookingSettings.notifyAdminsOnNewBooking}
-              title="Notify all admins on new booking requests"
+              title={`Notify all ${RESERVATION_AUDIENCE} on new booking requests`}
             />
           </div>
         </FormRow>
@@ -266,7 +278,7 @@ export function NotificationSettings({
             />
 
             <p className="mt-1.5 text-[13px] text-gray-500">
-              Only administrators can be added.
+              Only {PICKABLE_AUDIENCE} can be added.
             </p>
 
             {hasUnsavedChanges ? (

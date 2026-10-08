@@ -71,7 +71,15 @@ function ConditionalDropdown() {
         />
       )}
 
-      <BulkDeleteDialog />
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.location,
+          action: PermissionAction.delete,
+        })}
+      >
+        <BulkDeleteDialog />
+      </When>
       <LocationsBulkStartAuditDialog />
 
       <DropdownMenu
@@ -134,18 +142,26 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
             </When>
 
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.location,
+                action: PermissionAction.delete,
+              })}
             >
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Delete"
-                onClick={closeMenu}
-              />
-            </DropdownMenuItem>
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="trash"
+                  label="Delete"
+                  onClick={closeMenu}
+                />
+              </DropdownMenuItem>
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>

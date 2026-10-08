@@ -19,14 +19,14 @@ import type { OrganizationRole } from "./permissions/role-access";
 /** A group-id column on `SsoDetails`. */
 export type SsoGroupField =
   | "adminGroupId"
-  | "custodyManagerGroupId"
+  | "managerGroupId"
   | "selfServiceGroupId"
   | "baseUserGroupId";
 
 /** The role each group-id column confers. */
 export const SSO_GROUP_ROLE = {
   adminGroupId: "ADMIN",
-  custodyManagerGroupId: "CUSTODY_MANAGER",
+  managerGroupId: "MANAGER",
   selfServiceGroupId: "SELF_SERVICE",
   baseUserGroupId: "BASE",
 } as const satisfies Record<SsoGroupField, OrganizationRole>;

@@ -90,7 +90,7 @@ describe("ExplicitCheckoutSettings", () => {
 
     expect(
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Admins",
+        name: "Require explicit check-out for Admins and Managers",
       })
     ).toHaveAttribute("aria-checked", "true");
     expect(
@@ -138,7 +138,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
     const adminSwitch = () =>
       screen.getByRole("switch", {
-        name: "Require explicit check-out for Admins",
+        name: "Require explicit check-out for Admins and Managers",
       });
 
     fireEvent.click(adminSwitch());
@@ -186,7 +186,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
 
     const adminSwitch = screen.getByRole("switch", {
-      name: "Require explicit check-out for Admins",
+      name: "Require explicit check-out for Admins and Managers",
     });
     expect(adminSwitch).toBeDisabled();
     expect(
@@ -212,7 +212,7 @@ describe("ExplicitCheckinSettings", () => {
 
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Require explicit check-in for Admins",
+        name: "Require explicit check-in for Admins and Managers",
       })
     );
 

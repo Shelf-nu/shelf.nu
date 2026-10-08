@@ -5,7 +5,7 @@
  * Shelf `OrganizationRoles` value, using the group ids configured on `SsoDetails`.
  * These tests lock the robustness needed for real-world IdPs (esp. Shibboleth):
  * comma-separated multi-value fields, whitespace trimming, and case-insensitive
- * matching, while preserving ADMIN > CUSTODY_MANAGER > SELF_SERVICE > BASE
+ * matching, while preserving ADMIN > MANAGER > SELF_SERVICE > BASE
  * precedence.
  *
  * Also covers `requirePermission`'s `access` field: the `RoleAccess` object
@@ -73,7 +73,7 @@ function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
     baseUserGroupId: null,
     selfServiceGroupId: null,
     adminGroupId: null,
-    custodyManagerGroupId: null,
+    managerGroupId: null,
     requireSsoLogin: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -92,7 +92,7 @@ describe("SSO group columns", () => {
     expect(
       hasSsoGroupMappings({
         adminGroupId: null,
-        custodyManagerGroupId: null,
+        managerGroupId: null,
         selfServiceGroupId: null,
         baseUserGroupId: null,
       })
@@ -100,18 +100,18 @@ describe("SSO group columns", () => {
     expect(
       hasSsoGroupMappings({
         adminGroupId: null,
-        custodyManagerGroupId: null,
+        managerGroupId: null,
         selfServiceGroupId: "g",
         baseUserGroupId: null,
       })
     ).toBe(true);
   });
 
-  it("counts a workspace that maps only the Custody manager group as mapped", () => {
+  it("counts a workspace that maps only the Manager group as mapped", () => {
     expect(
       hasSsoGroupMappings({
         adminGroupId: null,
-        custodyManagerGroupId: "cm-group",
+        managerGroupId: "manager-group",
         selfServiceGroupId: null,
         baseUserGroupId: null,
       })
@@ -119,31 +119,31 @@ describe("SSO group columns", () => {
   });
 });
 
-describe("getRoleFromGroupId with a Custody manager group", () => {
+describe("getRoleFromGroupId with a Manager group", () => {
   const sso = makeSso({
     adminGroupId: "admin-group",
-    custodyManagerGroupId: "cm-group",
+    managerGroupId: "manager-group",
     selfServiceGroupId: "ss-group",
     baseUserGroupId: "base-group",
   });
 
-  it("assigns Custody manager to a member of its group", () => {
-    expect(getRoleFromGroupId(sso, ["cm-group"])).toBe(
-      OrganizationRoles.CUSTODY_MANAGER
+  it("assigns Manager to a member of its group", () => {
+    expect(getRoleFromGroupId(sso, ["manager-group"])).toBe(
+      OrganizationRoles.MANAGER
     );
   });
 
   it("ranks it above Self service and Base", () => {
-    expect(getRoleFromGroupId(sso, ["ss-group", "cm-group"])).toBe(
-      OrganizationRoles.CUSTODY_MANAGER
+    expect(getRoleFromGroupId(sso, ["ss-group", "manager-group"])).toBe(
+      OrganizationRoles.MANAGER
     );
-    expect(getRoleFromGroupId(sso, ["base-group", "cm-group"])).toBe(
-      OrganizationRoles.CUSTODY_MANAGER
+    expect(getRoleFromGroupId(sso, ["base-group", "manager-group"])).toBe(
+      OrganizationRoles.MANAGER
     );
   });
 
   it("ranks it below Administrator", () => {
-    expect(getRoleFromGroupId(sso, ["cm-group", "admin-group"])).toBe(
+    expect(getRoleFromGroupId(sso, ["manager-group", "admin-group"])).toBe(
       OrganizationRoles.ADMIN
     );
   });
@@ -151,11 +151,11 @@ describe("getRoleFromGroupId with a Custody manager group", () => {
   it("gives the higher role when one group is mapped to two fields", () => {
     const shared = makeSso({
       ...sso,
-      custodyManagerGroupId: "shared",
+      managerGroupId: "shared",
       selfServiceGroupId: "shared",
     });
     expect(getRoleFromGroupId(shared, ["shared"])).toBe(
-      OrganizationRoles.CUSTODY_MANAGER
+      OrganizationRoles.MANAGER
     );
   });
 });

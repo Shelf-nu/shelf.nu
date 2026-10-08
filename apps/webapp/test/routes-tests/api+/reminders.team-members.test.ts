@@ -82,7 +82,7 @@ describe("reminder recipient picker", () => {
     const [args] = vi.mocked(db.teamMember.findMany).mock
       .calls[0] as unknown as [{ where: unknown }];
     expect(JSON.stringify(args.where)).toContain(
-      '"hasSome":["OWNER","ADMIN","CUSTODY_MANAGER"]'
+      '"hasSome":["OWNER","ADMIN","MANAGER"]'
     );
   });
 });

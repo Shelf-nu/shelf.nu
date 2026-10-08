@@ -39,13 +39,13 @@ const R = OrganizationRoles;
 export const CHECKINOUT_ROLE_SETS: OrganizationRoles[][] = [
   [R.OWNER],
   [R.ADMIN],
-  [R.CUSTODY_MANAGER],
+  [R.MANAGER],
   [R.SELF_SERVICE],
   [R.BASE],
   [R.SELF_SERVICE, R.ADMIN],
   [R.ADMIN, R.SELF_SERVICE],
-  [R.SELF_SERVICE, R.CUSTODY_MANAGER],
-  [R.CUSTODY_MANAGER, R.SELF_SERVICE],
+  [R.SELF_SERVICE, R.MANAGER],
+  [R.MANAGER, R.SELF_SERVICE],
 ];
 
 /**

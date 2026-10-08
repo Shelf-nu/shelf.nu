@@ -271,11 +271,11 @@ describe("roleHasPermission — reports entity", () => {
   });
 });
 
-describe("CUSTODY_MANAGER matrix row", () => {
+describe("MANAGER matrix row", () => {
   // The role holds no allow-all shortcut, so every answer comes from its row.
   const can = (entity: string, action: string) =>
     roleHasPermission({
-      roles: ["CUSTODY_MANAGER"],
+      roles: ["MANAGER"],
       entity: entity as PermissionEntity,
       action: action as PermissionAction,
     });
@@ -296,6 +296,15 @@ describe("CUSTODY_MANAGER matrix row", () => {
       "export",
     ]) {
       assert.equal(can("booking", action), true, action);
+    }
+  });
+
+  test("runs every audit, like an Administrator", () => {
+    for (const action of ["create", "read", "update", "delete", "archive"]) {
+      assert.equal(can("audit", action), true, `audit:${action}`);
+    }
+    for (const action of ["create", "read", "update", "delete"]) {
+      assert.equal(can("auditNote", action), true, `auditNote:${action}`);
     }
   });
 

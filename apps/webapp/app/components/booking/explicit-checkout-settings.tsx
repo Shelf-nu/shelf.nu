@@ -55,9 +55,9 @@ export function ExplicitCheckoutSettings({
       switches={[
         {
           name: "requireExplicitCheckoutForAdmin" satisfies ExplicitCheckoutField,
-          label: "Require explicit check-out for Admins",
+          label: "Require explicit check-out for Admins and Managers",
           description:
-            "When enabled, administrators must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out.",
+            "When enabled, administrators and managers must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out.",
           defaultChecked: defaultValues.requireExplicitCheckoutForAdmin,
         },
         {

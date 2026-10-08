@@ -21,7 +21,11 @@ import {
 } from "~/utils/import-row-errors";
 import { validEmail } from "~/utils/misc";
 import { normalizeInviteEmail } from "./helpers";
-import { INVITABLE_ROLES, isInvitableRole, type InvitableRole } from "./roles";
+import {
+  INVITABLE_ROLES,
+  parseInvitableRole,
+  type InvitableRole,
+} from "./roles";
 
 /** The largest users file accepted, in data rows. Each row sends an email. */
 export const MAX_IMPORT_USERS_ROWS = 1000;
@@ -112,13 +116,14 @@ export function validateImportUserRows({
     const report = (title: string, message: string) =>
       errors.push({ row, title, message });
 
-    const role = cell(csvRow.role).toUpperCase();
-    if (!role) {
+    const rawRole = cell(csvRow.role);
+    const role = parseInvitableRole(rawRole);
+    if (!rawRole) {
       report("Missing role", "Role is required.");
-    } else if (!isInvitableRole(role)) {
+    } else if (!role) {
       report(
         "Invalid role",
-        `"${role}" can't be granted by invite. Use one of ${INVITABLE_ROLES.join(
+        `"${rawRole}" can't be granted by invite. Use one of ${INVITABLE_ROLES.join(
           ", "
         )}. Ownership moves only through ownership transfer.`
       );

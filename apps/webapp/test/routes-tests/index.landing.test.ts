@@ -45,7 +45,7 @@ describe("/ landing", () => {
     }
   );
 
-  it.each([["CUSTODY_MANAGER", "/bookings"]])(
+  it.each([["MANAGER", "/bookings"]])(
     "%s lands on %s",
     async (role, landing) => {
       state.roles = [role];
