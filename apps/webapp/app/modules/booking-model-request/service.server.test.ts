@@ -450,6 +450,34 @@ describe("getAssetModelAvailability", () => {
       not: BOOKING_ID,
     });
   });
+
+  it("leaves archived assets out of the pool (issue #382)", async () => {
+    expect.assertions(3);
+
+    await getAssetModelAvailability({
+      assetModelId: MODEL_ID,
+      organizationId: ORG_ID,
+      bookingId: BOOKING_ID,
+      from,
+      to,
+    });
+
+    // An archived unit can't be booked, so counting it would let a model
+    // reservation promise a unit that check-out then refuses. The custody and
+    // booking sums use the same asset set, so the subtraction stays coherent.
+    const whereOf = (fn: unknown) =>
+      (fn as { mock: { calls: [{ where: Record<string, unknown> }][] } }).mock
+        .calls[0]?.[0]?.where;
+    expect(whereOf(db.asset.count)?.archivedAt).toBeNull();
+    expect(
+      (whereOf(db.custody.aggregate)?.asset as Record<string, unknown>)
+        ?.archivedAt
+    ).toBeNull();
+    expect(
+      (whereOf(db.bookingAsset.aggregate)?.asset as Record<string, unknown>)
+        ?.archivedAt
+    ).toBeNull();
+  });
 });
 
 describe("getAssetModelAvailability — injected client", () => {

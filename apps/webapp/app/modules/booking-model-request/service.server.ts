@@ -375,11 +375,15 @@ export async function getAssetModelAvailability({
         // Total INDIVIDUAL assets of this model in the org. QUANTITY_TRACKED
         // assets aren't part of the model-request flow (they have their own
         // quantity booking path from Phase 3b).
+        // Archived assets are out of service and can't be booked (issue #382),
+        // so they are not part of the pool. The custody and booking sums below
+        // read the same asset set, so the subtraction stays coherent.
         client.asset.count({
           where: {
             organizationId,
             assetModelId,
             type: AssetType.INDIVIDUAL,
+            archivedAt: null,
           },
         }),
         // Units currently held by team members / users.
@@ -389,6 +393,7 @@ export async function getAssetModelAvailability({
               organizationId,
               assetModelId,
               type: AssetType.INDIVIDUAL,
+              archivedAt: null,
             },
           },
           _sum: { quantity: true },
@@ -401,6 +406,7 @@ export async function getAssetModelAvailability({
               organizationId,
               assetModelId,
               type: AssetType.INDIVIDUAL,
+              archivedAt: null,
             },
             bookingId: { not: bookingId },
             booking: {
