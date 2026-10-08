@@ -315,3 +315,12 @@ export interface CustomFieldSorting {
   alias: string;
   fieldType?: CustomFieldType;
 }
+
+/**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";

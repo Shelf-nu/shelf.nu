@@ -17,6 +17,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
@@ -108,7 +109,7 @@ const ConditionalActionsDropdown = () => {
 
   // Archive / reinstate. Fetcher-driven (posts to the asset detail action).
   const archiveFetcher = useFetcher();
-  const isArchiveSubmitting = archiveFetcher.state !== "idle";
+  const isArchiveSubmitting = useDisabled(archiveFetcher);
   const isArchived = Boolean(asset.archivedAt);
   /**
    * Why archiving is blocked for this asset, if at all. Mirrors the server

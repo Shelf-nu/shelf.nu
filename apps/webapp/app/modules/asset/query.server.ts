@@ -12,7 +12,7 @@ import { parseFilters } from "./filter-parsing";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import { buildAssetSearchUnion } from "./search-union.server";
 import { splitAssetSearchTerms } from "./search.server";
-import type { CustomFieldSorting } from "./types";
+import type { ArchivedFilter, CustomFieldSorting } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -72,7 +72,7 @@ export function generateWhereClause(
    * Defaults to "active" so the advanced (raw-SQL) index hides archived assets
    * just like the simple index, unless the caller opts in. See issue #382.
    */
-  archivedFilter: "active" | "archived" | "all" = "active"
+  archivedFilter: ArchivedFilter = "active"
 ): Prisma.Sql {
   let whereClause = Prisma.sql`WHERE a."organizationId" = ${organizationId}`;
 

@@ -1,6 +1,7 @@
 import {
   AssetStatus,
   AssetType,
+  Prisma,
   type AssetIndexSettings,
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
@@ -11,6 +12,7 @@ import {
   recordEvent,
   recordEvents,
 } from "~/modules/activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
 import { getCategory } from "~/modules/category/service.server";
@@ -37,7 +39,9 @@ import {
   archiveAsset,
   bulkArchiveAssets,
   bulkUnarchiveAssets,
+  bulkMarkAvailability,
   unarchiveAsset,
+  updateAssetBookingAvailability,
   bulkAssignAssetTags,
   bulkCheckInAssets,
   bulkCheckOutAssets,
@@ -2756,16 +2760,27 @@ describe("updateAsset archived freeze (issue #382)", () => {
     // updateAsset needs org/currency stubs this describe deliberately skips.
     mockCount.mockResolvedValue(0);
 
-    await expect(
-      updateAsset({
-        id: "asset-1",
-        userId: "user-1",
-        organizationId: "org-1",
-        title: "New title",
-      } as any)
-    ).rejects.not.toMatchObject({ title: "Asset is archived" });
+    // Captured either way: resolving is the outcome we want, and a rejection
+    // from the skipped stubs is not this test's concern — only that it is not
+    // the archived refusal.
+    const outcome = await updateAsset({
+      id: "asset-1",
+      userId: "user-1",
+      organizationId: "org-1",
+      title: "New title",
+    } as any).then(
+      () => null,
+      (cause: unknown) => cause
+    );
 
-    expect(mockCount).toHaveBeenCalled();
+    expect(outcome).not.toMatchObject({ title: "Asset is archived" });
+    expect(mockCount).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["asset-1"] },
+        organizationId: "org-1",
+        archivedAt: { not: null },
+      },
+    });
   });
 });
 
@@ -5913,6 +5928,20 @@ describe("getAssets search via UNION", () => {
   });
 });
 
+/**
+ * The unfinished-booking precondition both archive writes must carry. Order of
+ * the statuses is irrelevant to Postgres, so it is not asserted.
+ */
+const UNFINISHED_BOOKING_GUARD = {
+  none: {
+    booking: {
+      status: {
+        in: expect.arrayContaining(["DRAFT", "RESERVED", "ONGOING", "OVERDUE"]),
+      },
+    },
+  },
+};
+
 describe("archiveAsset", () => {
   const mockFindFirst = db.asset.findFirst as ReturnType<typeof vitest.fn>;
   const mockUpdateMany = db.asset.updateMany as ReturnType<typeof vitest.fn>;
@@ -5951,6 +5980,9 @@ describe("archiveAsset", () => {
           type: "INDIVIDUAL",
           status: "AVAILABLE",
           archivedAt: null,
+          // Pins the booking precondition INTO the write, so a booking added
+          // after the eligibility read still blocks the archive.
+          bookingAssets: UNFINISHED_BOOKING_GUARD,
         }),
         data: expect.objectContaining({ archivedAt: expect.any(Date) }),
       })
@@ -6123,6 +6155,14 @@ describe("bulkArchiveAssets", () => {
     });
 
     expect(result).toEqual({ archivedCount: 2, skippedCount: 1 });
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          archivedAt: null,
+          bookingAssets: UNFINISHED_BOOKING_GUARD,
+        }),
+      })
+    );
     expect(mockRecordEvents).toHaveBeenCalledTimes(1);
     const events = mockRecordEvents.mock.calls[0][0];
     expect(events).toEqual([
@@ -6218,6 +6258,148 @@ describe("bulkUnarchiveAssets", () => {
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
     ]);
   });
+
+  it("counts and emits only for rows still archived under the lock", async () => {
+    // A concurrent reinstate cleared a1 between the eligibility read and this
+    // call's transaction. The locked re-read inside the transaction no longer
+    // finds it, so a1 must not be reported or recorded a second time.
+    // why: findMany answers the eligibility read, then the in-tx re-read.
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "a1" }, { id: "a2" }])
+      .mockResolvedValueOnce([{ id: "a2" }]);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await bulkUnarchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2"],
+      settings: {} as never,
+    });
+
+    expect(result).toEqual({ unarchivedCount: 1, skippedCount: 1 });
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["a1", "a2"],
+      "org-1"
+    );
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["a2"] } }),
+      })
+    );
+    expect(mockRecordEvents.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
+    ]);
+  });
+
+  it("writes and records nothing when every row was reinstated elsewhere", async () => {
+    // why: eligibility read, then an empty in-tx re-read.
+    mockFindMany
+      .mockResolvedValueOnce([{ id: "a1" }])
+      .mockResolvedValueOnce([]);
+
+    const result = await bulkUnarchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      settings: {} as never,
+    });
+
+    expect(result).toEqual({ unarchivedCount: 0, skippedCount: 1 });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+    expect(mockRecordEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("availability writes on archived assets (issue #382)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("toggles availability only on a row that is still not archived", async () => {
+    await updateAssetBookingAvailability({
+      id: "a1",
+      organizationId: "org-1",
+      availableToBook: false,
+    });
+
+    // The pre-check gives the clear error; the WHERE closes the window where
+    // an archive commits between the check and the write.
+    expect(db.asset.update).toHaveBeenCalledWith({
+      where: { id: "a1", organizationId: "org-1", archivedAt: null },
+      data: { availableToBook: false },
+    });
+  });
+
+  it("reports an archive that landed mid-write as the archived conflict", async () => {
+    // why: a row that drops out of the `archivedAt: null` predicate makes
+    // Prisma raise P2025, which is what an archive committing in between does.
+    vitest.mocked(db.asset.update).mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("No record found", {
+        code: "P2025",
+        clientVersion: "test",
+      })
+    );
+
+    await expect(
+      updateAssetBookingAvailability({
+        id: "a1",
+        organizationId: "org-1",
+        availableToBook: false,
+      })
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+  });
+
+  it("skips assets archived after the bulk check", async () => {
+    await bulkMarkAvailability({
+      organizationId: "org-1",
+      assetIds: ["a1", "a2"],
+      type: "unavailable",
+      settings: {} as never,
+    });
+
+    expect(db.asset.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ archivedAt: null }),
+      })
+    );
+  });
+});
+
+describe("bulk archive / reinstate — upstream errors", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it.each([
+    ["bulkArchiveAssets", () => bulkArchiveAssets],
+    ["bulkUnarchiveAssets", () => bulkUnarchiveAssets],
+  ] as const)(
+    "%s keeps a selection error's own message and status",
+    async (_name, pick) => {
+      // e.g. an invalid advanced filter behind a "select all": the user should
+      // read why, not "Something went wrong".
+      // why: the id resolver is the upstream that raises it.
+      vitest.mocked(resolveAssetIdsForBulkOperation).mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          message: "That filter can't be applied.",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+
+      await expect(
+        pick()({
+          organizationId: "org-1",
+          assetIds: ["a1"],
+          settings: {} as never,
+        })
+      ).rejects.toMatchObject({
+        message: "That filter can't be applied.",
+        status: 400,
+      });
+    }
+  );
 });
 
 describe("buildAssetKitCreateData — AssetKit pivot for create-with-kit", () => {

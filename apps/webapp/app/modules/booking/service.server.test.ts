@@ -28,6 +28,7 @@ import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   assertKitsCheckoutable,
   assertKitsCustodyAssignable,
@@ -14880,6 +14881,40 @@ describe("addScannedAssetsToBooking", () => {
       expect(db.booking.update).not.toHaveBeenCalled();
     }
   );
+
+  it("refuses an archived scanned asset, locking the rows before the check", async () => {
+    // Pickers hide archived assets, but the scanner takes raw ids (issue #382).
+    // why: the archived guard counts archived rows among the scanned ids; one
+    // here. Once, so the default "none archived" answers every later test.
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(1);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: ["asset-1"],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/scanned assets are archived/),
+    });
+
+    // The row lock comes BEFORE the read, or an archive can commit between the
+    // check and the insert and leave an archived asset in the booking.
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      db,
+      ["asset-1"],
+      "org-1"
+    );
+    expect(
+      vitest.mocked(lockAssetsForArchiveGuard).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.count).mock.invocationCallOrder[0]);
+    // Refused before any write.
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
 
   it("guards every loose scan against kit membership, with no kit exempt", async () => {
     // A client that sends a scanned kit's members as plain asset ids, with no

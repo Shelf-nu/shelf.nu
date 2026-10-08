@@ -5802,9 +5802,6 @@ export async function updateKitAssets({
     });
     const actor = wrapUserLinkForNote({ ...user, id: userId });
 
-    // Archived assets are frozen (issue #382): they can't be added to a kit.
-    await assertAssetsAreNotArchived({ assetIds, organizationId });
-
     const kitWithRelations = await db.kit
       .findUniqueOrThrow({
         where: { id: kitId, organizationId },
@@ -6044,6 +6041,22 @@ export async function updateKitAssets({
           newQuantity: newQty,
         },
       ];
+    });
+
+    /**
+     * Archived assets are frozen (issue #382): none can join this kit or change
+     * its quantity in it. Checked against the rows this call WRITES, not the
+     * submitted `assetIds`: the picker submits the kit's whole membership, and
+     * an archived member that is merely kept must not lock the kit against
+     * every other edit. Removing an archived member stays allowed. Runs after
+     * the select-all expansion, so the real ids are checked, not the sentinel.
+     */
+    await assertAssetsAreNotArchived({
+      assetIds: [
+        ...newlyAddedAssets.map((asset) => asset.id),
+        ...qtyChangedAssets.map((asset) => asset.id),
+      ],
+      organizationId,
     });
 
     /**

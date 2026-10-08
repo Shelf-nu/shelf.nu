@@ -8156,3 +8156,110 @@ describe("getPaginatedAndFilterableKits: booking kit picker availability", () =>
     expect(JSON.stringify(where)).not.toContain("notIn");
   });
 });
+
+describe("updateKitAssets — archived assets (issue #382)", () => {
+  /** A kit member as `updateKitAssets` reads it back through `asset.findMany`. */
+  const member = (id: string, inKit: boolean) => ({
+    id,
+    title: id,
+    type: AssetType.INDIVIDUAL,
+    quantity: null,
+    unitOfMeasure: null,
+    assetKits: inKit ? [{ kitId: "kit-1", quantity: 1 }] : [],
+    custody: null,
+    assetLocations: [],
+  });
+
+  /** The kit `updateKitAssets` loads, holding `memberIds`. */
+  const kitHolding = (memberIds: string[]) => ({
+    id: "kit-1",
+    name: "Rack Kit",
+    location: null,
+    locationId: null,
+    custody: null,
+    assetKits: memberIds.map((id) => ({
+      kitId: "kit-1",
+      quantity: 1,
+      asset: {
+        id,
+        title: id,
+        type: AssetType.INDIVIDUAL,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-1" }],
+        bookingAssets: [],
+      },
+    })),
+  });
+
+  /** The archived guard's count call, recognised by its predicate. */
+  const archivedGuardCalls = () =>
+    vitest
+      .mocked(db.asset.count)
+      .mock.calls.filter(
+        ([args]) =>
+          (args as { where?: { archivedAt?: unknown } })?.where?.archivedAt !==
+          undefined
+      );
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("refuses to add an archived asset with a 400 and writes no membership", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(kitHolding([]));
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([member("asset-archived", false)]);
+    // why: the archived guard counts archived rows among the assets being
+    // added; one here. Consumed by this call, so nothing leaks.
+    //@ts-expect-error missing vitest type
+    db.asset.count.mockResolvedValueOnce(1);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["asset-archived"],
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+    expect(archivedGuardCalls()[0]?.[0]).toMatchObject({
+      where: { id: { in: ["asset-archived"] } },
+    });
+    expect(db.assetKit.create).not.toHaveBeenCalled();
+    expect(db.assetKit.createMany).not.toHaveBeenCalled();
+  });
+
+  it("does not let a kept archived member lock the kit against other edits", async () => {
+    // The picker submits the kit's whole membership. `switch-a` is archived
+    // and kept; `switch-b` is being removed. Judging the submitted ids would
+    // refuse this edit for as long as the kit holds an archived member.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(
+      kitHolding(["switch-a", "switch-b"])
+    );
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([member("switch-a", true)]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    const outcome = await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["switch-a"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    }).then(
+      () => null,
+      (cause: unknown) => cause
+    );
+
+    expect(outcome).not.toMatchObject({ title: "Asset is archived" });
+    // Nothing is added or re-quantified, so there is nothing to check.
+    expect(archivedGuardCalls()).toHaveLength(0);
+  });
+});

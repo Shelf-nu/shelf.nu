@@ -20,7 +20,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
-import type { ICustomFieldValueJson } from "./types";
+import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -583,14 +583,9 @@ export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
 
-/**
- * The "active vs archived" view dimension for asset lists. This is orthogonal
- * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
- * - `active`   → only non-archived assets (the default everywhere).
- * - `archived` → only archived assets (the "Archived" view).
- * - `all`      → both.
- */
-export type ArchivedFilter = "active" | "archived" | "all";
+// Defined in `./types` so `query.server.ts` can share it without an import
+// cycle (this module already imports from there); re-exported for callers.
+export type { ArchivedFilter } from "./types";
 
 /**
  * Reads the `archived` view dimension from URL search params. Defaults to
@@ -702,7 +697,7 @@ export function getAssetsWhereInput({
 
   if (!currentSearchParams) {
     // No params at all means the default "active" view — hide archived assets.
-    where.archivedAt = null;
+    applyArchivedFilter(where, "active");
     return where;
   }
 

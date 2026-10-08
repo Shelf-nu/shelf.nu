@@ -137,7 +137,7 @@ import {
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
-import type { ErrorLabel } from "~/utils/error";
+import type { AdditionalData, ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
@@ -3414,33 +3414,55 @@ export async function updateAsset({
       throw cause;
     }
 
-    /**
-     * The asset write carries `archivedAt: null` in its WHERE, so an archive
-     * that commits mid-transaction makes the row vanish from the predicate and
-     * Prisma raises P2025. Report it as the archived conflict rather than a
-     * generic write failure — the pre-check at the top of this function has
-     * already ruled out "not in this workspace" for every real caller.
-     */
-    if (
-      cause instanceof Prisma.PrismaClientKnownRequestError &&
-      cause.code === "P2025"
-    ) {
-      throw new ShelfError({
-        cause,
-        title: "Asset is archived",
-        message:
-          "This asset was archived while you were editing it. Reinstate it to make changes.",
-        additionalData: { userId, id, organizationId },
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-      });
+    const archivedMidWrite = archivedMidWriteError(cause, {
+      userId,
+      id,
+      organizationId,
+    });
+    if (archivedMidWrite) {
+      throw archivedMidWrite;
     }
 
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { userId, id, organizationId },
     });
   }
+}
+
+/**
+ * Maps a write that lost its row to an archive into the archived conflict.
+ *
+ * Single-asset writes carry `archivedAt: null` in their WHERE, so an archive
+ * that commits after the caller's pre-check makes the row vanish from the
+ * predicate and Prisma raises P2025. Callers have already ruled out "not in
+ * this workspace" with that pre-check, so P2025 here means archived. Shared so
+ * every such write tells the user the same thing (issue #382).
+ *
+ * @param cause - The error the write threw
+ * @param additionalData - Context for logs
+ * @returns The archived ShelfError for a P2025, or `null` for anything else
+ */
+function archivedMidWriteError(
+  cause: unknown,
+  additionalData: AdditionalData
+): ShelfError | null {
+  if (!isNotFoundError(cause)) {
+    return null;
+  }
+
+  return new ShelfError({
+    // why: cause deliberately null — ShelfError and makeShelfError turn any
+    // P2025 in the cause chain into a 404, which would report this conflict as
+    // "not found" instead of the 400 below.
+    cause: null,
+    title: "Asset is archived",
+    message:
+      "This asset was archived while you were editing it. Reinstate it to make changes.",
+    additionalData,
+    label: "Assets",
+    status: 400,
+    shouldBeCaptured: false,
+  });
 }
 
 export async function deleteAsset({
@@ -3911,6 +3933,11 @@ export async function bulkArchiveAssets({
       skippedCount: resolvedIds.length - archivedIds.length,
     };
   } catch (cause) {
+    // Keep an upstream error's own message (e.g. an invalid advanced filter);
+    // wrapping it would replace it with the generic text below.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while archiving the selected assets.",
@@ -3975,10 +4002,37 @@ export async function bulkUnarchiveAssets({
       return { unarchivedCount: 0, skippedCount: resolvedIds.length };
     }
 
+    /**
+     * The ids this call actually reinstates. The read above ran outside the
+     * transaction, so a concurrent reinstate may already have cleared some of
+     * them; emitting for every eligible id would then record reinstatements
+     * this call never made. Unlike archiving, the write leaves no stamp to read
+     * back (it sets `archivedAt` to null), so the rows are locked and re-read
+     * instead: a reinstate that committed first drops out of the re-read, and
+     * one that starts later waits on the lock.
+     */
+    let unarchivedIds: string[] = [];
+
     await db.$transaction(async (tx) => {
-      await tx.asset.updateMany({
+      // Same lock the archive paths take, sorted inside the helper, so this
+      // cannot deadlock against a concurrent bulk archive.
+      await lockAssetsForArchiveGuard(tx, eligibleIds, organizationId);
+
+      const stillArchived = await tx.asset.findMany({
         where: {
           id: { in: eligibleIds },
+          organizationId,
+          archivedAt: { not: null },
+        },
+        select: { id: true },
+      });
+      unarchivedIds = stillArchived.map((a) => a.id);
+
+      if (unarchivedIds.length === 0) return;
+
+      await tx.asset.updateMany({
+        where: {
+          id: { in: unarchivedIds },
           organizationId,
           archivedAt: { not: null },
         },
@@ -3986,7 +4040,7 @@ export async function bulkUnarchiveAssets({
       });
 
       await recordEvents(
-        eligibleIds.map((assetId) => ({
+        unarchivedIds.map((assetId) => ({
           organizationId,
           actorUserId: actorUserId ?? null,
           action: "ASSET_UNARCHIVED" as const,
@@ -3999,10 +4053,15 @@ export async function bulkUnarchiveAssets({
     });
 
     return {
-      unarchivedCount: eligibleIds.length,
-      skippedCount: resolvedIds.length - eligibleIds.length,
+      unarchivedCount: unarchivedIds.length,
+      skippedCount: resolvedIds.length - unarchivedIds.length,
     };
   } catch (cause) {
+    // Keep an upstream error's own message (e.g. an invalid advanced filter);
+    // wrapping it would replace it with the generic text below.
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
     throw new ShelfError({
       cause,
       message: "Something went wrong while reinstating the selected assets.",
@@ -6476,13 +6535,27 @@ export async function updateAssetBookingAvailability({
 }: Pick<Asset, "id" | "availableToBook" | "organizationId">) {
   try {
     // Archived assets are frozen (issue #382): availability can't be toggled.
+    // The pre-check gives the clear error; `archivedAt: null` in the WHERE
+    // closes the window where an archive commits between it and the write.
     await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
 
     return await db.asset.update({
-      where: { id, organizationId },
+      where: { id, organizationId, archivedAt: null },
       data: { availableToBook },
     });
   } catch (cause) {
+    if (isLikeShelfError(cause)) {
+      throw cause;
+    }
+
+    const archivedMidWrite = archivedMidWriteError(cause, {
+      id,
+      organizationId,
+    });
+    if (archivedMidWrite) {
+      throw archivedMidWrite;
+    }
+
     throw maybeUniqueConstraintViolation(cause, "Asset", {
       additionalData: { id },
     });
@@ -8697,12 +8770,14 @@ export async function bulkMarkAvailability({
     // Archived assets are frozen (issue #382): can't change availability.
     await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
-    // Simple, consistent where clause
+    // Simple, consistent where clause. `archivedAt: null` skips an asset that
+    // was archived after the check above, so its availability stays frozen.
     await db.asset.updateMany({
       where: {
         id: { in: resolvedIds },
         organizationId,
         availableToBook: type === "unavailable",
+        archivedAt: null,
       },
       data: { availableToBook: type === "available" },
     });

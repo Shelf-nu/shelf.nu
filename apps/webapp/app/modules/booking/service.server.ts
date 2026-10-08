@@ -16174,6 +16174,11 @@ async function addScannedAssetsToBookingWithinTx(
   // Archived assets can't be added to a booking, even via scan (issue #382).
   // Pickers hide them, but the scanner takes raw ids so the server enforces it.
   if (allScannedAssetIds.length > 0) {
+    // Row-lock first, the same lock the archive services and the other booking
+    // writes take: a plain read here could pass, then an archive commit before
+    // the BookingAsset rows below are written. Taken after the booking lock
+    // above, so the order matches `updateBookingAssets` (booking, then assets).
+    await lockAssetsForArchiveGuard(tx, allScannedAssetIds, organizationId);
     const archivedScannedCount = await tx.asset.count({
       where: {
         id: { in: allScannedAssetIds },
