@@ -7,6 +7,7 @@ import { useRouteLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
+import { observeChromeAbove } from "~/utils/observe-chrome-above";
 import { tw } from "~/utils/tw";
 import { useGlobalModeViaObserver } from "../code-scanner";
 import { resolveDrawerHeight } from "./drawer-height";
@@ -112,11 +113,16 @@ export default function BaseDrawer({
     };
     measure();
 
+    // The panel resizes rarely but MOVES whenever chrome above it changes
+    // height (a banner mounting or wrapping), which neither its own size nor a
+    // window resize reports.
     const observer = new ResizeObserver(measure);
     observer.observe(panel);
+    const stopWatchingChrome = observeChromeAbove(panel, measure);
     window.addEventListener("resize", measure);
     return () => {
       observer.disconnect();
+      stopWatchingChrome();
       window.removeEventListener("resize", measure);
     };
   }, [mode, vh]);
