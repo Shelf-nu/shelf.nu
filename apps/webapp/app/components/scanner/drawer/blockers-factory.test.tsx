@@ -1,21 +1,18 @@
 /**
  * Tests for {@link createBlockers}.
  *
- * The blocker panel renders inside the scanner drawer's pinned footer, which
- * does not shrink — so every pixel it takes comes out of the action button
- * below it. Drawers declare up to nine blocker categories and the drawer itself
- * is only `viewport - 400` tall in scanner mode, so an uncapped list can push
- * its own "confirm" button past the bottom of a `fixed` box with no scroll path
- * back to it.
- *
- * happy-dom does no layout, so these pin the structure that bounds the panel:
- * the list scrolls within a cap, and the count and escape hatch stay outside
- * that cap so they are legible however long the list runs.
+ * Blockers render as a "Needs attention" card at the top of the scanner
+ * drawer's list, plus a one-line note in the footer that says why the action is
+ * disabled when the card has scrolled out of view. Every scanner drawer gets
+ * both from this one factory, so these pin what an operator sees in all of
+ * them: every active blocker listed with its fix, one control that clears them
+ * all, and nothing at all when no blocker is active.
  *
  * @see {@link file://./blockers-factory.tsx}
+ * @see {@link file://./configurable-drawer.tsx} places the card and the note
  */
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { createBlockers, type BlockerConfig } from "./blockers-factory";
@@ -32,49 +29,91 @@ function makeBlockers(count: number): BlockerConfig[] {
   }));
 }
 
-/** Renders the component half of the factory tuple. */
-function renderBlockers(configs: BlockerConfig[]) {
-  const [hasBlockers, Blockers] = createBlockers({
-    blockerConfigs: configs,
-    onResolveAll: vi.fn(),
-  });
-  const result = render(<Blockers />);
-  return { hasBlockers, ...result };
+/** Builds the factory output. */
+function build(configs: BlockerConfig[]) {
+  const [hasBlockers, Blockers] = createBlockers({ blockerConfigs: configs });
+  return { hasBlockers, Blockers };
 }
 
 describe("createBlockers", () => {
-  it("caps the blocker list so it cannot displace the drawer's action", () => {
-    // Nine categories is what partial-check-in actually declares.
-    renderBlockers(makeBlockers(9));
+  it("renders a Needs attention card counting every unresolved item", () => {
+    const { Blockers } = build(makeBlockers(3));
+    render(<Blockers />);
 
-    const list = screen.getByRole("list");
-
-    expect(list.className).toContain("overflow-y-auto");
-    // Viewport-relative on purpose: a fixed pixel cap that fits a laptop still
-    // buries the button on a phone, where the drawer is a few hundred px tall.
-    expect(list.className).toContain("max-h-[20vh]");
+    const toggle = screen.getByRole("button", { name: /Needs attention/ });
+    // 1 + 2 + 3 items across the three categories.
+    expect(toggle).toHaveTextContent("6");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("keeps the count and the escape hatch outside the scrolling area", () => {
-    // Scrolling the list must never hide how many blockers there are or the
-    // one control that clears them.
-    renderBlockers(makeBlockers(9));
+  it("lists every active blocker with its message, fix and explanation", () => {
+    const configs = makeBlockers(9);
+    const { Blockers } = build(configs);
+    render(<Blockers />);
 
-    const list = screen.getByRole("list");
+    for (const [i] of configs.entries()) {
+      expect(
+        screen.getByText(`${i + 1} item(s) hit blocker ${i}`)
+      ).toBeInTheDocument();
+      expect(screen.getByText(`Why blocker ${i} happens`)).toBeInTheDocument();
+    }
+    const removes = screen.getAllByRole("button", { name: "Remove from list" });
+    expect(removes).toHaveLength(9);
+
+    fireEvent.click(removes[4]);
+    expect(configs[4].onResolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Resolve all in the card header, outside the fold toggle", () => {
+    const { Blockers } = build(makeBlockers(2));
+    render(<Blockers />);
+
+    const toggle = screen.getByRole("button", { name: /Needs attention/ });
     const resolveAll = screen.getByRole("button", { name: /Resolve all/ });
 
-    expect(screen.getByText(/Unresolved blockers \(45\)/)).toBeInTheDocument();
-    expect(list.contains(resolveAll)).toBe(false);
+    expect(toggle.contains(resolveAll)).toBe(false);
+    expect(resolveAll).toHaveTextContent("3");
   });
 
-  it("renders every active blocker, so the cap hides none of them", () => {
-    renderBlockers(makeBlockers(9));
+  it("Resolve all runs every shown blocker's fix and nothing else", () => {
+    // A blocker whose condition is false is not shown, so the operator was
+    // never told about its rows: Resolve all must not touch them.
+    const shown = makeBlockers(2);
+    const hidden: BlockerConfig = {
+      id: "hidden",
+      condition: false,
+      count: 1,
+      message: () => "never shown",
+      onResolve: vi.fn(),
+    };
+    const { Blockers } = build([...shown, hidden]);
+    render(<Blockers />);
 
-    expect(screen.getByRole("list").children).toHaveLength(9);
+    fireEvent.click(screen.getByRole("button", { name: /Resolve all/ }));
+
+    expect(shown[0].onResolve).toHaveBeenCalledTimes(1);
+    expect(shown[1].onResolve).toHaveBeenCalledTimes(1);
+    expect(hidden.onResolve).not.toHaveBeenCalled();
   });
 
-  it("renders nothing when no blocker is active", () => {
-    const { hasBlockers, container } = renderBlockers([
+  it("renders the footer note naming how many issues stand in the way", () => {
+    const { Blockers } = build(makeBlockers(2));
+    const { container } = render(<Blockers variant="note" />);
+
+    expect(container).toHaveTextContent("Resolve 3 issues above to continue.");
+    // The note is text only: the fixes live in the card.
+    expect(within(container).queryByRole("button")).toBeNull();
+  });
+
+  it("says issue, not issues, for exactly one", () => {
+    const { Blockers } = build(makeBlockers(1));
+    const { container } = render(<Blockers variant="note" />);
+
+    expect(container).toHaveTextContent("Resolve 1 issue above to continue.");
+  });
+
+  it("renders nothing, card or note, when no blocker is active", () => {
+    const { hasBlockers, Blockers } = build([
       {
         id: "inactive",
         condition: false,
@@ -85,6 +124,7 @@ describe("createBlockers", () => {
     ]);
 
     expect(hasBlockers).toBe(false);
-    expect(container).toBeEmptyDOMElement();
+    expect(render(<Blockers />).container).toBeEmptyDOMElement();
+    expect(render(<Blockers variant="note" />).container).toBeEmptyDOMElement();
   });
 });

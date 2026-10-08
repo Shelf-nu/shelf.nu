@@ -28,7 +28,7 @@ import type { OnCodeDetectionSuccessProps } from "~/components/scanner/code-scan
 import { db } from "~/database/db.server";
 import { useAuditScanPersistence } from "~/hooks/use-audit-scan-persistence";
 import { useAuditSessionInitialization } from "~/hooks/use-audit-session-initialization";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { completeAuditWithImages } from "~/modules/audit/complete-audit-with-images.server";
 import {
   getAuditSessionDetails,
@@ -46,7 +46,6 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -255,8 +254,10 @@ export default function AuditSessionRoute() {
   const isRestoringRef = useRef(true); // Start true, set false after initialization
   const pendingPersistsRef = useRef<Map<string, string>>(new Map()); // Maps assetId -> qrId
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const expectedItems: AuditScannedItem[] = useMemo(
     () =>
@@ -389,16 +390,17 @@ export default function AuditSessionRoute() {
         }}
       />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
           backButtonText="Audit"
           allowNonShelfCodes
           paused={!auditSession}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
         />
       </div>
     </>

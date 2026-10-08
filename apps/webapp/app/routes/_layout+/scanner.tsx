@@ -35,7 +35,6 @@ import {
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 import {
   resolveAssetIdFromSamId,
   type ResolveAssetIdFromSamIdOptions,
@@ -334,9 +333,6 @@ const QRScanner = () => {
           errorMessage={errorMessage}
           errorTitle={errorTitle}
           actionSwitcher={<ActionSwitcher />}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>
