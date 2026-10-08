@@ -27,7 +27,7 @@ import {
   type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
-import { pushIntoTab } from "@/lib/navigation";
+import { assetDetailHref } from "@/lib/asset-routes";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
@@ -360,17 +360,34 @@ function AuditDetailContent() {
   // Stale-while-revalidate — skip refetch if data is fresh (< 60s old)
   const hasFetched = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Set when a row opens its asset. The asset can be edited or deleted there,
+  // so coming back refetches even inside the 60s window: otherwise the row
+  // would show the details from before the fix the auditor just made.
+  const returningFromAsset = useRef(false);
+  // Each fetch takes the next number, and only the newest one may write
+  // state. A pull-to-refresh can still be in flight when a row opens its
+  // asset; its answer must not overwrite the reload made on the way back.
+  const latestRequestId = useRef(0);
 
   // ── Fetch ──────────────────────────────────────────────
 
-  const fetchAudit = useCallback(async () => {
-    if (!id || !currentOrg) return;
+  /**
+   * Loads the audit and writes it into state.
+   *
+   * @returns true when this was the newest request, so the caller may record
+   *   it as the latest load; false when it was cancelled or superseded
+   */
+  const fetchAudit = useCallback(async (): Promise<boolean> => {
+    if (!id || !currentOrg) return false;
+    const requestId = ++latestRequestId.current;
     const { data, error: fetchErr } = await api.audit(id, currentOrg.id);
-    // Request cancelled (navigation) — ignore
-    if (!data && !fetchErr) return;
+    // A newer fetch started while this one was in flight: its answer wins.
+    if (requestId !== latestRequestId.current) return false;
+    // Request cancelled (navigation): ignore
+    if (!data && !fetchErr) return false;
     if (fetchErr || !data) {
       setError(fetchErr || "Failed to load audit");
-      return;
+      return true;
     }
     setError(null);
     setAudit(data.audit);
@@ -395,6 +412,7 @@ function AuditDetailContent() {
         useNativeDriver: false,
       }).start();
     }
+    return true;
     // why: reduceMotion is captured by closure but only read on initial render path;
     // rebuilding fetchAudit when reduceMotion toggles would re-fire focus refetches
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -403,16 +421,24 @@ function AuditDetailContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
-      if (hasFetched.current && Date.now() - lastFetchedAt.current < 60_000)
+      if (
+        hasFetched.current &&
+        !returningFromAsset.current &&
+        Date.now() - lastFetchedAt.current < 60_000
+      )
         return;
+      returningFromAsset.current = false;
       if (!hasFetched.current) {
         setIsLoading(true);
       }
-      fetchAudit().finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        hasFetched.current = true;
-      });
+      fetchAudit()
+        .then((isNewest) => {
+          // A superseded fetch must not stamp the cache: the newer one owns it.
+          if (!isNewest) return;
+          lastFetchedAt.current = Date.now();
+          hasFetched.current = true;
+        })
+        .finally(() => setIsLoading(false));
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAudit])
@@ -607,6 +633,19 @@ function AuditDetailContent() {
     return displayAssets.filter((a) => a.status === effectiveFilter);
   }, [displayAssets, effectiveFilter]);
 
+  // Pushes the asset detail onto THIS stack (the Audits-mounted copy of the
+  // Assets tab's screen), so the header back button, the iOS swipe and the
+  // Android back button all pop straight back to this audit, with its filter
+  // and scroll intact. The Assets tab's route would switch tabs instead, and
+  // back would land on the Assets list. See lib/asset-routes.ts.
+  const openAsset = useCallback(
+    (assetId: string) => {
+      returningFromAsset.current = true;
+      router.push(assetDetailHref("audits", assetId));
+    },
+    [router]
+  );
+
   // ── Render functions ──────────────────────────────────
 
   const renderAsset = useCallback(
@@ -670,7 +709,8 @@ function AuditDetailContent() {
       // unexpected asset updates it from here. A deleted asset has no detail
       // left to open, so that row stays an inert summary and only its
       // evidence chip (below) is tappable.
-      const opensAsset = item.assetId !== null;
+      const assetId = item.assetId;
+      const opensAsset = assetId !== null;
       const Card = opensAsset ? TouchableOpacity : View;
       const openEvidence = () =>
         onEvidencePress({
@@ -683,14 +723,7 @@ function AuditDetailContent() {
           style={styles.assetCard}
           {...(opensAsset
             ? {
-                // Cross-tab: pushIntoTab anchors the Assets list beneath the
-                // detail so "back" has a target, and leaves this audit mounted
-                // in its own stack instead of pushing the asset onto it.
-                onPress: () =>
-                  pushIntoTab(
-                    "/(tabs)/assets",
-                    `/(tabs)/assets/${item.assetId}`
-                  ),
+                onPress: () => openAsset(assetId),
                 activeOpacity: 0.7,
                 accessibilityRole: "button" as const,
               }
@@ -811,7 +844,14 @@ function AuditDetailContent() {
         </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
+    [
+      colors,
+      auditAssetStatusBadge,
+      styles,
+      formatDateTime,
+      onEvidencePress,
+      openAsset,
+    ]
   );
 
   // ── Loading / Error states ────────────────────────────
