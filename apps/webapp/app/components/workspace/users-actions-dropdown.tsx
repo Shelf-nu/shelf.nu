@@ -35,6 +35,7 @@ import {
 } from "~/utils/permissions/membership-access";
 import { ROLE_LABELS } from "~/utils/permissions/role-access";
 import { ChangeRoleDialog } from "./change-role-dialog";
+import { RevokeAccessDialog } from "./revoke-access-dialog";
 import { Button } from "../shared/button";
 import { Spinner } from "../shared/spinner";
 
@@ -92,6 +93,7 @@ export function TeamUsersActionsDropdown({
   });
 
   const [changeRoleOpen, setChangeRoleOpen] = useState(false);
+  const [revokeAccessOpen, setRevokeAccessOpen] = useState(false);
 
   /** Most users will have an invite, however we have to handle SSO case:
    *
@@ -180,9 +182,6 @@ export function TeamUsersActionsDropdown({
             ) : null}
             {isAcceptedUser ? (
               <>
-                {userId ? (
-                  <input type="hidden" name="userId" value={userId} />
-                ) : null}
                 <Button
                   type="button"
                   variant="link"
@@ -212,12 +211,10 @@ export function TeamUsersActionsDropdown({
                   </span>
                 </Button>
                 <Button
-                  type="submit"
+                  type="button"
                   variant="link"
                   className="justify-start px-4 py-3  text-gray-700 hover:bg-slate-100 hover:text-gray-700 focus:bg-slate-100"
                   width="full"
-                  name="intent"
-                  value="revokeAccess"
                   disabled={
                     isCurrentUser
                       ? {
@@ -232,6 +229,10 @@ export function TeamUsersActionsDropdown({
                         }
                       : disabled
                   }
+                  onClick={() => {
+                    setOpen(false);
+                    setRevokeAccessOpen(true);
+                  }}
                 >
                   <span className="flex items-center gap-2">
                     <RemoveUserIcon /> Revoke access
@@ -244,13 +245,23 @@ export function TeamUsersActionsDropdown({
       </DropdownMenu>
 
       {userId ? (
-        <ChangeRoleDialog
-          userId={userId}
-          currentRoleEnum={roleEnum}
-          currentRoles={roles}
-          open={changeRoleOpen}
-          onOpenChange={setChangeRoleOpen}
-        />
+        <>
+          <ChangeRoleDialog
+            userId={userId}
+            currentRoleEnum={roleEnum}
+            currentRoles={roles}
+            open={changeRoleOpen}
+            onOpenChange={setChangeRoleOpen}
+          />
+          <RevokeAccessDialog
+            userId={userId}
+            name={name}
+            email={email}
+            isSSO={isSSO}
+            open={revokeAccessOpen}
+            onOpenChange={setRevokeAccessOpen}
+          />
+        </>
       ) : null}
     </>
   ) : null;

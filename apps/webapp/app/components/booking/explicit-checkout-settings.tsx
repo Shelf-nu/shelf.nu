@@ -1,17 +1,26 @@
 /**
  * Explicit Check-out Settings
  *
- * The "Explicit check-out requirement" card on Settings > Bookings. When a
- * switch is on, that role cannot use the one-click check-out ("Check out" on a
- * reserved booking, "Check out remaining" on an ongoing one, "Check Out All
- * Assets" in the mobile app): the web check-out control offers only "Scan to
- * check out", and the one-click check-out is refused on the server (web and
- * mobile). Scanning or selecting the assets stays available.
+ * The "Check-out needs each item scanned or selected" card on Settings >
+ * Bookings. When a switch is on, that role cannot use the one-click check-out
+ * ("Check out" on a reserved booking, "Check out remaining" on an ongoing one,
+ * "Check Out All Assets" in the mobile app): the web check-out control offers
+ * only "Scan to check out", and the one-click check-out is refused on the
+ * server (web and mobile). Scanning or selecting the assets stays available.
+ * The workspace owner is never restricted, and Base users hold no check-out
+ * permission, so the card has two switches: Admins and Managers, and Self
+ * Service users. All of its words come from `@shelf/labels`, which the phone
+ * reads too.
  *
  * @see {@link file://./explicit-requirement-settings-card.tsx} - shared layout
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the
  *   `updateExplicitCheckout` action that persists it
  */
+import {
+  EXPLICIT_REQUIREMENT_LABELS,
+  EXPLICIT_REQUIREMENT_ROLE_LABELS,
+  explicitRequirementSwitchDescription,
+} from "@shelf/labels";
 import z from "zod";
 import { ExplicitRequirementSettingsCard } from "./explicit-requirement-settings-card";
 
@@ -51,20 +60,25 @@ export function ExplicitCheckoutSettings({
   return (
     <ExplicitRequirementSettingsCard
       header={header}
+      exemption={EXPLICIT_REQUIREMENT_LABELS.CHECKOUT.EXEMPTION}
       intent="updateExplicitCheckout"
       switches={[
         {
           name: "requireExplicitCheckoutForAdmin" satisfies ExplicitCheckoutField,
-          label: "Require explicit check-out for Admins and Managers",
-          description:
-            "When enabled, administrators and managers must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out.",
+          label: EXPLICIT_REQUIREMENT_ROLE_LABELS.ADMIN,
+          description: explicitRequirementSwitchDescription(
+            "CHECKOUT",
+            "ADMIN"
+          ),
           defaultChecked: defaultValues.requireExplicitCheckoutForAdmin,
         },
         {
           name: "requireExplicitCheckoutForSelfService" satisfies ExplicitCheckoutField,
-          label: "Require explicit check-out for Self Service",
-          description:
-            "When enabled, self-service users must use the scanner-based or selection-based explicit check-out flow instead of the one-click check-out.",
+          label: EXPLICIT_REQUIREMENT_ROLE_LABELS.SELF_SERVICE,
+          description: explicitRequirementSwitchDescription(
+            "CHECKOUT",
+            "SELF_SERVICE"
+          ),
           defaultChecked: defaultValues.requireExplicitCheckoutForSelfService,
         },
       ]}

@@ -53,6 +53,12 @@ export interface QuantityAwareAsset {
     | null;
   /** Booking-asset pivot records for quantity-tracked booking display */
   bookingAssets?: BookingAssetRecord[] | null;
+  /**
+   * The booking rows to count, already netted, from a list loader whose
+   * `bookingAssets` serve other readers and stay raw (see
+   * `getStillOutBookingRowsByAsset`). Read in place of `bookingAssets` when set.
+   */
+  stillOutBookingAssets?: BookingAssetRecord[] | null;
   /** AssetKit pivot records so the tooltip can resolve kit names from `BookingAsset.assetKitId` */
   assetKits?: AssetKitRecord[] | null;
   /** Allow additional properties so any asset-like object can be passed */
@@ -64,23 +70,22 @@ export interface QuantityAwareAsset {
  * Returns null for non-quantity-tracked assets or when there is no custody
  * or booking data to display.
  *
- * IMPORTANT — `bookingAssets[].quantity` contract for ONGOING/OVERDUE rows:
- * For booking rows whose status is ONGOING or OVERDUE, the `quantity` on
- * each `BookingAssetRecord` MUST be the SERVER-COMPUTED effective claimed
- * count for this asset on that booking — i.e. the booked quantity AFTER
- * subtracting any `PartialBookingCheckout` claims attributed to the asset
- * (Wave-B aligned-array attribution with legacy fallback). It is NOT the
- * raw `BookingAsset.quantity` snapshot from the pivot table.
+ * IMPORTANT: the `bookingAssets[].quantity` contract for ONGOING/OVERDUE rows.
+ * On those rows `quantity` MUST be the units of this asset still off the shelf
+ * on that booking: what went out, minus what came back or was used up
+ * (RETURN / CONSUME / LOSS / DAMAGE). It is NOT the raw `BookingAsset.quantity`
+ * pivot snapshot, which is the units booked and over-reports "Checked out".
  *
- * Loaders / the lazy-fetch quantity-breakdown API endpoint are responsible
- * for performing this subtraction before feeding rows into this helper —
- * the canonical reducer is `computeCheckedOutForAsset` in
- * `~/modules/booking/service.server`, which is the single source of truth
- * shared by the OUT-side (`computeBookingAssetRemainingToCheckOut`) and
- * the overview-side. Without that pre-computation, the badge over-reports
- * units as checked-out (the regression tracked as #96).
+ * The loader does that netting before feeding rows in, through
+ * `toStillOutBookingRows` in `~/modules/asset/quantity-breakdown.server`, which
+ * reads `computeCheckedOutByBookingForAsset` in
+ * `~/modules/booking/checked-out.server`, the same figures as the asset
+ * overview's "Checked out" tile. A surface that cannot net its rows must not
+ * hand them to this helper as `bookingAssets`: ship the netted rows as
+ * `stillOutBookingAssets` (built by `getStillOutBookingRowsByAsset`), or leave
+ * both off and let the badge fetch `/api/assets/:id/quantity-breakdown`.
  *
- * RESERVED rows are unaffected — they carry the raw booked quantity.
+ * RESERVED rows are unaffected: they carry the raw booked quantity.
  */
 export function getQuantityData(asset?: QuantityAwareAsset | null) {
   if (!asset || !isQuantityTracked(asset)) return null;
@@ -96,8 +101,9 @@ export function getQuantityData(asset?: QuantityAwareAsset | null) {
   const inCustody = custodyArray.reduce((sum, c) => sum + (c.quantity ?? 0), 0);
 
   /* --- Bookings --- */
-  const bookingAssets: BookingAssetRecord[] = Array.isArray(asset.bookingAssets)
-    ? asset.bookingAssets
+  const bookingRows = asset.stillOutBookingAssets ?? asset.bookingAssets;
+  const bookingAssets: BookingAssetRecord[] = Array.isArray(bookingRows)
+    ? bookingRows
     : [];
 
   const reserved = bookingAssets

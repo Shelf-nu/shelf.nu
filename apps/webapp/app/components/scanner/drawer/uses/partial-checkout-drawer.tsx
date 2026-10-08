@@ -107,6 +107,15 @@ export type CheckoutDispositionInput = z.infer<
  */
 export const partialCheckoutAssetsSchema = z.object({
   assetIds: z.array(z.string()).min(1),
+  /**
+   * Slices (`BookingAsset` ids) the operator checked "without scanning" rather
+   * than scanning. The action records them as `"selected"` while the rest of
+   * the batch stays `"scanned"`; absent from the list dialogs, which never
+   * scan. Keyed by slice because a quantity-tracked asset can sit on a
+   * standalone slice and a kit slice of the same booking, one scanned and the
+   * other ticked.
+   */
+  selectedBookingAssetIds: z.array(z.string()).optional(),
   checkouts: z
     .string()
     .optional()
@@ -276,6 +285,7 @@ export default function PartialCheckoutDrawer({
     checkedOutAssetIds,
     checkedInAssetIds,
     remainingToCheckOutByAsset,
+    kitsBookedElsewhere,
   } = useLoaderData<typeof loader>();
 
   // Per-asset units-still-to-check-out map for QUANTITY_TRACKED assets,
@@ -557,6 +567,23 @@ export default function PartialCheckoutDrawer({
     return [...out];
   }, [items, qtyByBookingAssetId, expectedAssets]);
 
+  /**
+   * Slices the operator checked "without scanning": their entry sits under a
+   * synthetic quick-check-out key, the prefix plus the slice's `BookingAsset`
+   * id, rather than a scanned QR id. The action records these slices as
+   * selected and every other row of the batch as scanned, so the activity line
+   * and the receipt can say which was which.
+   */
+  const selectedBookingAssetIds = useMemo(
+    () =>
+      Object.entries(items).flatMap(([key, item]) =>
+        item && key.startsWith(QUICK_CHECKOUT_QR_PREFIX)
+          ? [key.slice(QUICK_CHECKOUT_QR_PREFIX.length)]
+          : []
+      ),
+    [items]
+  );
+
   // Serialize the active qty slices into the `checkouts` JSON payload
   // submitted alongside `assetIds[]`. Empty / 0 quantities are skipped
   // — the schema requires `quantity >= 1`.
@@ -624,6 +651,10 @@ export default function PartialCheckoutDrawer({
     bookingAssetIds,
     remainingByAssetId,
     alreadyCheckedOut,
+    kitsBookedElsewhere: new Set(kitsBookedElsewhere.map((kit) => kit.id)),
+    assetsInKitsBookedElsewhere: new Set(
+      kitsBookedElsewhere.flatMap((kit) => kit.assetIds)
+    ),
     removeAssetsFromList,
     removeItemsFromList,
   });
@@ -824,6 +855,7 @@ export default function PartialCheckoutDrawer({
         form={
           <CustomForm
             assetIdsForCheckout={assetIdsForCheckout}
+            selectedBookingAssetIds={selectedBookingAssetIds}
             checkoutsPayload={checkoutsPayload}
             isEarlyCheckout={isEarlyCheckout}
             booking={booking}
@@ -1342,6 +1374,8 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
 // Custom form component that handles early check-out dialog
 type CustomFormProps = {
   assetIdsForCheckout: string[];
+  /** Slices checked "without scanning"; posted so the action records them as selected. */
+  selectedBookingAssetIds: string[];
   /**
    * Per-slice qty payload (Wave B). Emitted alongside `assetIds[]` as a
    * single JSON-encoded `checkouts` hidden field — same pattern the
@@ -1356,6 +1390,7 @@ type CustomFormProps = {
 
 const CustomForm = ({
   assetIdsForCheckout,
+  selectedBookingAssetIds,
   checkoutsPayload,
   isEarlyCheckout,
   booking,
@@ -1396,6 +1431,15 @@ const CustomForm = ({
             value={JSON.stringify(checkoutsPayload)}
           />
         ) : null}
+
+        {selectedBookingAssetIds.map((bookingAssetId, index) => (
+          <input
+            key={`selectedBookingAssetIds-${bookingAssetId}`}
+            type="hidden"
+            name={`selectedBookingAssetIds[${index}]`}
+            value={bookingAssetId}
+          />
+        ))}
 
         {/* Cancel button */}
         <Button type="button" variant="secondary" to=".." className="ml-auto">

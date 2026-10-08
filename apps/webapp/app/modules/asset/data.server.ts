@@ -39,6 +39,7 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
   getAdvancedPaginatedAndFilterableAssets,
@@ -114,6 +115,49 @@ type MutableBookingAssetSlice = {
   kitId?: string | null;
   kitName?: string | null;
 };
+
+/**
+ * Gives each quantity-tracked asset on an index page the booking rows its
+ * status badge counts, as `stillOutBookingAssets`: one row per active booking
+ * with the units still off the shelf there (see
+ * `getStillOutBookingRowsByAsset`). `getQuantityData` reads them in place of
+ * `bookingAssets`, which stays raw because the calendar and the booking
+ * custodian read it per slice.
+ *
+ * Badge data is supplementary, so a failed read is logged and the page still
+ * renders.
+ *
+ * @param args.assets - The page's asset rows, mutated in place.
+ * @param args.organizationId - Caller's organization. Scopes every read.
+ */
+async function attachStillOutBookingAssets({
+  assets,
+  organizationId,
+}: {
+  assets: Parameters<typeof getStillOutBookingRowsByAsset>[1]["assets"];
+  organizationId: string;
+}) {
+  try {
+    const stillOutByAsset = await getStillOutBookingRowsByAsset(db, {
+      assets,
+      organizationId,
+    });
+    for (const asset of assets) {
+      const rows = stillOutByAsset.get(asset.id);
+      if (rows) Object.assign(asset, { stillOutBookingAssets: rows });
+    }
+  } catch (cause) {
+    Logger.error(
+      new ShelfError({
+        cause,
+        message: "Failed to compute checked-out units for the asset index",
+        label: "Assets",
+        additionalData: { organizationId, assetCount: assets.length },
+        shouldBeCaptured: true,
+      })
+    );
+  }
+}
 
 /**
  * Attaches the kit name (and kit id) onto every kit-driven BookingAsset slice.
@@ -370,6 +414,11 @@ export async function simpleModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // List view only: the calendar's badge never takes the quantity path.
+  if (view !== "availability") {
+    await attachStillOutBookingAssets({ assets, organizationId });
   }
 
   // Availability view only: resolve kit names for kit-driven booking slices so
@@ -852,6 +901,16 @@ export async function advancedModeLoader({
         shouldBeCaptured: true,
       })
     );
+  }
+
+  // The advanced index ships no booking slices, so without these rows the
+  // status badge of a quantity-tracked asset would count no checked-out units
+  // at all. The calendar's badge never takes the quantity path.
+  if (view !== "availability") {
+    await attachStillOutBookingAssets({
+      assets: refreshedAssets,
+      organizationId,
+    });
   }
 
   const userName = resolveUserDisplayName(user);

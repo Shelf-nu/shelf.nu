@@ -5848,6 +5848,203 @@ describe("fulfilModelRequestsAndCheckout", () => {
     );
   });
 
+  it("records the scan's method on the rows it scanned, and no method on rows already on the booking", async () => {
+    expect.assertions(1);
+
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: [
+        {
+          asset: {
+            id: "hp-1",
+            assetKits: [],
+            title: "HP LaserJet 2020",
+            status: AssetStatus.AVAILABLE,
+            bookingAssets: [],
+          },
+          assetId: "hp-1",
+          quantity: 1,
+          id: "ba-hp",
+          // Fixture default: this slice went out with the booking.
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+    });
+    const hydratedBooking = { ...mockBooking, status: BookingStatus.ONGOING };
+
+    // why: no database in unit tests, so every booking read this flow makes
+    // has to be queued here: the pre-tx load, then the post-tx hydrate. The
+    // in-tx status guard does NOT consume an entry: it reads through
+    // `$queryRaw` (row lock), which is stubbed separately in the db mock.
+    // Ordering matters: a missing or surplus entry does not fail loudly, it
+    // shifts every later read by one and the function returns whatever the
+    // exhausted mock yields.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce(hydratedBooking);
+    // why: scanned asset metadata lookup inside the tx: the service needs
+    // assetModelId for each scanned asset so materialize can match against
+    // outstanding requests. Return the 3 Dells with a shared model id.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce([
+      {
+        id: "dell-1",
+        title: "Dell #1",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+      {
+        id: "dell-2",
+        title: "Dell #2",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+      {
+        id: "dell-3",
+        title: "Dell #3",
+        type: AssetType.INDIVIDUAL,
+        assetModelId: "am-dell",
+      },
+    ]);
+    // why: post-scan snapshot inside the tx. All 4 BookingAssets are on the
+    // why: `addScannedAssetsToBookingWithinTx` first reads which scanned assets
+    // ALREADY hold a standalone row, so only newly-arrived ones can discharge a
+    // reservation. None do here, so this queued value is empty. It must come
+    // first: the chain below is order-dependent.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([]);
+
+    // booking by this point (1 pre-existing HP + 3 newly materialized Dells).
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([
+      {
+        quantity: 1,
+        asset: { id: "hp-1", title: "HP", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-1", title: "Dell #1", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-2", title: "Dell #2", type: AssetType.INDIVIDUAL },
+      },
+      {
+        quantity: 1,
+        asset: { id: "dell-3", title: "Dell #3", type: AssetType.INDIVIDUAL },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["dell-1", "dell-2", "dell-3"],
+      // The phone's fulfil scanner: the route knows the surface and the app
+      // declared the method.
+      provenance: { surface: "phone", method: "scanned" },
+    });
+
+    const checkedOutEvents = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT");
+    // One event per row (hp-1 + 3 Dells). The three Dells went through the
+    // scanner; the HP was on the booking beforehand and went out with the
+    // batch unscanned, so its method is not said. Every row keeps the surface.
+    expect(checkedOutEvents.map((event) => event.meta)).toEqual([
+      { method: null, surface: "phone" },
+      { method: "scanned", surface: "phone" },
+      { method: "scanned", surface: "phone" },
+      { method: "scanned", surface: "phone" },
+    ]);
+  });
+
+  it("records an item already on the booking as scanned when the fulfil scanner scans it", async () => {
+    expect.assertions(1);
+
+    // The reservations drawer checks out an item already on the booking by
+    // scanning it. The printer's row was there before the scan and its stamp
+    // is spent, so the scan adds no row for it and claims nothing; it still
+    // went through the scanner. The laptop is new to the booking. The HP was
+    // assigned beforehand and not scanned, so its method stays not said.
+    const mockBooking = buildPreTxBooking({
+      bookingAssets: ["hp-1", "printer-2"].map((assetId) => ({
+        asset: {
+          id: assetId,
+          assetKits: [],
+          title: assetId,
+          status: AssetStatus.AVAILABLE,
+          bookingAssets: [],
+        },
+        assetId,
+        quantity: 1,
+        id: `ba-${assetId}`,
+        checkedOutAt: null,
+        checkedInAt: null,
+      })),
+    });
+    // why: the pre-tx load, then the post-tx hydrate; see the test above.
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    // why: every asset read in this flow (the scanned assets' metadata inside
+    // the tx, then the titles for the post-commit notes) describes the ids it
+    // asks for.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id) => ({
+            id,
+            title: id,
+            type: AssetType.INDIVIDUAL,
+            assetModelId: id === "dell-1" ? "am-dell" : "am-printer",
+            assetKits: [],
+          }))
+        )
+    );
+    // why: the scan helper first reads which scanned assets already hold a
+    // standalone row: the printer does, so no row is added for it.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce([{ assetId: "printer-2", quantity: 1 }]);
+    // why: the post-scan snapshot the check-out events are written from.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValueOnce(
+      ["hp-1", "printer-2", "dell-1"].map((assetId) => ({
+        id: `ba-${assetId}`,
+        sourceKitId: null,
+        quantity: 1,
+        assetKitId: null,
+        asset: { id: assetId, title: assetId, type: AssetType.INDIVIDUAL },
+      }))
+    );
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await fulfilModelRequestsAndCheckout({
+      ...mockFulfilParams,
+      assetIds: ["printer-2", "dell-1"],
+      provenance: { surface: "web", method: "scanned" },
+    });
+
+    const checkedOutEvents = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_OUT");
+    expect(
+      checkedOutEvents.map((event) => [event.assetId, event.meta])
+    ).toEqual([
+      ["hp-1", { method: null, surface: "web" }],
+      ["printer-2", { method: "scanned", surface: "web" }],
+      ["dell-1", { method: "scanned", surface: "web" }],
+    ]);
+  });
+
   /**
    * Lock order rather than behaviour. The reservation writers take `AssetModel`
    * before `BookingModelRequest` and hold no booking lock, so this transaction
@@ -6882,6 +7079,104 @@ describe("checkinBooking", () => {
       expect.any(Object),
       expect.any(Date)
     );
+  });
+
+  it("writes a check-in event only for the slice it brings back, not for one returned earlier", async () => {
+    expect.assertions(1);
+
+    // The pens sit on two slices: ba-q0 came back in an earlier partial
+    // check-in, ba-q1 is still out. The one-click check-in brings back ba-q1
+    // only, so ba-q0 already has its event and must not get a second one that
+    // would blank the receipt's method for the pens.
+    const pens = {
+      id: "asset-pens",
+      type: AssetType.QUANTITY_TRACKED,
+      unitOfMeasure: null,
+      consumptionType: ConsumptionType.TWO_WAY,
+      title: "Pens",
+      assetKits: [],
+      status: AssetStatus.CHECKED_OUT,
+      bookingAssets: [
+        { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+      ],
+    };
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: pens,
+          assetId: "asset-pens",
+          quantity: 5,
+          id: "ba-q0",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: new Date("2026-01-01T12:00:00.000Z"),
+        },
+        {
+          asset: pens,
+          assetId: "asset-pens",
+          quantity: 10,
+          id: "ba-q1",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+
+    (
+      db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue(mockBooking);
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    // why: the pool row the quantity loop locks.
+    (
+      quantityLock.lockAssetForQuantityUpdate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({
+      id: "asset-pens",
+      title: "Pens",
+      type: AssetType.QUANTITY_TRACKED,
+      quantity: 100,
+      unitOfMeasure: null,
+    });
+    // why: the remaining helpers read the pens' booked units by asset; the
+    // completion gate reads by booking and is kept empty, as in the test below.
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args: { where?: { assetId?: string } }) =>
+      args?.where?.assetId
+        ? Promise.resolve([{ quantity: 15 }])
+        : Promise.resolve([])
+    );
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // why: the five pens of ba-q0 are already logged back.
+    (
+      db.consumptionLog.aggregate as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ _sum: { quantity: 5 } });
+    (db.custody.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      _sum: { quantity: 0 },
+    });
+
+    await checkinBooking({
+      ...mockCheckinParams,
+      userId: "user-1",
+      provenance: { surface: "web", method: "quick" },
+    });
+
+    const checkedIn = (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_CHECKED_IN")
+      .map((event) => {
+        const meta = event.meta as Record<string, unknown>;
+        return { method: meta.method, surface: meta.surface };
+      });
+    expect(checkedIn).toEqual([{ method: "quick", surface: "web" }]);
   });
 
   it("emits an ASSET_QUANTITY_CHANGED event for a QUANTITY_TRACKED pool decrement on check-in", async () => {
@@ -12368,6 +12663,108 @@ describe("partialCheckinBooking — qty-tracked dispositions", () => {
     );
   });
 
+  /**
+   * Two slices of the pens on the one booking, both out: standalone `ba-pens`
+   * and kit-driven `ba-pens-kit`. The web scan page can scan one and tick the
+   * other "without scanning" in the same batch.
+   */
+  function setupTwoPensSlices() {
+    setupQtyMocks();
+    // why: the per-slice cap reads each slice's booked units by id; both
+    // slices book 10.
+    (
+      db.bookingAsset.findUnique as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue({ quantity: 10 });
+    // why: the activity line links the booking by the name the status update
+    // returns.
+    (db.booking.update as ReturnType<typeof vitest.fn>).mockResolvedValue({
+      ...makeQtyBooking(),
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...makeQtyBooking(),
+      bookingAssets: ["ba-pens", "ba-pens-kit"].map((id) => ({
+        id,
+        assetId: mockQtyAssetId,
+        quantity: 10,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: {
+          id: mockQtyAssetId,
+          type: AssetType.QUANTITY_TRACKED,
+          assetKits: [],
+        },
+      })),
+    });
+  }
+
+  /** The `BOOKING_PARTIAL_CHECKIN` events this batch recorded. */
+  function partialCheckinEvents() {
+    return (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === "BOOKING_PARTIAL_CHECKIN")
+      .map((event) => [event.assetId, event.meta]);
+  }
+
+  it("records the asset as selected when every slice it returned on was ticked", async () => {
+    expect.assertions(1);
+
+    setupTwoPensSlices();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", returned: 5 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", returned: 5 },
+      ],
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-pens", "ba-pens-kit"],
+      },
+    });
+
+    // One event per asset, however many slices the batch touched.
+    expect(partialCheckinEvents()).toEqual([
+      [mockQtyAssetId, { method: "selected", surface: "web" }],
+    ]);
+  });
+
+  it("says nothing for the asset, and both ways on the activity line, when one slice was ticked and the other scanned", async () => {
+    expect.assertions(2);
+
+    setupTwoPensSlices();
+
+    await partialCheckinBooking({
+      ...baseParams,
+      checkins: [
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens", returned: 5 },
+        { assetId: mockQtyAssetId, bookingAssetId: "ba-pens-kit", returned: 5 },
+      ],
+      // The standalone slice was ticked "without scanning"; the kit slice went
+      // through the scanner.
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-pens"],
+      },
+    });
+
+    // The asset's one event covers both slices, so it must not claim either
+    // way: the method is recorded as not said, the surface still as web.
+    expect(partialCheckinEvents()).toEqual([
+      [mockQtyAssetId, { method: null, surface: "web" }],
+    ]);
+    expect(bookingNoteService.createSystemBookingNote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining("(scanned and selected on the web)"),
+      })
+    );
+  });
+
   it("records the canonical BOOKING_STATUS_CHANGED → COMPLETE event when qty dispositions complete the booking", async () => {
     expect.assertions(1);
 
@@ -15198,6 +15595,81 @@ describe("addScannedAssetsToBooking", () => {
           }),
         })
       );
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            bookingAssets: {
+              create: [
+                expect.objectContaining({
+                  assetId: "asset-cables",
+                  assetKitId: HELD_KIT.membershipId,
+                }),
+              ],
+            },
+          },
+        })
+      );
+    });
+
+    it("adds a kit whose quantity-tracked member a sibling kit has reserved for the same period", async () => {
+      expect.assertions(1);
+
+      const findFirst = restoreMockImplementationAfterTest(
+        db.booking.findFirst
+      );
+      // why: the booking window drives the overlap lookup.
+      findFirst.fn.mockResolvedValue({ from, to });
+
+      const assetFindMany = restoreMockImplementationAfterTest(
+        db.asset.findMany
+      );
+      // why: the pool is reserved on an overlapping booking through a sibling
+      // kit's slice. The stub answers only the columns each read selects, as the
+      // database does, so the guard sees the asset type only if it asks for it.
+      assetFindMany.fn.mockImplementation(
+        (args?: {
+          where?: { id?: { in?: string[] } };
+          select?: Record<string, unknown>;
+        }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => {
+              const row: Record<string, unknown> = {
+                id,
+                title: "Cables",
+                type: AssetType.QUANTITY_TRACKED,
+                status: AssetStatus.AVAILABLE,
+                unitOfMeasure: "cables",
+                assetModelId: null,
+                bookingAssets: [
+                  {
+                    booking: {
+                      id: "booking-sibling",
+                      status: BookingStatus.RESERVED,
+                    },
+                  },
+                ],
+              };
+              const select = args?.select;
+              return select
+                ? Object.fromEntries(
+                    Object.entries(row).filter(([key]) => key in select)
+                  )
+                : row;
+            })
+          )
+      );
+      // The kit's own slice is free; only the shared pool is booked elsewhere.
+      mockHeldKitElsewhere([]);
+      const update = restoreMockImplementationAfterTest(db.booking.update);
+      // why: the write returns the booking summary the post-commit notes read.
+      update.fn.mockResolvedValue({
+        id: "booking-scan",
+        name: "Scan Booking",
+        status: BookingStatus.RESERVED,
+      });
+
+      await addScannedAssetsToBooking(scanCase);
+
       expect(db.booking.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: {
@@ -19232,5 +19704,355 @@ describe("getBookingFlags - kits in custody", () => {
     });
 
     expect(flags.hasKitsInCustody).toBe(true);
+  });
+});
+
+describe("check-in and check-out method on activity events", () => {
+  // Every BOOKING_CHECKED_OUT / BOOKING_CHECKED_IN / BOOKING_PARTIAL_CHECKIN
+  // event records how the row was handled (`meta.method`) and from where
+  // (`meta.surface`), exactly as the route stated it. The service never guesses.
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids = args?.where?.id?.in;
+        return Promise.resolve(
+          Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
+        );
+      }
+    );
+    (
+      db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+    ).mockResolvedValue([]);
+  });
+
+  /** The events one writer recorded, flattened across every `recordEvents` call. */
+  function recordedEvents(action: string) {
+    return (
+      activityEventService.recordEvents as ReturnType<typeof vitest.fn>
+    ).mock.calls
+      .flatMap(([events]) => events as Array<Record<string, unknown>>)
+      .filter((event) => event.action === action);
+  }
+
+  it("checkoutBooking stamps the one-click web check-out as quick on the web", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.RESERVED,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            assetKits: [],
+            title: "Asset 1",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-m1",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+        {
+          asset: {
+            id: "asset-2",
+            assetKits: [],
+            title: "Asset 2",
+            status: "AVAILABLE",
+            bookingAssets: [],
+          },
+          assetId: "asset-2",
+          quantity: 1,
+          id: "ba-m2",
+          checkedOutAt: null,
+          checkedInAt: null,
+        },
+      ],
+    };
+    (db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>)
+      .mockResolvedValueOnce(mockBooking)
+      .mockResolvedValueOnce({ ...mockBooking, status: BookingStatus.ONGOING });
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({ id: "booking-1" });
+
+    await checkoutBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      from: futureFromDate,
+      to: futureToDate,
+      userId: "user-1",
+      provenance: { surface: "web", method: "quick" },
+    });
+
+    expect(
+      recordedEvents("BOOKING_CHECKED_OUT").map((event) => [
+        event.assetId,
+        event.meta,
+      ])
+    ).toEqual([
+      ["asset-1", { method: "quick", surface: "web" }],
+      ["asset-2", { method: "quick", surface: "web" }],
+    ]);
+  });
+
+  it("checkinBooking stamps a check-in of selected rows as selected on the web", async () => {
+    expect.assertions(1);
+
+    const mockBooking = {
+      ...mockBookingData,
+      status: BookingStatus.ONGOING,
+      bookingAssets: [
+        {
+          asset: {
+            id: "asset-1",
+            title: "Asset 1",
+            assetKits: [],
+            status: AssetStatus.CHECKED_OUT,
+            bookingAssets: [
+              { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+            ],
+          },
+          assetId: "asset-1",
+          quantity: 1,
+          id: "ba-m3",
+          checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+          checkedInAt: null,
+        },
+      ],
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(mockBooking);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...mockBooking,
+      status: BookingStatus.COMPLETE,
+    });
+    // why: the completion note names the checked-in assets, read back by id
+    // with their title and kit membership.
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids: string[] = args?.where?.id?.in ?? [];
+        return Promise.resolve(
+          ids.map((id) => ({ id, title: `Title ${id}`, assetKits: [] }))
+        );
+      }
+    );
+
+    await checkinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      hints: mockClientHints,
+      userId: "user-1",
+      specificAssetIds: ["asset-1"],
+      // The "Check in selected items" dialog closing the booking early.
+      provenance: { surface: "web", method: "selected" },
+    });
+
+    expect(
+      recordedEvents("BOOKING_CHECKED_IN").map((event) => event.meta)
+    ).toEqual([{ method: "selected", surface: "web" }]);
+  });
+
+  /**
+   * Two outstanding rows, `ba-d1` for asset-1 and `ba-d2` for asset-2, both
+   * out on an ongoing booking, so a batch naming both closes the booking
+   * through `checkinBooking`.
+   */
+  function setupTwoRowsThatCloseTheBooking() {
+    const bookingWithAssets = {
+      ...mockBookingData,
+      bookingAssets: ["asset-1", "asset-2"].map((assetId, i) => ({
+        asset: {
+          id: assetId,
+          title: `Title ${assetId}`,
+          assetKits: [],
+          type: AssetType.INDIVIDUAL,
+          status: AssetStatus.CHECKED_OUT,
+          bookingAssets: [
+            { booking: { id: "booking-1", status: BookingStatus.ONGOING } },
+          ],
+        },
+        assetId,
+        quantity: 1,
+        id: `ba-d${i + 1}`,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+      })),
+      status: BookingStatus.ONGOING,
+      partialCheckins: [],
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
+    //@ts-expect-error missing vitest type
+    db.booking.update.mockResolvedValue({
+      ...bookingWithAssets,
+      status: BookingStatus.COMPLETE,
+    });
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue(
+      bookingWithAssets.bookingAssets.map((ba) => ({
+        assetId: ba.assetId,
+        quantity: 1,
+        checkedOutAt: ba.checkedOutAt,
+        checkedInAt: null,
+        asset: { id: ba.assetId, type: AssetType.INDIVIDUAL },
+      }))
+    );
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockImplementation(
+      (args?: any) => {
+        const ids: string[] = args?.where?.id?.in ?? [];
+        return Promise.resolve(
+          ids.map((id) => ({
+            id,
+            title: `Title ${id}`,
+            status: AssetStatus.CHECKED_OUT,
+            assetKits: [],
+          }))
+        );
+      }
+    );
+  }
+
+  it("partialCheckinBooking keeps the batch's method when the last rows close the booking through the full check-in", async () => {
+    expect.assertions(1);
+
+    // Both outstanding rows come back in one phone batch, so the partial path
+    // hands the batch to `checkinBooking`, whose BOOKING_CHECKED_IN events must
+    // still say the rows were selected on the phone.
+    setupTwoRowsThatCloseTheBooking();
+
+    await partialCheckinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+      hints: mockClientHints,
+      provenance: { surface: "phone", method: "selected" },
+    });
+
+    expect(
+      recordedEvents("BOOKING_CHECKED_IN").map((event) => [
+        event.assetId,
+        event.meta,
+      ])
+    ).toEqual([
+      ["asset-1", { method: "selected", surface: "phone" }],
+      ["asset-2", { method: "selected", surface: "phone" }],
+    ]);
+  });
+
+  it("resolves each row's slice when a web batch with a ticked slice closes the booking through the full check-in", async () => {
+    expect.assertions(2);
+
+    // The scan page scanned asset-1 and ticked asset-2's slice "without
+    // scanning"; both rows come back in one batch, so the partial path hands
+    // it to `checkinBooking`, whose per-row events must keep the tick on its
+    // own slice rather than stamp the batch's method on both.
+    setupTwoRowsThatCloseTheBooking();
+
+    await partialCheckinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+      hints: mockClientHints,
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-d2"],
+      },
+    });
+
+    expect(
+      recordedEvents("BOOKING_CHECKED_IN").map((event) => [
+        event.assetId,
+        event.meta,
+      ])
+    ).toEqual([
+      ["asset-1", { method: "scanned", surface: "web" }],
+      ["asset-2", { method: "selected", surface: "web" }],
+    ]);
+    // The asset-side note the final batch writes says how it was made rather
+    // than claiming every item was scanned.
+    expect(noteService.createNotes).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          "checked in the last items still out (scanned and selected on the web), which completed the booking."
+        ),
+      })
+    );
+  });
+
+  it("partialCheckinBooking keeps the batch's method on rows that name no slice, whatever slices were ticked", async () => {
+    expect.assertions(1);
+
+    const bookingWithAssets = {
+      ...mockBookingData,
+      bookingAssets: ["asset-1", "asset-2", "asset-3"].map((assetId, i) => ({
+        asset: { id: assetId, assetKits: [], type: AssetType.INDIVIDUAL },
+        assetId,
+        quantity: 1,
+        id: `ba-m${i + 4}`,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+      })),
+    };
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue(bookingWithAssets);
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.findMany.mockResolvedValue(
+      ["asset-1", "asset-2", "asset-3"].map((assetId) => ({
+        assetId,
+        quantity: 1,
+        checkedOutAt: new Date("2026-01-01T10:00:00.000Z"),
+        checkedInAt: null,
+        asset: { id: assetId, type: AssetType.INDIVIDUAL },
+      }))
+    );
+    //@ts-expect-error missing vitest type
+    db.partialBookingCheckin.findMany.mockResolvedValue([
+      {
+        assetIds: ["asset-1", "asset-2"],
+        checkinTimestamp: new Date("2026-01-01T12:00:00.000Z"),
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", title: "Asset 1", status: AssetStatus.CHECKED_OUT },
+      { id: "asset-2", title: "Asset 2", status: AssetStatus.CHECKED_OUT },
+    ]);
+
+    await partialCheckinBooking({
+      id: "booking-1",
+      organizationId: "org-1",
+      assetIds: ["asset-1", "asset-2"],
+      userId: "user-1",
+      hints: mockClientHints,
+      // The web scan page. Both rows are INDIVIDUAL assets posted by asset id
+      // alone; a ticked slice in the provenance can only ever match a row
+      // that names that slice, so neither row reads as selected.
+      provenance: {
+        surface: "web",
+        method: "scanned",
+        selectedBookingAssetIds: ["ba-m5"],
+      },
+    });
+
+    expect(
+      recordedEvents("BOOKING_PARTIAL_CHECKIN").map((event) => [
+        event.assetId,
+        event.meta,
+      ])
+    ).toEqual([
+      ["asset-1", { method: "scanned", surface: "web" }],
+      ["asset-2", { method: "scanned", surface: "web" }],
+    ]);
   });
 });

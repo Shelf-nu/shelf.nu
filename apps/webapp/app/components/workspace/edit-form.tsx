@@ -315,12 +315,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"QR codes on PDFs"}
+          rowLabel={"Code images on PDFs"}
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether the QR image is printed on the booking checklist
-              and the audit receipt.
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
             </p>
           }
         >
@@ -343,16 +343,15 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showQrCodesOnPdfs"
                 className="cursor-pointer text-[14px] font-medium text-gray-700"
               >
-                Print QR codes on PDFs
+                Print code images on PDFs
               </label>
               <p
                 id="showQrCodesOnPdfs-desc"
                 className="text-[14px] text-gray-600"
               >
-                Turn this off when people should scan the label on the item
-                itself. A printed sheet carries the same codes, so it can be
-                scanned instead of walking to the equipment. The code still
-                prints as text either way.
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>

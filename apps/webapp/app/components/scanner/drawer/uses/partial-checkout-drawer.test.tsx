@@ -33,9 +33,10 @@ import {
   QUICK_CHECKOUT_QR_PREFIX,
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
-
 import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
-import PartialCheckoutDrawer from "./partial-checkout-drawer";
+import PartialCheckoutDrawer, {
+  partialCheckoutAssetsSchema,
+} from "./partial-checkout-drawer";
 
 // why: react-router's `useLoaderData` runs outside a real Remix route
 // context here — we stub it with deterministic data per test. `Link` /
@@ -180,6 +181,7 @@ function makeLoaderData(
     checkedInAssetIds: overrides.checkedInAssetIds ?? ([] as string[]),
     remainingToCheckOutByAsset: overrides.remainingToCheckOutByAsset ?? {},
     checkoutSourceQuestions: overrides.checkoutSourceQuestions ?? [],
+    kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
   };
 }
 
@@ -343,6 +345,7 @@ function makeLoaderDataFromExpected(
     checkedInAssetIds: overrides.checkedInAssetIds ?? ([] as string[]),
     remainingToCheckOutByAsset,
     checkoutSourceQuestions: [] as CheckoutSourceQuestion[],
+    kitsBookedElsewhere: [] as { id: string; assetIds: string[] }[],
   };
 }
 
@@ -863,5 +866,22 @@ describe("PartialCheckoutDrawer", () => {
     expect(screen.queryByText("Elysian")).not.toBeInTheDocument();
     expect(screen.queryByText("Justiciar")).not.toBeInTheDocument();
     expect(screen.queryByText("Spectral")).not.toBeInTheDocument();
+  });
+});
+
+describe("partialCheckoutAssetsSchema: rows checked without scanning", () => {
+  it("accepts the ticked slices, by BookingAsset id, next to the scanned rows", () => {
+    // The same asset can be scanned on its kit slice and ticked on its
+    // standalone slice, so the form names the slice, never the asset.
+    const parsed = partialCheckoutAssetsSchema.parse({
+      assetIds: ["asset-1", "asset-2"],
+      selectedBookingAssetIds: ["ba-standalone"],
+    });
+    expect(parsed.selectedBookingAssetIds).toEqual(["ba-standalone"]);
+  });
+
+  it("needs no ticked slices, so the list dialogs post as before", () => {
+    const parsed = partialCheckoutAssetsSchema.parse({ assetIds: ["asset-1"] });
+    expect(parsed.selectedBookingAssetIds).toBeUndefined();
   });
 });

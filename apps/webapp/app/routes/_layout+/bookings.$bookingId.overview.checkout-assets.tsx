@@ -21,10 +21,12 @@ import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
+import { outranksReservations } from "~/modules/booking/helpers";
 import {
   checkoutAssets,
   computeBookingAssetRemainingToCheckOut,
   computeBookingAssetSliceRemainingToCheckOut,
+  findKitsBookedElsewhere,
   getBooking,
   getDetailedPartialCheckoutData,
   getPartiallyCheckedInAssetIds,
@@ -365,6 +367,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       bookingId: booking.id,
     });
 
+    /**
+     * Kits on this booking that another booking holds, so the drawer can raise
+     * the refusal as a blocker instead of only at submit. Same lookup, window
+     * and in-flight rule as `partialCheckoutBooking`, so the two cannot
+     * disagree.
+     */
+    const kitsBookedElsewhere = (
+      await findKitsBookedElsewhere({
+        slices: booking.bookingAssets.map((ba) => ({
+          assetId: ba.assetId,
+          assetKitId: ba.assetKitId,
+          sourceKitId: ba.sourceKitId,
+        })),
+        bookingId: booking.id,
+        from: booking.from,
+        to: booking.to,
+        organizationId,
+        ignoreReservedConflicts: outranksReservations(booking.status),
+      })
+    ).map(({ id, assetIds }) => ({ id, assetIds }));
+
     return payload({
       title,
       header,
@@ -375,6 +398,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       expectedAssets,
       expectedKits,
       checkoutSourceQuestions,
+      kitsBookedElsewhere,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -419,6 +443,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // QUANTITY_TRACKED assets. The schema extension lives on
     // `partialCheckoutAssetsSchema` (imported by `checkoutAssets`), so
     // forwarding the FormData unchanged is sufficient.
+    // Everything on this page went through the scanner, except the slices the
+    // drawer names in `selectedBookingAssetIds`: those were checked "without
+    // scanning" and are recorded as selected.
     return await checkoutAssets({
       formData,
       request,
@@ -426,6 +453,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       organizationId,
       userId,
       authSession,
+      provenance: { surface: "web", method: "scanned" },
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });

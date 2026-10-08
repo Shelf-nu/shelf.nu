@@ -76,6 +76,14 @@ export type PartialCheckoutBlockerArgs = {
   remainingByAssetId: Record<string, number>;
   /** Asset ids recorded in prior partial check-outs of this booking. */
   alreadyCheckedOut: Set<string>;
+  /**
+   * Kits on this booking that another booking holds for an overlapping window,
+   * or that are still out on an overdue one. From `findKitsBookedElsewhere`,
+   * the same lookup `partialCheckoutBooking` refuses on.
+   */
+  kitsBookedElsewhere: Set<string>;
+  /** The assets this booking took from those kits. */
+  assetsInKitsBookedElsewhere: Set<string>;
   /** Drops rows by ASSET id. */
   removeAssetsFromList: (assetIds: string[]) => void;
   /** Drops rows by the CODE that scanned them, which is how kits are keyed. */
@@ -120,10 +128,11 @@ function qrIdsFor(
  * Blockers for the partial check-out drawer.
  *
  * Kit members are deliberately not blocked for being part of a kit: a partial
- * check-out may send individual kit assets out on their own. Conflicts with
- * another booking are not derived here either, because the scanned payload
- * does not carry other bookings; `partialCheckoutBooking` refuses them
- * server-side.
+ * check-out may send individual kit assets out on their own. A kit another
+ * booking holds is blocked, and so is a member of it scanned on its own: the
+ * submit sends every slice of a scanned asset, the kit slice included, and
+ * `partialCheckoutBooking` refuses the kit either way. The scanned payload does
+ * not carry other bookings, so the loader resolves those kits.
  *
  * A kit with a custodian is blocked whatever its members are. The kit is one
  * unit: a person holding it cannot also hand it to a borrower, and that holds
@@ -135,6 +144,8 @@ export function buildPartialCheckoutBlockers({
   bookingAssetIds,
   remainingByAssetId,
   alreadyCheckedOut,
+  kitsBookedElsewhere,
+  assetsInKitsBookedElsewhere,
   removeAssetsFromList,
   removeItemsFromList,
 }: PartialCheckoutBlockerArgs): PartialCheckoutBlockers {
@@ -207,6 +218,15 @@ export function buildPartialCheckoutBlockers({
     .map((kit) => kit.id);
   const qrIdsOfKitsInCustody = qrIdsFor(items, "kit", kitsInCustody);
 
+  // Kits outside the booking are left to `kits-not-in-booking`.
+  const kitsHeldElsewhere = kits
+    .filter(
+      (kit) =>
+        kitsBookedElsewhere.has(kit.id) && !kitsNotInBooking.includes(kit.id)
+    )
+    .map((kit) => kit.id);
+  const qrIdsOfKitsHeldElsewhere = qrIdsFor(items, "kit", kitsHeldElsewhere);
+
   // Assets that are redundant because their kit is also scanned.
   const redundantAssetIds: string[] = [];
   const qrIdsOfRedundantAssets: string[] = [];
@@ -229,6 +249,21 @@ export function buildPartialCheckoutBlockers({
       }
     }
   });
+
+  // A member scanned alongside its kit is already reported as redundant, and
+  // the kit carries the conflict, so it is not counted twice.
+  const assetsHeldElsewhere = assets
+    .filter(
+      (asset) =>
+        assetsInKitsBookedElsewhere.has(asset.id) &&
+        !redundantAssetIds.includes(asset.id)
+    )
+    .map((asset) => asset.id);
+  const qrIdsOfAssetsHeldElsewhere = qrIdsFor(
+    items,
+    "asset",
+    assetsHeldElsewhere
+  );
 
   const blockerConfigs: BlockerConfig[] = [
     {
@@ -297,6 +332,34 @@ export function buildPartialCheckoutBlockers({
       onResolve: () => removeItemsFromList(qrIdsOfKitsInCustody),
     },
     {
+      id: "kits-booked-elsewhere",
+      condition: kitsHeldElsewhere.length > 0,
+      count: kitsHeldElsewhere.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          already booked or checked out on another booking.
+        </>
+      ),
+      description:
+        "Another booking holds this kit for an overlapping period, or it has not come back from an overdue one.",
+      onResolve: () => removeItemsFromList(qrIdsOfKitsHeldElsewhere),
+    },
+    {
+      id: "kit-assets-booked-elsewhere",
+      condition: assetsHeldElsewhere.length > 0,
+      count: assetsHeldElsewhere.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong> part
+          of a kit that is booked or checked out on another booking.
+        </>
+      ),
+      description:
+        "The kit these assets belong to on this booking is held by another booking.",
+      onResolve: () => removeItemsFromList(qrIdsOfAssetsHeldElsewhere),
+    },
+    {
       id: "redundant-kit-assets",
       condition: redundantAssetIds.length > 0,
       count: redundantAssetIds.length,
@@ -346,6 +409,8 @@ export function buildPartialCheckoutBlockers({
         ...qrIdsOfAssetsInCustody,
         ...qrIdsOfAlreadyCheckedOutKits,
         ...qrIdsOfKitsInCustody,
+        ...qrIdsOfKitsHeldElsewhere,
+        ...qrIdsOfAssetsHeldElsewhere,
       ]);
     },
   };

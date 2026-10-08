@@ -1,3 +1,5 @@
+import type { BookingMethod } from "../booking-method";
+import { withBookingMethod } from "../booking-method";
 import { apiFetch } from "./client";
 import type {
   BookingsResponse,
@@ -86,12 +88,26 @@ export const bookingsApi = {
     ),
 
   /** Check out a booking (RESERVED -> ONGOING) */
-  checkoutBooking: (orgId: string, bookingId: string, timeZone?: string) =>
+  checkoutBooking: (
+    orgId: string,
+    bookingId: string,
+    timeZone?: string,
+    /**
+     * Answers to the booking's `checkoutSourceQuestions`, keyed by slice id:
+     * the location the units leave from, or `null` for the unplaced units.
+     * Left out, the server records its own default for each pool.
+     */
+    sourceLocations?: Record<string, string | null>
+  ) =>
     apiFetch<BookingActionResponse>(
       `/api/mobile/bookings/checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, timeZone }),
+        body: JSON.stringify({
+          bookingId,
+          timeZone,
+          ...(sourceLocations ? { sourceLocations } : {}),
+        }),
       }
     ),
 
@@ -107,19 +123,36 @@ export const bookingsApi = {
    * server refuses only a check-out that sends nothing out: without the
    * explicit requirement it needs a scanned unit or an asset already on the
    * booking, and under it a scanned unit.
+   *
+   * `method` says how the units were collected; the server records it on the
+   * booking's activity and prints it on the receipt. See `lib/booking-method`.
    */
   fulfilAndCheckoutBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     kitIds: string[] = [],
-    timeZone?: string
+    timeZone?: string,
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
+    method?: BookingMethod
   ) =>
     apiFetch<FulfilAndCheckoutResponse>(
       `/api/mobile/bookings/fulfil-and-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod(
+            {
+              bookingId,
+              assetIds,
+              kitIds,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
+            method
+          )
+        ),
       }
     ),
 
@@ -133,19 +166,26 @@ export const bookingsApi = {
       }
     ),
 
-  /** Partial check-in: check in specific assets */
+  /**
+   * Partial check-in: check in specific assets. `method` says how the app
+   * collected them (scanned or selected); the server records it on the
+   * booking's activity and prints it on the receipt. See `lib/booking-method`.
+   */
   partialCheckinBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     timeZone?: string,
-    checkins?: CheckinDisposition[]
+    checkins?: CheckinDisposition[],
+    method?: BookingMethod
   ) =>
     apiFetch<PartialCheckinResponse>(
       `/api/mobile/bookings/partial-checkin?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, checkins, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod({ bookingId, assetIds, checkins, timeZone }, method)
+        ),
         // why: non-idempotent — per-unit dispositions carry no request key, so
         // a timed-out-but-landed request re-sent would return the units twice.
         retry: false,
@@ -156,20 +196,34 @@ export const bookingsApi = {
    * Partial check-out: check out a subset of a booking's assets (progressive
    * check-out — "take some now"). The first checkout transitions the booking to
    * ONGOING; the rest stay reserved until checked out. Mirrors
-   * {@link partialCheckinBooking}.
+   * {@link partialCheckinBooking}, `method` included.
    */
   partialCheckoutBooking: (
     orgId: string,
     bookingId: string,
     assetIds: string[],
     timeZone?: string,
-    checkouts?: CheckoutDisposition[]
+    checkouts?: CheckoutDisposition[],
+    /** Same shape and meaning as on {@link checkoutBooking}. */
+    sourceLocations?: Record<string, string | null>,
+    method?: BookingMethod
   ) =>
     apiFetch<PartialCheckoutResponse>(
       `/api/mobile/bookings/partial-checkout?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, checkouts, timeZone }),
+        body: JSON.stringify(
+          withBookingMethod(
+            {
+              bookingId,
+              assetIds,
+              checkouts,
+              timeZone,
+              ...(sourceLocations ? { sourceLocations } : {}),
+            },
+            method
+          )
+        ),
         // why: non-idempotent — per-unit quantities carry no request key, so a
         // timed-out-but-landed request re-sent would check the units out twice.
         retry: false,

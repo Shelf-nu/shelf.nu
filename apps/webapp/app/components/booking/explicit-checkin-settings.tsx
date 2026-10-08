@@ -1,15 +1,25 @@
 /**
  * Explicit Check-in Settings
  *
- * The "Explicit check-in requirement" card on Settings > Bookings. When a
- * switch is on, that role cannot use the one-click quick check-in: the web
- * check-in control links straight to the explicit check-in page, and the
- * quick check-in is refused on the server (web and mobile).
+ * The "Check-in needs each item scanned or selected" card on Settings >
+ * Bookings. When a switch is on, that role cannot use the one-click quick
+ * check-in: the web check-in control links straight to the explicit check-in
+ * page, and the quick check-in is refused on the server (web and mobile).
+ * Scanning the items and selecting them from the list both stay open. The
+ * workspace owner is never restricted, and Base users hold no check-in
+ * permission, so the card has two switches: Admins and Managers, and Self
+ * Service users. All of its words come from `@shelf/labels`, which the phone
+ * reads too.
  *
  * @see {@link file://./explicit-requirement-settings-card.tsx} - shared layout
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the
  *   `updateExplicitCheckin` action that persists it
  */
+import {
+  EXPLICIT_REQUIREMENT_LABELS,
+  EXPLICIT_REQUIREMENT_ROLE_LABELS,
+  explicitRequirementSwitchDescription,
+} from "@shelf/labels";
 import z from "zod";
 import { ExplicitRequirementSettingsCard } from "./explicit-requirement-settings-card";
 
@@ -47,20 +57,22 @@ export function ExplicitCheckinSettings({
   return (
     <ExplicitRequirementSettingsCard
       header={header}
+      exemption={EXPLICIT_REQUIREMENT_LABELS.CHECKIN.EXEMPTION}
       intent="updateExplicitCheckin"
       switches={[
         {
           name: "requireExplicitCheckinForAdmin" satisfies ExplicitCheckinField,
-          label: "Require explicit check-in for Admins and Managers",
-          description:
-            "When enabled, administrators and managers must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
+          label: EXPLICIT_REQUIREMENT_ROLE_LABELS.ADMIN,
+          description: explicitRequirementSwitchDescription("CHECKIN", "ADMIN"),
           defaultChecked: defaultValues.requireExplicitCheckinForAdmin,
         },
         {
           name: "requireExplicitCheckinForSelfService" satisfies ExplicitCheckinField,
-          label: "Require explicit check-in for Self Service",
-          description:
-            "When enabled, self-service users must use the scanner-based explicit check-in flow instead of the one-click quick check-in.",
+          label: EXPLICIT_REQUIREMENT_ROLE_LABELS.SELF_SERVICE,
+          description: explicitRequirementSwitchDescription(
+            "CHECKIN",
+            "SELF_SERVICE"
+          ),
           defaultChecked: defaultValues.requireExplicitCheckinForSelfService,
         },
       ]}

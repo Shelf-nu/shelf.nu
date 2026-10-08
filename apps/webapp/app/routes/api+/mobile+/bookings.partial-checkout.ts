@@ -9,6 +9,7 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import {
   mobileSourceLocationsSchema,
   sourceSubmissionFromRecord,
@@ -33,10 +34,13 @@ import {
  *
  * @param args - Remix action args; `request` carries the JSON body
  *   `{ bookingId: string; assetIds: string[]; checkouts?: Array<{ assetId: string;
- *   bookingAssetId?: string | null; quantity: number }>; timeZone?: string }` and
- *   mobile auth headers. The optional `checkouts` field enables partial
- *   (sub-quantity) check-outs for PARTIAL-tracked assets; legacy clients omit it
- *   and get INDIVIDUAL semantics driven by `assetIds` alone.
+ *   bookingAssetId?: string | null; quantity: number }>; method?: "scanned" |
+ *   "selected"; timeZone?: string }` and mobile auth headers. The optional
+ *   `checkouts` field enables partial (sub-quantity) check-outs for
+ *   PARTIAL-tracked assets; legacy clients omit it and get INDIVIDUAL semantics
+ *   driven by `assetIds` alone. `method` says how the app collected the rows;
+ *   the server cannot tell a scan from a tick on this route, so a bundle that
+ *   sends nothing is recorded with `method: null`.
  * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
  *   on success, or `{ error: { message } }` with the appropriate status on failure.
  * @throws Never throws to the caller — errors are normalized via
@@ -56,46 +60,63 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, checkouts, timeZone, sourceLocations } =
-      await parseMobileBody(
-        z.object({
-          bookingId: z.string().min(1),
-          // Optional: a QT-only check-out sends its quantities in `checkouts` with
-          // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
-          // service 400s if BOTH are empty, so we don't require a minimum here
-          // (mirrors the partial-checkin route).
-          // Any non-empty id: asset ids come in more than one shape (imported
-          // and seeded rows carry ids that no single format check describes),
-          // and the id is proven against the booking downstream anyway. The
-          // check-in twin takes the same shape.
-          assetIds: z.array(z.string().min(1)).optional(),
-          /**
-           * Optional per-asset checkout payload mirroring the webapp check-in
-           * JSON shape. When present, the service uses it to perform partial
-           * (sub-quantity) checkouts for PARTIAL-tracked assets. Legacy mobile
-           * clients omit this field and continue to receive INDIVIDUAL
-           * semantics driven solely by `assetIds`.
-           */
-          checkouts: z
-            .array(
-              z.object({
-                assetId: z.string().min(1),
-                bookingAssetId: z.string().nullish(),
-                quantity: z.number().int().positive(),
-              })
-            )
-            .optional(),
-          timeZone: z.string().optional(),
-          /**
-           * Where each pool's units leave from, keyed by `bookingAssetId` or
-           * `assetId` (`null` = Unplaced). Only read for a slice going out for
-           * the first time; an app that omits it gets the default.
-           */
-          sourceLocations: mobileSourceLocationsSchema,
-        }),
-        request,
-        "Booking"
-      );
+    const {
+      bookingId,
+      assetIds,
+      checkouts,
+      method,
+      timeZone,
+      sourceLocations,
+    } = await parseMobileBody(
+      z.object({
+        bookingId: z.string().min(1),
+        // Optional: a QT-only check-out sends its quantities in `checkouts` with
+        // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
+        // service 400s if BOTH are empty, so we don't require a minimum here
+        // (mirrors the partial-checkin route).
+        // Any non-empty id: asset ids come in more than one shape (imported
+        // and seeded rows carry ids that no single format check describes),
+        // and the id is proven against the booking downstream anyway. The
+        // check-in twin takes the same shape.
+        assetIds: z.array(z.string().min(1)).optional(),
+        /**
+         * Optional per-asset checkout payload mirroring the webapp check-in
+         * JSON shape. When present, the service uses it to perform partial
+         * (sub-quantity) checkouts for PARTIAL-tracked assets. Legacy mobile
+         * clients omit this field and continue to receive INDIVIDUAL
+         * semantics driven solely by `assetIds`.
+         */
+        checkouts: z
+          .array(
+            z.object({
+              assetId: z.string().min(1),
+              bookingAssetId: z.string().nullish(),
+              quantity: z.number().int().positive(),
+            })
+          )
+          .optional(),
+        /**
+         * How the app collected the rows: the Scan to Check Out path sends
+         * `"scanned"`, Select to Check Out sends `"selected"`. Optional so
+         * older bundles keep working, and an unknown value is recorded as
+         * `null` too: the field only labels the batch, so it never refuses a
+         * hand-over.
+         */
+        method: z
+          .enum(CLIENT_DECLARED_BOOKING_METHODS)
+          .optional()
+          .catch(undefined),
+        timeZone: z.string().optional(),
+        /**
+         * Where each pool's units leave from, keyed by `bookingAssetId` or
+         * `assetId` (`null` = Unplaced). Only read for a slice going out for
+         * the first time; an app that omits it gets the default.
+         */
+        sourceLocations: mobileSourceLocationsSchema,
+      }),
+      request,
+      "Booking"
+    );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
@@ -141,6 +162,8 @@ export async function action({ request }: ActionFunctionArgs) {
       checkouts,
       userId: user.id,
       hints,
+      // Never guessed: a bundle that declared no method is recorded as null.
+      provenance: { surface: "phone", method: method ?? null },
       sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
