@@ -28,14 +28,17 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: rendering a QR per asset (qrcode-generator + sharp) is real work and
-// irrelevant to note queries
+// why: rendering a QR per asset (qrcode-generator + sharp) is external image
+// work, irrelevant to note queries. Barcode pictures are NOT stubbed: the real
+// bwip-js draws them, because their geometry is what makes them scan.
 vi.mock("~/modules/qr/service.server", () => ({
   getQrCodeMaps: vi.fn().mockResolvedValue({}),
 }));
 
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import { getQrCodeMaps } from "~/modules/qr/service.server";
 
 const SESSION = {
@@ -213,9 +216,18 @@ describe("audit receipt — the printed asset code", () => {
       select: { id: true, type: true, value: true },
     });
     // why: NOT the tight `{ take: 1, select: { id } }` the code-bearing-entity
-    // rule asks for — `getQrCodeMaps` renders the image from `version` /
+    // rule asks for: `getQrCodeMaps` renders the image from `version` /
     // `errorCorrection`, so narrowing this breaks the QR images in print only.
-    expect(include.qrCodes).toBe(true);
+    // Ordered so the QR picture and the QR id under it are the same code.
+    expect(include.qrCodes).toEqual({ orderBy: QR_CODES_ORDER_BY });
+  });
+
+  it("asks for the model cover, so an asset without a photo prints its model's", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    const include = mockOf(db.asset.findMany).mock.calls[0][0].include;
+
+    expect(include).toMatchObject(ASSET_MODEL_IMAGE_SELECT);
   });
 
   it("asks the database which code the workspace wants printed", async () => {
@@ -294,7 +306,7 @@ describe("audit receipt — the printed asset code", () => {
       barcodesEnabled: false,
     });
 
-    expect(result.assetIdToQrCodeMap["asset-1"]).toBeUndefined();
+    expect(result.assetIdToCodeImageMap["asset-1"]).toBeUndefined();
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });
   it("keeps the code-resolution relations out of the rows it returns", async () => {
@@ -324,10 +336,50 @@ describe("audit receipt — the printed asset code", () => {
     expect(mockOf(getQrCodeMaps)).toHaveBeenCalledTimes(1);
   });
 
-  it("encodes nothing when the workspace prints no QR image", async () => {
-    // The receipt renders no image in this case, so encoding one would cost a
-    // QR per asset and carry a data URL per asset to a browser that drops it.
-    // The printed code is resolved independently, so the row stays matchable.
+  it("draws the barcode, not the QR, for a barcode-preference workspace", async () => {
+    // why: the picture must be the SAME code as the text under it. The real
+    // bwip-js draws it; only the Shelf QR renderer is stubbed.
+    const result = await run({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    });
+
+    const picture = result.assetIdToCodeImageMap["asset-1"];
+    expect(picture).toMatchObject({ shape: "linear", placement: "cell" });
+    expect(picture.src).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(
+      Buffer.from(picture.src.split(",")[1], "base64").toString("utf8")
+    ).toContain('preserveAspectRatio="none"');
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("moves a barcode too wide for the Code column onto the line under its row", async () => {
+    const result = await run(
+      { qrIdDisplayPreference: "Code128", barcodesEnabled: true },
+      {
+        barcodes: [
+          { id: "bc-1", type: "Code128", value: "ABCDEFGHIJKLMNOPQRST" },
+        ],
+      }
+    );
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
+      "ABCDEFGHIJKLMNOPQRST"
+    );
+    // why: shrinking it into the cell would make the bars too thin to scan,
+    // and a QR instead would be a picture of a DIFFERENT code.
+    expect(result.assetIdToCodeImageMap["asset-1"]).toMatchObject({
+      shape: "linear",
+      placement: "line",
+    });
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("encodes nothing when the workspace prints no code pictures", async () => {
+    // The receipt renders no picture in this case, so encoding one would cost
+    // an encode per asset and carry a data URL per asset to a browser that
+    // drops it. The printed code is resolved independently, so the row stays
+    // matchable.
     const result = await run({
       qrIdDisplayPreference: "SAM_ID",
       barcodesEnabled: false,
@@ -335,7 +387,7 @@ describe("audit receipt — the printed asset code", () => {
     });
 
     expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
-    expect(result.assetIdToQrCodeMap).toEqual({});
+    expect(result.assetIdToCodeImageMap).toEqual({});
     expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
   });
 });

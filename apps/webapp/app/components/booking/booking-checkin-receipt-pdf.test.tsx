@@ -341,8 +341,25 @@ describe("booking check-in receipt — the sheet", () => {
     // on the paper defeats scanning the label on the item.
     const { container } = renderReceipt();
 
-    expect(screen.queryByAltText("QR Code")).not.toBeInTheDocument();
+    // why: the sheet has no picture column; any image in the table would be
+    // a code picture that should not be here.
+    expect(container.querySelector("table img")).toBeNull();
     expect(container.textContent).not.toMatch(/Total assets value/);
+  });
+
+  it("fixes the table to the page width, one share per column", () => {
+    // why: a table sized by its content runs off the page when a name or a
+    // moment is long; a fixed table wraps inside its columns instead.
+    const { container } = renderReceipt();
+
+    const table = container.querySelector("table.checkin-receipt-table")!;
+    const widths = [...table.querySelectorAll("col")].map((col) =>
+      parseFloat((col as HTMLElement).style.width)
+    );
+
+    expect(table).toHaveClass("table-fixed");
+    expect(widths).toHaveLength(table.querySelectorAll("thead th").length);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(100);
   });
 
   it("prints the workspace's asset code on the row", () => {

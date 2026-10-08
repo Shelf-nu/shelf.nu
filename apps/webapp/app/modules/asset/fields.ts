@@ -263,7 +263,12 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of
@@ -403,7 +408,12 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of

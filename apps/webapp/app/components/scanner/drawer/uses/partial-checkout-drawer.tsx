@@ -285,6 +285,7 @@ export default function PartialCheckoutDrawer({
     checkedOutAssetIds,
     checkedInAssetIds,
     remainingToCheckOutByAsset,
+    kitsBookedElsewhere,
   } = useLoaderData<typeof loader>();
 
   // Per-asset units-still-to-check-out map for QUANTITY_TRACKED assets,
@@ -650,6 +651,10 @@ export default function PartialCheckoutDrawer({
     bookingAssetIds,
     remainingByAssetId,
     alreadyCheckedOut,
+    kitsBookedElsewhere: new Set(kitsBookedElsewhere.map((kit) => kit.id)),
+    assetsInKitsBookedElsewhere: new Set(
+      kitsBookedElsewhere.flatMap((kit) => kit.assetIds)
+    ),
     removeAssetsFromList,
     removeItemsFromList,
   });

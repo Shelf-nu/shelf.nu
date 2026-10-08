@@ -15612,6 +15612,81 @@ describe("addScannedAssetsToBooking", () => {
         })
       );
     });
+
+    it("adds a kit whose quantity-tracked member a sibling kit has reserved for the same period", async () => {
+      expect.assertions(1);
+
+      const findFirst = restoreMockImplementationAfterTest(
+        db.booking.findFirst
+      );
+      // why: the booking window drives the overlap lookup.
+      findFirst.fn.mockResolvedValue({ from, to });
+
+      const assetFindMany = restoreMockImplementationAfterTest(
+        db.asset.findMany
+      );
+      // why: the pool is reserved on an overlapping booking through a sibling
+      // kit's slice. The stub answers only the columns each read selects, as the
+      // database does, so the guard sees the asset type only if it asks for it.
+      assetFindMany.fn.mockImplementation(
+        (args?: {
+          where?: { id?: { in?: string[] } };
+          select?: Record<string, unknown>;
+        }) =>
+          Promise.resolve(
+            (args?.where?.id?.in ?? []).map((id) => {
+              const row: Record<string, unknown> = {
+                id,
+                title: "Cables",
+                type: AssetType.QUANTITY_TRACKED,
+                status: AssetStatus.AVAILABLE,
+                unitOfMeasure: "cables",
+                assetModelId: null,
+                bookingAssets: [
+                  {
+                    booking: {
+                      id: "booking-sibling",
+                      status: BookingStatus.RESERVED,
+                    },
+                  },
+                ],
+              };
+              const select = args?.select;
+              return select
+                ? Object.fromEntries(
+                    Object.entries(row).filter(([key]) => key in select)
+                  )
+                : row;
+            })
+          )
+      );
+      // The kit's own slice is free; only the shared pool is booked elsewhere.
+      mockHeldKitElsewhere([]);
+      const update = restoreMockImplementationAfterTest(db.booking.update);
+      // why: the write returns the booking summary the post-commit notes read.
+      update.fn.mockResolvedValue({
+        id: "booking-scan",
+        name: "Scan Booking",
+        status: BookingStatus.RESERVED,
+      });
+
+      await addScannedAssetsToBooking(scanCase);
+
+      expect(db.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            bookingAssets: {
+              create: [
+                expect.objectContaining({
+                  assetId: "asset-cables",
+                  assetKitId: HELD_KIT.membershipId,
+                }),
+              ],
+            },
+          },
+        })
+      );
+    });
   });
 
   it("emits one BOOKING_ASSETS_ADDED event per scanned asset inside the tx", async () => {

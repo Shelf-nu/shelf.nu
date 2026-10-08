@@ -170,8 +170,8 @@ export async function fetchCheckinReceiptData(
         // search must not narrow it.
         search: undefined,
       },
-      // The sheet prints the text code only; there is no QR column to fill.
-      { includeQrImages: false }
+      // The sheet prints the text code only; there is no picture to draw.
+      { includeCodeImages: false }
     );
 
     const { booking, organization, assets, assetIdToDisplayCodeMap } = pdfMeta;

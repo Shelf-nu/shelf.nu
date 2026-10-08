@@ -77,6 +77,7 @@ import {
   calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
+  stillOutOnOverdueKitSlice,
 } from "~/modules/booking/utils.server";
 import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -491,45 +492,58 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           // enough for assets that inherit their image from their model.
           ...ASSET_MODEL_IMAGE_SELECT,
           bookingAssets: {
+            /**
+             * Other bookings' slices that can make a row unavailable: those on
+             * an overlapping booking, plus any kit slice still out on an
+             * OVERDUE booking whatever its dates, since an overdue kit has no
+             * known return date. The kit row judges a kit on its own slices
+             * (`hasKitBookingConflicts`), the same rule the booking writes
+             * refuse on.
+             */
             where: {
-              booking: {
-                ...(booking.from && booking.to
-                  ? {
-                      OR: [
-                        // Rule 1: RESERVED bookings always conflict
-                        {
-                          status: "RESERVED",
-                          id: { not: booking.id },
+              OR: [
+                {
+                  booking: {
+                    ...(booking.from && booking.to
+                      ? {
                           OR: [
+                            // Rule 1: RESERVED bookings always conflict
                             {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
+                              status: "RESERVED",
+                              id: { not: booking.id },
+                              OR: [
+                                {
+                                  from: { lte: booking.to },
+                                  to: { gte: booking.from },
+                                },
+                                {
+                                  from: { gte: booking.from },
+                                  to: { lte: booking.to },
+                                },
+                              ],
                             },
+                            // Rule 2: ONGOING/OVERDUE bookings
                             {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
+                              status: { in: ["ONGOING", "OVERDUE"] },
+                              id: { not: booking.id },
+                              OR: [
+                                {
+                                  from: { lte: booking.to },
+                                  to: { gte: booking.from },
+                                },
+                                {
+                                  from: { gte: booking.from },
+                                  to: { lte: booking.to },
+                                },
+                              ],
                             },
                           ],
-                        },
-                        // Rule 2: ONGOING/OVERDUE bookings
-                        {
-                          status: { in: ["ONGOING", "OVERDUE"] },
-                          id: { not: booking.id },
-                          OR: [
-                            {
-                              from: { lte: booking.to },
-                              to: { gte: booking.from },
-                            },
-                            {
-                              from: { gte: booking.from },
-                              to: { lte: booking.to },
-                            },
-                          ],
-                        },
-                      ],
-                    }
-                  : {}),
-              },
+                        }
+                      : {}),
+                  },
+                },
+                stillOutOnOverdueKitSlice({ currentBookingId: booking.id }),
+              ],
             },
             include: {
               booking: true,
