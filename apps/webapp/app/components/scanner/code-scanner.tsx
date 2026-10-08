@@ -3,13 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { BarcodeType } from "@prisma/client";
 import { TriangleLeftIcon } from "@radix-ui/react-icons";
 import { useAtom } from "jotai";
-import {
-  ArrowRight,
-  Camera,
-  CameraIcon,
-  QrCode,
-  ScanQrCode,
-} from "lucide-react";
+import { ArrowRight, Camera, CameraIcon, ScanQrCode } from "lucide-react";
 import { Link } from "react-router";
 import Webcam from "react-webcam";
 import { ClientOnly } from "remix-utils/client-only";
@@ -472,20 +466,18 @@ function ScannerMode({
   };
 
   return (
+    // Pinned to the top and kept to one input and one hint line. `pt-[68px]`
+    // clears the back-link / mode-switch bar overlaid on the scanner (52px)
+    // with a 16px gap. The scanner drawer reserves exactly
+    // `SCANNER_INPUT_PANEL_HEIGHT` above itself for this panel (see
+    // `drawer/drawer-height.ts`), so change the two together.
     <div
       className={tw(
-        "flex h-full flex-col items-center justify-center bg-slate-800 text-center ",
+        "flex h-full flex-col items-center justify-start bg-slate-800 pt-[68px] text-center",
         className
       )}
     >
       <RadialBg />
-      {/* Pulsating QR Icon */}
-      <div className="relative mx-auto mb-4 size-16">
-        <div className="absolute inset-0 flex items-center justify-center">
-          <QrCode className="size-8  text-white/90" />
-        </div>
-        <div className="animate-ping absolute inset-0 rounded-full border-4 text-white/80 opacity-30"></div>
-      </div>
       <div className="relative flex items-center gap-3">
         <Input
           ref={inputRef}
@@ -521,9 +513,8 @@ function ScannerMode({
           <ArrowRight className="size-4" />
         </Button>
       </div>
-      <p className="mt-4 max-w-[360px] text-white/70">
-        Focus the field and use your barcode scanner to scan any code, or type
-        the code ID and press Enter.
+      <p className="relative mt-2 text-xs text-white/70">
+        Scan with your barcode scanner, or type a code and press Enter.
       </p>
     </div>
   );

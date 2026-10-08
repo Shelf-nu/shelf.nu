@@ -16,8 +16,8 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import PartialCheckinDrawer from "~/components/scanner/drawer/uses/partial-checkin-drawer";
 import { db } from "~/database/db.server";
 import { useBookingCheckinSessionInitialization } from "~/hooks/use-booking-checkin-session-initialization";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
@@ -40,7 +40,6 @@ import {
 import { canPartialCheckInOut } from "~/utils/permissions/role-access";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -520,8 +519,10 @@ export default function CheckinAssetsFromBooking() {
     expectedAssets,
   });
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -540,7 +541,11 @@ export default function CheckinAssetsFromBooking() {
 
       <PartialCheckinDrawer isLoading={isLoading} defaultExpanded={true} />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -549,9 +554,6 @@ export default function CheckinAssetsFromBooking() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

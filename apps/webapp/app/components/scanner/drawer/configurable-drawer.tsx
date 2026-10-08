@@ -155,12 +155,12 @@ export default function ConfigurableDrawer<T>({
             <When truthy={hasItems}>
               <Form
                 ref={zo.ref}
-                className="mb-4 flex w-full"
+                className="flex w-full"
                 method={method}
                 action={actionUrl}
                 onSubmit={onSubmit}
               >
-                <div className="flex w-full gap-2 p-3">
+                <div className="flex w-full gap-2 px-3 py-2">
                   {/* Render form fields from formData */}
                   {Object.entries(formData).map(([key, value]) => {
                     if (Array.isArray(value)) {

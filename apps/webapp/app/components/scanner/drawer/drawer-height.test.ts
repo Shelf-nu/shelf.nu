@@ -17,7 +17,8 @@ import {
   DRAWER_TOP_GAP,
   MIN_DRAWER_HEIGHT,
   resolveDrawerHeight,
-  SCANNER_VIEWFINDER_GAP,
+  SCANNER_INPUT_GAP,
+  SCANNER_INPUT_PANEL_HEIGHT,
 } from "./drawer-height";
 
 /** A typical laptop viewport, used wherever the exact number is irrelevant. */
@@ -91,14 +92,24 @@ describe("resolveDrawerHeight", () => {
   });
 
   describe("expanded", () => {
-    it("leaves room for the camera viewfinder in scanner mode", () => {
+    it("leaves exactly the page chrome and the code-entry panel above it in scanner mode", () => {
+      // Scanner mode has no viewfinder: above the drawer sits only the code
+      // input. Reserving more than that panel needs is height taken from the
+      // scanned rows, which are what the operator is checking.
+      expect(SCANNER_INPUT_GAP).toBe(
+        DRAWER_TOP_GAP + SCANNER_INPUT_PANEL_HEIGHT
+      );
+      expect(SCANNER_INPUT_GAP).toBeLessThan(400);
+    });
+
+    it("leaves room for the code-entry panel in scanner mode", () => {
       expect(
         resolveDrawerHeight({
           ...baseArgs,
           expanded: true,
           isScannerMode: true,
         })
-      ).toBe(VH - SCANNER_VIEWFINDER_GAP);
+      ).toBe(VH - SCANNER_INPUT_GAP);
     });
 
     it("fills the viewport below the page chrome outside scanner mode", () => {
@@ -107,12 +118,12 @@ describe("resolveDrawerHeight", () => {
       );
     });
 
-    it("grows past the viewfinder gap rather than push the pinned footer off", () => {
+    it("grows past the scanner gap rather than push the pinned footer off", () => {
       // Drawers with no custom header (update-location, assign-custody,
       // release-custody) have an empty header wrapper, so nothing there can
       // give up height. Their footer is `shrink-0` by design — the action must
       // never sit behind its own scrollbar — so the drawer itself has to be
-      // tall enough to hold it. The camera yields, not the submit button.
+      // tall enough to hold it. The input panel yields, not the submit button.
       const height = resolveDrawerHeight({
         ...baseArgs,
         expanded: true,
@@ -121,7 +132,7 @@ describe("resolveDrawerHeight", () => {
       });
 
       expect(height).toBe(MIN_DRAWER_HEIGHT + 460);
-      expect(height).toBeGreaterThan(VH - SCANNER_VIEWFINDER_GAP);
+      expect(height).toBeGreaterThan(VH - SCANNER_INPUT_GAP);
     });
 
     it("still clamps when even the unshrinkable chrome outgrows the screen", () => {

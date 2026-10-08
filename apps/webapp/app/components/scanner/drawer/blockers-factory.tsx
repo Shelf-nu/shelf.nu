@@ -61,7 +61,7 @@ export function createBlockers({
 
     return (
       <m.div
-        className="bg-gray-25 p-4 text-[12px]"
+        className="bg-gray-25 px-4 pt-4 text-[12px]"
         transition={{ duration: 0.2 }}
         exit={{ opacity: 0 }}
       >

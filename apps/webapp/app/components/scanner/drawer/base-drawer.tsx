@@ -228,7 +228,7 @@ export default function BaseDrawer({
               ref={baseHeaderRef}
               className="default-base-drawer-header flex shrink-0 items-center justify-between border-b text-left"
             >
-              <div className="py-4">{title}</div>
+              <div className="py-2">{title}</div>
 
               {hasItems && onClear && (
                 <Button

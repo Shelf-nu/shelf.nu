@@ -50,8 +50,8 @@ import { CodeScanner } from "~/components/scanner/code-scanner";
 import FulfilReservationsDrawer from "~/components/scanner/drawer/uses/fulfil-reservations-drawer";
 import { db } from "~/database/db.server";
 import { useBookingFulfilSessionInitialization } from "~/hooks/use-booking-fulfil-session-initialization";
+import { useFillViewportHeight } from "~/hooks/use-fill-viewport-height";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
-import { useViewportHeight } from "~/hooks/use-viewport-height";
 import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
 import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
@@ -78,7 +78,6 @@ import {
 } from "~/utils/permissions/permission.data";
 import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { tw } from "~/utils/tw";
 
 export const links: LinksFunction = () => [
   { rel: "stylesheet", href: scannerCss },
@@ -391,8 +390,10 @@ export default function FulfilAndCheckoutForBooking() {
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
 
-  const { vh, isMd } = useViewportHeight();
-  const height = isMd ? vh - 67 : vh - 100;
+  // Fills the screen below wherever the layout's chrome ends, measured rather
+  // than subtracted, so the page itself never scrolls behind the drawer.
+  const { ref: scannerContainerRef, height } =
+    useFillViewportHeight<HTMLDivElement>();
 
   const savedCameraId = useScannerCameraId();
 
@@ -445,7 +446,11 @@ export default function FulfilAndCheckoutForBooking() {
         sourceQuestions={checkoutSourceQuestions}
       />
 
-      <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
+      <div
+        ref={scannerContainerRef}
+        className="-mx-4 flex flex-col overflow-hidden"
+        style={height === undefined ? undefined : { height: `${height}px` }}
+      >
         <CodeScanner
           isLoading={isLoading}
           onCodeDetectionSuccess={handleCodeDetectionSuccess}
@@ -453,9 +458,6 @@ export default function FulfilAndCheckoutForBooking() {
           allowNonShelfCodes
           paused={false}
           setPaused={() => {}}
-          scannerModeClassName={(mode) =>
-            tw(mode === "scanner" && "justify-start pt-[100px]")
-          }
           savedCameraId={savedCameraId}
         />
       </div>

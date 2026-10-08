@@ -146,11 +146,13 @@ export function SectionHeader({
       : "bg-gray-50 text-gray-600 border-t border-gray-100";
 
   return (
-    <Tr key={`section-${tone}-${label}`} skipEntrance>
+    // `h-auto` overrides the 80px item-row height: a section label is one line,
+    // and every pixel it takes comes out of the scanned rows.
+    <Tr key={`section-${tone}-${label}`} skipEntrance className="h-auto">
       <td
         colSpan={2}
         className={tw(
-          "px-4 py-3 text-xs font-semibold uppercase tracking-wide md:px-6",
+          "px-4 py-1.5 text-xs font-semibold uppercase tracking-wide md:px-6",
           toneClass
         )}
       >
