@@ -32,7 +32,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: InfoIcon,
     title: "Admin Review",
     description:
-      "Your booking will be shown as reserved, however the admin can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
+      "Your booking will be shown as reserved, however an administrator or manager can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
     iconClassName: "bg-warning-100 text-warning-500",
   },
   {

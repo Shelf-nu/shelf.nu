@@ -1,11 +1,14 @@
 /**
- * Pins the wording built from the policy table for the two audiences the
- * booking notification settings describe.
+ * Pins the wording built from the policy table: the booking notification
+ * audiences and the sentence the audit dialogs show.
  *
  * @see {@link file://./role-audience.ts}
  */
 import { describe, expect, it } from "vitest";
-import { describeRoleAudience } from "./role-audience";
+import {
+  AUDIT_ANY_PERFORMER_SENTENCE,
+  describeRoleAudience,
+} from "./role-audience";
 
 // @vitest-environment node
 
@@ -30,5 +33,11 @@ describe("describeRoleAudience", () => {
 
   it("returns an empty string when no role matches", () => {
     expect(describeRoleAudience(() => false)).toBe("");
+  });
+
+  it("builds the audit dialogs' sentence from every role that sees all audits", () => {
+    expect(AUDIT_ANY_PERFORMER_SENTENCE).toBe(
+      "Owners, administrators and managers can perform any audit."
+    );
   });
 });

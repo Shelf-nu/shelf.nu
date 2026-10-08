@@ -7,6 +7,10 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  rolesWhere,
+  type OrganizationRole,
+} from "~/utils/permissions/role-access";
+import {
   getAuditFilterMetadata,
   getAuditStatusLabel,
   type AuditFilterType,
@@ -334,22 +338,29 @@ describe("getAuditFilterMetadata — MISSING heading follows the audit state", (
 });
 
 describe("AUDIT_UNASSIGNED_LABELS (shared with the companion app)", () => {
-  // why: the constant's own docstring promises the three registers "can never
-  // say different things about who is allowed to scan" — and nothing enforced
-  // it, so they shipped disagreeing: the terse two said "admins can scan"
-  // while the prose one said "admins and owners". A user on the phone was told
-  // they could not do a thing the same product told them they could on the
-  // web. The promise needs a check, not just a comment.
+  // The three registers must agree on who may scan an audit nobody is assigned
+  // to, and that set comes from the role policy: every role whose audits scope
+  // is "all" passes requireAuditAssignee. A role added to that set must be
+  // named in every register, on the web and on the phone alike.
   const registers = Object.entries(AUDIT_UNASSIGNED_LABELS);
 
-  it("names BOTH permitted roles in every register", () => {
-    // Ground truth is the server, not the copy: `requireAuditAssignee` returns
-    // early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
-    // are exactly the roles that may scan an unassigned audit.
+  /** How each role is named in the label copy. */
+  const ROLE_WORD: Record<OrganizationRole, string> = {
+    OWNER: "owner",
+    ADMIN: "admin",
+    MANAGER: "manager",
+    SELF_SERVICE: "self service",
+    BASE: "base",
+  };
+
+  it("names every role that may scan an unassigned audit in every register", () => {
+    const permitted = rolesWhere((policy) => policy.audits.scope === "all");
+    expect(permitted.length).toBeGreaterThan(0);
     for (const [name, text] of registers) {
       const labelled = `${name}: ${text.toLowerCase()}`;
-      expect(labelled).toContain("admin");
-      expect(labelled).toContain("owner");
+      for (const role of permitted) {
+        expect(labelled).toContain(ROLE_WORD[role]);
+      }
     }
   });
 

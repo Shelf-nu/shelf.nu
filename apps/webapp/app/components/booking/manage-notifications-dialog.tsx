@@ -21,6 +21,7 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import type { BookingPageLoaderData } from "~/routes/_layout+/bookings.$bookingId.overview";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { PICKABLE_RECIPIENT_AUDIENCE } from "~/utils/permissions/role-audience";
 import { resolveTeamMemberName } from "~/utils/user";
 import type { NotificationRecipientTeamMember } from "./forms/fields/notification-recipients";
 import { NotificationPreview } from "./notification-preview";
@@ -248,7 +249,7 @@ export default function ManageNotificationsDialog() {
                   placeholder="Search team members..."
                 />
                 <p className="mt-1.5 text-[13px] text-gray-500">
-                  Only administrators can be added.
+                  Only {PICKABLE_RECIPIENT_AUDIENCE} can be added.
                 </p>
               </div>
 

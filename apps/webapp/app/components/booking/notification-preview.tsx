@@ -1,4 +1,4 @@
-import { describeRoleAudience } from "~/utils/permissions/role-audience";
+import { RESERVATION_AUDIENCE } from "~/utils/permissions/role-audience";
 
 /** A single recipient entry for the notification preview. */
 type PreviewRecipient = {
@@ -17,11 +17,6 @@ type NotificationPreviewProps = {
    *  Currently booking_recipient and always_notify items are removable. */
   onRemoveRecipient?: (id: string) => void;
 };
-
-/** Who hears a new reservation, e.g. "owners, administrators and managers". */
-const RESERVATION_AUDIENCE = describeRoleAudience(
-  (policy) => policy.notifications.orgBookingBroadcasts
-);
 
 /**
  * Maps internal reason codes to human-readable labels displayed next to each

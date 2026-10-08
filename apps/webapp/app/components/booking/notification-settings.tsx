@@ -23,7 +23,10 @@ import { Card } from "~/components/shared/card";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
-import { describeRoleAudience } from "~/utils/permissions/role-audience";
+import {
+  PICKABLE_RECIPIENT_AUDIENCE,
+  RESERVATION_AUDIENCE,
+} from "~/utils/permissions/role-audience";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "./notification-preview";
 
@@ -34,16 +37,6 @@ export const NotifyBookingCreatorSchema = z.object({
     .transform((val) => val === "on")
     .default("false"),
 });
-
-/** Who hears a new reservation, e.g. "owners, administrators and managers". */
-const RESERVATION_AUDIENCE = describeRoleAudience(
-  (policy) => policy.notifications.orgBookingBroadcasts
-);
-
-/** Who the "Always notify" picker offers. */
-const PICKABLE_AUDIENCE = describeRoleAudience(
-  (policy) => policy.notifications.selectableAsRecipient
-);
 
 /** Zod schema for the "notify admins on new booking" toggle form. */
 export const NotifyAdminsOnNewBookingSchema = z.object({
@@ -278,7 +271,7 @@ export function NotificationSettings({
             />
 
             <p className="mt-1.5 text-[13px] text-gray-500">
-              Only {PICKABLE_AUDIENCE} can be added.
+              Only {PICKABLE_RECIPIENT_AUDIENCE} can be added.
             </p>
 
             {hasUnsavedChanges ? (

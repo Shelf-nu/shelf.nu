@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { DateTimePicker } from "~/components/shared/date-time-picker";
 import { Separator } from "~/components/shared/separator";
 import { useDisabled } from "~/hooks/use-disabled";
+import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 
 /**
  * Maximum length (in characters) of the optional audit description field.
@@ -171,7 +172,7 @@ export function StartAuditDialogContent({
           <Separator className="md:hidden" />
           <p className="p-3 pb-0 font-medium">Select assignee (optional).</p>
           <p className="border-b p-3 ">
-            Admins can perform any audit. Choosing assignees also lets those
+            {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets those
             people perform it, including several at different times.
           </p>
           <AuditTeamMemberSelector error={assigneeError} />

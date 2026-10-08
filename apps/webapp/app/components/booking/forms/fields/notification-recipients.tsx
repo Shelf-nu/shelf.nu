@@ -22,6 +22,7 @@ import FormRow from "~/components/forms/form-row";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
 import { useRoleAccess } from "~/hooks/use-role-access";
+import { PICKABLE_RECIPIENT_AUDIENCE } from "~/utils/permissions/role-audience";
 import type { TeamMemberNameFields, UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { NotificationPreview } from "../../notification-preview";
@@ -236,7 +237,7 @@ export function NotificationRecipientsField({
           placeholder="Search team members..."
         />
         <p className="mt-1.5 text-[13px] text-gray-500">
-          Only administrators can be added.
+          Only {PICKABLE_RECIPIENT_AUDIENCE} can be added.
         </p>
 
         {/* Hidden input for form submission — comma-separated team member IDs */}
