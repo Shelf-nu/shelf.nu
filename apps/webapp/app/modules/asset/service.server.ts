@@ -21,6 +21,7 @@ import {
   ConsumptionCategory,
   ConsumptionType,
   ErrorCorrection,
+  KitStatus,
   Prisma,
   TagUseFor,
 } from "@prisma/client";
@@ -3750,6 +3751,23 @@ export async function archiveAsset({
  * @returns The reinstated asset id.
  * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
  */
+/**
+ * Reinstating is refused while the asset's kit is in use (issue #382).
+ *
+ * An archived kit member is left out when its kit goes into custody or out on
+ * a booking, so it holds no kit custody row and sits on none of the kit's
+ * bookings. Reinstating it then would leave an active member that its own
+ * in-use kit does not account for. Mirrors `archiveAsset`, which refuses while
+ * the asset is in use: release or check in the kit first.
+ */
+const NOT_IN_AN_IN_USE_KIT = {
+  assetKits: { none: { kit: { status: { not: KitStatus.AVAILABLE } } } },
+} satisfies Prisma.AssetWhereInput;
+
+/** The message for a reinstate refused by {@link NOT_IN_AN_IN_USE_KIT}. */
+const KIT_IN_USE_REINSTATE_MESSAGE =
+  "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
 export async function unarchiveAsset({
   id,
   organizationId,
@@ -3763,7 +3781,11 @@ export async function unarchiveAsset({
     const asset = await db.asset.findFirst({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: reinstate service must find archived assets and 409 on active ones
       where: { id, organizationId },
-      select: { id: true, archivedAt: true },
+      select: {
+        id: true,
+        archivedAt: true,
+        assetKits: { select: { kit: { select: { status: true } } } },
+      },
     });
 
     if (!asset) {
@@ -3789,17 +3811,36 @@ export async function unarchiveAsset({
       });
     }
 
+    if (asset.assetKits.some((ak) => ak.kit.status !== KitStatus.AVAILABLE)) {
+      throw new ShelfError({
+        cause: null,
+        title: "Kit in use",
+        message: KIT_IN_USE_REINSTATE_MESSAGE,
+        status: 400,
+        label,
+        shouldBeCaptured: false,
+      });
+    }
+
     await db.$transaction(async (tx) => {
+      // The kit check above is a read; the WHERE re-asserts it, so a kit that
+      // goes into use in between still blocks the reinstate.
       const { count } = await tx.asset.updateMany({
-        where: { id, organizationId, archivedAt: { not: null } },
+        where: {
+          id,
+          organizationId,
+          archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
+        },
         data: { archivedAt: null },
       });
 
       if (count === 0) {
         throw new ShelfError({
           cause: null,
-          title: "Not archived",
-          message: "This asset is not archived.",
+          title: "Not reinstated",
+          message:
+            "This asset could not be reinstated: it is no longer archived, or its kit went into custody or out on a booking. Refresh and try again.",
           status: 409,
           label,
           shouldBeCaptured: false,
@@ -3980,7 +4021,9 @@ export async function bulkArchiveAssets({
 
 /**
  * Bulk-reinstates (un-archives) assets. Mirrors {@link bulkArchiveAssets}:
- * only currently-archived selections are reinstated; the rest are skipped.
+ * only currently-archived selections are reinstated; the rest are skipped,
+ * including members of a kit that is in custody or checked out
+ * ({@link NOT_IN_AN_IN_USE_KIT}).
  * Emits one ASSET_UNARCHIVED event per asset actually reinstated.
  *
  * @returns Counts of assets reinstated and skipped, for the success message.
@@ -4024,6 +4067,7 @@ export async function bulkUnarchiveAssets({
         id: { in: resolvedIds },
         organizationId,
         archivedAt: { not: null },
+        ...NOT_IN_AN_IN_USE_KIT,
       },
       select: { id: true },
     });
@@ -4054,6 +4098,7 @@ export async function bulkUnarchiveAssets({
           id: { in: eligibleIds },
           organizationId,
           archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
         },
         select: { id: true },
       });
@@ -4066,6 +4111,7 @@ export async function bulkUnarchiveAssets({
           id: { in: unarchivedIds },
           organizationId,
           archivedAt: { not: null },
+          ...NOT_IN_AN_IN_USE_KIT,
         },
         data: { archivedAt: null },
       });

@@ -853,6 +853,10 @@ export default function AssetOverview() {
    * control on this route inherits the freeze from one place, and the page
    * cannot drift as controls are added. Reinstate lives in the Actions
    * dropdown, so it is unaffected.
+   *
+   * Comments are the one deliberate exception: the Activity tab keeps its
+   * composer on an archived asset, so people can record why it was archived
+   * or what became of it. A comment changes nothing about the asset itself.
    */
   const assetIsFrozen = !!asset?.archivedAt;
   const canEditAsset = canUpdateAvailability && !assetIsFrozen;

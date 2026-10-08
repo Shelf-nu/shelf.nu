@@ -34,6 +34,7 @@ import {
   getPaginatedAndFilterableKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createNote, createNotes } from "../note/service.server";
@@ -6962,7 +6963,14 @@ describe("updateKitAssets - kit-booking propagation scope", () => {
     //@ts-expect-error missing vitest type
     db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
     //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(mockAssetsForKit);
+    db.asset.findMany.mockImplementation(
+      // why: the propagation asks which new members were archived since the
+      // membership transaction (issue #382); none here.
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null ? [] : mockAssetsForKit
+        )
+    );
     // The AssetKit row the pivot insert just created for the new member.
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue([
@@ -7236,6 +7244,11 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
        */
       extraBookings?: Array<{ id: string; status: BookingStatus }>;
       /**
+       * New members archived after the membership transaction and before the
+       * booking propagation (issue #382).
+       */
+      archivedSince?: string[];
+      /**
        * The kit's pre-existing slices, overriding the single slice implied by
        * `kitSlicesWereCheckedOut`. Lets a case model a kit that only half
        * left, or one whose members have since come back.
@@ -7317,9 +7330,11 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
 
     // why: the service re-reads the submitted asset ids to diff them against
     // current membership. Returning both the sitting member and the newcomer
-    // is what makes `newlyAddedAssets` exactly `["newcomer"]`.
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([
+    // is what makes `newlyAddedAssets` exactly `["newcomer"]`. The propagation
+    // also asks which new members were archived since (issue #382): none, by
+    // default — `archivedSince` lets a case say otherwise.
+    const archivedSince = options.archivedSince ?? [];
+    const members = [
       {
         id: "sitting-member",
         title: "Sitting member",
@@ -7342,7 +7357,16 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
         bookingAssets: [],
         assetLocations: [],
       },
-    ]);
+    ];
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null
+            ? archivedSince.map((id) => ({ id }))
+            : members
+        )
+    );
 
     // why: the propagation block reads back the AssetKit row the membership
     // write just created, to populate `assetKitId` / `sourceKitId` on the new
@@ -7524,6 +7548,29 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(db.bookingAsset.createMany).not.toHaveBeenCalled();
     // `recordEvents` still carries this call's membership events, so assert on
     // the propagation action specifically.
+    expect(propagatedAddedEvents()).toEqual([]);
+  });
+
+  it("skips a new member archived before it reaches the kit's bookings (issue #382)", async () => {
+    // The membership transaction checked the newcomer, but it has committed,
+    // and an archive can land before the propagation writes BookingAsset rows.
+    arrange(BookingStatus.DRAFT, KitStatus.AVAILABLE, false, {
+      archivedSince: ["newcomer"],
+    });
+
+    await act();
+
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["newcomer"],
+      "org-1"
+    );
+    const written = vitest
+      .mocked(db.bookingAsset.createMany)
+      .mock.calls.flatMap(
+        ([args]) => (args as { data: { assetId: string }[] }).data
+      );
+    expect(written.map((row) => row.assetId)).not.toContain("newcomer");
     expect(propagatedAddedEvents()).toEqual([]);
   });
 

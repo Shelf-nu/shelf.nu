@@ -267,8 +267,10 @@ describe("POST /api/mobile/asset/update-location", () => {
     });
   });
 
-  it("refuses an archived asset under the row lock, writing nothing (issue #382)", async () => {
-    // This route writes the placement itself, so it carries its own freeze.
+  it("refuses an archived asset even when the request changes nothing (issue #382)", async () => {
+    // Already at the requested location with the same quantity: without the
+    // early check the no-op short-circuit would answer success for an asset
+    // every other request is refused on.
     // why: the guard reports the asset archived.
     vi.mocked(assertAssetsAreNotArchived).mockRejectedValueOnce(
       new ShelfError({
@@ -283,11 +285,40 @@ describe("POST /api/mobile/asset/update-location", () => {
 
     const { status } = await callAction({
       assetId: "asset-1",
+      locationId: "loc-storage",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenCalledWith({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+    });
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
+  });
+
+  it("re-checks under the row lock for an archive that lands mid-request (issue #382)", async () => {
+    // why: the early read finds the asset active; the locked read inside the
+    // write transaction finds it archived.
+    vi.mocked(assertAssetsAreNotArchived)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          title: "Asset is archived",
+          message: "Archived assets are read-only.",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
       locationId: "loc-van",
     });
 
     expect(status).toBe(400);
-    expect(assertAssetsAreNotArchived).toHaveBeenCalledWith(
+    expect(assertAssetsAreNotArchived).toHaveBeenLastCalledWith(
       { assetIds: ["asset-1"], organizationId: "org-1" },
       expect.anything()
     );

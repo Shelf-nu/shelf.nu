@@ -40,6 +40,21 @@ const QUERY_METHODS = new Set([
 ]);
 
 /**
+ * Whether `prop` is a plain property named `name`, written bare (`where`) or
+ * quoted (`"where"`). A computed key (`[where]`) names nothing statically.
+ *
+ * @param {import("estree").Property | import("estree").SpreadElement} prop
+ * @param {string} name
+ * @returns {boolean}
+ */
+function isKeyNamed(prop, name) {
+  if (prop.type !== "Property" || prop.computed) return false;
+  if (prop.key.type === "Identifier") return prop.key.name === name;
+  if (prop.key.type === "Literal") return prop.key.value === name;
+  return false;
+}
+
+/**
  * Whether an object literal names `archivedAt`, directly or behind a spread
  * (which cannot be checked statically, so it is trusted).
  *
@@ -47,13 +62,9 @@ const QUERY_METHODS = new Set([
  * @returns {boolean}
  */
 function hasArchivedAtProperty(objectExpression) {
-  return objectExpression.properties.some((prop) => {
-    if (prop.type === "SpreadElement") return true;
-    if (prop.type !== "Property") return false;
-    if (prop.key.type === "Identifier") return prop.key.name === "archivedAt";
-    if (prop.key.type === "Literal") return prop.key.value === "archivedAt";
-    return false;
-  });
+  return objectExpression.properties.some(
+    (prop) => prop.type === "SpreadElement" || isKeyNamed(prop, "archivedAt")
+  );
 }
 
 module.exports = {
@@ -123,11 +134,8 @@ module.exports = {
         // Options built elsewhere: not statically checkable.
         if (optionsArg.type !== "ObjectExpression") return;
 
-        const whereProp = optionsArg.properties.find(
-          (prop) =>
-            prop.type === "Property" &&
-            prop.key.type === "Identifier" &&
-            prop.key.name === "where"
+        const whereProp = optionsArg.properties.find((prop) =>
+          isKeyNamed(prop, "where")
         );
 
         if (!whereProp) {

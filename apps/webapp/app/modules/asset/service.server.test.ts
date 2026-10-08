@@ -6126,7 +6126,11 @@ describe("unarchiveAsset", () => {
   });
 
   it("reinstates an archived asset and emits ASSET_UNARCHIVED (status untouched)", async () => {
-    mockFindFirst.mockResolvedValue({ id: "a1", archivedAt: new Date() });
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      archivedAt: new Date(),
+      assetKits: [],
+    });
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await unarchiveAsset({
@@ -6153,11 +6157,55 @@ describe("unarchiveAsset", () => {
   });
 
   it("throws 409 when the asset is not archived", async () => {
-    mockFindFirst.mockResolvedValue({ id: "a1", archivedAt: null });
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      archivedAt: null,
+      assetKits: [],
+    });
     await expect(
       unarchiveAsset({ id: "a1", organizationId: "org-1" })
     ).rejects.toMatchObject({ status: 409 });
     expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it.each(["IN_CUSTODY", "CHECKED_OUT"])(
+    "refuses while the asset's kit is %s, writing nothing",
+    async (kitStatus) => {
+      // An archived member was left out when its kit went into use, so it holds
+      // no kit custody and sits on none of the kit's bookings. Reinstating it
+      // now would leave an active member its own kit does not account for.
+      mockFindFirst.mockResolvedValue({
+        id: "a1",
+        archivedAt: new Date(),
+        assetKits: [{ kit: { status: kitStatus } }],
+      });
+
+      await expect(
+        unarchiveAsset({ id: "a1", organizationId: "org-1" })
+      ).rejects.toMatchObject({ title: "Kit in use", status: 400 });
+      expect(mockUpdateMany).not.toHaveBeenCalled();
+    }
+  );
+
+  it("re-asserts the kit condition in the write, for a kit that goes into use in between", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      archivedAt: new Date(),
+      assetKits: [{ kit: { status: "AVAILABLE" } }],
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    await unarchiveAsset({ id: "a1", organizationId: "org-1" });
+
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          assetKits: {
+            none: { kit: { status: { not: "AVAILABLE" } } },
+          },
+        }),
+      })
+    );
   });
 });
 
@@ -6320,6 +6368,28 @@ describe("bulkUnarchiveAssets", () => {
     expect(mockRecordEvents.mock.calls[0][0]).toEqual([
       expect.objectContaining({ action: "ASSET_UNARCHIVED", assetId: "a2" }),
     ]);
+  });
+
+  it("skips members of a kit that is in use, at the read and at the write", async () => {
+    mockFindMany.mockResolvedValue([{ id: "a1" }]);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    await bulkUnarchiveAssets({
+      organizationId: "org-1",
+      assetIds: ["a1"],
+      settings: {} as never,
+    });
+
+    const kitGuard = {
+      assetKits: { none: { kit: { status: { not: "AVAILABLE" } } } },
+    };
+    // Eligibility read, the locked re-read, and the write all carry it.
+    for (const [args] of mockFindMany.mock.calls) {
+      expect(args).toMatchObject({ where: kitGuard });
+    }
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining(kitGuard) })
+    );
   });
 
   it("writes and records nothing when every row was reinstated elsewhere", async () => {

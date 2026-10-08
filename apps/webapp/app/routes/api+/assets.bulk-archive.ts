@@ -101,7 +101,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         title: "Assets reinstated",
         message:
           skippedCount > 0
-            ? `${unarchivedCount} reinstated, ${skippedCount} skipped (not archived).`
+            ? `${unarchivedCount} reinstated, ${skippedCount} skipped (not archived, or in a kit that is in custody or checked out).`
             : `${unarchivedCount} ${
                 unarchivedCount === 1 ? "asset" : "assets"
               } reinstated.`,

@@ -22,6 +22,8 @@ ruleTester.run("require-archived-at-check-on-asset-queries", rule, {
     "db.asset.findMany({ where: { organizationId, archivedAt: null } })",
     // Deliberately archived ones.
     "tx.asset.count({ where: { id: { in: ids }, archivedAt: { not: null } } })",
+    // A quoted key is the same property.
+    'db.asset.findMany({ "where": { organizationId, "archivedAt": null } })',
     // Any client name: tx, _db, client.
     "client.asset.groupBy({ by: ['status'], where: { organizationId, archivedAt: null } })",
     // Both branches of a ternary say which side they read.
@@ -49,6 +51,16 @@ ruleTester.run("require-archived-at-check-on-asset-queries", rule, {
     { code: "db.asset.findUniqueOrThrow({ where: { id } })", errors: [error] },
     {
       code: "db.asset.aggregate({ where: { organizationId }, _sum: { value: true } })",
+      errors: [error],
+    },
+    // A quoted `where` is still checked.
+    {
+      code: 'db.asset.findMany({ "where": { organizationId } })',
+      errors: [error],
+    },
+    // A computed key names nothing: `archivedAt` is not proven present.
+    {
+      code: "db.asset.findMany({ where: { [archivedAt]: null } })",
       errors: [error],
     },
     // No where at all reads every asset.

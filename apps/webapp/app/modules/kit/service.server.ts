@@ -7071,9 +7071,12 @@ export async function updateKitAssets({
        * against an existing one, and claiming an add that did not happen would
        * make the trail lie.
        */
-      const buildPropagatedEvents = (bookings: typeof bookingsToUpdate) =>
+      const buildPropagatedEvents = (
+        bookings: typeof bookingsToUpdate,
+        assets: typeof newlyAddedAssets
+      ) =>
         bookings.flatMap((booking) =>
-          newlyAddedAssets.flatMap((asset) => {
+          assets.flatMap((asset) => {
             const ak = akByAssetId.get(asset.id);
             if (!ak) return [];
             return [
@@ -7176,6 +7179,34 @@ export async function updateKitAssets({
           }
 
           /**
+           * The new members that may still go onto bookings. The membership
+           * transaction above locked and checked them, but it has committed,
+           * and an archive could have landed since (issue #382). Locked here
+           * after the booking locks — booking then assets, the order
+           * `updateBookingAssets` takes — and archived members SKIPPED rather
+           * than refused: the membership change has already happened, and an
+           * archived kit member stays out of bookings the same way it stays out
+           * of kit custody.
+           */
+          const newAssetIds = newlyAddedAssets.map((a) => a.id);
+          await lockAssetsForArchiveGuard(tx, newAssetIds, organizationId);
+          const archivedSinceIds = new Set(
+            (
+              await tx.asset.findMany({
+                where: {
+                  id: { in: newAssetIds },
+                  organizationId,
+                  archivedAt: { not: null },
+                },
+                select: { id: true },
+              })
+            ).map((a) => a.id)
+          );
+          const assetsToPropagate = newlyAddedAssets.filter(
+            (a) => !archivedSinceIds.has(a.id)
+          );
+
+          /**
            * The bookings this call actually writes to.
            *
            * A booking that is still in planning takes the member unconditionally
@@ -7195,7 +7226,7 @@ export async function updateKitAssets({
 
           for (const booking of bookingsReceivingRows) {
             await tx.bookingAsset.createMany({
-              data: newlyAddedAssets.map((a) => {
+              data: assetsToPropagate.map((a) => {
                 const ak = akByAssetId.get(a.id);
                 return {
                   bookingId: booking.id,
@@ -7215,7 +7246,10 @@ export async function updateKitAssets({
 
           // Built from the same set the rows were written to, so the trail
           // reports exactly what persisted.
-          const propagatedEvents = buildPropagatedEvents(bookingsReceivingRows);
+          const propagatedEvents = buildPropagatedEvents(
+            bookingsReceivingRows,
+            assetsToPropagate
+          );
           if (propagatedEvents.length > 0) {
             await recordEvents(propagatedEvents, tx);
           }
@@ -7309,7 +7343,7 @@ export async function updateKitAssets({
                * status-without-a-marker state the pair below exists to avoid.
                * Same scoping as `propagatedEvents`, for the same reason.
                */
-              const stampable = newlyAddedAssets.flatMap((a) => {
+              const stampable = assetsToPropagate.flatMap((a) => {
                 const ak = akByAssetId.get(a.id);
                 return ak
                   ? [

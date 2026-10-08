@@ -90,6 +90,12 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
+    // Archived assets are frozen (issue #382). Checked here, before the no-op
+    // short-circuit below, so an archived asset is refused the same way
+    // whether or not the request would change anything. The check inside the
+    // write transaction stays as the race-safe guard for real writes.
+    await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+
     // Prevent location update if asset belongs to a kit
     const parentKit = asset.assetKits[0]?.kit;
     if (parentKit) {
