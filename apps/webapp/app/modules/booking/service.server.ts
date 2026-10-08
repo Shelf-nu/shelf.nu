@@ -17260,6 +17260,13 @@ export async function getAvailableAssetsIdsForBooking(
   organizationId: string
 ): Promise<string[]> {
   try {
+    // Archived assets are refused, not quietly dropped (issue #382): an asset
+    // archived after the page loaded would otherwise vanish from the
+    // selection while the rest booked, with nothing telling the user. Every
+    // other unbookable case in this flow rejects the same way. Org-scoped, so
+    // a foreign id still reads as missing rather than archived.
+    await assertAssetsAreNotArchived({ assetIds, organizationId });
+
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
       // cannot resolve / attach assets that live in another workspace.

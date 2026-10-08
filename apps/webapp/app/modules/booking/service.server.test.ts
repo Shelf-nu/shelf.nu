@@ -16117,6 +16117,22 @@ describe("getAvailableAssetsIdsForBooking", () => {
     ).resolves.toEqual(["asset-1", "asset-2"]);
   });
 
+  it("refuses a selection with an archived asset instead of booking the rest (issue #382)", async () => {
+    // An asset archived after the page loaded must not vanish from the
+    // selection while the others book with a success message.
+    // why: the archived guard counts archived rows among the submitted ids;
+    // one here. Once, so the default "none archived" answers later tests.
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(1);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(
+        ["asset-active", "asset-archived"],
+        "org-1"
+      )
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+    expect(db.asset.findMany).not.toHaveBeenCalled();
+  });
+
   it("returns a QUANTITY_TRACKED kit member — its free pool stays directly bookable", async () => {
     // A QT asset allocates only a slice of its pool per kit (and may sit in
     // several kits at once), so the remaining units are legitimately bookable
