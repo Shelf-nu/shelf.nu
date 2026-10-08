@@ -1,8 +1,14 @@
+/** CSV export route for selected bookings. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportBookingsFromIndexToCsv } from "~/utils/csv.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -14,12 +20,17 @@ export const ExportBookingsSchema = z.object({
   bookingIds: z.array(z.string()).min(1),
 });
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+/** Exports the requested bookings as a CSV download. */
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllBookings } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -45,14 +56,16 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       request,
       bookingsIds: bookingsIds.split(","),
       userId,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
     });
 
-    return new Response(csvString, {
-      status: 200,
+    return csvResponse(csvString, {
       headers: {
-        "content-type": "text/csv",
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "bookings",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
+        }),
       },
     });
   } catch (cause) {

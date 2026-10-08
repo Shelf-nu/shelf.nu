@@ -1,6 +1,7 @@
 import type { RefObject, InputHTMLAttributes } from "react";
 import { forwardRef } from "react";
 
+import { withNumberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import { tw } from "~/utils/tw";
 import { InnerLabel } from "./inner-label";
 import type { IconType } from "../shared/icons-map";
@@ -19,10 +20,10 @@ export interface InputProps
    */
   inputType?: "input" | "textarea";
 
-  /** Weather the label is hidden */
+  /** Whether the label is hidden */
   hideLabel?: boolean;
 
-  /** Weather the label is hidden on md */
+  /** Whether the label is hidden on md */
   hideMd?: boolean;
 
   /** name of any icon available in icons map */
@@ -62,6 +63,12 @@ export interface InputProps
   autoComplete?: string;
 }
 
+/**
+ * Shared form field: label, optional icon or add-on, error text and the app's
+ * input styling. Renders a `<textarea>` when `inputType` is "textarea". Number
+ * inputs ignore the mouse wheel while focused, so scrolling a form cannot
+ * change their value.
+ */
 const Input = forwardRef(function Input(
   {
     className,
@@ -120,9 +127,15 @@ const Input = forwardRef(function Input(
     ...rest,
   };
 
+  // why: a React onWheel cannot cancel the browser's wheel step (React attaches
+  // wheel passively); the guard adds a native listener while the input is focused.
+  const wheelGuard =
+    rest.type === "number" ? withNumberInputWheelGuard(rest) : {};
+
   let input = (
     <input
       {...inputProps}
+      {...wheelGuard}
       aria-label={label}
       ref={ref as RefObject<HTMLInputElement> | undefined}
     />

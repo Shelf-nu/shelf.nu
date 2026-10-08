@@ -19,7 +19,7 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
+  seedFormSelectionAtom,
 } from "~/atoms/list";
 import { AssetImage } from "~/components/assets/asset-image/component";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -58,6 +58,7 @@ import { ShelfError, makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
 import { isSelectingAllItems } from "~/utils/list";
+import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
 import {
   PermissionAction,
   PermissionEntity,
@@ -263,7 +264,7 @@ export default function AddAssetsToLocation() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
+  const seedFormSelection = useSetAtom(seedFormSelectionAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -343,7 +344,7 @@ export default function AddAssetsToLocation() {
   const didInitializeSelectedItemsRef = useRef(false);
   if (!didInitializeSelectedItemsRef.current) {
     didInitializeSelectedItemsRef.current = true;
-    setSelectedBulkItems(locationAssets);
+    seedFormSelection(locationAssets);
   }
 
   return (
@@ -710,6 +711,7 @@ const RowComponent = ({
                 <input
                   id={`location-qty-${item.id}`}
                   type="number"
+                  {...numberInputWheelGuard}
                   min={1}
                   max={Number.isFinite(max) ? max : undefined}
                   value={currentValue}

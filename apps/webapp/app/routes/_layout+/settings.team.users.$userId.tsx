@@ -15,10 +15,10 @@ import { Button } from "~/components/shared/button";
 import { UserSubheading } from "~/components/user/user-subheading";
 import When from "~/components/when/when";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
-import { getUserFromOrg } from "~/modules/user/service.server";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { getUserProfileForOrg } from "~/modules/user/service.server";
 import { resolveUserAction } from "~/modules/user/utils.server";
-import { getUserContactById } from "~/modules/user-contact/service.server";
+import { getUserContactForDisplay } from "~/modules/user-contact/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
@@ -27,8 +27,13 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import {
+  ROLE_LABELS,
+  isWorkspaceOwner,
+  resolveRole,
+} from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
-import { organizationRolesMap } from "./settings.team";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const loader = async ({
   request,
@@ -54,29 +59,16 @@ export const loader = async ({
       }
     );
 
-    const user = await getUserFromOrg({
+    const user = await getUserProfileForOrg({
       id: selectedUserId,
       organizationId,
       userOrganizations,
       request,
-      extraInclude: {
-        teamMembers: {
-          where: { organizationId },
-          include: {
-            receivedInvites: {
-              where: { organizationId },
-            },
-          },
-        },
-      },
     });
 
-    const userContact = await getUserContactById(user.id);
+    const userContact = await getUserContactForDisplay(user.id);
 
-    const userName =
-      (user.firstName ? user.firstName.trim() : "") +
-      " " +
-      (user.lastName ? user.lastName.trim() : "");
+    const userName = resolveUserDisplayName(user);
     const header = {
       title: userName,
     };
@@ -103,14 +95,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId, role);
+    return await resolveUserAction(request, organizationId, userId, access);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -126,7 +118,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function UserPage() {
   const { user, organizationId } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   /* Notes tab is only visible to ADMIN/OWNER roles.
    * BASE and SELF_SERVICE users will never see it.
@@ -135,6 +127,13 @@ export default function UserPage() {
     roles,
     entity: PermissionEntity.teamMemberNote,
     action: PermissionAction.read,
+  });
+
+  /* Changing, revoking or re-inviting this member is a team-member update. */
+  const canUpdateTeamMembers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
   });
 
   const TABS: Item[] = [
@@ -150,10 +149,11 @@ export default function UserPage() {
   const currentOrgMembership = user.userOrganizations.find(
     (uo) => uo.organizationId === organizationId
   );
-  const userOrgRole =
-    organizationRolesMap[
-      currentOrgMembership?.roles[0] ?? user.userOrganizations[0].roles[0]
-    ];
+  const membershipRoles =
+    currentOrgMembership?.roles ?? user.userOrganizations[0]?.roles ?? [];
+  /** The member's effective role: the one every policy decision reads. */
+  const userOrgRoleEnum = resolveRole(membershipRoles);
+  const userOrgRole = ROLE_LABELS[userOrgRoleEnum];
   return (
     <>
       <Header
@@ -179,7 +179,7 @@ export default function UserPage() {
         subHeading={<UserSubheading user={user} />}
       />
 
-      <When truthy={userOrgRole !== "Owner"}>
+      <When truthy={canUpdateTeamMembers && !isWorkspaceOwner(membershipRoles)}>
         <AbsolutePositionedHeaderActions className="hidden w-full md:flex">
           <TeamUsersActionsDropdown
             userId={user.id}
@@ -198,10 +198,8 @@ export default function UserPage() {
               </Button>
             )}
             role={userOrgRole}
-            roleEnum={
-              currentOrgMembership?.roles[0] ??
-              user.userOrganizations[0].roles[0]
-            }
+            roleEnum={userOrgRoleEnum}
+            roles={membershipRoles}
           />
         </AbsolutePositionedHeaderActions>
       </When>

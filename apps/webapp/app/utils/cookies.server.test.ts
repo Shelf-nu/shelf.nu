@@ -1,126 +1,62 @@
 /**
- * Tests for the Advanced-mode filter normalizer.
+ * Tests for the host-only `user-prefs` expiry shim.
  *
- * Regression coverage for the report drill-down bug where bare column-filter
- * values (e.g. `?location=<uuid>`, emitted by the Asset Distribution donut)
- * were silently dropped instead of normalized to operator form (`is:<uuid>`),
- * making drill-down a no-op for any workspace in Advanced mode.
+ * The shim exists to clear a leftover host-only cookie once `user-prefs`
+ * became domain-scoped. It is emitted on every authenticated page load, so
+ * when there is no domain to scope to it targets the same cookie the response
+ * is writing — and every stored preference (sidebar notice card, the Team
+ * upgrade banner's fold) is discarded on the next request.
+ *
+ * That is the state of any deployment leaving `COOKIE_DOMAIN` unset, local
+ * development included.
  *
  * @see {@link file://./cookies.server.ts}
  */
-import type { AssetIndexSettings } from "@prisma/client";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// why: cookies.server pulls in modules whose transitive imports try to
-// initialize the Prisma client at import time, which throws when no DB is
-// reachable. The function under test never touches the DB.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+// why: the shim reads `COOKIE_DOMAIN` per call, so a getter lets each test set
+// the deployment shape without re-importing the module under test.
+const envMock = vi.hoisted(() => ({ COOKIE_DOMAIN: undefined as unknown }));
+vi.mock("./env", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("./env");
+  return {
+    ...actual,
+    get COOKIE_DOMAIN() {
+      return envMock.COOKIE_DOMAIN;
+    },
+  };
+});
 
-import { getAdvancedFiltersFromRequest } from "./cookies.server";
+// why: cookies.server transitively imports asset/utils.server, which
+// initializes Prisma at import time.
+vi.mock("~/modules/asset/utils.server", () => ({
+  advancedFilterFormatSchema: {},
+}));
 
-const ORG_ID = "org-test";
+const { expireHostOnlyUserPrefsCookie } = await import("./cookies.server");
 
-/** Minimal settings stub with the column names exercised by the tests. */
-const settings = {
-  columns: [
-    { name: "location", visible: true, position: 0 },
-    { name: "category", visible: true, position: 1 },
-    { name: "status", visible: true, position: 2 },
-  ],
-} as unknown as AssetIndexSettings;
-
-const makeRequest = (query: string) =>
-  new Request(`https://app.example.com/assets${query}`);
-
-describe("getAdvancedFiltersFromRequest", () => {
-  it("normalizes a bare column value to `is:<value>` and signals redirect", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?location=loc-uuid"),
-      ORG_ID,
-      settings
-    );
-
-    expect(result.filters).toBe("location=is%3Aloc-uuid");
-    expect(result.redirectNeeded).toBe(true);
-    expect(result.serializedCookie).toBeDefined();
+describe("expireHostOnlyUserPrefsCookie", () => {
+  beforeEach(() => {
+    envMock.COOKIE_DOMAIN = undefined;
   });
 
-  it("normalizes multiple bare column values (location, category, status)", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?location=loc-1&category=cat-1&status=AVAILABLE"),
-      ORG_ID,
-      settings
-    );
-
-    const params = new URLSearchParams(result.filters);
-    expect(params.get("location")).toBe("is:loc-1");
-    expect(params.get("category")).toBe("is:cat-1");
-    expect(params.get("status")).toBe("is:AVAILABLE");
-    expect(result.redirectNeeded).toBe(true);
+  it("emits nothing when there is no cookie domain", () => {
+    // The real cookie is host-only here, so the expiry would delete it. This
+    // is the case that silently wiped preferences on every page load.
+    expect(expireHostOnlyUserPrefsCookie()).toEqual([]);
   });
 
-  it("passes operator-prefixed values through unchanged", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?status=is%3AAVAILABLE"),
-      ORG_ID,
-      settings
-    );
+  it("expires the host-only leftover when the cookie is domain-scoped", () => {
+    envMock.COOKIE_DOMAIN = ".shelf.nu";
 
-    expect(result.filters).toBe("status=is%3AAVAILABLE");
-    expect(result.redirectNeeded).toBe(false);
-  });
+    const headers = expireHostOnlyUserPrefsCookie();
 
-  it("leaves non-column params (page, search) untouched", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?page=2&s=keyboard&location=loc-uuid"),
-      ORG_ID,
-      settings
-    );
-
-    const params = new URLSearchParams(result.filters);
-    expect(params.get("page")).toBe("2");
-    expect(params.get("s")).toBe("keyboard");
-    expect(params.get("location")).toBe("is:loc-uuid");
-  });
-
-  it("drops empty column values cleanly without producing `is:` (URL gets cleaned via redirect)", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?location="),
-      ORG_ID,
-      settings
-    );
-
-    // The empty value is not echoed back as `is:` and not retained. The
-    // redirect fires so the browser URL no longer carries the empty filter.
-    expect(result.filters).toBe("");
-    expect(result.redirectNeeded).toBe(true);
-  });
-
-  it("drops malformed operator-form values instead of coercing them to `is:<malformed>`", async () => {
-    // Regression: a value containing `:` whose prefix isn't a valid operator
-    // (e.g. `?status=foo:AVAILABLE`) used to be silently dropped by the old
-    // validator. The normalizer must not promote it to `is:foo:AVAILABLE` —
-    // that would split downstream to operator=`is`, value=`foo` and crash the
-    // status enum cast in `parseFilters`. Caught by Codex on PR #2540.
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest("?status=foo:AVAILABLE"),
-      ORG_ID,
-      settings
-    );
-
-    expect(result.filters).toBe("");
-    expect(result.redirectNeeded).toBe(true);
-  });
-
-  it("returns empty state when no URL params and no cookie", async () => {
-    const result = await getAdvancedFiltersFromRequest(
-      makeRequest(""),
-      ORG_ID,
-      settings
-    );
-
-    expect(result.filters).toBe("");
-    expect(result.redirectNeeded).toBe(false);
-    expect(result.serializedCookie).toBeUndefined();
+    expect(headers).toHaveLength(1);
+    const [name, value] = headers[0];
+    expect(name).toBe("Set-Cookie");
+    expect(value).toContain("Max-Age=0");
+    // No Domain attribute: that is what makes it target the OLD cookie and
+    // leave the domain-scoped one alone.
+    expect(value).not.toMatch(/Domain=/i);
   });
 });

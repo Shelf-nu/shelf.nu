@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { CopyIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import {
   PermissionAction,
@@ -27,7 +27,7 @@ export default function AssetQuickActions({
   style,
   asset,
 }: AssetQuickActionsProps) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>

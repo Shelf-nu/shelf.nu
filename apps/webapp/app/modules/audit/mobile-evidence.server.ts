@@ -11,7 +11,7 @@
  *  2. The auditAsset must belong **to that session** (closes cross-tenant
  *     note/image injection — a client that learns a foreign auditAssetId
  *     must not be able to attach evidence to it).
- *  3. BASE / SELF_SERVICE callers must be an assignee of the audit
+ *  3. Callers limited to assigned audits must be an assignee of the audit
  *     (mirrors `audits.complete.ts`).
  *
  * Lives outside `service.server.ts` so the audit service does not depend on
@@ -35,7 +35,7 @@ import { ShelfError } from "~/utils/error";
  * @param args.organizationId - The caller's resolved organization id
  * @param args.userId - The authenticated user id
  * @throws {ShelfError} 404 if session not in org or asset not in session;
- *   403 if a BASE/SELF_SERVICE caller is not an assignee
+ *   403 if a caller limited to assigned audits is not an assignee
  */
 export async function requireAuditAssetInSession({
   auditSessionId,
@@ -76,12 +76,11 @@ export async function requireAuditAssetInSession({
     });
   }
 
-  const { role } = await getMobileUserContext(userId, organizationId);
-  const isSelfServiceOrBase = role === "SELF_SERVICE" || role === "BASE";
+  const { access } = await getMobileUserContext(userId, organizationId);
   await requireAuditAssignee({
     auditSessionId,
     organizationId,
     userId,
-    isSelfServiceOrBase,
+    assignedOnly: !access.audits.seeAll,
   });
 }

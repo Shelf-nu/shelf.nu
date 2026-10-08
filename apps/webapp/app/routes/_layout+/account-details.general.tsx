@@ -35,6 +35,7 @@ import {
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import { assertEmailChangeAllowed } from "~/modules/auth/sso-enforcement.server";
 import {
   getUserByID,
   getUserWithContact,
@@ -287,14 +288,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
           reason = parsedData?.reason;
         }
 
+        /**
+         * Both addresses come from the SESSION, never from the form.
+         *
+         * `parsedData.email` is submitted by the client and was used verbatim
+         * as the `to:` of the confirmation email, with only `z.string()`
+         * validation. Any authenticated user could therefore make Shelf send
+         * a Shelf-branded email, from Shelf's sending domain, to an address of
+         * their choosing — a spam relay that borrows our deliverability
+         * reputation. The form field was never a security control; the session
+         * already knows who is asking.
+         *
+         * The admin notification takes the session address too: it previously
+         * reported whatever email the client claimed, so the one place a human
+         * reviews these requests could be shown an address the account does
+         * not own.
+         */
         sendEmail({
           to: ADMIN_EMAIL || `"Shelf" <updates@emails.shelf.nu>`,
           subject: "Delete account request",
-          text: `User with id ${userId} and email ${parsedData.email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
+          text: `User with id ${userId} and email ${email} has requested to delete their account. \n User: ${SERVER_URL}/admin-dashboard/${userId} \n\n Reason: ${reason}\n\n`,
         });
 
         sendEmail({
-          to: parsedData.email,
+          to: email,
           subject: "Delete account request received",
           text: `We have received your request to delete your account. It will be processed within 72 hours.\n\n Kind regards,\nthe Shelf team \n\n`,
         });
@@ -312,6 +329,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
       case "initiateEmailChange": {
         if (parsedData.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
+
+        // A standard account that must sign in with SSO could otherwise move
+        // itself to an address off the SSO domain and regain password login.
+        await assertEmailChangeAllowed({ userId, email });
 
         const ssoDomains = await getConfiguredSSODomains();
         const user = await getUserByID(userId, {
@@ -389,6 +410,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Invalid payload type");
 
         const { otp, email: newEmail } = parsedData;
+
+        // Checked again here: a code issued before the account was refused
+        // must not complete the change.
+        await assertEmailChangeAllowed({ userId, email });
 
         /** Just to make sure the user exists */
         await getUserByID(userId, {

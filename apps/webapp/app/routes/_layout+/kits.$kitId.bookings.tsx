@@ -4,11 +4,11 @@ import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
-import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import { getTagsForBookingTagsFilter } from "~/modules/tag/service.server";
 import { getTeamMemberForCustodianFilter } from "~/modules/team-member/service.server";
@@ -49,13 +49,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.kit,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.kit,
+      action: PermissionAction.read,
+    });
 
     const searchParams = getCurrentSearchParams(request);
     const {
@@ -72,7 +71,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Self-service / base users see only their own bookings here. Resolve the
     // full scope (user link + every team-member link) so legacy team-member-
     // linked bookings aren't hidden while showing on the index.
-    const custodianScope = !canSeeAllBookings
+    const custodianScope = !access.bookings.seeAll
       ? await resolveCustodianScope({ userId, organizationId })
       : undefined;
 
@@ -89,7 +88,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           custodianTeamMemberIds: teamMemberIds,
           kitId,
           tags: filterTags,
+          // PERF: the list renders booking-level fields plus an asset COUNT. The
+          // per-booking `bookingAssets` payload existed only for the assets
+          // drawer, which now fetches it from
+          // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+          includeAssets: false,
           extraInclude: {
+            // Asset count for the row's drawer trigger, now that the pivot rows
+            // themselves are no longer loaded.
+            _count: { select: { bookingAssets: true } },
             tags: TAG_WITH_COLOR_SELECT,
             // Same reason as the asset Bookings tab: this route renders the
             // shared bookings row via `BookingsIndexPage`, and the
@@ -111,10 +118,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
           userId,
-          // A FILTER. This passed no scoping argument at all, so a restricted
-          // user — /kits is gated on `kit:read`, which BASE holds — received
-          // the entire team roster here.
-          filterByUserId: !canSeeAllCustody,
+          // A FILTER, so custody visibility governs: only the caller's own
+          // team member unless custody is visible to them.
+          filterByUserId: !access.custody.seeAll,
         }),
         getTagsForBookingTagsFilter({
           organizationId,
@@ -131,7 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // Flag bookings whose QUANTITY_TRACKED assets are over-committed in their
     // window, so the shared list renders the amber "Stock conflict" pill here
     // too (see `~/modules/booking/stock-conflicts.server`).
-    const decoratedBookings = await decorateBookingsWithStockConflicts({
+    const decoratedBookings = await decorateBookingsForList({
       bookings,
       organizationId,
     });

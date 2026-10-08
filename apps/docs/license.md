@@ -1,7 +1,9 @@
 ---
 title: License
-description: Shelf.nu is licensed under AGPL-3.0
+description: Shelf.nu is licensed under AGPL-3.0. The companion mobile app has its own license.
 ---
+
+Shelf.nu is licensed under the AGPL-3.0, reproduced below, with one exception. All content under `apps/companion/` (the companion mobile app) is **not open source**. It is licensed under the [PolyForm Internal Use License 1.0.0](https://github.com/Shelf-nu/shelf.nu/blob/main/apps/companion/LICENSE), which does not allow distribution. The [`LICENSE`](https://github.com/Shelf-nu/shelf.nu/blob/main/LICENSE) file in the repository root is the binding text.
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

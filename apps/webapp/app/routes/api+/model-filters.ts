@@ -9,18 +9,18 @@ import {
 } from "~/modules/booking/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { resolveCustodianPickerScope } from "~/modules/team-member/service.server";
-import { bookingWriteScopeClause } from "~/utils/booking-authorization.server";
+import {
+  bookingAddableStatusClause,
+  bookingWriteScopeClause,
+} from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   getModelFilterConfig,
   isSearchableKey,
 } from "~/utils/model-filters-registry.server";
-import {
-  resolveCanSeeAllBookings,
-  resolveCanSeeAllCustody,
-  resolveEffectiveRole,
-} from "~/utils/roles.server";
+import { resolveMembershipAccess } from "~/utils/permissions/membership-access";
+import { rolesWhere } from "~/utils/permissions/role-access";
 
 /**
  * Booking statuses a booking search returns when the caller does not ask for a
@@ -76,7 +76,7 @@ export const ModelFiltersSchema = z.discriminatedUnion("name", [
   BasicModelFilters.extend({
     name: z.literal("teamMember"),
     deletedAt: z.string().nullable().optional(),
-    userWithAdminAndOwnerOnly: z.coerce.boolean().optional(), // To get only the teamMembers which are admin or owner
+    selectableRecipientsOnly: z.coerce.boolean().optional(), // Only members whose role may be picked as a notification recipient
     usersOnly: z.coerce.boolean().optional(), // To get only the teamMembers with users (exclude NRMs)
     /**
      * Which question this custodian picker is asking — see
@@ -137,6 +137,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   try {
     const { organizationId, userOrganizations, currentOrganization } =
       await getSelectedOrganization({ userId, request });
+    // The caller's access in the active organization, resolved from the
+    // session and the workspace toggles, never from a request param.
+    const access = resolveMembershipAccess({
+      userOrganizations,
+      organizationId,
+      workspace: currentOrganization,
+    });
 
     /** Getting all the query parameters from url */
     const url = new URL(request.url);
@@ -193,21 +200,24 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     /**
      * When searching for teamMember, we have to search for
      * - teamMember's name
-     * - teamMember's user firstName, lastName and email
+     * - teamMember's user firstName, lastName, displayName and email
      */
     if (modelFilters.name === "teamMember") {
       searchBranches.push(
         { name: { contains: queryValue, mode: "insensitive" } },
         { user: { firstName: { contains: queryValue, mode: "insensitive" } } },
-        // Was a second `firstName` branch, so surname search silently matched
-        // nothing.
         { user: { lastName: { contains: queryValue, mode: "insensitive" } } },
+        // `displayName` replaces first/last name in the UI for users who set
+        // one, so it is the name a searcher can actually see in the option.
+        {
+          user: { displayName: { contains: queryValue, mode: "insensitive" } },
+        },
         // Matched but never RETURNED — see the registry's `teamMember` select.
         { user: { email: { contains: queryValue, mode: "insensitive" } } }
       );
 
       where.deletedAt = modelFilters.deletedAt;
-      if (modelFilters.userWithAdminAndOwnerOnly) {
+      if (modelFilters.selectableRecipientsOnly) {
         where.AND = [
           { user: { isNot: null } },
           {
@@ -216,7 +226,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                 some: {
                   AND: [
                     { organizationId },
-                    { roles: { hasSome: ["ADMIN", "OWNER"] } },
+                    {
+                      roles: {
+                        hasSome: rolesWhere(
+                          (p) => p.notifications.selectableAsRecipient
+                        ),
+                      },
+                    },
                   ],
                 },
               },
@@ -234,21 +250,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * the list grew from "just me" to the entire roster the moment the user
        * typed.
        */
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
+      // Fail closed: an unmigrated call site gets the NARROWER assignment
+      // rule, so it shows too few names rather than too many.
+      const purpose = modelFilters.custodyPurpose ?? "custody-assignment";
       const custodyScope = resolveCustodianPickerScope({
-        // Fail closed: an unmigrated call site gets the NARROWER assignment
-        // rule, so it shows too few names rather than too many.
-        purpose: modelFilters.custodyPurpose ?? "custody-assignment",
-        role,
-        canSeeAllCustody: resolveCanSeeAllCustody({
-          role,
-          currentOrganization,
-        }),
+        purpose,
+        access,
         userId,
       });
 
-      // BASE may never assign custody, so there is nothing to offer and no
-      // reason to hit the database.
+      // A caller who may not assign custody at all has nothing to be offered,
+      // so there is no reason to hit the database.
       if (custodyScope.mode === "none") {
         return data(payload({ filters: [] }));
       }
@@ -284,25 +296,21 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        */
       where.AND = [...(where.AND ?? []), bookingDraftVisibilityClause(userId)];
 
-      const role = resolveEffectiveRole({ userOrganizations, organizationId });
-
       /**
        * Standard booking READ visibility: SELF_SERVICE / BASE users only see
        * bookings they are custodian of, unless the workspace has switched the
        * setting on.
        *
-       * Resolved from the session role plus the organization's settings, never
-       * from a request param, and AND-ed so the search `OR` cannot widen it.
-       * The restriction used to be opt-in via a `scopeToCustodian` query param,
-       * which a caller could simply omit — every booking row in the workspace
-       * came back to a restricted user with the setting off.
+       * Resolved from the membership's effective role plus the organization's
+       * settings, never from a request param (a caller could omit a param),
+       * and AND-ed so the search `OR` cannot widen it.
        *
        * Shares `custodianScopeClause` with `getBookings` so the shape matches
-       * the loader that seeded the picker; matching only `custodianUserId` here
-       * dropped bookings custodied through a legacy team-member row as soon as
-       * the user typed.
+       * the loader that seeded the picker: the clause also matches bookings
+       * custodied through a legacy team-member row, which `custodianUserId`
+       * alone would miss.
        */
-      if (!resolveCanSeeAllBookings({ role, currentOrganization })) {
+      if (!access.bookings.seeAll) {
         where.AND.push(
           custodianScopeClause(
             await resolveCustodianScope({ userId, organizationId })
@@ -314,7 +322,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * Standard booking WRITE authorization, AND-ed on top.
        *
        * Every reachable consumer of a booking search for a restricted role is a
-       * mutation-target picker — the two "Add to existing booking" dialogs. The
+       * mutation-target picker: the two "Add to existing booking" dialogs. The
        * asset-index advanced filter is the only read-only consumer, and
        * `assets._index.tsx` refuses ADVANCED mode to SELF_SERVICE / BASE
        * outright, so this never narrows a list they can otherwise reach.
@@ -324,10 +332,18 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
        * action rejects turns the picker into a 403 dead end. A future read-only
        * booking search for these roles needs a purpose distinction here.
        */
-      const writeScope = bookingWriteScopeClause({ userId, role });
+      const writeScope = bookingWriteScopeClause({ userId, access });
 
       if (writeScope) {
         where.AND.push(writeScope);
+      }
+
+      // Same picker rule as the seeding loader: only statuses the add action
+      // accepts for this caller.
+      const addableStatus = bookingAddableStatusClause({ access });
+
+      if (addableStatus) {
+        where.AND.push(addableStatus);
       }
     }
 

@@ -54,7 +54,8 @@ export const EmptyState = ({
    * the All view hides nothing, so the plain wording is right there.
    */
   const archivedParam = searchParams.get("archived");
-  const viewHidesArchived = archivedParam !== "archived" && archivedParam !== "all";
+  const viewHidesArchived =
+    archivedParam !== "archived" && archivedParam !== "all";
   const searchMayBeHidingArchived = plural === "assets" && viewHidesArchived;
 
   /**

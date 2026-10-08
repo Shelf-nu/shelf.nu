@@ -1,0 +1,141 @@
+/**
+ * Redaction of log-bound values.
+ *
+ * `parseData` puts the whole submitted payload into `ShelfError.additionalData`
+ * on a validation failure, and the logger emits `additionalData` verbatim, so
+ * every submitted field reaches the log line unless its key is redacted. The
+ * password-reset form is the sharpest case: it submits `{ email, otp, password,
+ * confirmPassword }`, and a mistyped confirmation is an ordinary validation
+ * failure.
+ *
+ * @see {@link file://./redact.ts}
+ * @see {@link file://./http.server.ts} `parseData`
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { REDACTED, TRUNCATED, redactSensitive } from "./redact";
+
+// @vitest-environment node
+
+describe("redactSensitive", () => {
+  it("redacts the OTP and passwords in a password-reset payload but keeps the email", () => {
+    expect(
+      redactSensitive({
+        email: "user@example.com",
+        otp: "123456",
+        password: "hunter2",
+        confirmPassword: "hunter2",
+      })
+    ).toEqual({
+      email: "user@example.com",
+      otp: REDACTED,
+      password: REDACTED,
+      confirmPassword: REDACTED,
+    });
+  });
+
+  it("keeps non-sensitive fields, which are the point of logging at all", () => {
+    expect(redactSensitive({ email: "a@b.c", name: "Ada", count: 3 })).toEqual({
+      email: "a@b.c",
+      name: "Ada",
+      count: 3,
+    });
+  });
+
+  it.each([
+    "password",
+    "newPassword",
+    "confirmPassword",
+    "currentPassword",
+    "password_confirmation",
+    "otp",
+    "token",
+    "refreshToken",
+    "accessToken",
+    "apiKey",
+    "api_key",
+    "clientSecret",
+    "authorization",
+    "sessionId",
+    "privateKey",
+  ])("redacts %s", (key) => {
+    expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
+  });
+
+  it.each(["x-api-key", "user.token", "2fa-secret"])(
+    "redacts %s, where a separator bounds the sensitive word",
+    (key) => {
+      expect(redactSensitive({ [key]: "sensitive" })[key]).toBe(REDACTED);
+    }
+  );
+
+  it.each(["token1", "password1", "my password", "user/token", "auth:token"])(
+    "keeps %s, where the sensitive word is not bounded by a separator or a letter",
+    (key) => {
+      expect(redactSensitive({ [key]: "kept" })[key]).toBe("kept");
+    }
+  );
+
+  it("does not mutate the input — callers still need the real values", () => {
+    // A validation failure still has to tell the user which field was wrong.
+    const input = { otp: "123456", email: "a@b.c" };
+
+    redactSensitive(input);
+
+    expect(input.otp).toBe("123456");
+  });
+
+  it("walks nested objects and arrays", () => {
+    expect(
+      redactSensitive({
+        user: { email: "a@b.c", password: "hunter2" },
+        attempts: [{ otp: "111111" }, { otp: "222222" }],
+      })
+    ).toEqual({
+      user: { email: "a@b.c", password: REDACTED },
+      attempts: [{ otp: REDACTED }, { otp: REDACTED }],
+    });
+  });
+
+  it("passes primitives and null through untouched", () => {
+    expect(redactSensitive("plain")).toBe("plain");
+    expect(redactSensitive(42)).toBe(42);
+    expect(redactSensitive(null)).toBeNull();
+    expect(redactSensitive(undefined)).toBeUndefined();
+  });
+
+  it("leaves non-plain objects alone rather than flattening them", () => {
+    // Spreading a Date into a plain object would turn it into `{}` and lose
+    // the value entirely — worse than not redacting it.
+    const date = new Date("2026-01-01");
+
+    expect(redactSensitive({ when: date }).when).toBe(date);
+  });
+
+  it("terminates on deeply nested input instead of recursing forever", () => {
+    let deep: Record<string, unknown> = { password: "hunter2" };
+    for (let i = 0; i < 50; i++) {
+      deep = { nested: deep };
+    }
+
+    expect(() => redactSensitive(deep)).not.toThrow();
+  });
+
+  it("truncates past the depth limit rather than passing the subtree through", () => {
+    // Failing OPEN here would defeat the function: returning an unwalked
+    // subtree means returning an unredacted one.
+    let deep: Record<string, unknown> = { password: "hunter2" };
+    for (let i = 0; i < 50; i++) {
+      deep = { nested: deep };
+    }
+
+    expect(JSON.stringify(redactSensitive(deep))).not.toContain("hunter2");
+  });
+
+  it("marks what it truncated so the gap is visible in the log", () => {
+    const deep = { a: { b: { c: { d: { e: { secretless: "value" } } } } } };
+
+    expect(JSON.stringify(redactSensitive(deep))).toContain(TRUNCATED);
+  });
+});

@@ -9,7 +9,9 @@ import {
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import type { loader } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { dateForDateTimeInputValue } from "~/utils/date-fns";
@@ -19,6 +21,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import { BookingCheckinReceiptPDF } from "./booking-checkin-receipt-pdf";
 import { BookingOverviewPDF } from "./booking-overview-pdf";
 import { CancelBookingDialog } from "./cancel-booking-dialog";
 import { DeleteBooking } from "./delete-booking";
@@ -35,7 +38,11 @@ interface Props {
 }
 
 export const ActionsDropdown = ({ fullWidth }: Props) => {
-  const { booking } = useLoaderData<typeof loader>();
+  const { booking, hasDispositionedUnits } = useLoaderData<typeof loader>();
+  // Seed the extend dialog in the RESOLVED preference zone — the same zone this
+  // page displays the booking in and the extend action parses the submission in.
+  // Seeding from the device clock showed a different end date than the page.
+  const prefs = useFormatPrefs();
   const {
     isCompleted,
     isOngoing,
@@ -47,7 +54,8 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
   } = useBookingStatusHelpers(booking.status);
 
   const submit = useSubmit();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
 
   const canArchiveBooking = userHasPermission({
     roles,
@@ -100,7 +108,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
           </When>
           <When truthy={canExtendBooking}>
             <ExtendBookingDialog
-              currentEndDate={dateForDateTimeInputValue(new Date(booking.to))}
+              currentEndDate={dateForDateTimeInputValue(
+                new Date(booking.to),
+                prefs.timeZone
+              )}
             />
           </When>
           <When
@@ -146,7 +157,7 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
 
           <When
             truthy={
-              !isBaseOrSelfService &&
+              roleAccess.policy.notifications.manageBookingRecipients &&
               !isCompleted &&
               !isArchived &&
               !isCancelled
@@ -155,10 +166,10 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
             <ManageNotificationsDialog />
           </When>
 
-          {/* Because SELF_SERVICE and BASE can only delete bookings they own and are in draft, we need to handle it like this, rather than with userHasPermission */}
-
+          {/* Members whose policy limits delete to drafts see Delete only on a
+              draft; the server applies the same rule (`assertCanDeleteBooking`). */}
           <When
-            truthy={(isBaseOrSelfService && isDraft) || !isBaseOrSelfService}
+            truthy={!roleAccess.policy.bookings.deleteOnlyDrafts || isDraft}
           >
             <DeleteBooking booking={booking} />
           </When>
@@ -171,6 +182,11 @@ export const ActionsDropdown = ({ fullWidth }: Props) => {
                 (ba: { asset: { id: string } }) => ba.asset
               ),
             }}
+            timeStamp={new Date().getTime()}
+          />
+          <BookingCheckinReceiptPDF
+            booking={booking}
+            hasDispositionedUnits={hasDispositionedUnits}
             timeStamp={new Date().getTime()}
           />
         </DropdownMenuContent>

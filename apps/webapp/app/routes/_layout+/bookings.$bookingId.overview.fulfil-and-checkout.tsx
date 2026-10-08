@@ -2,12 +2,13 @@
  * Fulfil Reservations & Check Out Route
  *
  * Dedicated scanner route for bookings that still carry outstanding
- * `BookingModelRequest` rows (Phase 3d — Book-by-Model). Opening the
+ * `BookingModelRequest` rows (book-by-model). Opening the
  * route shows the operator *what's expected* (pending model rows
  * rendered from `modelRequests`), lets them scan concrete assets to
- * fulfil those requests, and — on submit — materialises the requests
- * AND transitions the booking from `RESERVED → ONGOING` in a single
- * atomic transaction via `fulfilModelRequestsAndCheckout`.
+ * fulfil those requests, and — on submit — delegates to
+ * `fulfilAndCheckOut`, which materialises the requests and then checks
+ * the booking out: the whole booking, or, under the workspace's
+ * explicit check-out requirement, only the scanned units.
  *
  * Mirrors `bookings.$bookingId.overview.scan-assets.tsx` for the
  * scanner shell (header, camera, `addScannedItemAtom`). The drawer
@@ -19,16 +20,18 @@
  * the normal checkout path directly; the fulfil detour would just be
  * ceremony.
  *
- * @see {@link file://./../../modules/booking/service.server.ts} —
- *   `fulfilModelRequestsAndCheckout` (T2).
+ * @see {@link file://./../../modules/booking/fulfil-and-checkout.server.ts}
+ *   — orchestrates the full vs. partial check-out.
  * @see {@link file://./../../components/scanner/drawer/uses/fulfil-reservations-drawer.tsx}
- *   — drawer UI (T5).
+ *   — drawer UI.
  * @see {@link file://./../../hooks/use-booking-fulfil-session-initialization.ts}
- *   — atom seeding hook (T4).
- * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms (T1).
+ *   — atom seeding hook.
+ * @see {@link file://./../../atoms/qr-scanner.ts} — fulfil atoms.
+ * @see {@link file://./../../modules/booking-model-request/scan-session.server.ts}
+ *   for the loader derivation shared with the Scan to Assign screen.
  */
 
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -49,13 +52,15 @@ import { db } from "~/database/db.server";
 import { useBookingFulfilSessionInitialization } from "~/hooks/use-booking-fulfil-session-initialization";
 import { useScannerCameraId } from "~/hooks/use-scanner-camera-id";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import {
-  fulfilModelRequestsAndCheckout,
-  getBooking,
-} from "~/modules/booking/service.server";
+import { parseSourceLocationsFromFormData } from "~/modules/booking/checkout-source-location";
+import { getCheckoutSourceQuestions } from "~/modules/booking/checkout-source-location.server";
+import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
+import { getBooking } from "~/modules/booking/service.server";
+import { deriveBookingScanSession } from "~/modules/booking-model-request/scan-session.server";
+import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import scannerCss from "~/styles/scanner.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { canUserManageBookingAssets } from "~/utils/bookings";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
@@ -71,6 +76,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -84,17 +90,17 @@ export const links: LinksFunction = () => [
  * - `assetIds`: concrete asset IDs the operator scanned in the drawer
  *   (matched OR off-model — server matches them against outstanding
  *   `BookingModelRequest` rows and creates `BookingAsset` rows).
- * - `kitIds`: present for forward compatibility — kit-level
- *   `BookingModelRequest`s don't exist today, so the server will
- *   reject non-empty kits when there are outstanding model requests.
- *   We still plumb the field through so the drawer can evolve without
- *   a schema change.
+ * - `kitIds`: kit IDs the operator scanned in the drawer. The server
+ *   resolves each into kit-driven `BookingAsset` rows and assigns their
+ *   INDIVIDUAL members against outstanding `BookingModelRequest` rows,
+ *   exactly as it does for a directly scanned asset. Members are not
+ *   listed in `assetIds` — sending one both ways would book it twice.
  * - `checkoutIntentChoice`: the operator's answer to the early-
  *   checkout alert (`with-adjusted-date` | `without-adjusted-date`).
  *   Only meaningful when `isBookingEarlyCheckout(booking.from)` is
  *   true; otherwise the service ignores it.
  *
- * Exported so the drawer (T5) can reuse the same schema for
+ * Exported so the drawer can reuse the same schema for
  * client-side form validation.
  */
 export const fulfilAndCheckoutSchema = z.object({
@@ -112,16 +118,18 @@ export const fulfilAndCheckoutSchema = z.object({
  *   already-included concrete assets.
  * - Rejects if the user can't manage the booking (mirrors
  *   scan-assets).
+ * - Tells the drawer whether submit sends out only the scanned items, so
+ *   its "something to check out" rule matches the action's.
+ * - Derives `expectedModelRequests` and `alreadyIncluded` via
+ *   `deriveBookingScanSession`, shared with the Scan to Assign loader so
+ *   the two screens can never disagree about what a scan is worth.
  * - Short-circuits to `/bookings/:id` when there are zero outstanding
- *   model requests — the regular checkout flow is correct in that
- *   case and the fulfil scanner would be a confusing detour.
- * - Supplements the booking query with a lightweight lookup of each
- *   `bookingAsset.assetId → assetModelId` because the default
- *   `BOOKING_WITH_ASSETS_INCLUDE` on `getBooking` doesn't select
- *   `assetModelId` on the nested asset row. The drawer needs this to
- *   group "already included" entries by model and to compute
- *   per-model progress without issuing a follow-up round-trip.
+ *   model requests: the regular checkout flow is correct in that case and
+ *   the fulfil scanner would be a confusing detour.
  */
+/** Statuses a booking can be checked out in, as `fulfilAndCheckOut` accepts. */
+const FULFILLABLE_STATUSES: string[] = ["RESERVED", "ONGOING", "OVERDUE"];
+
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -131,16 +139,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, userOrganizations } = await requirePermission(
-      {
+    // Matches the action's gate: this screen exists only to check out, so a
+    // role without `booking:checkout` should not reach it at all.
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      }
-    );
-
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+        action: PermissionAction.checkout,
+      });
 
     const booking = await getBooking({
       id: bookingId,
@@ -149,82 +156,84 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       request,
     });
 
-    const canManageAssets = canUserManageBookingAssets(booking, isSelfService);
+    // Seeing a booking does not grant checking it out: a caller who does not
+    // write every booking must own it. The action refuses the same callers, so
+    // this keeps another member's booking, model requests and asset data off
+    // this screen. No-op when `access.bookings.writeAll`.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "check out",
+    });
 
-    if (!canManageAssets) {
+    // This screen is a check-out, so it takes the check-out rule (the
+    // permission above, ownership, and a status that can be checked out), not
+    // the add-items rule: assigning reserved units is part of checking the
+    // booking out, which Self service may do on its own booking. The service
+    // re-checks the status under a row lock.
+    if (!FULFILLABLE_STATUSES.includes(booking.status)) {
       throw new ShelfError({
         cause: null,
-        message:
-          "You are not allowed to add assets for this booking at the moment.",
+        message: "This booking cannot be checked out in its current status.",
         label: "Booking",
+        status: 400,
         shouldBeCaptured: false,
       });
     }
 
     /**
-     * Outstanding model requests — anything with `fulfilledAt === null`
-     * still needs fulfilment. If none remain, this route has nothing to
-     * do; send the operator back to the booking page where the normal
-     * checkout flow lives. `booked` reflects the original reservation
-     * intent (for progress denominators); `remaining` is what's still
-     * outstanding after any prior partial-scan progress, so the drawer
-     * pre-populates the right number of pending rows.
+     * Outstanding model requests plus the assets already on the booking that
+     * a scan could still make answer one, derived through the predicate and
+     * rule both booking scanners share (this screen and Scan to Assign) so a
+     * scan is never worth a different amount depending which is open.
+     *
+     * If nothing remains outstanding, this route has nothing to do; send the
+     * operator back to the booking page where the normal checkout flow
+     * lives. `booked` reflects the original reservation intent (for progress
+     * denominators); `remaining` is what's still outstanding after any prior
+     * partial-scan progress, so the drawer pre-populates the right number of
+     * pending rows.
      */
-    const expectedModelRequests = booking.modelRequests
-      .filter((r) => r.fulfilledAt === null)
-      .map((r) => ({
-        assetModelId: r.assetModelId,
-        assetModelName: r.assetModel.name,
-        booked: r.quantity,
-        remaining: r.quantity - r.fulfilledQuantity,
-      }));
+    const { expectedModelRequests, alreadyIncluded } =
+      await deriveBookingScanSession({
+        modelRequests: booking.modelRequests,
+        bookingAssets: booking.bookingAssets,
+        organizationId,
+      });
 
     if (expectedModelRequests.length === 0) {
       return redirect(`/bookings/${bookingId}`);
     }
 
     /**
-     * Supplementary lookup: `assetModelId` per `BookingAsset.assetId`
-     * (not selected by `BOOKING_WITH_ASSETS_INCLUDE`). Cheap — narrow
-     * `select` on at most N rows where N = booking.bookingAssets
-     * length. Keeps the expensive `getBooking` call unchanged.
+     * Whether submit sends out only the scanned items, decided the same way
+     * `fulfilAndCheckOut` decides it: under the explicit check-out requirement,
+     * or once the booking is no longer RESERVED.
      */
-    const alreadyIncludedAssetIds = booking.bookingAssets.map(
-      (ba) => ba.asset.id
-    );
-    const assetModelIdByAssetId = new Map<string, string | null>();
-    if (alreadyIncludedAssetIds.length > 0) {
-      const rows = await db.asset.findMany({
-        where: {
-          id: { in: alreadyIncludedAssetIds },
-          organizationId,
-        },
-        select: { id: true, assetModelId: true },
-      });
-      for (const row of rows) {
-        assetModelIdByAssetId.set(row.id, row.assetModelId);
-      }
-    }
-
-    const alreadyIncluded = booking.bookingAssets.map((ba) => ({
-      id: ba.asset.id,
-      title: ba.asset.title,
-      mainImage: ba.asset.mainImage,
-      thumbnailImage: ba.asset.thumbnailImage,
-      assetModelId: assetModelIdByAssetId.get(ba.asset.id) ?? null,
-      kitId: ba.asset.assetKits[0]?.kitId ?? null,
-      // `ba.quantity` is the BOOKING-specific unit count (from the
-      // `BookingAsset` pivot) — always `1` for INDIVIDUAL, `N` for
-      // QUANTITY_TRACKED. Needed so the drawer's "Already included"
-      // section can render `"Pens × 20"` for qty-tracked rows.
-      bookedQuantity: ba.quantity,
-      type: ba.asset.type as "INDIVIDUAL" | "QUANTITY_TRACKED",
-    }));
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const checksOutScannedOnly =
+      isExplicitScanRequired({
+        access,
+        settings: bookingSettings,
+        direction: "checkout",
+      }) || booking.status !== BookingStatus.RESERVED;
 
     const title = `Fulfil reservations & check out | ${booking.name}`;
     const header: HeaderData = {
       title,
     };
+
+    /**
+     * Pools already on the booking at two or more locations that have not
+     * gone out yet. The check-out confirmation asks where each one's units
+     * leave from.
+     */
+    const checkoutSourceQuestions = await getCheckoutSourceQuestions({
+      organizationId,
+      bookingId: booking.id,
+    });
 
     return payload({
       title,
@@ -232,6 +241,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       expectedModelRequests,
       alreadyIncluded,
+      checksOutScannedOnly,
+      checkoutSourceQuestions,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, bookingId });
@@ -242,11 +253,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 /**
  * Action for the fulfil-and-checkout route.
  *
- * Parses the drawer-submitted payload, delegates to
- * `fulfilModelRequestsAndCheckout` (single atomic tx: materialise
- * requests → create BookingAssets → optional early-date rewrite →
- * status transition → post-commit emails/scheduler), and redirects
- * back to the booking page on success.
+ * Parses the drawer-submitted payload and delegates to
+ * `fulfilAndCheckOut`, which materialises the requests into
+ * `BookingAsset` rows and then checks the booking out — the whole
+ * booking, or, under the workspace's explicit check-out requirement,
+ * only the scanned units — before redirecting back to the booking page
+ * on success.
  *
  * `hints` is required by the service for the timezone-aware early-
  * date rewrite and the check-in scheduler — matches how the existing
@@ -262,11 +274,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    // `checkout`, not `update`: BASE holds `update` and deliberately does NOT
+    // hold `checkout`, so gating on `update` let a BASE user check out through
+    // this route. The dedicated action exists precisely to withhold this.
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
-      action: PermissionAction.update,
+      action: PermissionAction.checkout,
     });
 
     const formData = await request.formData();
@@ -277,16 +292,44 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     );
 
     /**
-     * Pull the booking's from/to for the pre-tx conflict guard inside
-     * the service (mirrors the existing `checkoutBooking` caller in
+     * Pull the booking's from/to for the full check-out's pre-tx conflict
+     * guard (mirrors the existing `checkoutBooking` caller in
      * `bookings.$bookingId.overview.tsx`).
      */
     const basicBookingInfo = await db.booking.findUniqueOrThrow({
       where: { id: bookingId, organizationId },
-      select: { from: true, to: true },
+      // creatorId/custodianUserId feed the ownership guard below.
+      select: {
+        from: true,
+        to: true,
+        creatorId: true,
+        custodianUserId: true,
+      },
     });
 
-    await fulfilModelRequestsAndCheckout({
+    // A direct POST skips the loader, so the action repeats the ownership
+    // check. SELF_SERVICE holds `booking:checkout`, and `fulfilAndCheckOut`
+    // does not check ownership itself. No-op when `access.bookings.writeAll`.
+    // Mirrors api+/mobile+/bookings.fulfil-and-checkout.ts.
+    validateBookingOwnership({
+      booking: basicBookingInfo,
+      userId,
+      access,
+      action: "check out",
+    });
+
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers as such. Under the requirement only the scanned units
+    // are checked out.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const requireExplicitCheckout = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkout",
+    });
+
+    const { remainingAssetCount } = await fulfilAndCheckOut({
       bookingId,
       organizationId,
       userId,
@@ -296,17 +339,30 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       hints: getClientHint(request),
       from: basicBookingInfo.from,
       to: basicBookingInfo.to,
+      requireExplicitCheckout,
+      // The confirm dialog's "From location" picks, keyed by slice id, for
+      // pools already on the booking at two or more placements. A pool this
+      // scan adds has no slice yet, so it gets the default (see
+      // `recordCheckoutSourceLocations`).
+      sourceLocations: parseSourceLocationsFromFormData(formData),
     });
 
     sendNotification({
       title: "Checked out",
-      message: "Your booking has been checked out successfully",
+      message:
+        remainingAssetCount > 0
+          ? `The scanned units are checked out. ${remainingAssetCount} more ${
+              remainingAssetCount === 1 ? "asset is" : "assets are"
+            } still to check out.`
+          : "Your booking has been checked out successfully",
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });
 
     return redirect(`/bookings/${bookingId}`);
   } catch (cause) {
+    // `error()` also sends the refusal to this user as an error notification.
+    // That toast is how a refused check-out reaches the operator in the drawer.
     const reason = makeShelfError(cause, { userId, bookingId });
     return data(error(reason), { status: reason.status });
   }
@@ -327,7 +383,7 @@ export const handle = {
  * Seeds the fulfil session atoms from the loader payload, renders the
  * drawer + camera, and forwards QR detections to the shared
  * `addScannedItemAtom`. All actual fulfil-specific UI lives in
- * `FulfilReservationsDrawer` (T5); this component is intentionally a
+ * `FulfilReservationsDrawer`; this component is intentionally a
  * thin harness, matching `scan-assets.tsx`.
  */
 export default function FulfilAndCheckoutForBooking() {
@@ -342,11 +398,16 @@ export default function FulfilAndCheckoutForBooking() {
 
   // The shell needs the loader payload to seed the fulfil session
   // atoms on mount via `useBookingFulfilSessionInitialization`. The
-  // drawer (T5) also reads `useLoaderData` directly for its own
+  // drawer also reads `useLoaderData` directly for its own
   // rendering — that's fine; `useLoaderData` dedupes via the router
   // context.
-  const { booking, expectedModelRequests, alreadyIncluded } =
-    useLoaderData<typeof loader>();
+  const {
+    booking,
+    expectedModelRequests,
+    alreadyIncluded,
+    checksOutScannedOnly,
+    checkoutSourceQuestions,
+  } = useLoaderData<typeof loader>();
 
   useBookingFulfilSessionInitialization({
     session: {
@@ -359,6 +420,8 @@ export default function FulfilAndCheckoutForBooking() {
       bookingFrom: booking.from
         ? new Date(booking.from).toISOString()
         : new Date().toISOString(),
+      bookingStatus: booking.status,
+      checksOutScannedOnly,
       expectedModelRequests,
       alreadyIncluded,
     },
@@ -377,7 +440,10 @@ export default function FulfilAndCheckoutForBooking() {
     <>
       <Header hidePageDescription />
 
-      <FulfilReservationsDrawer isLoading={isLoading} />
+      <FulfilReservationsDrawer
+        isLoading={isLoading}
+        sourceQuestions={checkoutSourceQuestions}
+      />
 
       <div className="-mx-4 flex flex-col" style={{ height: `${height}px` }}>
         <CodeScanner

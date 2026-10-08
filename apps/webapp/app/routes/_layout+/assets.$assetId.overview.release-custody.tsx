@@ -1,11 +1,11 @@
-import { OrganizationRoles, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, redirect, useLoaderData, useNavigation } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UserXIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { getAsset } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { releaseCustody } from "~/modules/custody/service.server";
@@ -113,15 +113,14 @@ export const action = async ({
   });
 
   try {
-    const { role, organizationId, userOrganizations } = await requirePermission(
-      {
+    const { access, organizationId, userOrganizations } =
+      await requirePermission({
         userId,
         request,
         entity: PermissionEntity.asset,
         action: PermissionAction.custody,
-      }
-    );
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+      });
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const user = await getUserByID(userId, {
       select: {
@@ -179,13 +178,13 @@ export const action = async ({
     const custodyRecord = getPrimaryCustody(assetWithCustody.custody);
 
     // Pass activity event data to releaseCustody for atomic recording. The
-    // SELF_SERVICE self-restriction is enforced inside releaseCustody so web
-    // and mobile share one implementation.
+    // caller's custody scope is enforced inside releaseCustody so web and
+    // mobile share one implementation.
     const asset = await releaseCustody({
       assetId,
       organizationId,
       userId,
-      role,
+      custodyAssign: access.custody.assign,
       activityEvent: {
         actorUserId: userId,
         teamMemberId: custodyRecord?.custodian?.id,
@@ -211,23 +210,13 @@ export const action = async ({
         ? wrapCustodianForNote({
             teamMember: {
               name: custodianDisplayName,
-              user: custodyRecord.custodian.user
-                ? {
-                    id: custodyRecord.custodian.user.id,
-                    firstName: custodyRecord.custodian.user.firstName,
-                    lastName: custodyRecord.custodian.user.lastName,
-                  }
-                : null,
+              user: custodyRecord.custodian.user,
             },
           })
         : // Free-form fallback name, rendered as literal bold text.
           `**${stripMarkdocDelimiters(custodianDisplayName)}**`;
-      const actor = wrapUserLinkForNote({
-        id: user.id,
-        firstName: user.firstName,
-        lastName: user.lastName,
-      });
-      const content = isSelfService
+      const actor = wrapUserLinkForNote(user);
+      const content = assignsSelfOnly
         ? `${actor} released their custody.`
         : `${actor} released ${custodianDisplay}'s custody.`;
 
@@ -264,7 +253,7 @@ export default function Custody() {
   const transition = useNavigation();
   const disabled = isFormProcessing(transition.state);
 
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
 
   return (
     <>
@@ -276,7 +265,7 @@ export default function Custody() {
           <h4>Release custody of asset</h4>
           <p>
             Are you sure you want to release{" "}
-            {isSelfService ? (
+            {assignsSelfOnly ? (
               "your"
             ) : (
               <span className="font-medium">

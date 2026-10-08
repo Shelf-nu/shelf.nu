@@ -3,11 +3,22 @@ import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
 
 import { db } from "~/database/db.server";
-import { resolveAssetImage } from "~/modules/asset/image-resolution";
+import {
+  resolveAssetImage,
+  serializeImageExpiration,
+} from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
+import {
+  custodianScopeClause,
+  resolveCustodianScope,
+} from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import {
+  redactCustodianForViewer,
+  type RowWithCustody,
+} from "~/utils/custody-visibility.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
@@ -15,13 +26,33 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import { requirePermission } from "~/utils/roles.server";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 const querySchema = z.object({
   q: z.string().trim().max(100).optional(),
 });
 
+/**
+ * Cross-entity search behind the command palette.
+ *
+ * Queries assets, audits, kits, bookings, locations and team members in one
+ * round trip, each scoped to the active organization.
+ *
+ * Each entity type is searched only for members whose matrix grant covers
+ * reading it. Bookings carry an extra restriction: unless the member's access
+ * (role policy and workspace setting) covers every booking, results are
+ * limited to the caller's own, across both custody links, since a booking may
+ * name them through the user link or through any team-member row they hold.
+ * That restriction is AND-ed, never folded into the search `OR`, so a search
+ * term cannot widen it.
+ *
+ * @param args.context - Carries the auth session
+ * @param args.request - Read for the query string and active organization
+ * @returns Matches per entity, each already scoped to what the caller may see
+ */
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
@@ -47,19 +78,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       );
     }
 
-    const {
-      organizationId,
-      role,
-      canSeeAllBookings,
-      canSeeAllCustody,
-      isSelfServiceOrBase,
-      currentOrganization,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.commandPaletteSearch,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.commandPaletteSearch,
+        action: PermissionAction.read,
+      });
 
     const terms = query
       .split(/[\s,]+/)
@@ -129,6 +154,14 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                     mode: Prisma.QueryMode.insensitive,
                   },
                 },
+                // `displayName` replaces first/last name in the UI for users
+                // who set one, so it is the name a searcher can actually see.
+                {
+                  displayName: {
+                    contains: term,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
                 {
                   email: {
                     contains: term,
@@ -153,14 +186,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     // Check if this is a personal workspace - they don't have bookings or team members
     const isPersonalWorkspace = isPersonalOrg(currentOrganization);
 
-    // Check permissions for different entity types based on actual roles
-    const hasKitPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasBookingPermission =
-      !isPersonalWorkspace &&
-      ["OWNER", "ADMIN", "SELF_SERVICE", "BASE"].includes(role);
-    const hasLocationPermission = ["OWNER", "ADMIN"].includes(role);
-    const hasTeamMemberPermission =
-      !isPersonalWorkspace && ["OWNER", "ADMIN"].includes(role);
+    // Each entity type follows the matrix grant for reading it.
+    const roles =
+      userOrganizations.find((o) => o.organization.id === organizationId)
+        ?.roles ?? [];
+    const canRead = (entity: PermissionEntity) =>
+      hasPermission({
+        organizationId,
+        userId,
+        roles,
+        entity,
+        action: PermissionAction.read,
+      });
+    const [canReadKits, canReadBookings, canReadLocations, canReadTeam] =
+      await Promise.all([
+        canRead(PermissionEntity.kit),
+        canRead(PermissionEntity.booking),
+        canRead(PermissionEntity.location),
+        canRead(PermissionEntity.teamMember),
+      ]);
+    const hasKitPermission = canReadKits;
+    const hasBookingPermission = !isPersonalWorkspace && canReadBookings;
+    const hasLocationPermission = canReadLocations;
+    const hasTeamMemberPermission = !isPersonalWorkspace && canReadTeam;
     const hasAuditPermission = true;
 
     // Prepare where clauses for other entities
@@ -175,8 +223,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       ...(bookingSearchConditions.length
         ? { OR: bookingSearchConditions }
         : {}),
-      // BASE and SELF_SERVICE users can only see their own bookings unless org settings allow otherwise
-      ...(canSeeAllBookings ? {} : { custodianUserId: userId }),
+      // Members who cannot see every booking see only their own. AND-ed
+      // rather than merged in beside the search `OR` above: custody is itself
+      // an OR across the user link and any team-member link, and a search
+      // term must not be able to widen it away.
+      ...(access.bookings.seeAll
+        ? {}
+        : {
+            AND: [
+              custodianScopeClause(
+                await resolveCustodianScope({ userId, organizationId })
+              ),
+            ],
+          }),
     };
 
     const locationWhere: Prisma.LocationWhereInput = {
@@ -189,40 +248,50 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const teamMemberWhere: Prisma.TeamMemberWhereInput = {
       organizationId,
       deletedAt: null,
-      ...(teamMemberSearchConditions.length
-        ? { OR: teamMemberSearchConditions }
-        : {}),
-      // BASE and SELF_SERVICE users can only see team members they have custody access to
-      ...(canSeeAllCustody
-        ? {}
-        : {
-            OR: [
-              // Team members they have assets in custody from
+      // Combined with AND, not spread in beside each other: both this query's
+      // search `OR` and the custody-scope `OR` below use the same `OR` key, so
+      // spreading them into one object would let the second clobber the
+      // first instead of narrowing it.
+      AND: [
+        ...(teamMemberSearchConditions.length
+          ? [{ OR: teamMemberSearchConditions }]
+          : []),
+        // Members who cannot see all custody see only team members they
+        // share custody with, and themselves
+        ...(access.custody.seeAll
+          ? []
+          : [
               {
-                custodies: {
-                  some: {
-                    custodian: { userId },
+                OR: [
+                  // Team members they have assets in custody from
+                  {
+                    custodies: {
+                      some: {
+                        custodian: { userId },
+                      },
+                    },
                   },
-                },
-              },
-              // Team members they have kits in custody from
-              {
-                kitCustodies: {
-                  some: {
-                    custodian: { userId },
+                  // Team members they have kits in custody from
+                  {
+                    kitCustodies: {
+                      some: {
+                        custodian: { userId },
+                      },
+                    },
                   },
-                },
+                  // Their own team member record
+                  { userId },
+                ],
               },
-              // Their own team member record
-              { userId },
-            ],
-          }),
+            ]),
+      ],
     };
 
     const auditWhere: Prisma.AuditSessionWhereInput = {
       organizationId,
       ...(auditSearchConditions.length ? { OR: auditSearchConditions } : {}),
-      ...(isSelfServiceOrBase && userId
+      // Members who cannot see every audit see only those assigned to them
+      ...(!access.audits.seeAll && userId
         ? {
             assignments: {
               some: {
@@ -247,6 +316,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderBy: "title",
           orderDirection: "asc",
           perPage: 8,
+          // The same list scope as the asset index: roles limited to bookable
+          // assets never find the rest by searching.
+          availableToBookOnly: access.policy.assets.listScope === "bookable",
           extraInclude: {
             // Model cover image for assets with no image of their own
             ...ASSET_MODEL_IMAGE_SELECT,
@@ -349,17 +421,29 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return data(
       payload({
         query,
-        assets: assetResults.assets.map((asset) => {
+        // A caller who cannot see all custody must not learn who holds an
+        // asset they found by search, so custodians are redacted exactly as
+        // on the asset index before any name is read below.
+        assets: redactCustodianForViewer(
+          // `getAssets` widens its include, so its type shows `custody` as
+          // bare columns while the rows carry the index's custodian select.
+          // Restate that shape at this boundary, as the mapping below does.
+          assetResults.assets as unknown as Array<
+            Omit<(typeof assetResults.assets)[number], "custody"> &
+              RowWithCustody
+          >,
+          { canSeeAllCustody: access.custody.seeAll, userId }
+        ).map((asset) => {
           /** Custody records from getAssets may include custodian if the query includes it */
           const primaryCustody = getPrimaryCustody(
             asset.custody as Array<
               Record<string, unknown> & {
                 custodian?: {
                   name?: string;
-                  user?: {
-                    firstName?: string | null;
-                    lastName?: string | null;
-                  } | null;
+                  // `displayName` is required, not optional: `assetIndexFields`
+                  // selects it, and a cast that omits it silently narrows the
+                  // row back to the legal name.
+                  user?: UserNameFields | null;
                 };
               }
             >
@@ -388,10 +472,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               return {
                 mainImage: isPlaceholder ? null : image.fullUrl,
                 thumbnailImage: isPlaceholder ? null : image.thumbnailUrl,
+                mainImageExpiration: serializeImageExpiration(
+                  image.source,
+                  asset.mainImageExpiration?.toISOString() ?? null
+                ),
               };
             })(),
-            mainImageExpiration:
-              asset.mainImageExpiration?.toISOString() ?? null,
             // `getAssets` widens its `extraInclude` arg to
             // `Prisma.AssetInclude`, so the return type can't narrow back
             // to the `assetLocations` shape we requested above. Cast at
@@ -409,7 +495,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             tagNames: asset.tags?.map((tag) => tag.name) ?? [],
             custodianName: primaryCustody?.custodian?.name ?? null,
             custodianUserName: primaryCustody?.custodian?.user
-              ? `${primaryCustody.custodian.user.firstName} ${primaryCustody.custodian.user.lastName}`.trim()
+              ? resolveUserDisplayName(primaryCustody.custodian.user)
               : null,
             barcodes: asset.barcodes?.map((barcode) => barcode.value) ?? [],
             customFieldValues:
@@ -460,6 +546,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           email: member.user?.email || null,
           firstName: member.user?.firstName || null,
           lastName: member.user?.lastName || null,
+          displayName: member.user?.displayName ?? null,
           userId: member.userId,
         })),
       })

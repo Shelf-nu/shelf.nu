@@ -39,8 +39,8 @@ import { Button } from "~/components/shared/button";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   computeBookingKitDrift,
   duplicateBooking,
@@ -50,7 +50,8 @@ import { getBookingSettingsForOrganization } from "~/modules/booking-settings/se
 import { getWorkingHoursForOrganization } from "~/modules/working-hours/service.server";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { getClientHint, getHints, useHints } from "~/utils/client-hints";
+import { assertCanDuplicateBooking } from "~/utils/booking-authorization.server";
+import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
@@ -77,8 +78,9 @@ export const meta = () => [{ title: appendToMetaTitle("Duplicate booking") }];
  * any per-kit membership drift to surface in the confirmation modal.
  *
  * @returns The source booking, its kit drift, and a `showModal` flag.
- * @throws {ShelfError} If the user lacks booking-create permission or the
- *   booking cannot be resolved within the caller's organization.
+ * @throws {ShelfError} If the user lacks booking-create permission, the
+ *   booking cannot be resolved within the caller's organization, or the
+ *   caller may not duplicate it.
  */
 export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
@@ -86,12 +88,13 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { bookingId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.create,
-    });
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.create,
+      });
 
     const [booking, kitDrift] = await Promise.all([
       getBooking({
@@ -100,10 +103,15 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
         request,
         userOrganizations,
       }),
-      // Drift is independent of the booking lookup — fetch in parallel so
-      // the modal opens as quickly as today.
+      // Drift is independent of the booking lookup, so it is fetched in
+      // parallel; nothing is returned until the guard below passes.
       computeBookingKitDrift({ bookingId, organizationId }),
     ]);
+
+    // This loader answers its own data requests, so it cannot lean on the
+    // booking page's loader: the source booking is returned only to a caller
+    // who may duplicate it.
+    assertCanDuplicateBooking({ booking, userId, access });
 
     return payload({
       showModal: true,
@@ -127,7 +135,8 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
  *
  * @returns A redirect to the new booking on success, or a `DataOrErrorResponse`
  *   carrying validation/field errors on failure.
- * @throws {ShelfError} If the user lacks booking-create permission.
+ * @throws {ShelfError} If the user lacks booking-create permission, or may not
+ *   duplicate this booking (see `assertCanDuplicateBooking`).
  */
 export async function action({ request, context, params }: ActionFunctionArgs) {
   const { userId } = context.getSession();
@@ -135,7 +144,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
   const { bookingId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -143,19 +152,15 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     });
 
     const formData = await request.formData();
-    const hints = getHints(request);
     // TIMEZONE FIX: parse the submitted wall-clock dates in the acting user's
     // RESOLVED pref timezone (matches display), not the browser hint.
-    const prefTimeZone = (
-      await resolveUserFormatPrefsById(userId, getClientHint(request))
-    ).timeZone;
-    const hintsWithPrefTz = { ...hints, timeZone: prefTimeZone };
+    const prefs = await resolveUserFormatPrefsById(
+      userId,
+      getClientHint(request)
+    );
     const workingHours = await getWorkingHoursForOrganization(organizationId);
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
-
-    // ADMIN/OWNER users bypass time restrictions (bufferStartTime, maxBookingLength)
-    const isAdminOrOwner = !isSelfServiceOrBase;
 
     // `coerceLocalDate` (inside the schema) parses the `datetime-local` wire
     // strings into absolute instants in the user's timezone via `fromISO`,
@@ -166,10 +171,10 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
     const { startDate: from, endDate: to } = parseData(
       formData,
       DuplicateBookingSchema({
-        hints: hintsWithPrefTz,
+        prefs,
         workingHours,
         bookingSettings,
-        isAdminOrOwner,
+        bypassTimeLimits: access.policy.bookings.bypassTimeLimits,
       }),
       {
         // Expected user-input validation (e.g. "Start date must be at least N
@@ -179,6 +184,8 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       }
     );
 
+    // The service checks the caller may duplicate the source on the same
+    // row it copies from (`assertCanDuplicateBooking`).
     const newBooking = await duplicateBooking({
       bookingId,
       organizationId,
@@ -186,6 +193,7 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       request,
       from,
       to,
+      access,
     });
 
     sendNotification({
@@ -234,10 +242,9 @@ export default function DuplicateBooking() {
   const actionData = useActionData<DataOrErrorResponse>();
 
   const disabled = useDisabled();
-  const hints = useHints();
   // TIMEZONE FIX: client-side date validation must use the user's RESOLVED
   // timezone preference (the same one display uses), not the browser hint, so
-  // it agrees with the server parse. Locale still comes from `hints`.
+  // it agrees with the server parse.
   const prefs = useFormatPrefs();
 
   // Working hours + booking settings drive the date defaults and validation,
@@ -246,7 +253,7 @@ export default function DuplicateBooking() {
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
 
-  const { isAdministratorOrOwner } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   // Prefill with the next valid working slot — NOT the source booking's dates,
   // which are usually in the past and would fail validation.
@@ -254,7 +261,8 @@ export default function DuplicateBooking() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner
+      roleAccess.policy.bookings.bypassTimeLimits,
+      prefs
     );
 
   const [startDate, setStartDate] = useState(defaultStartDate);
@@ -272,10 +280,10 @@ export default function DuplicateBooking() {
   const zo = useZorm(
     "DuplicateBooking",
     DuplicateBookingSchema({
-      hints: { ...hints, timeZone: prefs.timeZone },
+      prefs,
       workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 

@@ -15,11 +15,14 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import { TagsAutocomplete } from "~/components/tag/tags-autocomplete";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
+import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { getBookingDefaultStartEndTimes } from "~/modules/working-hours/utils";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { getValidationErrors } from "~/utils/http";
 import { userCanViewSpecificCustody } from "~/utils/permissions/custody-and-bookings-permissions.validator.client";
 
@@ -34,16 +37,21 @@ export default function CreateBookingForSelectedAssetsDialog() {
   const workingHoursData = useWorkingHours();
   const { workingHours } = workingHoursData;
   const bookingSettings = useBookingSettings();
-  const { isBaseOrSelfService, roles, isAdministratorOrOwner } =
-    useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
+  const custodianIsSelf = bookingCustodianIsSelf(roleAccess);
+  // TIMEZONE FIX: client-side date validation uses the RESOLVED pref zone
+  // (matches display + the server parse), not the browser hint.
+  const prefs = useFormatPrefs();
 
   const zo = useZorm(
     "CreateBookingWithAssets",
     BookingFormSchema({
+      prefs,
       action: "new",
       workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -51,15 +59,17 @@ export default function CreateBookingForSelectedAssetsDialog() {
     getBookingDefaultStartEndTimes(
       workingHours,
       bookingSettings.bufferStartTime,
-      isAdministratorOrOwner
+      roleAccess.policy.bookings.bypassTimeLimits,
+      prefs
     );
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
 
   const user = useUserData();
-  // Use teamMembersForForm for BASE/SELF_SERVICE users to ensure their team member is always available
+  // teamMembersForForm guarantees the caller's own team member when their
+  // booking custodian is fixed to themself.
   const teamMembersToUse = teamMembersForForm || teamMembers;
-  const defaultTeamMember = isBaseOrSelfService
+  const defaultTeamMember = custodianIsSelf
     ? teamMembersToUse.find((tm) => tm.userId === user!.id)
     : undefined;
 
@@ -88,6 +98,10 @@ export default function CreateBookingForSelectedAssetsDialog() {
       description={`Create a new booking with selected(${selectedAssets.length}) assets`}
       actionUrl="/bookings/new"
       className="lg:w-[600px]"
+      // No `allowBodyOverflow` despite the TagsAutocomplete below: this dialog
+      // scrolls its own content in the `max-h`/`overflow-auto` wrapper, which
+      // already clips the suggestion listbox before the dialog body ever could.
+      // Opting in would not un-clip it — it would only cost the body its scroll.
     >
       {({ disabled, handleCloseDialog, fetcherError, fetcherData }) => {
         /** This handles server side errors in case client side validation fails */
@@ -131,7 +145,7 @@ export default function CreateBookingForSelectedAssetsDialog() {
             <Card className="m-0 mb-2">
               <CustodianField
                 defaultTeamMember={defaultTeamMember}
-                disabled={disabled || isBaseOrSelfService}
+                disabled={disabled || custodianIsSelf}
                 userCanSeeCustodian={userCanSeeCustodian}
                 isNewBooking
                 error={
@@ -167,7 +181,6 @@ export default function CreateBookingForSelectedAssetsDialog() {
             <Card className="m-0 overflow-visible">
               <NotificationRecipientsField
                 disabled={disabled}
-                isAdminOrOwner={isAdministratorOrOwner}
                 creatorName="You"
               />
             </Card>

@@ -11,15 +11,18 @@ import Input from "~/components/forms/input";
 import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 
 import {
+  refuseAuthenticatedLegacySession,
+  revokeSession,
   sendResetPasswordLink,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
+import { createSsoRequiredError } from "~/modules/auth/sso-enforcement.server";
+import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
@@ -30,6 +33,7 @@ import {
   parseData,
   readFormData,
 } from "~/utils/http.server";
+import { Logger } from "~/utils/logger";
 import { validEmail } from "~/utils/misc";
 import { passwordSchema } from "~/utils/zod";
 
@@ -99,42 +103,69 @@ export async function action({ request, context }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        /** We are going to get the user to make sure it exists and is confirmed
-         * this will not allow the user to use the forgot password before they have confirmed their email
+        /**
+         * Every outcome below MUST respond identically — same status, same
+         * redirect target — whether or not the address belongs to an account.
+         * Distinguishable responses let anyone enumerate which addresses are
+         * registered, and which are federated, one request at a time.
+         *
+         * Eligibility to receive a code is decided by `getLegacyLoginDecision`
+         * (`auth/sso-enforcement.server`), which `sendResetPasswordLink` asks:
+         * a converted account is refused, and so is every account on an SSO
+         * domain except an unconverted owner of a workspace linked to that
+         * domain. A refused address is sent nothing and the send returns as a
+         * success. That decision costs
+         * a different number of queries depending on the answer, so it runs
+         * inside the un-awaited send below, never before the response.
+         *
+         * A "use SSO instead" hint belongs in the page as static copy shown to
+         * everyone — that helps without answering a question about any
+         * particular address.
          */
-        const user = await db.user.findFirst({
-          where: { email },
-          select: {
-            id: true,
-            sso: true,
-          },
-        });
+        // Case-insensitive, like every other account lookup: a stored
+        // "Jane@Acme.com" must still get its reset code for "jane@acme.com".
+        const user = await findUserByEmail(email);
 
-        if (!user) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "The user with this email is not confirmed yet, so you cannot reset it's password. Please confirm your user before continuing",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
+        if (user && !user.sso) {
+          /**
+           * NOT awaited, and its failure never reaches the client.
+           *
+           * Response time must not depend on the answer. Awaiting this costs
+           * the SSO decision's reads plus a Supabase API call (~50-300ms) that
+           * an unknown or SSO address never pays, and
+           * averaging repeated requests reads accounts off that difference —
+           * the uniform response above, undone by the clock.
+           *
+           * Requires a long-lived server process: this deploys under
+           * `react-router-hono-server` in Docker on Fly, so the promise settles
+           * after the response. On a runtime that suspends once the response is
+           * sent, this must become a queued job or reset emails silently stop.
+           *
+           * The rejection is swallowed because a delivery failure is only
+           * reachable for an address that exists, so surfacing it re-opens the
+           * leak by another route.
+           */
+          void sendResetPasswordLink(email).catch((cause: unknown) => {
+            Logger.error(
+              new ShelfError({
+                cause,
+                message: "Failed to send the password reset link",
+                // The USER ID, not the address. This endpoint is anonymous, so
+                // logging the email would put account addresses into the log
+                // stream and Sentry — a log-side version of the very leak this
+                // route was changed to close, since anyone with log access
+                // could then read off which addresses are registered. The id
+                // identifies the account for debugging without storing PII.
+                additionalData: { userId: user.id },
+                label: "Auth",
+              })
+            );
           });
         }
 
-        if (user.sso) {
-          throw new ShelfError({
-            cause: null,
-            message:
-              "This user is an SSO user and cannot reset password using email.",
-            additionalData: { email },
-            shouldBeCaptured: false,
-            label: "Auth",
-          });
-        }
-
-        await sendResetPasswordLink(email);
-
-        return redirect("/forgot-password?email=" + email);
+        // Encoded: an address containing `&` or `#` would otherwise
+        // truncate or corrupt the redirect target.
+        return redirect("/forgot-password?email=" + encodeURIComponent(email));
       }
       case "confirm-otp": {
         const { email, otp, password } = parseData(
@@ -155,10 +186,37 @@ export async function action({ request, context }: ActionFunctionArgs) {
           throw new ShelfError({
             cause: verifyError,
             message: "Invalid or expired verification code",
-            additionalData: { email, otp },
+            // The OTP is deliberately NOT included. It is a live
+            // account-takeover credential until it expires, and additionalData
+            // is written straight to the log line.
+            additionalData: { email },
             label: "Auth",
             shouldBeCaptured: false,
           });
+        }
+
+        /**
+         * Verifying the code opened a recovery session. Every refusal or
+         * failure from here on revokes it, so it never outlives the request.
+         */
+        const recoveryAccessToken = otpData.session.access_token;
+
+        /**
+         * A code sent before the address was refused (a deploy, a domain newly
+         * configured for SSO) must not set a password. Checked only after the
+         * code verifies, so the refusal is never an answer about an address to
+         * someone who does not hold its code. A refusal, or a decision that
+         * fails, revokes the recovery session.
+         */
+        const refusal = await refuseAuthenticatedLegacySession({
+          // The account and address the code verified, which are the
+          // session's own.
+          userId: otpData.user.id,
+          email: otpData.user.email ?? email,
+          accessToken: recoveryAccessToken,
+        });
+        if (refusal) {
+          throw createSsoRequiredError(refusal);
         }
 
         /**
@@ -167,11 +225,16 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * access token so the explicit `signOut(…, "others")` defense-in-depth
          * layer can run before the update (see `updateAccountPassword`).
          */
-        await updateAccountPassword(
-          otpData.user.id,
-          password,
-          otpData.session.access_token
-        );
+        try {
+          await updateAccountPassword(
+            otpData.user.id,
+            password,
+            recoveryAccessToken
+          );
+        } catch (cause) {
+          await revokeSession(recoveryAccessToken);
+          throw cause;
+        }
 
         context.destroySession();
         return redirect("/login?password_reset=true");

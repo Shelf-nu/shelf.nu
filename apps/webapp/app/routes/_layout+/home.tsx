@@ -33,6 +33,7 @@ import UpcomingReminders from "~/components/home/upcoming-reminders";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { getUpcomingRemindersForHomePage } from "~/modules/asset-reminder/service.server";
 import { getBookings } from "~/modules/booking/service.server";
 
@@ -103,6 +104,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       locationDistribution,
       locationsCount,
       categoriesCount,
+      // Onboarding checklist booleans
+      checklistData,
       // Cookie
       cookieResult,
     ] = await Promise.all([
@@ -206,12 +209,19 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // 1d. Ongoing + overdue bookings for custodian merge
+      // The four booking calls below render booking scalars, the custodian and
+      // `_count.bookingAssets` — never an asset row — so they all skip the
+      // per-booking asset payload.
       getBookings({
         organizationId,
         userId,
         page: 1,
-        perPage: 1000,
+        // `perPage` is clamped to 20 for anything over 100, so the previous
+        // `perPage: 1000` merged custodians from the first 20 active bookings
+        // only. `takeCap` is the bounded escape hatch that sees them all.
+        takeCap: 1000,
         statuses: ["ONGOING", "OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -229,6 +239,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         statuses: ["RESERVED"],
         bookingFrom: new Date(),
         bookingTo: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -243,6 +254,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["OVERDUE"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -257,6 +269,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         page: 1,
         perPage: 5,
         statuses: ["ONGOING"],
+        includeAssets: false,
         extraInclude: {
           custodianTeamMember: true,
           custodianUser: true,
@@ -273,6 +286,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           include: {
             category: true,
             custody: { select: { quantity: true } },
+            // Model cover image — `<AssetImage>` renders it for assets with
+            // no image of their own.
+            ...ASSET_MODEL_IMAGE_SELECT,
           },
         })
         .catch((cause) => {
@@ -318,7 +334,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // location, so an asset in a kit could be counted twice. COUNT(DISTINCT)
       // is the only form that gets the number and the ranking right together.
       db
-        .$queryRaw<{ locationId: string; locationName: string; assetCount: number }[]>(
+        .$queryRaw<
+          { locationId: string; locationName: string; assetCount: number }[]
+        >(
           Prisma.sql`
             SELECT al."locationId"                     AS "locationId",
                    l.name                              AS "locationName",
@@ -352,6 +370,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       db.category.count({
         where: { organizationId },
       }),
+
+      // Onboarding checklist counts
+      // Joins this `Promise.all` rather than being awaited after it: nothing
+      // above feeds it, so serialising it just added a round trip to the
+      // loader's critical path.
+      checklistOptions({ organizationId }),
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
@@ -396,10 +420,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             content: parseMarkdownToReact(announcement.content),
           }
         : null,
-      checklistOptions: await checklistOptions({
+      checklistOptions: {
         hasAssets: totalAssets > 0,
-        organizationId,
-      }),
+        // `directCustodians` is already the "team members holding custody"
+        // query, with the same where clause the dropped `custodiesCount`
+        // used — `take: 20` cannot change a `> 0` test — so counting them
+        // again server-side was a redundant round trip.
+        hasCustodies: directCustodians.length > 0,
+        ...checklistData,
+      },
     });
   } catch (cause) {
     const reason = makeShelfError(cause);

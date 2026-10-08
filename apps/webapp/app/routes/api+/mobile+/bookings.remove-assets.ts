@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -9,15 +8,16 @@ import {
   getMobileUserContext,
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { removeAssets } from "~/modules/booking/service.server";
-import { canSeeBooking } from "~/utils/booking-authorization.server";
-import { canUserRemoveBookingAssets } from "~/utils/bookings";
+import { isBookingCustodian } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canRemoveBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -33,13 +33,14 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * Adding assets/kits is handled by the existing `add-scanned-assets` endpoint;
  * this endpoint is the removal counterpart for the picker-based edit flow.
  *
- * Status gating uses `canUserRemoveBookingAssets` (COMPLETE / ARCHIVED /
- * CANCELLED reject), plus an explicit own-booking guard for self-service and
- * BASE users. Note this is intentionally looser than the ADD counterpart: a
- * custodian may remove items from their own booking in any non-finished
- * status, matching the web booking-overview remove actions.
+ * Gating is `canRemoveBookingItems` (the statuses the caller's policy lists)
+ * plus an own-booking guard for callers who do not write every booking.
+ * Looser than the ADD counterpart for SELF_SERVICE, which may remove from its
+ * own RESERVED booking; BASE stops at DRAFT on both. Matches the web
+ * booking-overview remove actions.
  *
- * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
+ * Body: { bookingId: string, assetIds?: string[], kitIds?: string[],
+ *   standaloneAssetIds?: string[] }
  * Query: ?orgId=...
  *
  * @see {@link file://./bookings.add-scanned-assets.ts} the add counterpart
@@ -51,6 +52,14 @@ const BodySchema = z
     bookingId: z.string().min(1),
     assetIds: z.array(z.string().min(1)).optional().default([]),
     kitIds: z.array(z.string().min(1)).optional().default([]),
+    /**
+     * The subset of `assetIds` the caller ticked as rows of their own.
+     *
+     * Left undefined (not defaulted) so an omitted field stays tellable from
+     * an explicitly empty one: absent means "infer the intent", empty means
+     * "none of these ids names a loose row".
+     */
+    standaloneAssetIds: z.array(z.string().min(1)).optional(),
   })
   .refine((body) => body.assetIds.length > 0 || body.kitIds.length > 0, {
     message: "Select at least one asset or kit to remove.",
@@ -75,9 +84,12 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, kitIds } = BodySchema.parse(
-      await request.json()
-    );
+    const {
+      bookingId,
+      assetIds,
+      kitIds,
+      standaloneAssetIds: requestedStandaloneAssetIds,
+    } = await parseMobileBody(BodySchema, request, "Booking");
 
     // Org-scoped booking lookup — a foreign-org booking id 404s here.
     const booking = await db.booking.findFirst({
@@ -90,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
         // BOTH custody links are needed. A booking assigned to a team member
         // before a user was attached to it keeps `custodianUserId = NULL` even
         // after the invite is accepted, so the user link alone fails closed for
-        // the very users those bookings belong to. See `canSeeBooking`.
+        // the very users those bookings belong to. See `isBookingCustodian`.
         custodianUserId: true,
         custodianTeamMember: { select: { userId: true } },
       },
@@ -103,26 +115,21 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE for managing booking assets: both
-    // may only touch their OWN bookings (enforced just below). Keying only on
-    // SELF_SERVICE let a BASE user with `booking:update` edit anyone's booking
-    // via this endpoint.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `access` is resolved from the membership's effective (highest-rank)
+    // role, so a membership holding ADMIN beside a restricted role is an admin.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Self-service / BASE users may only modify their own bookings. Reuses the
-    // shared custody predicate rather than comparing `custodianUserId` alone:
-    // that narrower test 403s a custodian whose booking is held through the
-    // team-member link, which is precisely the user this endpoint's removal
-    // parity is meant to serve.
-    const ownsBooking = canSeeBooking({
-      canSeeAllBookings: false,
+    // A caller who does not write every booking may only modify their own.
+    // BASE holds `booking:update` too, so this applies to it as well as to
+    // SELF_SERVICE. Reuses the shared custody predicate rather than comparing
+    // `custodianUserId` alone: that narrower test 403s a custodian whose
+    // booking is held through the team-member link, which is precisely the
+    // user this endpoint's removal parity is meant to serve.
+    const ownsBooking = isBookingCustodian({
       booking,
       userId: user.id,
     });
-    if (isSelfServiceOrBase && !ownsBooking) {
+    if (!access.bookings.writeAll && !ownsBooking) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -132,18 +139,23 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    // Status only. `canUserManageBookingAssets` (which the ADD counterpart
-    // uses) additionally pins self-service/BASE to DRAFT, which blocked a
-    // custodian from removing an item from their OWN reserved booking — the
-    // web allows exactly that, and the two surfaces must agree. Ownership is
-    // already enforced by the own-booking guard directly above.
-    if (!canUserRemoveBookingAssets(booking)) {
+    // Statuses from the caller's policy (`bookings.removableItemStatuses`);
+    // looser than the ADD rule for SELF_SERVICE, which may remove from its own
+    // RESERVED booking, as on web. BASE stops at DRAFT: removing from a live
+    // booking resets the asset to available, which is the check-in BASE cannot
+    // run. Ownership is already enforced by the own-booking guard above.
+    if (!canRemoveBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
         message:
           "Assets cannot be removed from this booking in its current status.",
-        additionalData: { userId, bookingId, status: booking.status },
+        additionalData: {
+          userId,
+          bookingId,
+          role: access.role,
+          status: booking.status,
+        },
         label: "Booking",
         status: 403,
         shouldBeCaptured: false,
@@ -195,25 +207,38 @@ export async function action({ request }: ActionFunctionArgs) {
     });
     const attachedAssetIds = assets.map((asset) => asset.id);
 
-    // Whatever the caller put in `assetIds` is an explicit "remove this
-    // asset's own row" instruction — that is the endpoint's contract. So a
-    // directly-requested asset stays in the standalone bucket even when it
-    // ALSO belongs to a kit in `kitIds`: a qty-tracked asset can hold both a
-    // standalone row and a kit-driven row on one booking, and the caller
-    // asked for both. Narrowed to rows actually attached to this booking.
+    // The assets the caller named outright, narrowed to rows actually on this
+    // booking. `assertAssetsBelongToOrg` above has already org-scoped them.
     const requestedAssetIdSet = new Set(assetIds);
-    const standaloneAssetIds = attachedAssetIds.filter((assetId) =>
+    const requestedAttachedAssetIds = attachedAssetIds.filter((assetId) =>
       requestedAssetIdSet.has(assetId)
     );
 
+    // Which of those mean "delete this asset's kit-less row" rather than "every
+    // row it has here". A caller that can observe the distinction states it in
+    // `standaloneAssetIds`; one that cannot leaves the field off, and every id
+    // it named is read as that instruction — the endpoint's default contract.
+    //
+    // Either way a named id stays in this bucket even when it ALSO belongs to a
+    // kit in `kitIds`: a qty-tracked asset can hold both a standalone row and
+    // kit-driven rows on one booking, and a caller naming both wants both gone.
+    const explicitStandaloneIdSet = requestedStandaloneAssetIds
+      ? new Set(requestedStandaloneAssetIds)
+      : null;
+    const standaloneAssetIds = explicitStandaloneIdSet
+      ? requestedAttachedAssetIds.filter((assetId) =>
+          explicitStandaloneIdSet.has(assetId)
+        )
+      : requestedAttachedAssetIds;
+
     // `assets` drives the booking-note phrasing only ("… removed {kits} and
-    // {assets} from booking"), NOT what gets detached. Members pulled in by a
-    // kit are already covered by the kit half of the note, so listing them
-    // again duplicates them (and turns a kit-only removal into a note naming
-    // every member). Mirrors the web bulk-remove handler.
-    const standaloneAssetIdSet = new Set(standaloneAssetIds);
-    const standaloneAssets = assets.filter((asset) =>
-      standaloneAssetIdSet.has(asset.id)
+    // {assets} from booking"), NOT what gets detached — so it names everything
+    // the caller asked for, however the delete above is scoped. Members pulled
+    // in by a kit are already covered by the kit half of the note, so listing
+    // them again duplicates them (and turns a kit-only removal into a note
+    // naming every member). Mirrors the web bulk-remove handler.
+    const requestedAssets = assets.filter((asset) =>
+      requestedAssetIdSet.has(asset.id)
     );
 
     const updated = await removeAssets({
@@ -223,10 +248,31 @@ export async function action({ request }: ActionFunctionArgs) {
       standaloneAssetIds,
       firstName: user.firstName ?? "",
       lastName: user.lastName ?? "",
+      displayName: user.displayName ?? null,
       userId: user.id,
-      assets: standaloneAssets,
+      assets: requestedAssets,
       organizationId,
     });
+
+    /**
+     * How many assets actually lost a row, which is not the same as how many
+     * the caller named: `standaloneAssetIds` can narrow the delete to a subset
+     * of them, and counting the request instead of the deletion reports
+     * removals that did not happen.
+     *
+     * The two cases mirror `removeAssets`'s own scoping. With kits named it
+     * deletes the named kits' membership rows plus the kit-less rows of the
+     * standalone bucket; with no kit named it deletes every row of every asset
+     * it was given. Change that scoping and this count has to move with it.
+     */
+    const kitAssetIdSet = new Set(kitAssetIds);
+    const removedAssetIds =
+      kitIds.length > 0
+        ? new Set([
+            ...attachedAssetIds.filter((assetId) => kitAssetIdSet.has(assetId)),
+            ...standaloneAssetIds,
+          ])
+        : new Set(attachedAssetIds);
 
     return data({
       booking: {
@@ -234,7 +280,7 @@ export async function action({ request }: ActionFunctionArgs) {
         name: updated.name,
         status: updated.status,
       },
-      removedCount: attachedAssetIds.length,
+      removedCount: removedAssetIds.size,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

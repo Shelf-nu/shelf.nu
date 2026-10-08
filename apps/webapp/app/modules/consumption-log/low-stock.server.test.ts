@@ -31,7 +31,7 @@ vitest.mock("~/utils/emitter/send-notification.server", () => ({
 // don't depend on org fixtures.
 const getAdminsMock = vitest.fn();
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsForNotification: (...args: unknown[]) =>
+  getOrganizationNotificationAudience: (...args: unknown[]) =>
     getAdminsMock(...args),
 }));
 
@@ -133,6 +133,10 @@ describe("checkAndNotifyLowStock — debounce (enter-low fires once)", () => {
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
     expect(lowStockAlertHtmlMock).toHaveBeenCalledTimes(1);
+    expect(getAdminsMock).toHaveBeenCalledWith({
+      organizationId: expect.any(String),
+      audience: "inventoryAlerts",
+    });
     // The debounce marker is stamped with a Date so a further decrement while
     // still low won't re-fire.
     expect(assetUpdateMock).toHaveBeenCalledWith({
@@ -480,5 +484,58 @@ describe("checkAndNotifyLowStock — early bail-outs", () => {
 
     expect(assetUpdateMock).not.toHaveBeenCalled();
     expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkAndNotifyLowStock — never rejects", () => {
+  // Every caller runs this AFTER its mutation has committed. An escaping
+  // rejection answers 500 for a request whose write succeeded, the client
+  // retries, and the non-idempotent mutation behind it allocates twice.
+
+  it("swallows a failure of its very first read", async () => {
+    // why: the opening `asset.findFirst` is the first thing the check does and
+    // carries no guard of its own, so a transient database failure there is
+    // the shortest path to an escaping rejection. The contract under test is
+    // that the returned promise resolves anyway.
+    findFirstMock.mockRejectedValue(new Error("connection reset"));
+
+    await expect(
+      checkAndNotifyLowStock({
+        assetId: ASSET_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("swallows a failure of the availability read", async () => {
+    // why: a healthy asset row gets the check past its first statement, so the
+    // failure lands on the custody aggregate instead — also unguarded, and far
+    // enough in to show the contract covers the whole check rather than one
+    // chosen statement.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
+    custodyAggregateMock.mockRejectedValue(new Error("aggregate failed"));
+
+    await expect(
+      checkAndNotifyLowStock({
+        assetId: ASSET_ID,
+        userId: USER_ID,
+        organizationId: ORG_ID,
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("still reports low stock when nothing fails", async () => {
+    // why: an asset below its threshold with nothing failing — the case that
+    // proves the guard did not turn the notifier into a no-op.
+    findFirstMock.mockResolvedValue(assetRow({ quantity: 1, minQuantity: 5 }));
+
+    await checkAndNotifyLowStock({
+      assetId: ASSET_ID,
+      userId: USER_ID,
+      organizationId: ORG_ID,
+    });
+
+    expect(sendEmailMock).toHaveBeenCalled();
   });
 });

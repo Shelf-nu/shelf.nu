@@ -127,24 +127,32 @@ export function getLocationKitsWhereInput({
 export function getLocationsWhereInput({
   organizationId,
   currentSearchParams,
+  search,
 }: {
   organizationId: Location["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * An already-parsed search term, for the list loader, which receives it as a
+   * parameter rather than as a query string. Takes precedence over
+   * `currentSearchParams`; pass one or the other, not both.
+   */
+  search?: string | null;
 }): Prisma.LocationWhereInput {
   const where: Prisma.LocationWhereInput = { organizationId };
 
-  if (!currentSearchParams) {
-    return where;
-  }
+  const term = (
+    search ?? new URLSearchParams(currentSearchParams ?? "").get("s")
+  )?.trim();
 
-  const searchParams = new URLSearchParams(currentSearchParams);
-  const search = searchParams.get("s")?.trim();
-
-  if (search) {
-    where.name = {
-      contains: search,
-      mode: "insensitive",
-    };
+  // All three text fields, because that is what the list matches. A resolver
+  // that searched only the name would expand a "select all" to a smaller set
+  // than the operator was looking at — and then act on it.
+  if (term) {
+    where.OR = [
+      { name: { contains: term, mode: "insensitive" } },
+      { description: { contains: term, mode: "insensitive" } },
+      { address: { contains: term, mode: "insensitive" } },
+    ];
   }
 
   return where;

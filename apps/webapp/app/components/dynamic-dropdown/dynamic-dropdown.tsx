@@ -192,6 +192,25 @@ export default function DynamicDropdown({
               className
             )}
             style={style}
+            // A modal Radix Dialog — every `Sheet`, and so every route
+            // rendered through `ContextualSidebar` — mounts
+            // `react-remove-scroll`, which cancels any `wheel` whose target
+            // sits outside the dialog content. This popover is portalled to
+            // `document.body`, which counts as outside, so without this a long
+            // option list cannot be scrolled by wheel inside a sheet; only
+            // dragging the scrollbar works, since that is a pointer
+            // interaction rather than a wheel event.
+            //
+            // React attaches portal listeners to the portal container, and
+            // `document.body` is a descendant of the `document` remove-scroll
+            // listens on, so stopping here runs first and keeps the event
+            // alive.
+            onWheel={(event) => {
+              event.stopPropagation();
+            }}
+            onTouchMove={(event) => {
+              event.stopPropagation();
+            }}
           >
             <div className="flex items-center justify-between ">
               {!hideLabel && (

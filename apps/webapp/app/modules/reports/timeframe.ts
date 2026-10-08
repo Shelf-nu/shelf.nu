@@ -31,6 +31,21 @@ import type { TimeframePreset, ResolvedTimeframe } from "./types";
  *   (UTC), which is acceptable for the internal error-path fallbacks below.
  * @returns Resolved timeframe with actual dates and label
  */
+/**
+ * Whether a date boundary can actually be read.
+ *
+ * `new Date()` answers a string it cannot parse with an Invalid Date rather
+ * than by throwing, and that value is an object — so it is truthy, passes a
+ * presence check, and only fails much later inside a formatter. Query strings
+ * are user-supplied, so this is reachable from any report URL.
+ *
+ * @param value - A boundary that may be absent, or present but unreadable
+ * @returns `true` only for a Date carrying a real instant
+ */
+function isUsableDate(value: Date | undefined): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
 export function resolveTimeframe(
   preset: TimeframePreset,
   customFrom?: Date,
@@ -142,9 +157,15 @@ export function resolveTimeframe(
     }
 
     case "custom": {
-      if (!customFrom || !customTo) {
-        // Return a default if custom dates not provided
-        return resolveTimeframe("last_30d");
+      // `new Date("garbage")` is an Invalid Date, which is TRUTHY — so a
+      // presence check alone lets one through, and it reaches `formatDateShort`
+      // here and `Intl.DateTimeFormat.format` in the PDF route, which throws a
+      // RangeError. A boundary that cannot be read is no boundary, so it is
+      // treated the same as one that was never given.
+      if (!isUsableDate(customFrom) || !isUsableDate(customTo)) {
+        // Carry `prefs` into the fallback: without it the default range is
+        // resolved in UTC rather than the caller's timezone.
+        return resolveTimeframe("last_30d", undefined, undefined, prefs);
       }
       // Pass the boundaries through unchanged. The naive-calendar-day →
       // pref-tz start/end-of-day conversion happens ONCE, at the picker's URL
@@ -165,8 +186,11 @@ export function resolveTimeframe(
     }
 
     default:
-      // Default to last 30 days
-      return resolveTimeframe("last_30d");
+      // An unrecognised preset, which the query string can carry. Carry `prefs`
+      // into the fallback for the same reason the unreadable-boundary case does:
+      // without it the window is anchored at UTC midnight, so a report covers a
+      // different set of rows than the range it claims.
+      return resolveTimeframe("last_30d", undefined, undefined, prefs);
   }
 }
 
@@ -242,11 +266,4 @@ export function toZonedBoundaryISO(
   );
   const bounded = boundary === "start" ? day.startOf("day") : day.endOf("day");
   return bounded.toJSDate().toISOString();
-}
-
-/**
- * Get the default timeframe (last 30 days).
- */
-export function getDefaultTimeframe(): ResolvedTimeframe {
-  return resolveTimeframe("last_30d");
 }

@@ -1,23 +1,58 @@
 import type React from "react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AuditStatus, AuditAssetStatus } from "@prisma/client";
+import {
+  AUDIT_ASSET_STATUS_LABELS,
+  auditAssetStatusLabel,
+  isAuditCompleted,
+} from "@shelf/labels";
 import { useReactToPrint } from "react-to-print";
 import useApiQuery from "~/hooks/use-api-query";
 import { getAuditStatusLabel } from "~/modules/audit/audit-filter-utils";
 import type { AuditPdfDbResult } from "~/modules/audit/pdf-helpers";
+import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { sanitizeFilename } from "~/utils/sanitize-filename";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AuditAssetStatusBadge } from "./audit-asset-status-badge";
 import { AuditStatusBadgeWithOverdue } from "./audit-status-badge-with-overdue";
+import { AssetCodePrintImage } from "../assets/asset-code-print-image";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
+import { AssetPrintImage } from "../assets/asset-print-image";
 import { CategoryBadge } from "../assets/category-badge";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
 import { Image } from "../shared/image";
+import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
+
+/**
+ * Widths of the asset table's columns, in percent, in column order. They sum
+ * to 100 and the table is `table-fixed`, so the table is exactly the printable
+ * width and no cell's content can push it off the page; long text wraps inside
+ * its column instead. The Code column's share is shared with the server, which
+ * refuses a barcode picture wider than that cell.
+ */
+const ASSET_TABLE_COLUMNS = [
+  { name: "number", percent: 5 },
+  { name: "image", percent: 9 },
+  { name: "name", percent: 15 },
+  { name: "category", percent: 16 },
+  { name: "location", percent: 14 },
+  { name: "status", percent: 14 },
+  { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
+] as const;
+
+/**
+ * Lets a badge in a narrow table cell wrap its words instead of running past
+ * the cell's edge. The badges size to their text by default. The slimmer
+ * padding keeps a common label such as "Uncategorized" on one line.
+ */
+const WRAPPING_BADGE_CLASS =
+  "w-auto max-w-full px-1.5 [overflow-wrap:anywhere]";
 
 /**
  * Props for the AuditReceiptPDF component
@@ -147,7 +182,7 @@ export const AuditReceiptPDF = ({
  * @param pdfMeta - All audit data needed for the PDF (note content is already sanitized server-side)
  */
 // react-doctor:no-giant-component — deferred for follow-up refactor
-const AuditPDFContent = ({
+export const AuditPDFContent = ({
   componentRef,
   pdfMeta,
 }: {
@@ -160,11 +195,26 @@ const AuditPDFContent = ({
     session,
     organization,
     assets,
-    assetIdToQrCodeMap,
+    assetIdToCodeImageMap,
+    assetIdToDisplayCodeMap,
     generalImages,
     assetImages,
+    conditionNotes,
     activityNotes,
   } = pdfMeta;
+
+  // An audit is a claim about what was physically present, so a receipt whose
+  // codes can be scanned from the desk undermines the thing it records.
+  // Workspaces that care turn the pictures off; the text code still prints.
+  const showCodeImages = organization.showQrCodesOnPdfs ?? true;
+
+  // why: the receipt can be downloaded at ANY point in an audit's life — the
+  // Actions dropdown offers it with no status gate — so it must apply the same
+  // completion rule as the screen it was printed from. `missingAssetCount` is
+  // seeded with the full expected count at creation, so it only means "lost"
+  // once the audit is complete.
+  const auditIsCompleted = isAuditCompleted(session);
+  const unscannedLabel = auditAssetStatusLabel("PENDING", auditIsCompleted);
 
   // Format creator name from user data or fallback to email
   const creatorName =
@@ -183,57 +233,76 @@ const AuditPDFContent = ({
           .join(", ")
       : "Not assigned";
 
-  // Group asset-specific images by their associated asset
-  const assetImageGroups = assetImages.reduce(
-    (acc, img) => {
-      const assetId = img.auditAsset?.asset?.id;
-      if (!assetId) return acc;
+  /**
+   * One entry per asset somebody recorded something about, holding BOTH what
+   * they wrote and what they photographed.
+   *
+   * why merged: a note about the Laerdal and a photo of the Laerdal are one
+   * observation. Printing them in two separate sections made the reader join
+   * them up by asset name across pages, which is work the receipt should have
+   * done. Notes led that split badly — they had no section of their own at
+   * all, and arrived mixed into a fifteen-row "Activity Log".
+   */
+  type Finding = {
+    assetName: string;
+    images: typeof assetImages;
+    notes: typeof conditionNotes;
+  };
 
-      if (!acc[assetId]) {
-        acc[assetId] = {
-          assetName: img.auditAsset?.asset?.title || "Unknown",
-          images: [],
-        };
-      }
-      acc[assetId].images.push(img);
-      return acc;
-    },
-    {} as Record<string, { assetName: string; images: typeof assetImages }>
+  const findingGroups: Record<string, Finding> = {};
+
+  const findingFor = (assetId: string, assetName: string) => {
+    if (!findingGroups[assetId]) {
+      findingGroups[assetId] = { assetName, images: [], notes: [] };
+    }
+    return findingGroups[assetId];
+  };
+
+  for (const img of assetImages) {
+    const assetId = img.auditAsset?.asset?.id;
+    if (!assetId) continue;
+    findingFor(assetId, img.auditAsset?.asset?.title || "Unknown").images.push(
+      img
+    );
+  }
+
+  for (const note of conditionNotes) {
+    const assetId = note.auditAsset?.asset?.id;
+    // Audit-wide notes have no asset; they print above, with the general images.
+    if (!assetId) continue;
+    findingFor(assetId, note.auditAsset?.asset?.title || "Unknown").notes.push(
+      note
+    );
+  }
+
+  /** Notes about the audit as a whole — the completion note lives here. */
+  const generalNotes = conditionNotes.filter((n) => !n.auditAsset?.asset?.id);
+
+  const findingEntries = Object.entries(findingGroups).sort((a, b) =>
+    a[1].assetName.localeCompare(b[1].assetName)
   );
+
+  const hasFindings =
+    findingEntries.length > 0 ||
+    generalNotes.length > 0 ||
+    generalImages.length > 0;
 
   return (
     <div
-      className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+      // On screen the sheet is an A4 page with its 10mm margins as padding,
+      // so the preview's table is the same 190mm wide as the printed one.
+      className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
       ref={componentRef}
     >
       {/* Print-specific styles for A4 layout */}
+      <PrintTableStyles tableClassName="audit-assets-table" />
+      {/* On paper the receipt sits in the normal page flow, whatever
+          positioning the page hosting it gives the wrapper. */}
       <style>
         {`@media print {
-          @page {
-            margin: 10mm;
-            size: A4;
-          }
           .pdf-wrapper {
-            margin: 0;
-            padding: 0;
             position: static !important;
             left: auto !important;
-          }
-          .audit-assets-table {
-            border-collapse: separate !important;
-            border-spacing: 0 !important;
-          }
-          .audit-assets-table th,
-          .audit-assets-table td {
-            border-right: 1px solid #d1d5db !important;
-            border-bottom: 1px solid #d1d5db !important;
-          }
-          .audit-assets-table thead th {
-            border-top: 1px solid #d1d5db !important;
-          }
-          .audit-assets-table th:first-child,
-          .audit-assets-table td:first-child {
-            border-left: 1px solid #d1d5db !important;
           }
         }`}
       </style>
@@ -339,89 +408,131 @@ const AuditPDFContent = ({
             <div className="text-2xl font-bold">
               {session.foundAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Found</div>
+            <div className="text-sm text-gray-600">
+              {AUDIT_ASSET_STATUS_LABELS.FOUND}
+            </div>
           </div>
           <div className="border border-gray-300 p-3 text-center">
             <div className="text-2xl font-bold">
               {session.missingAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Missing</div>
+            <div className="text-sm text-gray-600">{unscannedLabel}</div>
           </div>
           <div className="border border-gray-300 p-3 text-center">
             <div className="text-2xl font-bold">
               {session.unexpectedAssetCount ?? 0}
             </div>
-            <div className="text-sm text-gray-600">Unexpected</div>
+            <div className="text-sm text-gray-600">
+              {AUDIT_ASSET_STATUS_LABELS.UNEXPECTED}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Images Section - General and asset-specific images */}
-      <When truthy={generalImages.length > 0 || assetImages.length > 0}>
+      {/*
+        Findings — what people RECORDED, grouped by the asset they recorded it
+        about, notes and photographs together.
+
+        why this replaced the old "Images" section: a note and a photo of the
+        same asset are one observation, and printing them apart made the reader
+        rejoin them by name. Notes had it worse — no section at all, folded
+        into a fifteen-row "Activity Log" that the system trail crowded out.
+      */}
+      <When truthy={hasFindings}>
         <section className="mb-5">
-          <h2 className="mb-2 text-lg font-medium">Images</h2>
+          <h2 className="mb-2 text-lg font-medium">Findings</h2>
 
-          {/* General Audit Images - Not linked to specific assets */}
-          <When truthy={generalImages.length > 0}>
+          {/* About the audit as a whole — completion note and its photos. */}
+          <When truthy={generalNotes.length > 0 || generalImages.length > 0}>
             <div className="mb-4">
-              <h3 className="mb-2 text-sm font-medium">
-                General Audit Images ({generalImages.length})
-              </h3>
-              <div className="grid grid-cols-4 gap-2">
-                {generalImages.map((img) => (
-                  <div key={img.id} className="border border-gray-300 p-1">
-                    <img
-                      src={img.thumbnailUrl || img.imageUrl}
-                      alt={img.description || "Audit image"}
-                      className="h-24 w-full object-cover"
-                    />
-                    {img.description && (
-                      <p className="mt-1 text-xs text-gray-600">
-                        {img.description}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <h3 className="mb-2 text-sm font-medium">About this audit</h3>
+
+              {generalNotes.map((note) => (
+                <div key={note.id} className="mb-2 border border-gray-300 p-2">
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {note.user
+                      ? resolveUserDisplayName(note.user) || note.user.email
+                      : "System"}{" "}
+                    &middot; <DateS date={note.createdAt} includeTime />
+                  </p>
+                </div>
+              ))}
+
+              <When truthy={generalImages.length > 0}>
+                <div className="grid grid-cols-4 gap-2">
+                  {generalImages.map((img) => (
+                    <div key={img.id} className="border border-gray-300 p-1">
+                      <img
+                        src={img.thumbnailUrl || img.imageUrl}
+                        alt={img.description || "Audit image"}
+                        className="h-24 w-full object-cover"
+                      />
+                      {img.description && (
+                        <p className="mt-1 text-xs text-gray-600">
+                          {img.description}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </When>
             </div>
           </When>
 
-          {/* Asset-Specific Images - Grouped by asset */}
-          <When truthy={assetImages.length > 0}>
-            <div>
-              <h3 className="mb-2 text-sm font-medium">
-                Asset-Specific Images ({assetImages.length})
-              </h3>
-              {Object.entries(assetImageGroups).map(
-                ([assetId, { assetName, images }]) => (
-                  <div key={assetId} className="mb-3">
-                    <h4 className="mb-1 text-xs font-medium text-gray-700">
-                      {assetName}
-                    </h4>
-                    <div className="grid grid-cols-4 gap-2">
-                      {images.map((img) => (
-                        <div
-                          key={img.id}
-                          className="border border-gray-300 p-1"
-                        >
-                          <img
-                            src={img.thumbnailUrl || img.imageUrl}
-                            alt={img.description || "Asset image"}
-                            className="h-24 w-full object-cover"
-                          />
-                          {img.description && (
-                            <p className="mt-1 text-xs text-gray-600">
-                              {img.description}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+          {/* One block per asset somebody recorded something about. */}
+          {findingEntries.map(([assetId, { assetName, images, notes }]) => (
+            <div key={assetId} className="mb-3">
+              <h4 className="mb-1 text-xs font-medium text-gray-700">
+                {assetName}
+              </h4>
+
+              {notes.map((note) => (
+                <div key={note.id} className="mb-2 border border-gray-300 p-2">
+                  {/* why whitespace-pre-wrap: a condition note is typed in a
+                      textarea, so line breaks are part of what the person
+                      wrote. Without this the receipt runs a multi-line
+                      observation together into one paragraph — the Activity
+                      Log above already sets it for the same reason. */}
+                  <p className="whitespace-pre-wrap text-xs text-gray-900">
+                    {note.content}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500">
+                    {note.user
+                      ? resolveUserDisplayName(note.user) || note.user.email
+                      : "System"}{" "}
+                    &middot; <DateS date={note.createdAt} includeTime />
+                  </p>
+                </div>
+              ))}
+
+              <When truthy={images.length > 0}>
+                <div className="grid grid-cols-4 gap-2">
+                  {images.map((img) => (
+                    <div key={img.id} className="border border-gray-300 p-1">
+                      <img
+                        src={img.thumbnailUrl || img.imageUrl}
+                        alt={img.description || `Photo of ${assetName}`}
+                        className="h-24 w-full object-cover"
+                      />
+                      {img.description && (
+                        <p className="mt-1 text-xs text-gray-600">
+                          {img.description}
+                        </p>
+                      )}
                     </div>
-                  </div>
-                )
-              )}
+                  ))}
+                </div>
+              </When>
             </div>
-          </When>
+          ))}
         </section>
       </When>
 
@@ -429,68 +540,80 @@ const AuditPDFContent = ({
       <When truthy={assets.length > 0}>
         <section className="mb-5">
           <h2 className="mb-2 text-lg font-medium">Assets</h2>
-          <table className="audit-assets-table w-full border border-gray-300">
+          <table className="audit-assets-table w-full table-fixed border border-gray-300">
+            <PrintColGroup columns={ASSET_TABLE_COLUMNS} />
             <thead>
               <tr>
-                <th className="w-10 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                   #
                 </th>
-                <th className="w-20 min-w-[76px] border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Image
                 </th>
-                <th className="w-1/4 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
                   Name
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Category
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Location
                 </th>
-                <th className="w-20 border border-gray-300 p-2.5 text-left text-xs font-medium">
+                <th className="border border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                   Status
                 </th>
-                <th className="min-w-[80px] border border-gray-300 p-2.5 text-left text-xs font-medium">
-                  QR Code
+                {/* Wide enough for an 11-character Code 128 picture at 0.25mm
+                    per bar, with the code text under it. */}
+                <th className="border border-gray-300 p-2.5 text-left text-xs font-medium">
+                  Code
                 </th>
               </tr>
             </thead>
-            <tbody>
-              {assets.map((asset, index) => (
-                <Fragment key={asset.id}>
+            {assets.map((asset, index) => {
+              const codeImage = showCodeImages
+                ? assetIdToCodeImageMap[asset.id]
+                : undefined;
+              // A code too wide or dense to scan inside the Code cell prints
+              // on its own full-width line under the row instead.
+              const printsCodeOnLine = codeImage?.placement === "line";
+
+              return (
+                // One row group per asset, so its row and its code line print
+                // on the same page.
+                <tbody key={asset.id}>
                   <tr>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="border border-gray-300 px-1 py-2.5 align-top text-xs">
                       {index + 1}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top">
-                      {/* Use simple img tag for PDF - AssetImage component doesn't work in print context */}
-                      {asset.thumbnailImage ? (
-                        <img
-                          src={asset.thumbnailImage}
-                          alt={asset.title}
-                          className="size-12 rounded-[2px] object-cover"
-                        />
-                      ) : (
-                        <div className="flex size-12 items-center justify-center rounded-[2px] bg-gray-100 text-xs text-gray-400">
-                          No image
-                        </div>
-                      )}
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top">
+                      <AssetPrintImage
+                        asset={asset}
+                        alt={asset.title}
+                        className="size-12"
+                      />
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="break-words border border-gray-300 p-2.5 align-top text-xs">
                       {asset.title}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
-                      <CategoryBadge category={asset.category ?? null} />
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
+                      <CategoryBadge
+                        category={asset.category ?? null}
+                        className={WRAPPING_BADGE_CLASS}
+                      />
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
                       {asset.location?.name ? (
-                        <GrayBadge>{asset.location.name}</GrayBadge>
+                        <GrayBadge className={WRAPPING_BADGE_CLASS}>
+                          {asset.location.name}
+                        </GrayBadge>
                       ) : (
                         "-"
                       )}
                     </td>
-                    <td className="border border-gray-300 p-2.5 align-top text-xs">
-                      {/* Convert AuditAssetStatus to AuditStatusLabel for badge display */}
+                    <td className="border border-gray-300 px-1.5 py-2.5 align-top text-xs">
+                      {/* Convert AuditAssetStatus to AuditStatusLabel for badge
+                          display. Pass the audit's completion state so these
+                          rows agree with the Statistics tile above them. */}
                       <AuditAssetStatusBadge
                         status={getAuditStatusLabel(
                           asset.auditData.auditStatus
@@ -498,23 +621,46 @@ const AuditPDFContent = ({
                                 expected: boolean;
                                 auditStatus: AuditAssetStatus;
                               })
-                            : null
+                            : null,
+                          auditIsCompleted
                         )}
                       />
                     </td>
                     <td className="border border-gray-300 p-2.5 align-top">
-                      {assetIdToQrCodeMap[asset.id] && (
-                        <img
-                          src={assetIdToQrCodeMap[asset.id]}
-                          alt={`QR code for ${asset.title}`}
-                          className="size-16"
+                      <div className="flex flex-col items-start gap-1">
+                        <When truthy={!printsCodeOnLine}>
+                          <AssetCodePrintImage
+                            image={codeImage}
+                            alt={`Code for ${asset.title}`}
+                            squareClassName="size-16"
+                          />
+                        </When>
+                        {/* Printed even when there is no picture: the code is
+                            the part a reader matches against the physical
+                            label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
                         />
-                      )}
+                      </div>
                     </td>
                   </tr>
-                </Fragment>
-              ))}
-            </tbody>
+                  <When truthy={printsCodeOnLine}>
+                    <tr>
+                      <td
+                        colSpan={ASSET_TABLE_COLUMNS.length}
+                        className="border border-gray-300 p-2.5 text-left align-top"
+                      >
+                        <AssetCodePrintImage
+                          image={codeImage}
+                          alt={`Code for ${asset.title}`}
+                          squareClassName="size-16"
+                        />
+                      </td>
+                    </tr>
+                  </When>
+                </tbody>
+              );
+            })}
           </table>
         </section>
       </When>

@@ -6,6 +6,11 @@
  * (which Radix uses for positioning) so the dropdown renders where
  * expected on small screens.
  *
+ * With the transform gone the menu renders as a bottom sheet, detached from
+ * its trigger, so the trigger-relative available-height cap on
+ * `DropdownMenuContent` no longer describes the space it has. The sheet is
+ * capped against the viewport instead and scrolls past that.
+ *
  * Replaces ~20 duplicated `<style>` blocks across action-dropdown
  * components (see PR https://github.com/Shelf-nu/shelf.nu/pull/304 for
  * history). Only renders when `open` is true, matching the prior
@@ -30,5 +35,8 @@ const MOBILE_DROPDOWN_CSS = `@media (max-width: 640px) {
   [data-radix-popper-content-wrapper] {
     transform: none !important;
     will-change: auto !important;
+  }
+  [data-radix-popper-content-wrapper] [data-radix-menu-content] {
+    max-height: 85dvh !important;
   }
 }`;

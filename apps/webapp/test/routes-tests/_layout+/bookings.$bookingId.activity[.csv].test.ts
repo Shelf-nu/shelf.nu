@@ -6,6 +6,7 @@ import {
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 import { locationDescendantsMock } from "@mocks/location-descendants";
+import { accessFor } from "@helpers/role-access";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
@@ -75,12 +76,12 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // `canSeeAllBookings: true` models the admin/owner case these formatting
+    // ADMIN access models the admin/owner case these formatting
     // assertions are about. The route also gates self-service/base callers to
     // their own bookings; that gate has its own test below.
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: true,
+      access: accessFor(["ADMIN"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -142,7 +143,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
     expect(response instanceof Response).toBe(true);
     expect((response as unknown as Response).status).toBe(200);
     expect((response as unknown as Response).headers.get("content-type")).toBe(
-      "text/csv"
+      "text/csv; charset=utf-8"
     );
     expect(
       (response as unknown as Response).headers.get("content-disposition")
@@ -166,7 +167,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("refuses to export another user's booking for a caller who cannot see all bookings", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -193,7 +194,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("exports the caller's own booking when they cannot see all bookings", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -225,7 +226,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("exports a legacy booking held via the caller's team-member link alone", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",
@@ -251,7 +252,7 @@ describe("app/routes/_layout+/bookings.$bookingId.activity[.csv] loader", () => 
   it("refuses to export a booking whose team-member link belongs to another user", async () => {
     requirePermissionMock.mockResolvedValue({
       organizationId: "org-9",
-      canSeeAllBookings: false,
+      access: accessFor(["BASE"]),
     } as any);
     dbMock.booking.findFirstOrThrow.mockResolvedValue({
       id: "booking-789",

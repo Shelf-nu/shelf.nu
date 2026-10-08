@@ -21,12 +21,12 @@ import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
+import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   getBookingsFilterData,
 } from "~/modules/booking/service.server";
-import { decorateBookingsWithStockConflicts } from "~/modules/booking/stock-conflicts.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
 import {
@@ -36,6 +36,7 @@ import {
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -65,18 +66,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const {
-      organizationId,
-      currentOrganization,
-      isSelfServiceOrBase,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -105,7 +101,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       tags: filterTags,
     } = await getBookingsFilterData({
       request,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
       userId,
     });
@@ -140,7 +136,15 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         orderBy,
         orderDirection,
         tags: filterTags,
+        // PERF: the list renders booking-level fields plus an asset COUNT. The
+        // per-booking `bookingAssets` payload existed only for the assets
+        // drawer, which now fetches it from
+        // `/api/bookings/:bookingId/assets-sidebar` when a row is expanded.
+        includeAssets: false,
         extraInclude: {
+          // Asset count for the row's drawer trigger, now that the pivot rows
+          // themselves are no longer loaded.
+          _count: { select: { bookingAssets: true } },
           tags: TAG_WITH_COLOR_SELECT,
           // Include outstanding model-level reservations so the
           // assets-sidebar drawer can render the "Unassigned model
@@ -164,21 +168,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+        filterByUserId: !access.custody.seeAll, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
         userId,
       }),
 
-      // team members for booking form - BASE/SELF_SERVICE users need their team member guaranteed
-      isSelfServiceOrBase
+      // Team members for the booking form: a member whose booking custodian is
+      // fixed to themself needs their own team member guaranteed.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
 
       db.tag.findMany({
         where: {
@@ -196,123 +201,16 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const totalPages = Math.ceil(bookingCount / perPage);
 
     /**
-     * One amber "Stock conflict" pill per booking that has ≥1 over-committed
-     * QUANTITY_TRACKED asset in its window (see
-     * `~/modules/booking/stock-conflicts.server`). Bounded to the current
-     * page's bookings — same batching contract as the disposition/checkout
-     * maps below, just one more fixed-cost query group.
+     * The two row pills — amber "Stock conflict" (≥1 over-committed
+     * QUANTITY_TRACKED asset in this booking's window) and "Includes
+     * unavailable assets" — both need a query the booking row cannot answer.
+     * `decorateBookingsForList` runs them concurrently, bounded to the current
+     * page's bookings. See `~/modules/booking/list-flags.server`.
      */
-    const decoratedBookings = await decorateBookingsWithStockConflicts({
+    const decoratedBookings = await decorateBookingsForList({
       bookings,
       organizationId,
     });
-
-    /**
-     * Compute a per-booking map of `assetId → dispositionedQty` (sum
-     * of RETURN + CONSUME + LOSS + DAMAGE ConsumptionLog rows) for
-     * every qty-tracked asset currently visible on this page. Feeds
-     * the `BookingAssetsSidebar` so it can render the same qty
-     * progress indicator and "Partially checked in" badge the
-     * overview page uses.
-     *
-     * Strategy: one aggregate query scoped to the bookingIds on this
-     * page (at most `perPage` bookings, so bounded). Then we bucket the
-     * rows by bookingId and store a Map<string, Record<string, number>>
-     * keyed by bookingId. Empty record for bookings with no activity.
-     */
-    const bookingIdsOnPage = bookings.map((b) => b.id);
-    const dispositionRows =
-      bookingIdsOnPage.length > 0
-        ? await db.consumptionLog.groupBy({
-            by: ["bookingId", "assetId", "category"],
-            where: {
-              bookingId: { in: bookingIdsOnPage },
-              category: { in: ["RETURN", "CONSUME", "LOSS", "DAMAGE"] },
-            },
-            _sum: { quantity: true },
-          })
-        : [];
-    /**
-     * Per-booking → per-asset disposition totals AND a per-category
-     * breakdown. The sidebar tooltip uses the breakdown to show
-     * Returned / Consumed / Lost / Damaged separately (lost and
-     * damaged units are conceptually different from returned ones).
-     * Both derivations come from the same single groupBy — no extra
-     * DB round-trip.
-     */
-    const dispositionedByBooking: Record<string, Record<string, number>> = {};
-    const dispositionBreakdownByBooking: Record<
-      string,
-      Record<
-        string,
-        { returned: number; consumed: number; lost: number; damaged: number }
-      >
-    > = {};
-    for (const row of dispositionRows) {
-      if (!row.bookingId) continue;
-      const qty = row._sum.quantity ?? 0;
-
-      if (!dispositionedByBooking[row.bookingId]) {
-        dispositionedByBooking[row.bookingId] = {};
-      }
-      dispositionedByBooking[row.bookingId][row.assetId] =
-        (dispositionedByBooking[row.bookingId][row.assetId] ?? 0) + qty;
-
-      if (!dispositionBreakdownByBooking[row.bookingId]) {
-        dispositionBreakdownByBooking[row.bookingId] = {};
-      }
-      const bucket =
-        dispositionBreakdownByBooking[row.bookingId][row.assetId] ??
-        ({
-          returned: 0,
-          consumed: 0,
-          lost: 0,
-          damaged: 0,
-        } as const);
-      const next = { ...bucket };
-      if (row.category === "RETURN") next.returned += qty;
-      else if (row.category === "CONSUME") next.consumed += qty;
-      else if (row.category === "LOSS") next.lost += qty;
-      else if (row.category === "DAMAGE") next.damaged += qty;
-      dispositionBreakdownByBooking[row.bookingId][row.assetId] = next;
-    }
-
-    /**
-     * Per-booking → per-asset progressively-checked-out total. Sums
-     * `PartialBookingCheckout.quantities[i]` across every checkout
-     * session for the bookings on this page, bucketed by
-     * `(bookingId, assetIds[i])`. Feeds the sidebar's new amber
-     * `PARTIALLY_CHECKED_OUT_QTY_PENDING_RETURN` badge: an asset with
-     * `checkedOutQuantity > 0 && dispositionedQuantity === 0` on an
-     * active booking is "partly out, no returns yet".
-     *
-     * Legacy fallback: pre-progressive-checkout rows have
-     * `quantities[].length !== assetIds[].length` (often empty). We
-     * count one unit per occurrence in that case, matching the
-     * service-layer read convention (`countCheckedOutUnitsForAsset` in
-     * `apps/webapp/app/modules/booking/service.server.ts`).
-     */
-    const checkoutSessionRows =
-      bookingIdsOnPage.length > 0
-        ? await db.partialBookingCheckout.findMany({
-            where: { bookingId: { in: bookingIdsOnPage } },
-            select: { bookingId: true, assetIds: true, quantities: true },
-          })
-        : [];
-    const checkedOutByBooking: Record<string, Record<string, number>> = {};
-    for (const session of checkoutSessionRows) {
-      const ids = session.assetIds ?? [];
-      const qtys = session.quantities ?? [];
-      const aligned = qtys.length === ids.length;
-      const bucket =
-        checkedOutByBooking[session.bookingId] ??
-        (checkedOutByBooking[session.bookingId] = {});
-      for (let i = 0; i < ids.length; i += 1) {
-        const assetId = ids[i];
-        const quantity = aligned ? qtys[i] ?? 1 : 1;
-        bucket[assetId] = (bucket[assetId] ?? 0) + quantity;
-      }
-    }
 
     const header: HeaderData = {
       title: "Bookings",
@@ -334,15 +232,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         perPage,
         modelName,
         hasActiveFilters,
-        dispositionedByBooking,
-        dispositionBreakdownByBooking,
-        checkedOutByBooking,
         ...teamMembersData,
-        // For BASE/SELF_SERVICE users, provide dedicated form team members
-        // For ADMIN users, reuse the filter team members
+        // Members fixed to themselves get dedicated form team members;
+        // everyone else reuses the filter team members.
         teamMembersForForm:
           teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
-        isSelfServiceOrBase,
         ...notifyData,
         tags,
         totalTags: tags.length,
@@ -396,7 +290,7 @@ export default function BookingsIndexPage({
   disableBulkActions?: boolean;
 }) {
   const matches = useMatches();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -459,7 +353,8 @@ export default function BookingsIndexPage({
 
         <List
           bulkActions={
-            disableBulkActions || isBaseOrSelfService ? undefined : (
+            disableBulkActions ||
+            !roleAccess.policy.bookings.showBulkActions ? undefined : (
               <BulkActionsDropdown />
             )
           }

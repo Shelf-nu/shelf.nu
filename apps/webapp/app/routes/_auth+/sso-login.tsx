@@ -73,18 +73,33 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
 
-    // PKCE (native SSO): a PKCE-capable companion build appends an S256
-    // `code_challenge`. Stash it in a short-lived cookie so it survives the SSO
-    // redirect chain back to `/oauth/callback/mobile`, where it is bound to the
-    // minted auth code. Only accept a well-formed S256 challenge (43-char
-    // base64url); anything else is ignored (treated as a legacy, non-PKCE flow).
+    // PKCE (native SSO): the companion appends an S256 `code_challenge`. Stash
+    // it in a short-lived cookie so it survives the SSO redirect chain back to
+    // `/oauth/callback/mobile`, where it is bound to the minted auth code.
     const codeChallenge = url.searchParams.get("code_challenge");
     const validChallenge =
-      isMobile && codeChallenge && /^[A-Za-z0-9_-]{43}$/.test(codeChallenge)
+      codeChallenge && /^[A-Za-z0-9_-]{43}$/.test(codeChallenge)
         ? codeChallenge
         : null;
 
-    if (validChallenge) {
+    // A mobile flow MUST carry a well-formed challenge. The native callback
+    // hands the auth code back over the `shelf://` custom scheme, which any app
+    // on the device may claim, so an unbound code would be a bearer token for a
+    // full session (RFC 8252 §8.1). Refuse rather than degrade: a request
+    // without one cannot have come from the companion, which always sends it.
+    if (isMobile && !validChallenge) {
+      throw new ShelfError({
+        cause: null,
+        title: "Sign-in not supported",
+        message:
+          "This version of the Shelf app can't sign in with SSO. Please update the app and try again.",
+        label: "Auth",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (isMobile && validChallenge) {
       return data(payload({ title, subHeading }), {
         headers: {
           "Set-Cookie":

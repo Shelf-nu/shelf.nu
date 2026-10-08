@@ -1,7 +1,6 @@
 import type { BookingStatus, Tag as PrismaTag, User } from "@prisma/client";
 import type { BookingLifecycleProgress as BookingLifecycleProgressType } from "~/modules/booking/utils.server";
 import { BADGE_COLORS } from "~/utils/badge-colors";
-import { resolveUserDisplayName } from "~/utils/user";
 import { BookingLifecycleProgress as BookingLifecycleProgressBar } from "./booking-lifecycle-progress";
 import { CategoryBadge } from "../assets/category-badge";
 import ItemsWithViewMore from "../list/items-with-view-more";
@@ -44,7 +43,10 @@ export function BookingStatistics({
   totalValue: string;
   allCategories: { id: string; name: string; color: string }[];
   tags: Pick<PrismaTag, "id" | "name" | "color">[];
-  creator: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  creator: Pick<
+    User,
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+  >;
   /**
    * Segmented checkout/check-in lifecycle progress. When present (and the
    * booking has any partial checkout/check-in activity), renders the
@@ -194,10 +196,7 @@ export function BookingStatistics({
         <div className="flex items-start justify-between">
           <span className="text-sm text-gray-500">Created by</span>
 
-          <UserBadge
-            name={resolveUserDisplayName(creator)}
-            img={creator.profilePicture}
-          />
+          <UserBadge user={creator} />
         </div>
 
         {autoArchivedAt && status === "ARCHIVED" && (

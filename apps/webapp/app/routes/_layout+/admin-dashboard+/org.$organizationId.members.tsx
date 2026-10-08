@@ -9,6 +9,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Organization members") },
@@ -96,9 +97,7 @@ export default function AdminOrgQrCodes() {
                   {member.id}
                 </Link>
               </Td>
-              <Td>
-                {member.firstName} {member.lastName}
-              </Td>
+              <Td>{resolveUserDisplayName(member)}</Td>
               <Td>
                 <span>
                   {member.email}{" "}

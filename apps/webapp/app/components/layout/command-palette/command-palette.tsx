@@ -30,11 +30,23 @@ import { Spinner } from "~/components/shared/spinner";
 import useApiQuery from "~/hooks/use-api-query";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LayoutLoaderResponse } from "~/routes/_layout+/_layout";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { isPersonalOrg } from "~/utils/organization";
+import type { AdminArea } from "~/utils/permissions/admin-areas";
+import { canSeeAdminArea } from "~/utils/permissions/admin-areas";
+import {
+  PermissionAction,
+  PermissionEntity,
+  roleHasPermission,
+} from "~/utils/permissions/permission.data";
+import {
+  visibleSettingsTabs,
+  visibleTeamTabs,
+} from "~/utils/permissions/settings-tabs";
 import { tw } from "~/utils/tw";
+import { resolveTeamMemberName } from "~/utils/user";
 import { useCommandPalette } from "./command-palette-context";
 
 const ASSET_RESULTS_LIMIT = 10;
@@ -107,6 +119,7 @@ export type TeamMemberSearchResult = {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  displayName: string | null;
   userId: string | null;
 };
 
@@ -124,11 +137,18 @@ type QuickAction = QuickCommand & {
   isVisible?: (context: CommandContext) => boolean;
 };
 
+/** What the current member may see, as the quick commands' `isVisible` reads it. */
 type CommandContext = {
-  canInviteUsers: boolean;
   canCreateBookings: boolean;
   isPersonalWorkspace: boolean;
-  isBaseOrSelfService: boolean;
+  /** The member may see this admin area (matrix grant of the page it opens). */
+  canSee: (area: AdminArea) => boolean;
+  /** At least one settings tab is visible. */
+  canSeeSettings: boolean;
+  /** The Users tab is visible (the Team entry opens it). */
+  canSeeTeamUsers: boolean;
+  /** The member may invite users. */
+  canInviteUsers: boolean;
 };
 
 const NAVIGATION_COMMANDS: QuickCommand[] = [
@@ -165,7 +185,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/audits",
     keywords: ["audits", "audit", "inventory", "check", "verify"],
     icon: ClipboardCheckIcon,
-    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+    isVisible: ({ canSee }) => canSee("audits"),
   },
   {
     id: "team",
@@ -174,8 +194,8 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/settings/team/users",
     keywords: ["users", "members", "people"],
     icon: UserPlus2Icon,
-    isVisible: ({ isPersonalWorkspace, isBaseOrSelfService }) =>
-      !isPersonalWorkspace && !isBaseOrSelfService,
+    isVisible: ({ isPersonalWorkspace, canSeeTeamUsers }) =>
+      !isPersonalWorkspace && canSeeTeamUsers,
   },
   {
     id: "settings",
@@ -184,7 +204,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/settings",
     keywords: ["preferences", "configuration"],
     icon: SettingsIcon,
-    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+    isVisible: ({ canSeeSettings }) => canSeeSettings,
   },
   {
     id: "home",
@@ -193,7 +213,7 @@ const NAVIGATION_COMMANDS: QuickCommand[] = [
     href: "/home",
     keywords: ["overview", "analytics", "dashboard"],
     icon: HomeIcon,
-    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+    isVisible: ({ canSee }) => canSee("home"),
   },
 ];
 
@@ -205,7 +225,7 @@ const ACTION_COMMANDS: QuickAction[] = [
     href: "/assets/new",
     keywords: ["new", "asset", "inventory"],
     icon: FilePlus2Icon,
-    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+    isVisible: ({ canSee }) => canSee("createAsset"),
   },
   {
     id: "create-kit",
@@ -214,7 +234,7 @@ const ACTION_COMMANDS: QuickAction[] = [
     href: "/kits/new",
     keywords: ["new", "kit", "inventory", "collection"],
     icon: PackageIcon,
-    isVisible: ({ isBaseOrSelfService }) => !isBaseOrSelfService,
+    isVisible: ({ canSee }) => canSee("createKit"),
   },
   {
     id: "create-booking",
@@ -423,6 +443,10 @@ export function getTeamMemberCommandValue(member: TeamMemberSearchResult) {
     member.email ?? "",
     member.firstName ?? "",
     member.lastName ?? "",
+    // cmdk re-filters client-side against this value, so a row the server
+    // matched on `displayName` is scored out and never rendered unless the
+    // same field is searchable here too.
+    member.displayName ?? "",
     member.id,
   ].filter(Boolean);
 
@@ -501,28 +525,34 @@ export function CommandPalette() {
     enabled: open && Boolean(debouncedQuery),
   });
 
-  const canInviteUsers = useMemo(() => {
-    const roles = layoutData?.currentOrganizationUserRoles ?? [];
-    return roles.includes("ADMIN") || roles.includes("OWNER");
-  }, [layoutData?.currentOrganizationUserRoles]);
-
+  const roles = useOrganizationRoles();
   const canCreateBookings = layoutData?.canUseBookings ?? false;
   const isPersonalWorkspace = isPersonalOrg(layoutData?.currentOrganization);
-  const { isBaseOrSelfService } = useUserRoleHelper();
 
+  // Each entry shows with the matrix grant of the page it opens, the same
+  // lists the sidebar and the settings tabs read.
   const commandContext = useMemo<CommandContext>(
     () => ({
-      canInviteUsers,
       canCreateBookings,
       isPersonalWorkspace,
-      isBaseOrSelfService,
+      canSee: (area) => canSeeAdminArea({ roles, area }),
+      canSeeSettings:
+        visibleSettingsTabs({ roles, isPersonalOrg: isPersonalWorkspace })
+          .length > 0,
+      canSeeTeamUsers: visibleTeamTabs({
+        roles,
+        isPersonalOrg: isPersonalWorkspace,
+      }).some((t) => t.to === "users"),
+      // The palette renders during SSR, outside the layout's hydration gate,
+      // so it reads the pure resolver: `permission.validator.client` has its
+      // exports stubbed to undefined in the server bundle.
+      canInviteUsers: roleHasPermission({
+        roles,
+        entity: PermissionEntity.teamMember,
+        action: PermissionAction.create,
+      }),
     }),
-    [
-      canInviteUsers,
-      canCreateBookings,
-      isPersonalWorkspace,
-      isBaseOrSelfService,
-    ]
+    [canCreateBookings, isPersonalWorkspace, roles]
   );
 
   useEffect(() => {
@@ -830,7 +860,20 @@ export function CommandPalette() {
                 <UserIcon className="size-4 text-gray-500" />
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate font-medium text-gray-900">
-                    {member.name}
+                    {resolveTeamMemberName({
+                      name: member.name,
+                      // NRMs have no user account, so the stored name is the
+                      // only name there is; a registered member is named by
+                      // their account, where a display name outranks the
+                      // mirror `TeamMember.name` if the two disagree.
+                      user: member.userId
+                        ? {
+                            displayName: member.displayName,
+                            firstName: member.firstName,
+                            lastName: member.lastName,
+                          }
+                        : null,
+                    })}
                   </span>
                   <span className="truncate text-xs text-gray-500">
                     {member.email || "NRM"}

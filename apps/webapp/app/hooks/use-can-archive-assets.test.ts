@@ -46,7 +46,7 @@ describe("who sees the Archived tab", () => {
   });
 
   it("hides it when the role list is empty", () => {
-    // why: `useUserRoleHelper` returns undefined roles before the layout
+    // why: `useOrganizationRoles` returns undefined roles before the layout
     // loader resolves; the gate must fail closed, not flash the tab.
     expect(canArchive([])).toBe(false);
   });

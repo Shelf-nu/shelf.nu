@@ -16,6 +16,8 @@ vi.mock("~/database/db.server", () => ({
 const TARGET = "user-target";
 const RECIPIENT = "user-recipient";
 const ORG = "org-1";
+/** A role change that moves both ownership and bookings created for others. */
+const BOTH = { ownership: true, bookingsCreatedForOthers: true };
 
 /**
  * Builds a fake transaction client exposing only the model methods
@@ -47,8 +49,7 @@ function asTx(tx: MockTx) {
 /**
  * Asserts the 8 OWNERSHIP rewrites (Asset/Category/Tag/Location/CustomField/
  * Image/Kit/AssetReminder) fired with the expected `where`/`data` shape.
- * These must move for every `reason` — shared between the demotion and
- * removal test groups below.
+ * They move on every removal, and on a role change when `moves.ownership`.
  */
 function expectOwnershipTransferred(tx: MockTx) {
   expect(tx.asset.updateMany).toHaveBeenCalledWith({
@@ -97,6 +98,7 @@ describe("transferEntitiesToNewOwner", () => {
         newOwnerId: RECIPIENT,
         organizationId: ORG,
         reason: "demotion",
+        moves: BOTH,
       });
 
       for (const call of tx.booking.updateMany.mock.calls) {
@@ -113,6 +115,7 @@ describe("transferEntitiesToNewOwner", () => {
         newOwnerId: RECIPIENT,
         organizationId: ORG,
         reason: "demotion",
+        moves: BOTH,
       });
 
       const creatorCalls = tx.booking.updateMany.mock.calls.filter((call) =>
@@ -143,6 +146,7 @@ describe("transferEntitiesToNewOwner", () => {
         newOwnerId: RECIPIENT,
         organizationId: ORG,
         reason: "demotion",
+        moves: BOTH,
       });
 
       // The `not: null` guard is load-bearing: without it, a null custodian
@@ -170,6 +174,7 @@ describe("transferEntitiesToNewOwner", () => {
         newOwnerId: RECIPIENT,
         organizationId: ORG,
         reason: "demotion",
+        moves: BOTH,
       });
 
       expect(tx.invite.updateMany).not.toHaveBeenCalled();
@@ -184,9 +189,56 @@ describe("transferEntitiesToNewOwner", () => {
         newOwnerId: RECIPIENT,
         organizationId: ORG,
         reason: "demotion",
+        moves: BOTH,
       });
 
       expectOwnershipTransferred(tx);
+    });
+  });
+
+  describe("reason: demotion, moving one group only", () => {
+    it("moves ownership without touching bookings when only ownership moves", async () => {
+      const tx = createMockTx();
+
+      await transferEntitiesToNewOwner({
+        tx: asTx(tx),
+        id: TARGET,
+        newOwnerId: RECIPIENT,
+        organizationId: ORG,
+        reason: "demotion",
+        moves: { ownership: true, bookingsCreatedForOthers: false },
+      });
+
+      expectOwnershipTransferred(tx);
+      expect(tx.booking.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("moves only bookings created for others when ownership stays", async () => {
+      const tx = createMockTx();
+
+      await transferEntitiesToNewOwner({
+        tx: asTx(tx),
+        id: TARGET,
+        newOwnerId: RECIPIENT,
+        organizationId: ORG,
+        reason: "demotion",
+        moves: { ownership: false, bookingsCreatedForOthers: true },
+      });
+
+      expect(tx.booking.updateMany).toHaveBeenCalledTimes(1);
+      for (const model of [
+        tx.asset,
+        tx.category,
+        tx.tag,
+        tx.location,
+        tx.customField,
+        tx.image,
+        tx.kit,
+        tx.assetReminder,
+        tx.invite,
+      ]) {
+        expect(model.updateMany).not.toHaveBeenCalled();
+      }
     });
   });
 

@@ -173,6 +173,24 @@ export default function OrganizationSelector() {
             >
               Manage workspaces
             </Button>
+            {/**
+             * Personal workspaces can't invite anyone, whatever the user pays.
+             * The label deliberately makes no claim about their plan: tier
+             * lives on the user while add-ons live on the organization, so
+             * "upgrade" would be wrong for a Team-tier user sitting in their
+             * Personal workspace. The Team page resolves the actual action.
+             */}
+            {currentOrganization.type === "PERSONAL" ? (
+              <Button
+                to="/settings/team"
+                icon="user"
+                variant="link"
+                className=" w-full select-none justify-start rounded p-2 text-left font-medium text-gray-900 outline-none  hover:bg-gray-50 hover:text-gray-800 "
+                onClick={closeDropdown}
+              >
+                Invite your team
+              </Button>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

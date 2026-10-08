@@ -7,6 +7,11 @@ import { updateOrganization } from "~/modules/organization/service.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload } from "~/utils/http.server";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
@@ -19,7 +24,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       request,
     });
 
-    // Verify user has permission (owner or admin in org)
+    // The membership in this workspace only: the query filters on it.
     const user = await getUserByID(userId, {
       select: {
         id: true,
@@ -30,9 +35,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
-    const userRoles = user.userOrganizations[0]?.roles || [];
-    const canRunMigration =
-      userRoles.includes("OWNER") || userRoles.includes("ADMIN");
+    // `userOrganizations` holds only this workspace's membership (filtered
+    // above), so `[0]` is that membership, not a positional role read. The
+    // migration rewrites every asset, so it follows `asset:update`.
+    const canRunMigration = await hasPermission({
+      organizationId,
+      userId,
+      roles: user.userOrganizations[0]?.roles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.update,
+    });
 
     if (!canRunMigration) {
       return data(

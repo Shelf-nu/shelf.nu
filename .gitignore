@@ -16,6 +16,8 @@ yarn.lock
 .env.local
 .env.staging
 .env.production
+.env.*.backup
+.env.production-backup
 
 .cache
 
@@ -30,6 +32,7 @@ tsconfig.tsbuildinfo
 # Claude Code — personal settings (project-shared settings and skills are committed)
 .claude/settings.local.json
 .claude/.credentials*
+CLAUDE.local.md
 
 **/coverage
 

@@ -37,6 +37,7 @@ import { makeShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -194,7 +195,7 @@ const ListUserContent = ({
     <Td className=" p-0 md:p-0">
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         <Link
-          target="blank"
+          target="_blank"
           className="underline hover:text-gray-500"
           to={`/qr/${item.id}`}
         >
@@ -216,7 +217,7 @@ const ListUserContent = ({
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.organization ? (
           <Link
-            target="blank"
+            target="_blank"
             className="underline hover:text-gray-500"
             to={`/admin-dashboard/org/${item.organization.id}`}
           >
@@ -231,11 +232,11 @@ const ListUserContent = ({
       <div className="flex justify-between gap-3 p-4 md:justify-normal md:px-6">
         {item.user ? (
           <Link
-            target="blank"
+            target="_blank"
             className="underline hover:text-gray-500"
             to={`/admin-dashboard/${item.user.id}`}
           >
-            {item.user.firstName} {item.user.lastName} ({item.user.email})
+            {resolveUserDisplayName(item.user)} ({item.user.email})
             <br /> ({item.user.id})
           </Link>
         ) : (

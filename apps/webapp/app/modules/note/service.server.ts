@@ -7,11 +7,13 @@ import type {
   Note,
   Prisma,
   Tag,
+  Organization,
   User,
 } from "@prisma/client";
 import type { AssetType, ConsumptionType } from "@prisma/client";
 import { db } from "~/database/db.server";
 import {
+  buildAssetModelChangeNote,
   buildCategoryChangeNote,
   buildDescriptionChangeNote,
   buildNameChangeNote,
@@ -42,6 +44,7 @@ import {
   assertAssetsBelongToOrg,
   type OrgValidationTxClient,
 } from "~/utils/org-validation.server";
+import type { UserNameFields } from "~/utils/user";
 
 const label = "Note";
 
@@ -184,12 +187,40 @@ export async function createNotes(
 export async function deleteNote({
   id,
   userId,
-}: Pick<Note, "id"> & { userId: User["id"] }) {
+  organizationId,
+}: Pick<Note, "id"> & {
+  userId: User["id"];
+  /**
+   * Required, not optional: Note has no organizationId column, so the only
+   * scoping was `userId` -- which let an author delete a asset note belonging to
+   * an organization they are no longer part of. Making it required means the
+   * compiler, not a grep, finds every call site.
+   */
+  organizationId: Organization["id"];
+}) {
   try {
-    return await db.note.deleteMany({
-      where: { id, userId },
+    // Scoped through the parent asset, which is where organizationId lives.
+    // Still one query -- a relation filter, not an extra round trip.
+    const result = await db.note.deleteMany({
+      where: { id, userId, asset: { organizationId } },
     });
+
+    if (result.count === 0) {
+      throw new ShelfError({
+        cause: null,
+        message: "Note not found or you don't have permission to delete it.",
+        additionalData: { id, userId, organizationId },
+        label,
+        status: 403,
+      });
+    }
+
+    return result;
   } catch (cause) {
+    if (cause instanceof ShelfError) {
+      throw cause;
+    }
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while deleting the note",
@@ -406,8 +437,7 @@ export async function createBulkKitChangeNotes({
         await createKitChangeNote({
           currentKit,
           newKit,
-          firstName: user.firstName ?? "",
-          lastName: user.lastName ?? "",
+          user,
           assetId: asset.id,
           userId,
           organizationId,
@@ -438,8 +468,7 @@ export async function createBulkKitChangeNotes({
 export async function createKitChangeNote({
   currentKit,
   newKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -450,8 +479,8 @@ export async function createKitChangeNote({
 }: {
   currentKit: Pick<Kit, "id" | "name"> | null;
   newKit: Pick<Kit, "id" | "name"> | null;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -469,11 +498,7 @@ export async function createKitChangeNote({
   quantity?: number | null;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
     // Qty-tracked unit label ("50 units") for this kit's slice, or null
     // for INDIVIDUAL / missing quantity — in which case we keep the
     // original countless phrasing ("added asset to ...").
@@ -562,7 +587,7 @@ export async function createKitChangeNote({
  *
  * @param params.fromKit - Source kit (asset is losing units from here)
  * @param params.toKit - Destination kit (asset is gaining units here)
- * @param params.firstName / params.lastName - Acting user (for the userLink)
+ * @param params.user - Acting user's name columns (for the userLink)
  * @param params.assetId - Asset whose units are being redistributed
  * @param params.userId - Acting user — written to `Note.userId`
  * @param params.organizationId - Caller's validated organization ID
@@ -574,8 +599,7 @@ export async function createKitChangeNote({
 export async function createKitMoveNote({
   fromKit,
   toKit,
-  firstName,
-  lastName,
+  user,
   assetId,
   userId,
   organizationId,
@@ -585,8 +609,8 @@ export async function createKitMoveNote({
 }: {
   fromKit: Pick<Kit, "id" | "name">;
   toKit: Pick<Kit, "id" | "name">;
-  firstName: string;
-  lastName: string;
+  /** Acting user's name columns — names the actor in the note's user link. */
+  user: UserNameFields;
   assetId: Asset["id"];
   userId: User["id"];
   /** Caller's validated org — propagated to the note's asset ownership check */
@@ -599,11 +623,7 @@ export async function createKitMoveNote({
   quantity: number;
 }) {
   try {
-    const userLink = wrapUserLinkForNote({
-      id: userId,
-      firstName,
-      lastName,
-    });
+    const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
     const fromKitLink = wrapKitsWithDataForNote(
       { id: fromKit.id, name: fromKit.name.trim() },
@@ -671,11 +691,7 @@ export async function createTagChangeNoteIfNeeded({
   }
 
   const user = await loadUserForNotes();
-  const userLink = wrapUserLinkForNote({
-    id: userId,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-  });
+  const userLink = wrapUserLinkForNote({ ...user, id: userId });
 
   const formatTagNames = (tagList: TagSummary[]) =>
     tagList
@@ -781,6 +797,48 @@ export async function createAssetDescriptionChangeNote({
     userLink,
     previous: previousDescription,
     next: newDescription,
+  });
+
+  if (!content) {
+    return;
+  }
+
+  await createNote({
+    content,
+    type: "UPDATE",
+    userId,
+    assetId,
+    organizationId,
+  });
+}
+
+/**
+ * Persist a note when the asset model is set, changed, or removed.
+ *
+ * Writes nothing when the model did not actually change, so bulk callers can
+ * pass every asset they touched without filtering first.
+ */
+export async function createAssetModelChangeNote({
+  assetId,
+  userId,
+  organizationId,
+  previousModel,
+  newModel,
+  loadUserForNotes,
+}: {
+  assetId: Asset["id"];
+  userId: User["id"];
+  /** Caller's validated org — propagated to the note's asset ownership check */
+  organizationId: string;
+  previousModel?: { id: string; name: string } | null;
+  newModel?: { id: string; name: string } | null;
+  loadUserForNotes: LoadUserForNotesFn;
+}) {
+  const userLink = await resolveUserLink({ userId, loadUserForNotes });
+  const content = buildAssetModelChangeNote({
+    userLink,
+    previous: previousModel,
+    next: newModel,
   });
 
   if (!content) {
@@ -903,11 +961,7 @@ export async function createAssetNotesForAuditAddition({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,
@@ -957,11 +1011,7 @@ export async function createAssetNotesForAuditRemoval({
 
     if (!user || assetIds.length === 0) return;
 
-    const userLink = wrapUserLinkForNote({
-      id: user.id,
-      firstName: user.firstName ?? "",
-      lastName: user.lastName ?? "",
-    });
+    const userLink = wrapUserLinkForNote(user);
 
     const auditLink = wrapLinkForNote(
       `/audits/${audit.id}/overview`,

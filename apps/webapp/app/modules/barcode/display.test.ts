@@ -2,8 +2,13 @@ import { BarcodeType } from "@prisma/client";
 import { describe, it, expect } from "vitest";
 import {
   resolveDisplayCode,
+  describeCodeFallback,
+  serializeDisplayCode,
   type AssetForCodeResolution,
   type OrganizationForCodeResolution,
+  type ResolvedDisplayCode,
+  ASSET_CODE_RESOLUTION_SELECT,
+  QR_CODES_ORDER_BY,
 } from "./display";
 
 // @vitest-environment node
@@ -43,6 +48,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ qrCodes: [{ id: "qr-abc" }] }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -50,6 +56,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
       type: "QR_ID",
       isFallback: false,
       workspacePreference: "QR_ID",
+      entityKind: "asset",
     });
   });
 
@@ -59,6 +66,7 @@ describe("resolveDisplayCode — workspace preference QR_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ qrCodes: [] }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("");
@@ -71,6 +79,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
     const result = resolveDisplayCode({
       entity: asset({ sequentialId: "SAM-0042" }),
       organization: org({ qrIdDisplayPreference: "SAM_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -78,6 +87,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
       type: "SAM_ID",
       isFallback: false,
       workspacePreference: "SAM_ID",
+      entityKind: "asset",
     });
   });
 
@@ -89,6 +99,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
         qrCodes: [{ id: "qr-fallback" }],
       }),
       organization: org({ qrIdDisplayPreference: "SAM_ID" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -96,6 +107,7 @@ describe("resolveDisplayCode — workspace preference SAM_ID", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "SAM_ID",
+      entityKind: "asset",
     });
   });
 });
@@ -107,6 +119,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-1", type: BarcodeType.Code128, value: "ABC-123" }],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -114,6 +127,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
       type: "Code128",
       isFallback: false,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -128,6 +142,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("A-FIRST");
@@ -144,6 +159,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("C128-1");
@@ -157,6 +173,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-1", type: BarcodeType.Code39, value: "C39-1" }],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -164,6 +181,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -179,6 +197,7 @@ describe("resolveDisplayCode — workspace preference is a BarcodeType", () => {
         barcodes: [{ id: "bc-x", type: preferred, value: `${preferred}-val` }],
       }),
       organization: org({ qrIdDisplayPreference: preferred }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe(`${preferred}-val`);
@@ -199,6 +218,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
       }),
       // Workspace prefers Code128, but the override forces Code39 for this asset
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -206,6 +226,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
       type: "Code39",
       isFallback: false,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -221,6 +242,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "Code128" }),
+      entityKind: "asset",
     });
 
     // Falls through to workspace pref → picks bc-present
@@ -242,6 +264,7 @@ describe("resolveDisplayCode — per-asset preferredBarcodeId override", () => {
         ],
       }),
       organization: org({ qrIdDisplayPreference: "QR_ID" }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("https://x.example");
@@ -258,6 +281,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "QR_ID",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -265,6 +289,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: false,
       workspacePreference: "QR_ID",
+      entityKind: "asset",
     });
   });
 
@@ -276,6 +301,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "SAM_ID",
       }),
+      entityKind: "asset",
     });
 
     expect(result.value).toBe("SAM-0001");
@@ -294,6 +320,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -301,6 +328,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -325,6 +353,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -332,6 +361,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
   });
 
@@ -352,6 +382,7 @@ describe("resolveDisplayCode — non-addon organizations", () => {
         barcodesEnabled: false,
         qrIdDisplayPreference: "Code128",
       }),
+      entityKind: "asset",
     });
 
     expect(result).toEqual({
@@ -359,6 +390,169 @@ describe("resolveDisplayCode — non-addon organizations", () => {
       type: "QR_ID",
       isFallback: true,
       workspacePreference: "Code128",
+      entityKind: "asset",
     });
+  });
+
+  it("carries entityKind through so callers can word help text honestly", () => {
+    // why: the resolver picks the same code for a kit as for an asset — this
+    // field never changes WHICH code wins. It exists so the badge can avoid
+    // telling a kit to add a SAM ID, which kits cannot have.
+    const result = resolveDisplayCode({
+      entity: { qrCodes: [{ id: "kit-qr" }] },
+      organization: {
+        qrIdDisplayPreference: "SAM_ID",
+        barcodesEnabled: false,
+      },
+      entityKind: "kit",
+    });
+
+    expect(result.entityKind).toBe("kit");
+    expect(result.value).toBe("kit-qr");
+    expect(result.isFallback).toBe(true);
+  });
+
+  it("refuses to resolve without an entityKind", () => {
+    // The failure this guards is invisible at runtime: an entity resolved as
+    // the wrong kind still renders, still shows the RIGHT code, and only the
+    // fallback advice becomes impossible to follow ("add a SAM ID" to a kit).
+    // Nothing observable is wrong, so no ordinary assertion can catch it and
+    // the compiler has to be the guard.
+    //
+    // The directive below IS that guard: make `entityKind` optional again and
+    // it stops suppressing anything, so `tsc` fails the build on an unused
+    // directive. Deleting this case removes the only enforcement there is.
+    // (Keep any mention of the directive off the start of a comment line —
+    // TypeScript reads one there as real, wherever it appears.)
+    // @ts-expect-error - entityKind is deliberately required
+    const result = resolveDisplayCode({
+      entity: { qrCodes: [{ id: "qr" }] },
+      organization: { qrIdDisplayPreference: "QR_ID", barcodesEnabled: false },
+    });
+
+    // Still resolves at runtime — which is exactly why the type must object.
+    expect(result.value).toBe("qr");
+  });
+});
+
+describe("ASSET_CODE_RESOLUTION_SELECT", () => {
+  it("orders the QR relation, so the one QR it keeps is the same on every read", () => {
+    // why: the fragment keeps a single QR and `Qr.assetId` is not unique.
+    // Without the order, which QR survives `take: 1` is up to the database.
+    expect(ASSET_CODE_RESOLUTION_SELECT.qrCodes).toEqual({
+      take: 1,
+      orderBy: QR_CODES_ORDER_BY,
+      select: { id: true },
+    });
+  });
+});
+
+describe("describeCodeFallback", () => {
+  it("has nothing to explain when the preferred code is the one shown", () => {
+    expect(
+      describeCodeFallback({
+        type: "Code128",
+        isFallback: false,
+        workspacePreference: "Code128",
+        entityKind: "asset",
+      })
+    ).toBeNull();
+  });
+
+  it("names the preference an asset is missing, not the code shown in its place", () => {
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "Code128",
+        entityKind: "asset",
+      })
+    ).toEqual({
+      text: "Your workspace prefers Code 128 but this item has no Code 128.",
+      fixable: true,
+    });
+  });
+
+  it("tells a kit on a SAM ID workspace that kits have none, and offers no fix", () => {
+    // why: `Kit` has no `sequentialId` column and no UI to set one, so the
+    // generic "this item has no SAM ID" would imply a fix nobody can make.
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "SAM_ID",
+        entityKind: "kit",
+      })
+    ).toEqual({
+      text: "Your workspace prefers SAM ID, which kits do not have. Showing the QR Code ID instead.",
+      fixable: false,
+    });
+  });
+
+  it("words a kit's missing barcode the same as an asset's", () => {
+    // why: kits do carry barcodes, so only SAM ID earns the kit wording.
+    expect(
+      describeCodeFallback({
+        type: "QR_ID",
+        isFallback: true,
+        workspacePreference: "Code128",
+        entityKind: "kit",
+      })
+    ).toEqual({
+      text: "Your workspace prefers Code 128 but this item has no Code 128.",
+      fixable: true,
+    });
+  });
+});
+
+describe("serializeDisplayCode", () => {
+  /** A resolved code with overrides; defaults to an honoured Code 128. */
+  function resolved(
+    partial: Partial<ResolvedDisplayCode> = {}
+  ): ResolvedDisplayCode {
+    return {
+      value: "CODE-000128",
+      type: "Code128",
+      isFallback: false,
+      workspacePreference: "Code128",
+      entityKind: "asset",
+      ...partial,
+    };
+  }
+
+  it("labels the code that is shown and carries no note when nothing fell back", () => {
+    expect(serializeDisplayCode(resolved())).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+      fallbackNote: null,
+    });
+  });
+
+  it("keeps the label on the code shown and explains the fallback separately", () => {
+    // why: a client that printed `label` as the missing preference would tell
+    // the reader the workspace shows "QR Code ID". The preference is named
+    // only in `fallbackNote`.
+    expect(
+      serializeDisplayCode(
+        resolved({ value: "qr-1", type: "QR_ID", isFallback: true })
+      )
+    ).toEqual({
+      value: "qr-1",
+      label: "QR Code ID",
+      type: "QR_ID",
+      isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
+    });
+  });
+
+  it("sends nothing when the entity has no code to show", () => {
+    expect(
+      serializeDisplayCode(
+        resolved({ value: "", type: "QR_ID", isFallback: true })
+      )
+    ).toBeNull();
   });
 });

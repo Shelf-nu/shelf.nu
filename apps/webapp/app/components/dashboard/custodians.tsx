@@ -1,6 +1,6 @@
 import { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { loader } from "~/routes/_layout+/home";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -8,6 +8,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import type { UserNameFields } from "~/utils/user";
 import { resolveTeamMemberName } from "~/utils/user";
 import { ClickableTr } from "./clickable-tr";
 import { DashboardEmptyState } from "./empty-state";
@@ -30,7 +31,7 @@ const PLACEHOLDER_ROW_KEYS = [
 
 export default function CustodiansList() {
   const { custodiansData } = useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const currentOrganization = useCurrentOrganization();
   const isPersonal = isPersonalOrg(currentOrganization);
   const canViewTeamMemberUsers = userHasPermission({
@@ -125,11 +126,7 @@ function Row({
   custodian: {
     name: string;
     userId?: string | null;
-    user?: {
-      firstName?: string | null;
-      lastName?: string | null;
-      profilePicture?: string | null;
-    } | null;
+    user?: (UserNameFields & { profilePicture?: string | null }) | null;
   };
   count: number;
   /** Does the current user have permissions to acess this teamMember page */

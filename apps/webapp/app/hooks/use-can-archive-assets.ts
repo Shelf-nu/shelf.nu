@@ -25,7 +25,7 @@
  * @returns `true` for ADMIN / OWNER, `false` for BASE / SELF_SERVICE.
  */
 
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -33,7 +33,7 @@ import {
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 
 export function useCanArchiveAssets(): boolean {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   return userHasPermission({
     roles,

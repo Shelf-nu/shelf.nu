@@ -395,13 +395,15 @@ describe("POST /api/mobile/asset/update", () => {
       const result = await action(createActionArgs({ request }));
 
       expect(result instanceof Response).toBe(true);
-      // Zod parse throws ZodError → caught by the route → makeShelfError
-      // wraps it. The mock at the top of this file (`vi.mock` for
-      // ~/utils/error) doesn't extract a status from ZodError, so the
-      // fallback `cause?.status || 500` returns 500. Assert that exact
-      // status — looser checks (e.g. `!= 200`) accept 401/403 and miss
-      // a future regression where auth fails before validation.
-      expect((result as unknown as Response).status).toBe(500);
+      // The body is validated through `parseMobileBody`, which converts the
+      // ZodError into a ShelfError carrying status 400 and
+      // `shouldBeCaptured: false`. This previously asserted 500 — a bare
+      // `schema.parse()` threw a ZodError that `makeShelfError` did not
+      // recognise, so a malformed client payload became a server error and a
+      // Sentry capture. Assert the exact status: looser checks (e.g. `!= 200`)
+      // accept 401/403 and would miss a regression where auth fails before
+      // validation.
+      expect((result as unknown as Response).status).toBe(400);
       expect(updateAsset).not.toHaveBeenCalled();
     });
 

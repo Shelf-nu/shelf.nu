@@ -33,6 +33,7 @@
  * @see {@link file://../../../app/modules/asset/availability.server.ts}
  * @see {@link file://../../../app/modules/asset/availability.server.test.ts}
  */
+import { permissionContext } from "@helpers/role-access";
 import type { ActionFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vitest } from "vitest";
 import { db } from "~/database/db.server";
@@ -152,7 +153,10 @@ function createTxMock({
       findUnique: vitest.fn().mockResolvedValue({ quantity: currentQuantity }),
       update: vitest.fn().mockResolvedValue({}),
     },
-    consumptionLog: { groupBy: vitest.fn().mockResolvedValue([]) },
+    consumptionLog: {
+      findMany: vitest.fn().mockResolvedValue([]),
+      groupBy: vitest.fn().mockResolvedValue([]),
+    },
   };
 }
 
@@ -214,11 +218,9 @@ function buildActionArgs(body: Record<string, string>): ActionFunctionArgs {
 beforeEach(() => {
   vitest.clearAllMocks();
   // @ts-expect-error mocked
-  requirePermission.mockResolvedValue({
-    organizationId: ORG_ID,
-    role: "ADMIN",
-    isSelfServiceOrBase: false,
-  });
+  requirePermission.mockResolvedValue(
+    permissionContext({ roles: ["ADMIN"], organizationId: ORG_ID })
+  );
   // @ts-expect-error mocked
   getUserByID.mockResolvedValue({
     id: USER_ID,

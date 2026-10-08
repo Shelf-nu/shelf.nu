@@ -1,0 +1,162 @@
+#!/usr/bin/env node
+/**
+ * Generates `apps/companion/.env.local` for running the app against a server
+ * you control — the iOS Simulator, an Android emulator, or a physical device.
+ *
+ * The three values the app needs are the ones a Shelf server already publishes
+ * on `/api/mobile/config`, so this reads them from there rather than asking you
+ * to copy credentials by hand. For a local webapp, which has no such endpoint
+ * until it is running, it falls back to the monorepo root `.env`.
+ *
+ * Usage:
+ *   node scripts/setup-sim-env.mjs                      # local webapp, simulator
+ *   node scripts/setup-sim-env.mjs --api-url=https://testapp.shelf.nu
+ *   node scripts/setup-sim-env.mjs --lan                # use this Mac's LAN IP
+ *
+ * The generated file is gitignored. Re-run it whenever you point the app at a
+ * different server, then restart Metro with `pnpm companion:dev:clear` — the
+ * `EXPO_PUBLIC_*` values are inlined at bundle time, so a warm cache keeps
+ * serving the old ones.
+ */
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const COMPANION_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+const ROOT_DIR = dirname(dirname(COMPANION_DIR));
+const OUT = join(COMPANION_DIR, ".env.local");
+
+const args = process.argv.slice(2);
+const flag = (name) =>
+  args
+    .find((a) => a.startsWith(`--${name}=`))
+    ?.split("=")
+    .slice(1)
+    .join("=");
+
+/** Reads a KEY=value pair out of a dotenv file, tolerating quotes. */
+function fromDotenv(path, key) {
+  if (!existsSync(path)) return null;
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const m = line.match(new RegExp(`^\\s*${key}\\s*=\\s*(.*)$`));
+    if (m) return m[1].trim().replace(/^["']|["']$/g, "") || null;
+  }
+  return null;
+}
+
+/** This Mac's LAN address — what a physical device must use instead of localhost. */
+function lanIp() {
+  for (const iface of ["en0", "en1"]) {
+    try {
+      // execFileSync, not execSync: no shell, so nothing here is interpreted.
+      const ip = execFileSync("ipconfig", ["getifaddr", iface], {
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .toString()
+        .trim();
+      if (ip) return ip;
+    } catch {
+      // Interface is down or absent — try the next one.
+    }
+  }
+  return null;
+}
+
+const useLan = args.includes("--lan");
+const host = useLan ? lanIp() : "localhost";
+if (useLan && !host) {
+  console.error("[sim-env] FAILED — could not determine a LAN IP (en0/en1).");
+  process.exit(1);
+}
+
+const apiUrl = (flag("api-url") ?? `http://${host}:3000`).replace(/\/+$/, "");
+
+// A self-signed cert cannot be verified by the app, and the failure surfaces as
+// a generic network error rather than anything that names TLS.
+if (/^https:\/\/(localhost|127\.0\.0\.1|192\.168\.|10\.)/.test(apiUrl)) {
+  console.error(
+    `[sim-env] FAILED — ${apiUrl} is HTTPS on a local address.\n` +
+      "          The app cannot verify a self-signed certificate. Start the\n" +
+      "          webapp with DISABLE_HTTPS=true and use an http:// URL."
+  );
+  process.exit(1);
+}
+
+/**
+ * Asks a running server to describe itself.
+ *
+ * @param base - Server origin.
+ * @returns The parsed config, or null when it could not be reached.
+ */
+async function fetchConfig(base) {
+  try {
+    const res = await fetch(`${base}/api/mobile/config`, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+const remote = await fetchConfig(apiUrl);
+
+let supabaseUrl = remote?.supabaseUrl;
+let supabaseAnonKey = remote?.supabaseAnonKey;
+let source = `${apiUrl}/api/mobile/config`;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  // Expected when the webapp is not running yet, or predates that endpoint.
+  const envPath = join(ROOT_DIR, ".env");
+  supabaseUrl = fromDotenv(envPath, "SUPABASE_URL");
+  supabaseAnonKey = fromDotenv(envPath, "SUPABASE_ANON_PUBLIC");
+  source = envPath;
+}
+
+// Applied to whichever source produced the URL, not just the dotenv fallback:
+// a local webapp answers /api/mobile/config with its own loopback Supabase URL,
+// and a device cannot reach the Mac's loopback any more than it can reach
+// localhost:3000.
+if (supabaseUrl && useLan) {
+  supabaseUrl = supabaseUrl.replace(
+    /\/\/(localhost|127\.0\.0\.1)/,
+    `//${host}`
+  );
+}
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error(
+    `[sim-env] FAILED — no Supabase credentials.\n` +
+      `          ${apiUrl} did not answer /api/mobile/config, and\n` +
+      `          ${join(
+        ROOT_DIR,
+        ".env"
+      )} has no SUPABASE_URL / SUPABASE_ANON_PUBLIC.\n` +
+      "          Start the webapp first, or pass --api-url of a deployed server."
+  );
+  process.exit(1);
+}
+
+writeFileSync(
+  OUT,
+  [
+    "# Generated by scripts/setup-sim-env.mjs — safe to delete and regenerate.",
+    `# Credentials read from: ${source}`,
+    "#",
+    "# These are inlined at BUNDLE time. After changing them, restart Metro with",
+    "# `pnpm companion:dev:clear` or the old values keep being served.",
+    `EXPO_PUBLIC_API_URL="${apiUrl}"`,
+    `EXPO_PUBLIC_SUPABASE_URL="${supabaseUrl}"`,
+    `EXPO_PUBLIC_SUPABASE_ANON_PUBLIC="${supabaseAnonKey}"`,
+    "",
+  ].join("\n")
+);
+
+console.log(`[sim-env] wrote ${OUT}`);
+console.log(`[sim-env]   API      ${apiUrl}`);
+console.log(`[sim-env]   Supabase ${supabaseUrl}`);
+console.log(`[sim-env]   source   ${source}`);
+if (remote?.name) console.log(`[sim-env]   server   ${remote.name}`);

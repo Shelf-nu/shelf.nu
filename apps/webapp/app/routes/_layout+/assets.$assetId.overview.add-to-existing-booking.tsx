@@ -62,14 +62,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, canSeeAllBookings } = await requirePermission(
-      {
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      }
-    );
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
     // loadBookingsData + the asset lookup are independent (both only
     // need organizationId from requirePermission above), so parallelise
@@ -79,8 +77,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         userId: authSession?.userId,
-        role,
-        canSeeAllBookings,
+        access,
         ids: assetId ? [assetId] : undefined,
       }),
       db.asset.findFirst({
@@ -131,7 +128,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -152,7 +149,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       assetIds,
       organizationId,
-      { userId, role }
+      { userId, access }
     );
 
     /**
@@ -210,13 +207,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
       userId,
       quantities,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
-    const actor = wrapUserLinkForNote({
-      id: authSession.userId,
-      firstName: user?.firstName,
-      lastName: user?.lastName,
-    });
+    const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });
     const bookingLink = wrapLinkForNote(
       `/bookings/${booking.id}`,
       booking.name

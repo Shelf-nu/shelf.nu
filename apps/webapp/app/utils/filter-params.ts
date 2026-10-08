@@ -9,6 +9,14 @@ export const NON_FILTER_PARAMS = new Set([
   "sortBy",
   "orderBy",
   "orderDirection",
+  // The asset index's model view orders its rollup through its own two params,
+  // because the keys it offers name model columns rather than asset ones. They
+  // choose an ordering, so they belong here beside `sortBy`. Counted as filters
+  // instead, clicking a column header would put the index into its
+  // filters-are-active state, where an empty result is blamed on filters the
+  // reader never applied and the offered remedy is to clear them.
+  "modelSortBy",
+  "modelSortDirection",
   "index",
   "view",
   // `archived` is the Active/Archived/All VIEW dimension on the asset index

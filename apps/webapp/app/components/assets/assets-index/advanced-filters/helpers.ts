@@ -1,5 +1,6 @@
 import type { CustomField } from "@prisma/client";
 import { useSearchParams } from "~/hooks/search-params";
+import { splitFilterParam } from "~/modules/asset/filter-param";
 import type {
   Column,
   ColumnLabelKey,
@@ -131,7 +132,13 @@ export function useInitialFilters(columns: Column[]) {
   searchParams.forEach((value, key) => {
     const column = columns.find((c) => c.name === key);
     if (column) {
-      const [operator, filterValue] = value.split(":");
+      const [operator, filterValue] = splitFilterParam(value);
+
+      // No separator means no value; there is no filter row to rebuild, and
+      // the `between` branch below would read `.split` off `undefined`.
+      if (filterValue === undefined) {
+        return;
+      }
 
       initialFilters.push({
         name: key,

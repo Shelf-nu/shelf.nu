@@ -1,17 +1,24 @@
 import type { Organization, Prisma, TeamMember } from "@prisma/client";
-import { BookingStatus, OrganizationRoles } from "@prisma/client";
+import { BookingStatus } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 import type { ErrorLabel } from "~/utils/error";
-import { isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
+import { rolesWhere } from "~/utils/permissions/role-access";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import { resolveUserDisplayName } from "~/utils/user";
-import { getNrmSelectionWhere } from "./nrm-scope";
+import { getNrmIndexWhere, getNrmSelectionWhere } from "./nrm-scope";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
 const label: ErrorLabel = "Team Member";
@@ -263,7 +270,7 @@ export const getPaginatedAndFilterableTeamMembers = async ({
  * everything and look like the filter had worked.
  *
  * @param args.teamMemberIds - Raw ids from the query string.
- * @param args.canSeeAllCustody - Resolved by `resolveCanSeeAllCustody`.
+ * @param args.canSeeAllCustody - The caller's `access.custody.seeAll`.
  * @param args.userId - The caller.
  * @param args.organizationId - Active workspace.
  * @returns The ids the caller is allowed to filter by.
@@ -321,10 +328,21 @@ export async function scopeCustodianFilterIds(args: {
   userId: string;
   organizationId: Organization["id"];
 }): Promise<string[]> {
-  const requested = args.teamMemberIds ?? [];
-  const allowed = await narrowCustodianFilterIds(args);
+  /**
+   * A blank value is not a request. `?teamMember=` arrives as `[""]`, from a
+   * cleared filter or a stale link, and carrying it through turns "no filter"
+   * into a clause no row can satisfy.
+   *
+   * Cleaned before narrowing, not after: `narrowCustodianFilterIds` returns the
+   * requested ids untouched for a caller who may see all custody, so filtering
+   * only the count here would still hand an admin a blank id to query by.
+   */
+  const teamMemberIds = (args.teamMemberIds ?? []).filter(
+    (id) => id.trim() !== ""
+  );
+  const allowed = await narrowCustodianFilterIds({ ...args, teamMemberIds });
 
-  return requested.length > 0 && allowed.length === 0
+  return teamMemberIds.length > 0 && allowed.length === 0
     ? [CUSTODY_FILTER_REFUSED]
     : allowed;
 }
@@ -344,64 +362,52 @@ export type CustodianPickerScope =
 /**
  * The scope one custodian picker should apply.
  *
- * Custodian pickers serve two different questions and a single rule cannot
- * answer both:
+ * Custodian pickers serve three different questions and a single rule cannot
+ * answer all of them:
  *
- * - `custody-filter` — "whose custody may I look at?" A read-visibility
- *   question, so the workspace overrides (`selfServiceCanSeeCustody` /
- *   `baseUserCanSeeCustody`, already resolved into `canSeeAllCustody`) govern.
- * - `custody-assignment` — "who may I hand this ASSET to?" A business rule the
- *   overrides never widen: SELF_SERVICE assigns only to itself and BASE may
- *   not assign at all. The setting is about SEEING custody, not granting it.
- * - `booking-custodian` — "who may this BOOKING be assigned to?" Distinct from
- *   asset custody: BASE holds `booking:create`, so it must be able to put
- *   itself on a booking even though it may never take custody of an asset.
- *   Restricted roles get themselves; ADMIN / OWNER get everyone.
+ * - `custody-filter`: "whose custody may I look at?" A read-visibility
+ *   question, answered by `access.custody.seeAll`, which already folds in the
+ *   workspace visibility toggles.
+ * - `custody-assignment`: "who may I hand this ASSET to?" The role's
+ *   `custody.assign` scope. The visibility toggles never widen it: they are
+ *   about SEEING custody, not granting it.
+ * - `booking-custodian`: "who may this BOOKING be assigned to?" The role's
+ *   `bookings.custodianPicker`. Distinct from asset custody: a role may put
+ *   itself on a booking without being allowed to take custody of an asset.
  *
- * Every custodian picker — seed and search alike — resolves through here, so
- * the seeded list and the typed list cannot disagree. They previously did:
- * the search applied no scope at all, so a restricted user saw only themselves
- * until they typed, at which point the whole roster appeared.
+ * Every custodian picker, seed and search alike, resolves through here, so
+ * the seeded list and the typed list cannot disagree: a search that applied
+ * no scope would show a restricted user the whole roster the moment they
+ * typed.
  *
- * @param args.purpose - Which question this picker is asking.
- * @param args.role - Effective role from `resolveEffectiveRole`.
- * @param args.canSeeAllCustody - Resolved via `resolveCanSeeAllCustody`.
- * @param args.userId - The caller, for the `self` mode.
- * @returns `all` (unrestricted), `self` (own team-member rows), or `none`.
+ * @param args.purpose - Which question this picker is asking
+ * @param args.access - The caller's resolved access (`requirePermission().access`)
+ * @param args.userId - The caller, for the `self` mode
+ * @returns `all` (unrestricted), `self` (own team-member rows), or `none`
  */
 export function resolveCustodianPickerScope({
   purpose,
-  role,
-  canSeeAllCustody,
+  access,
   userId,
 }: {
   purpose: CustodianPickerPurpose;
-  role: OrganizationRoles;
-  canSeeAllCustody: boolean;
+  access: Pick<RoleAccess, "custody" | "policy">;
   userId: string;
 }): CustodianPickerScope {
   if (purpose === "custody-assignment") {
-    // BASE may never take custody of an asset, whatever the override says.
-    if (role === OrganizationRoles.BASE) {
-      return { mode: "none" };
-    }
-    if (role === OrganizationRoles.SELF_SERVICE) {
-      return { mode: "self", userId };
-    }
+    if (access.custody.assign === "none") return { mode: "none" };
+    if (access.custody.assign === "self") return { mode: "self", userId };
     return { mode: "all" };
   }
 
   if (purpose === "booking-custodian") {
-    // Restricted roles book for themselves. Unlike asset custody this includes
-    // BASE, which holds `booking:create` and would otherwise be unable to name
-    // a custodian at all. Mirrors `getTeamMemberForForm`'s seed.
-    return role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE
+    // Mirrors `getTeamMemberForForm`'s seed, which reads the same helper.
+    return bookingCustodianIsSelf(access)
       ? { mode: "self", userId }
       : { mode: "all" };
   }
 
-  return canSeeAllCustody ? { mode: "all" } : { mode: "self", userId };
+  return access.custody.seeAll ? { mode: "all" } : { mode: "self", userId };
 }
 
 export async function getTeamMemberForCustodianFilter({
@@ -575,8 +581,10 @@ export async function getTeamMemberForCustodianFilter({
  * 2. Draft: Fetch team members list, always including current custodian
  * 3. New booking (no status): Standard fetch without custodian guarantee
  *
- * For BASE/SELF_SERVICE users: Returns only their team member (optimized single query)
- * For ADMIN users: Returns paginated list with conditional custodian inclusion
+ * Members whose booking custodian is fixed to themselves
+ * (`bookings.custodianPicker === "self"`) get only their own team member
+ * (a single query). Everyone else gets the paginated list, with conditional
+ * custodian inclusion.
  *
  * This is separate from getTeamMemberForCustodianFilter to avoid mixing concerns:
  * - Filter: needs paginated list for sidebar filters
@@ -585,7 +593,7 @@ export async function getTeamMemberForCustodianFilter({
 export async function getTeamMemberForForm({
   organizationId,
   userId,
-  isSelfServiceOrBase,
+  access,
   getAll,
   custodianUserId,
   custodianTeamMemberId,
@@ -594,7 +602,8 @@ export async function getTeamMemberForForm({
 }: {
   organizationId: Organization["id"];
   userId: string;
-  isSelfServiceOrBase: boolean;
+  /** The caller's access; `bookings.custodianPicker` decides the seed. */
+  access: RoleAccess;
   getAll?: boolean;
   custodianUserId?: string;
   custodianTeamMemberId?: string;
@@ -605,13 +614,14 @@ export async function getTeamMemberForForm({
   usersOnly?: boolean;
 }) {
   try {
-    // BASE/SELF_SERVICE users can only see their own bookings, so always return only their team member.
+    // A member whose booking custodian is fixed to themself gets only their
+    // own team member.
     //
     // This is the `booking-custodian` rule in `resolveCustodianPickerScope`,
     // which the search endpoint resolves for the same picker. The two must stay
     // in step: if this branch changes, change that purpose too, or the list
     // will differ before and after the user types.
-    if (isSelfServiceOrBase) {
+    if (bookingCustodianIsSelf(access)) {
       const teamMember = await db.teamMember.findFirst({
         where: {
           organizationId,
@@ -743,7 +753,11 @@ export async function getTeamMemberForForm({
     throw new ShelfError({
       cause,
       message: "Failed to fetch team member for form",
-      additionalData: { organizationId, userId, isSelfServiceOrBase },
+      additionalData: {
+        organizationId,
+        userId,
+        custodianIsSelf: bookingCustodianIsSelf(access),
+      },
       label,
     });
   }
@@ -873,6 +887,240 @@ export async function getTeamMember({
 }
 
 /**
+ * Soft-deletes one non-registered member, refusing while they still hold
+ * custody over any asset.
+ *
+ * The custody rule is not advisory. Deleting an NRM only sets `deletedAt`, so
+ * every `Custody` row keeps pointing at the member: the assets go on naming a
+ * custodian who is gone from the NRM index and from every custodian picker,
+ * and nothing short of opening assets one at a time can find what they hold.
+ *
+ * Both halves of the `where` are load-bearing, and both belong in the write
+ * rather than in a preceding read — the list page the caller is acting from was
+ * rendered earlier, and a member can be given custody in between:
+ *
+ * - `custodies: { none: {} }` enforces the rule at the moment of the write.
+ * - the NRM scope keeps the delete on a row this index actually lists. A bare
+ *   `{ id, organizationId }` also matches the TeamMember backing a registered
+ *   user, or one holding a pending invite, neither of which is deletable here.
+ *
+ * A miss is therefore ordinary, not exceptional: it is reported as a client
+ * error, with a second read only to say which of the two reasons applied.
+ *
+ * @param params.nrmId - The member to delete
+ * @param params.organizationId - The active organization
+ * @throws {ShelfError} 400 if the member still holds custody, 404 if the id is
+ *   not a deletable NRM in this organization, 500 if the write fails
+ */
+export async function deleteNRM({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}) {
+  try {
+    // Built from the index scope plus this one id. NOT `getNrmSelectionWhere`:
+    // that helper reads `ALL_SELECTED_KEY` and drops the id filter entirely for
+    // it, so a request naming that sentinel as its member would match — and
+    // soft-delete — every unencumbered NRM in the organization.
+    const scope: Prisma.TeamMemberWhereInput = {
+      ...getNrmIndexWhere({ organizationId }),
+      id: nrmId,
+    };
+
+    // Custody comes in two independent shapes and either one is enough to make
+    // a member undeletable. Assigning a kit ALWAYS writes `KitCustody`, while
+    // the inherited per-asset `Custody` rows are only written when the kit has
+    // assets to inherit them — so the custodian of an empty kit holds no
+    // `custodies` at all and would pass an asset-only guard.
+    const holdsNothing = {
+      custodies: { none: {} },
+      kitCustodies: { none: {} },
+    };
+
+    const { count } = await db.teamMember.updateMany({
+      where: { ...scope, ...holdsNothing },
+      data: { deletedAt: new Date() },
+    });
+
+    if (count > 0) {
+      return;
+    }
+
+    // Nothing matched. Read again purely to say why, so the caller gets an
+    // actionable message; the write above is what enforced.
+    const member = await db.teamMember.findFirst({
+      where: scope,
+      select: { _count: { select: { custodies: true, kitCustodies: true } } },
+    });
+
+    if (!member) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member could not be found in your workspace, or is not one that can be deleted here.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 404,
+        shouldBeCaptured: false,
+      });
+    }
+
+    if (member._count.custodies + member._count.kitCustodies > 0) {
+      throw new ShelfError({
+        cause: null,
+        message:
+          "This team member has custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
+        additionalData: { nrmId, organizationId },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    // The row is here and holds nothing, yet the guarded write passed it by:
+    // whatever it held was released between the two statements. Telling the
+    // caller to release custody would name something that no longer exists.
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This team member changed while it was being deleted. Please try again.",
+      additionalData: { nrmId, organizationId },
+      label,
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  } catch (cause) {
+    // The refusals above are deliberate 4xx answers; re-wrapping them would
+    // replace a message written for the user with "try again later".
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Failed to delete team member",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Builds the 404 answered when an id is not an NRM of the workspace.
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @returns A client-error `ShelfError` that is not reported to Sentry
+ */
+function nrmNotFoundError({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}) {
+  return new ShelfError({
+    cause: null,
+    title: "Team member not found",
+    message: "This non-registered member does not exist in your workspace.",
+    additionalData: { nrmId, organizationId },
+    label,
+    status: 404,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Loads a non-registered member for the edit form.
+ *
+ * Read through the NRM index scope, so a registered member's team record, a
+ * member with a pending invite, a soft-deleted NRM and another workspace's
+ * member are all "not found".
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @returns The member's id and name
+ * @throws {ShelfError} 404 when the id is not an NRM of the workspace, 500 if
+ *   the read fails
+ */
+export async function getNrmForEdit({
+  nrmId,
+  organizationId,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+}): Promise<{ id: string; name: string }> {
+  try {
+    const nrm = await db.teamMember.findFirst({
+      where: { ...getNrmIndexWhere({ organizationId }), id: nrmId },
+      select: { id: true, name: true },
+    });
+
+    if (!nrm) {
+      throw nrmNotFoundError({ nrmId, organizationId });
+    }
+
+    return nrm;
+  } catch (cause) {
+    // The 404 above is a deliberate answer; re-wrapping it would turn it into
+    // a 500.
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while loading the team member.",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Renames a non-registered member.
+ *
+ * The NRM index scope is part of the write, so a row that became registered
+ * or invited after the form was loaded can never be renamed through this
+ * path: a registered member's `TeamMember.name` is their stored display name.
+ *
+ * @param args.nrmId - The member id from the URL
+ * @param args.organizationId - The caller's workspace
+ * @param args.name - The new name, already trimmed
+ * @throws {ShelfError} 404 when the id is not an NRM of the workspace, 500 if
+ *   the write fails
+ */
+export async function renameNrm({
+  nrmId,
+  organizationId,
+  name,
+}: {
+  nrmId: TeamMember["id"];
+  organizationId: TeamMember["organizationId"];
+  name: TeamMember["name"];
+}): Promise<void> {
+  try {
+    const { count } = await db.teamMember.updateMany({
+      where: { ...getNrmIndexWhere({ organizationId }), id: nrmId },
+      data: { name },
+    });
+
+    if (count === 0) {
+      throw nrmNotFoundError({ nrmId, organizationId });
+    }
+  } catch (cause) {
+    // The 404 above is a deliberate answer; re-wrapping it would turn it into
+    // a 500.
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while renaming the team member.",
+      additionalData: { nrmId, organizationId },
+      label,
+    });
+  }
+}
+
+/**
  * Soft-deletes the selected NRMs, refusing the whole batch if any of them
  * still holds custody.
  *
@@ -901,20 +1149,31 @@ export async function bulkDeleteNRMs({
 
     const teamMembers = await db.teamMember.findMany({
       where,
-      select: { id: true, _count: { select: { custodies: true } } },
+      select: {
+        id: true,
+        _count: { select: { custodies: true, kitCustodies: true } },
+      },
     });
 
-    /** If some team members have custody, then delete is not allowed */
+    /**
+     * If some team members have custody, then delete is not allowed. Kit
+     * custody counts: assigning a kit always writes `KitCustody`, and only
+     * writes the inherited per-asset `Custody` rows when the kit has assets,
+     * so the custodian of an empty kit holds no `custodies` at all.
+     */
     const someTeamMemberHasCustodies = teamMembers.some(
-      (tm) => tm._count.custodies > 0
+      (tm) => tm._count.custodies + tm._count.kitCustodies > 0
     );
 
     if (someTeamMemberHasCustodies) {
       throw new ShelfError({
         cause: null,
         message:
-          "Some team members has custody over some assets. Please release custody or check-in those assets before deleting the user.",
+          "Some team members have custody over some assets or kits. Please release custody or check-in those items before deleting the user.",
+        additionalData: { organizationId },
         label,
+        status: 400,
+        shouldBeCaptured: false,
       });
     }
 
@@ -933,18 +1192,19 @@ export async function bulkDeleteNRMs({
           organizationId,
         }),
         custodies: { none: {} },
+        kitCustodies: { none: {} },
       },
       data: { deletedAt: new Date() },
     });
   } catch (cause) {
-    const message =
-      cause instanceof ShelfError
-        ? cause.message
-        : "Something went wrong while bulk deleting non-registered members";
+    // The custody refusal above is a deliberate 4xx answer; re-wrapping it
+    // would turn a rule the user can act on into a server fault.
+    rethrowIfClientError(cause);
 
     throw new ShelfError({
       cause,
-      message,
+      message:
+        "Something went wrong while bulk deleting non-registered members",
       label,
     });
   }
@@ -1073,7 +1333,8 @@ export async function fixTeamMembersNames(
 
 /**
  * Fetches team members eligible for the notification recipients picker.
- * Returns only admins/owners with linked user accounts (no NRMs).
+ * Returns members with linked user accounts (no NRMs) whose role may be picked
+ * as a notification recipient (`notifications.selectableAsRecipient`).
  *
  * Used by booking form loaders to provide initial data for the
  * `DynamicDropdown` component's `initialDataKey`.
@@ -1092,8 +1353,9 @@ export async function getTeamMembersForNotify({
   try {
     const idsToExclude = excludeTeamMemberIds ?? [];
 
-    // Single query using a nested relation filter to find team members
-    // whose linked user has an admin/owner role in this organization.
+    // Single query using a nested relation filter to find team members whose
+    // linked user's role in this organization may be picked as a recipient
+    // (`notifications.selectableAsRecipient`).
     const teamMembersForNotify = await db.teamMember.findMany({
       where: {
         organizationId,
@@ -1103,7 +1365,9 @@ export async function getTeamMembersForNotify({
             some: {
               organizationId,
               roles: {
-                hasSome: [OrganizationRoles.ADMIN, OrganizationRoles.OWNER],
+                hasSome: rolesWhere(
+                  (p) => p.notifications.selectableAsRecipient
+                ),
               },
             },
           },
@@ -1122,7 +1386,20 @@ export async function getTeamMembersForNotify({
           },
         },
       },
-      orderBy: [{ user: { firstName: "asc" } }, { name: "asc" }],
+      /**
+       * Order by the label the picker actually renders. `TeamMember.name` is
+       * NOT NULL and `updateUser` keeps it equal to `displayName` when set and
+       * `"firstName lastName"` otherwise — the same chain
+       * `resolveTeamMemberName` resolves — so it is already a materialised
+       * COALESCE, which Prisma's `orderBy` cannot express directly.
+       *
+       * Leading with `user.displayName` instead splits the list in two:
+       * Postgres sorts NULLs last on ASC, so every renamed user is hoisted
+       * above every un-renamed one and a display-name "Zoe" precedes a
+       * fallback "Aaron". Ordering by `name` also matches the search path in
+       * `api+/model-filters`, so the list does not re-sort as the user types.
+       */
+      orderBy: [{ name: "asc" }, { id: "asc" }],
     });
 
     return {
@@ -1143,46 +1420,37 @@ export async function getTeamMembersForNotify({
  * Fetches team members for the quantity custody dialog's DynamicSelect.
  *
  * Returns the first page (12 items) by default, or all items when
- * `getAll=teamMember` is present in the search params. Self-service
- * users are scoped to only their own team member record.
+ * `getAll=teamMember` is present in the search params. The list is scoped
+ * by the caller's custody assignment scope: everyone, only the caller's own
+ * team member, or no one.
  *
- * @param args - Organization, request, user ID, and role
+ * @param args - Organization, request, user ID, and the caller's access
  * @returns Object with `teamMembers` array and `totalTeamMembers` count
  */
 export async function getTeamMembersForQuantityCustody({
   organizationId,
   request,
   userId,
-  role,
-  canSeeAllCustody,
+  access,
 }: {
   organizationId: string;
   request: Request;
   userId: string;
-  /**
-   * Caller's role. Takes the place of an `isSelfService` boolean, which was a
-   * ROLE check where a RULE was needed: it is false for BASE, so the scope
-   * below collapsed to `undefined` and the whole roster shipped to a BASE user
-   * — who cannot assign custody at all (`asset: [read]`).
-   */
-  role: OrganizationRoles;
-  /** Resolved by `resolveCanSeeAllCustody`, for the shared scope resolver. */
-  canSeeAllCustody: boolean;
+  /** The caller's access; the ASSIGNMENT scope governs this picker. */
+  access: RoleAccess;
 }) {
   try {
     const searchParams = getCurrentSearchParams(request);
 
     /**
-     * This seeds an ASSIGNMENT picker, so the assignment rule governs, not the
-     * custody read rule: BASE may not assign at all, SELF_SERVICE only to
-     * themselves. Same resolver the search endpoint uses for
+     * This seeds an ASSIGNMENT picker, so the role's `custody.assign` scope
+     * governs, not the custody read rule. Same resolver the search endpoint uses for
      * `custodyPurpose: "custody-assignment"`, so the seed and the list the user
      * gets after typing cannot disagree.
      */
     const scope = resolveCustodianPickerScope({
       purpose: "custody-assignment",
-      role,
-      canSeeAllCustody,
+      access,
       userId,
     });
 

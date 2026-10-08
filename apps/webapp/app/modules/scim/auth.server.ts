@@ -28,10 +28,11 @@ function hashToken(rawToken: string): string {
  *
  * This is the single chokepoint for every SCIM route (`Users`, `Users/{id}`,
  * `ServiceProviderConfig`, `ResourceTypes`, `Schemas`), so it is also where the
- * `ENABLE_SCIM` feature flag is enforced.
+ * `ENABLE_SCIM` feature flag and the workspace's suspended state are enforced.
  *
  * @throws {ScimError} 404 if SCIM is not enabled on this deployment
  * @throws {ScimError} 401 if the token is missing or invalid
+ * @throws {ScimError} 403 if the token's workspace is disabled
  */
 export async function authenticateScimRequest(
   request: Request
@@ -57,11 +58,30 @@ export async function authenticateScimRequest(
 
   const scimToken = await db.scimToken.findUnique({
     where: { tokenHash },
-    select: { id: true, organizationId: true },
+    select: {
+      id: true,
+      organizationId: true,
+      // A disabled workspace is suspended for every actor, and an identity
+      // provider is no exception: without this the IdP keeps provisioning
+      // users, reactivating deactivated ones and mutating a workspace nobody
+      // is allowed to open.
+      organization: { select: { workspaceDisabled: true } },
+    },
   });
 
   if (!scimToken) {
     throw new ScimError("Invalid token", 401);
+  }
+
+  // 403, not 401: the token is genuine, and telling the IdP admin the
+  // workspace is suspended is what lets them stop retrying and fix the
+  // account. Distinguishing the two discloses nothing — the caller already
+  // holds a valid token for this workspace.
+  if (scimToken.organization.workspaceDisabled) {
+    throw new ScimError(
+      "This workspace is disabled. Contact support to re-enable it before provisioning users.",
+      403
+    );
   }
 
   // `lastUsedAt` is observability, not authentication state — nothing downstream

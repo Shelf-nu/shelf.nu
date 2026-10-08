@@ -17,13 +17,14 @@
  * @see {@link file://./event-card.tsx}
  */
 import type { EventContentArg } from "@fullcalendar/core";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
   AvailabilitySlice,
   CalendarExtendedProps,
 } from "~/routes/_layout+/calendar";
+import { bookingStatusColorMap } from "~/utils/bookings";
 import renderEventCard, { EventCardContent } from "./event-card";
 
 // why: DateS reads client hints from Remix context unavailable in the test;
@@ -41,7 +42,9 @@ vi.mock("~/components/user/team-member-badge", () => ({
 // why: BookingStatusBadge reads user data + roles from Remix context; the
 // status chip is orthogonal to the slice breakdown/glyph gating.
 vi.mock("~/components/booking/booking-status-badge", () => ({
-  BookingStatusBadge: () => <span>status</span>,
+  BookingStatusBadge: ({ status }: { status: string }) => (
+    <span data-testid="status-badge">{status}</span>
+  ),
 }));
 
 /** Builds a CalendarExtendedProps booking with sane defaults. Omit
@@ -171,6 +174,81 @@ describe("EventCardContent — per-slice breakdown gating", () => {
     // ...but the redundant per-slice Qty and the total are suppressed.
     expect(screen.queryByText(/^Qty /)).toBeNull();
     expect(screen.queryByText(/Total reserved/)).toBeNull();
+  });
+});
+
+describe("EventCardContent — returned asset", () => {
+  it("adds a returned line under the period and keeps the real status badge", () => {
+    render(
+      <EventCardContent
+        booking={makeBooking({
+          status: "ONGOING",
+          returned: true,
+          returnedAt: "2026-07-10T15:30:00.000Z",
+        })}
+      />
+    );
+
+    const line = screen.getByTestId("event-card-returned");
+    expect(line).toHaveTextContent("Returned");
+    // The return instant is printed on the line (DateS is stubbed to "date").
+    expect(within(line).getByText("date")).toBeInTheDocument();
+    // The badge is the booking's own status, not the bar's display status.
+    expect(screen.getByTestId("status-badge")).toHaveTextContent("ONGOING");
+  });
+
+  it("colours the bar text as complete for a returned asset", () => {
+    render(
+      <RenderedEventCard
+        {...makeEventArg(
+          makeBooking({
+            status: "ONGOING",
+            returned: true,
+            returnedAt: "2026-07-10T15:30:00.000Z",
+          })
+        )}
+      />
+    );
+
+    // The colour sits on the trigger wrapper around the inner card content.
+    const trigger = screen
+      .getByText(/Test Booking/)
+      .closest(".inner-event-card-wrapper")?.parentElement;
+    expect(trigger?.style.color).toBe(bookingStatusColorMap.COMPLETE.text);
+  });
+
+  it("prefixes a returned bar with the return time instead of the booking start", () => {
+    render(
+      <RenderedEventCard
+        {...makeEventArg(
+          makeBooking({
+            status: "ONGOING",
+            returned: true,
+            returnedAt: "2026-07-10T15:30:00.000Z",
+          })
+        )}
+      />
+    );
+
+    const prefix = screen.getByTestId("event-card-returned-prefix");
+    expect(prefix).toHaveTextContent("Returned");
+    expect(within(prefix).getByText("date")).toBeInTheDocument();
+  });
+
+  it("prefixes a live bar with the booking start", () => {
+    render(
+      <RenderedEventCard
+        {...makeEventArg(makeBooking({ status: "ONGOING" }))}
+      />
+    );
+
+    expect(screen.queryByTestId("event-card-returned-prefix")).toBeNull();
+  });
+
+  it("shows no returned line for the booking-calendar shape", () => {
+    render(<EventCardContent booking={makeBooking()} />);
+
+    expect(screen.queryByTestId("event-card-returned")).toBeNull();
   });
 });
 

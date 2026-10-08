@@ -34,10 +34,10 @@ vi.mock("~/components/user/team-member-badge", () => ({
   }) => <span data-testid="team-member-badge">{teamMember?.name ?? ""}</span>,
 }));
 
-// why: useUserRoleHelper resolves roles via Remix loader data; tests do
+// why: useOrganizationRoles resolves roles via Remix loader data; tests do
 // not run inside a route, so we stub it to a single-role admin set.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: ["ADMIN"] }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => ["ADMIN"],
 }));
 
 // why: permission gating defaults to allow so the column always
@@ -110,7 +110,7 @@ describe("CustodyColumn", () => {
 
     // No "(N)" suffix should appear for quantity <= 1.
     expect(screen.queryByText(/\(\d+\)/)).not.toBeInTheDocument();
-    // No "+N more" chip with a single custodian.
+    // No "+N" chip with a single custodian.
     expect(screen.queryByTestId("custody-more-chip")).not.toBeInTheDocument();
   });
 
@@ -130,7 +130,7 @@ describe("CustodyColumn", () => {
     expect(screen.queryByText(/\(\d+\)/)).not.toBeInTheDocument();
   });
 
-  it("renders the primary badge plus a +N more chip for multiple custodians", () => {
+  it("renders the primary badge plus a +N chip for multiple custodians", () => {
     renderCell([
       makeCustody("Alice", 4),
       makeCustody("Bob", 7),
@@ -143,7 +143,8 @@ describe("CustodyColumn", () => {
 
     // Chip indicates 2 additional custodians
     const chip = screen.getByTestId("custody-more-chip");
-    expect(chip).toHaveTextContent("+2 more");
+    expect(chip).toHaveTextContent(/^\+2$/);
+    expect(chip).toHaveAttribute("aria-label", "+2 more custodians");
   });
 
   it("lists every custodian with their quantity in the tooltip on hover", async () => {
@@ -166,5 +167,24 @@ describe("CustodyColumn", () => {
     // still listed.
     expect(tooltip).toHaveTextContent("Carol");
     expect(tooltip).not.toHaveTextContent("Carol (1)");
+  });
+
+  it("reaches the same tooltip by keyboard, not only by hover", async () => {
+    const user = userEvent.setup();
+
+    renderCell([
+      makeCustody("Alice", 4),
+      makeCustody("Bob", 7),
+      makeCustody("Carol", 1),
+    ]);
+
+    // The chip has to be a focusable control. Radix wires its focus handlers
+    // onto the element it is given, so a tooltip hung on a plain <span> is
+    // unreachable without a pointer.
+    await user.tab();
+    expect(screen.getByTestId("custody-more-chip")).toHaveFocus();
+
+    const tooltip = await screen.findByTestId("custody-more-tooltip");
+    expect(tooltip).toHaveTextContent("Bob (7)");
   });
 });

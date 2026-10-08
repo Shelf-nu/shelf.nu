@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { Roles } from "@prisma/client";
 import type { InviteStatuses } from "@prisma/client";
 import type {
   ActionFunctionArgs,
@@ -14,14 +13,14 @@ import { ListContentWrapper } from "~/components/list/content-wrapper";
 import { Filters } from "~/components/list/filters";
 import ImportUsersDialog from "~/components/settings/import-users-dialog/import-users-dialog";
 import InviteUserDialog from "~/components/settings/invite-user-dialog";
+import TransferOwnershipButton from "~/components/settings/transfer-ownership-button";
 import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 
 import { Td, Th } from "~/components/table";
 import { SSOUserBadge } from "~/components/user/sso-user-badge";
 import { TeamUsersActionsDropdown } from "~/components/workspace/users-actions-dropdown";
-import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { TeamMembersWithUserOrInvite } from "~/modules/settings/service.server";
 import { getPaginatedAndFilterableSettingUsers } from "~/modules/settings/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
@@ -34,6 +33,8 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { ROLE_POLICIES } from "~/utils/permissions/role-access";
 import { requirePermission } from "~/utils/roles.server";
 import { tw } from "~/utils/tw";
 
@@ -55,9 +56,12 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
         action: PermissionAction.read,
       });
 
-    /** Cannot manage users for PERSONAL organization */
+    /**
+     * Personal workspaces can't manage registered users. Send them to the Team
+     * page (which explains how to upgrade) instead of a contextless redirect.
+     */
     if (organization?.type === "PERSONAL") {
-      return redirect("/settings/general");
+      return redirect("/settings/team/nrm");
     }
 
     const searchParams = getCurrentSearchParams(request);
@@ -110,14 +114,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
       action: PermissionAction.update,
     });
 
-    return await resolveUserAction(request, organizationId, userId, role);
+    return await resolveUserAction(request, organizationId, userId, access);
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
@@ -146,6 +150,14 @@ export default function UserTeamSetting() {
 
   const shouldRenderIndex = allowedRoutes.includes(currentRoute?.handle?.name);
 
+  const roles = useOrganizationRoles();
+  /* Importing users sends invites too, so both buttons need the invite grant. */
+  const canInviteUsers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.create,
+  });
+
   return shouldRenderIndex ? (
     <div>
       <ContextualModal />
@@ -164,20 +176,28 @@ export default function UserTeamSetting() {
       </p>
 
       <ListContentWrapper>
-        <Filters>
-          <div className="flex items-center gap-1">
-            <ImportUsersDialog />
-            <InviteUserDialog
-              trigger={
-                <Button
-                  type="button"
-                  className="mt-2 w-full md:mt-0 md:w-max"
-                  variant="primary"
-                >
-                  <span className="whitespace-nowrap">Invite a user</span>
-                </Button>
-              }
-            />
+        {/* innerWrapperClassName: the search wrapper defaults to w-full, which
+        squeezes the actions slot to leftovers. Content-size it on md+ so the
+        three action buttons get the actual free space. */}
+        <Filters innerWrapperClassName="md:w-auto">
+          {/* Three buttons don't always fit one row: stack them full-width on
+          mobile, and let the row wrap on tighter md screens. The container owns
+          the spacing and the stretch — children must NOT add their own `mt-*`
+          or `w-full`, or the gaps stop being uniform. */}
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:items-center md:justify-end">
+            <TransferOwnershipButton />
+            {canInviteUsers ? (
+              <>
+                <ImportUsersDialog />
+                <InviteUserDialog
+                  trigger={
+                    <Button type="button" variant="primary">
+                      <span className="whitespace-nowrap">Invite a user</span>
+                    </Button>
+                  }
+                />
+              </>
+            ) : null}
           </div>
         </Filters>
 
@@ -210,6 +230,14 @@ export default function UserTeamSetting() {
 }
 
 function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
+  const roles = useOrganizationRoles();
+  /* Row actions (change role, revoke, resend) are team-member updates. */
+  const canUpdateTeamMembers = userHasPermission({
+    roles,
+    entity: PermissionEntity.teamMember,
+    action: PermissionAction.update,
+  });
+
   return (
     <>
       <Td className="w-full whitespace-normal p-0 md:p-0">
@@ -227,7 +255,8 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
         <InviteStatusBadge status={item.status} />
       </Td>
       <Td className="text-right">
-        {item.role !== "Owner" ? (
+        {canUpdateTeamMembers &&
+        !ROLE_POLICIES[item.roleEnum].membership.ownsWorkspace ? (
           <TeamUsersActionsDropdown
             inviteStatus={item.status}
             userId={item.userId}
@@ -236,48 +265,11 @@ function UserRow({ item }: { item: TeamMembersWithUserOrInvite }) {
             isSSO={item.sso || false}
             role={item.role}
             roleEnum={item.roleEnum}
+            roles={item.roles}
           />
-        ) : (
-          <OwnerRowActions ownerName={item.name} />
-        )}
+        ) : null}
       </Td>
     </>
-  );
-}
-
-/**
- * The one owner-level action that belongs with the member list is transferring
- * ownership, which lives on the general settings page. Surface it here so it
- * is discoverable where people manage their team.
- */
-function OwnerRowActions({ ownerName }: { ownerName: string }) {
-  const { isOwner } = useUserRoleHelper();
-  const user = useUserData();
-
-  /**
-   * Shelf staff admins can also run the transfer flow, so they get the same
-   * link as the owner (matches the isShelfAdmin check in TransferOwnershipCard)
-   */
-  const isShelfAdmin = user?.roles?.some((role) => role.name === Roles.ADMIN);
-
-  if (isOwner || isShelfAdmin) {
-    return (
-      <Button to="/settings/general#transfer-ownership" variant="secondary">
-        Transfer ownership
-      </Button>
-    );
-  }
-
-  return (
-    <Button
-      type="button"
-      variant="secondary"
-      disabled={{
-        reason: `Only the workspace owner (${ownerName}) can transfer ownership of this workspace.`,
-      }}
-    >
-      Transfer ownership
-    </Button>
   );
 }
 

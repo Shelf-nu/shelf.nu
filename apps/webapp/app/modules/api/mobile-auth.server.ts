@@ -1,6 +1,6 @@
-import {
-  type AssetType,
-  type ConsumptionType,
+import type {
+  AssetType,
+  ConsumptionType,
   OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
@@ -10,22 +10,29 @@ import {
   type AssetImageSource,
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import { revokeAllSessions } from "~/modules/auth/service.server";
+import {
+  createSsoRequiredError,
+  getLegacyLoginDecisionForUser,
+} from "~/modules/auth/sso-enforcement.server";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
   type PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { validatePermission } from "~/utils/permissions/permission.validator.server";
+import type { RoleAccess } from "~/utils/permissions/role-access";
+import { resolveRoleAccess } from "~/utils/permissions/role-access";
 import {
   assertCanUseBookings,
   canUseAudits,
   canUseBarcodes,
 } from "~/utils/subscription.server";
-import {
-  computeCanSeeAllCustody,
-  filterMobileCustodyListForViewer,
-  viewerCanSeeLegacyCustody,
-} from "./mobile-custody-visibility.server";
+import { scopeMobileAssetCustodyToViewer } from "./mobile-custody-visibility.server";
 import { recordMobileActivity } from "./mobile-usage.server";
 
 /**
@@ -73,14 +80,18 @@ export async function requireMobileAuth(request: Request) {
     });
   }
 
-  // Get the database user record — exclude soft-deleted users
+  // The Shelf user shares its id with the auth user, so the verified token's
+  // subject identifies the account. Never resolve by email: a separate auth
+  // user can hold the same address (a non-SSO account beside an SSO one), and
+  // its session must not act as the Shelf account.
   const user = await db.user.findUnique({
-    where: { email: authUser.email },
+    where: { id: authUser.id },
     select: {
       id: true,
       email: true,
       firstName: true,
       lastName: true,
+      displayName: true,
       profilePicture: true,
       onboarded: true,
       // Date/time format preferences (raw, nullable). Surfaced on
@@ -93,16 +104,46 @@ export async function requireMobileAuth(request: Request) {
       timeZone: true,
       deletedAt: true,
       lastMobileActiveAt: true,
+      sso: true,
     },
   });
 
-  if (!user || user.deletedAt) {
+  // A session whose auth user has no Shelf account is not a Shelf sign-in.
+  // 401 sends the companion back to its login screen.
+  if (!user) {
+    throw new ShelfError({
+      cause: null,
+      message: "This session does not belong to a Shelf account",
+      label: "Auth",
+      status: 401,
+      shouldBeCaptured: false,
+    });
+  }
+
+  if (user.deletedAt) {
     throw new ShelfError({
       cause: null,
       message: "User not found in database",
       label: "Auth",
       status: 404,
     });
+  }
+
+  // The companion signs in with a password straight against Supabase, so this
+  // is the first point Shelf sees that session. Refuse it when the address must
+  // use SSO, as the web sign-in would. SSO users pass without a lookup: their
+  // companion sessions are the SSO sessions of `User.sso` accounts. A refused account
+  // has every session revoked first, so its refresh token cannot mint another
+  // access token for the companion or the web.
+  if (!user.sso) {
+    const decision = await getLegacyLoginDecisionForUser({
+      userId: user.id,
+      email: user.email,
+    });
+    if (!decision.allowed) {
+      await revokeAllSessions(token);
+      throw createSsoRequiredError(decision.reason);
+    }
   }
 
   // Record companion-app usage for adoption metrics. requireMobileAuth is the
@@ -116,19 +157,54 @@ export async function requireMobileAuth(request: Request) {
   const {
     deletedAt: _deletedAt,
     lastMobileActiveAt: _lastMobileActiveAt,
+    sso: _sso,
     ...safeUser
   } = user;
   return { user: safeUser, authUser };
 }
 
 /**
- * Fetches organizations for a user, with their roles.
+ * Fetches a user's organizations, with their roles, in landing order.
+ *
+ * `organizations[0]` is the workspace the companion should open: the app has
+ * no workspace cookie, so the ARRAY ORDER is the wire contract for where a
+ * session lands. The order mirrors the web resolver in
+ * `~/modules/organization/context.server.ts` so both clients answer "which
+ * workspace am I in?" the same way:
+ *
+ *   1. the user's `lastSelectedOrganizationId`, when they still belong to it
+ *   2. for non-SSO users, their personal workspace
+ *   3. everything else, oldest first (stable across calls)
+ *
+ * SSO users never see their personal workspace — it is filtered out here for
+ * the same reason the web filters it at every touchpoint: their membership is
+ * driven by the IdP, and the personal workspace is not part of that world.
+ *
+ * `lastSelectedOrganizationId` is also returned explicitly (null when unset or
+ * no longer valid) so the app can distinguish "the server picked for me" from
+ * "I chose this workspace" without re-deriving the hierarchy.
+ *
+ * Each organization also carries the four workspace visibility toggles
+ * (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
+ * resolve the same `RoleAccess` the server does for that workspace via
+ * `resolveRoleAccess`.
+ *
+ * @param userId - the authenticated user
+ * @returns organizations in landing order, plus the explicit last-selected id
  */
 export async function getUserOrganizations(userId: string) {
   const userOrgs = await db.userOrganization.findMany({
     where: { userId },
+    // Oldest-first base order keeps rank ties deterministic across calls; the
+    // id tie-break pins organizations created in the same instant.
+    orderBy: [
+      { organization: { createdAt: "asc" } },
+      { organization: { id: "asc" } },
+    ],
     select: {
       roles: true,
+      user: { select: { sso: true, lastSelectedOrganizationId: true } },
       organization: {
         select: {
           id: true,
@@ -137,10 +213,39 @@ export async function getUserOrganizations(userId: string) {
           imageId: true,
           barcodesEnabled: true,
           auditsEnabled: true,
+          // why: the four workspace visibility toggles a RoleAccess resolves
+          // against. Without them here the companion has no way to widen a
+          // restricted role's own-scope for a given workspace.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
+          selfServiceCanSeeCustody: true,
+          baseUserCanSeeCustody: true,
         },
       },
     },
   });
+
+  const isSSO = userOrgs[0]?.user?.sso === true;
+  const lastSelectedId = userOrgs[0]?.user?.lastSelectedOrganizationId ?? null;
+
+  const visible = isSSO
+    ? userOrgs.filter((uo) => uo.organization.type !== "PERSONAL")
+    : userOrgs;
+
+  const lastSelectedOrganizationId = visible.some(
+    (uo) => uo.organization.id === lastSelectedId
+  )
+    ? lastSelectedId
+    : null;
+
+  /** Landing rank per the hierarchy above; sort is stable, so ties keep the
+   * oldest-first base order. */
+  const rank = (uo: (typeof visible)[number]) => {
+    if (uo.organization.id === lastSelectedOrganizationId) return 0;
+    if (!isSSO && uo.organization.type === "PERSONAL") return 1;
+    return 2;
+  };
+  const ordered = [...visible].sort((a, b) => rank(a) - rank(b));
 
   // Serialize the *canonical* add-on capability (premium-aware), not the
   // raw DB flags, so the companion's client-side gating
@@ -148,12 +253,15 @@ export async function getUserOrganizations(userId: string) {
   // the server gating, which now uses canUseAudits/canUseBarcodes. Without
   // this, non-premium/self-hosted deployments would allow the feature on
   // the API but hide it in the app.
-  return userOrgs.map((uo) => ({
-    ...uo.organization,
-    barcodesEnabled: canUseBarcodes(uo.organization),
-    auditsEnabled: canUseAudits(uo.organization),
-    roles: uo.roles,
-  }));
+  return {
+    organizations: ordered.map((uo) => ({
+      ...uo.organization,
+      barcodesEnabled: canUseBarcodes(uo.organization),
+      auditsEnabled: canUseAudits(uo.organization),
+      roles: uo.roles,
+    })),
+    lastSelectedOrganizationId,
+  };
 }
 
 /**
@@ -224,27 +332,32 @@ export async function requireMobilePermission({
 }
 
 /**
- * Fetches the user's role and org capability flags (barcodes, audits) for
- * a given organization. `canUseAudits`/`canUseBarcodes` reuse the canonical
+ * Fetches the caller's roles, reach and the org capability flags that every
+ * mobile route gates on. `canUseAudits`/`canUseBarcodes` reuse the canonical
  * subscription.server predicates so mobile matches webapp gating exactly.
  *
- * Also returns `canSeeAllCustody` — the mobile twin of the flag the web's
- * `requirePermission` returns (roles.server.ts:113-122): ADMIN/OWNER always
- * see all custody; SELF_SERVICE/BASE only when the matching org override
- * (`selfServiceCanSeeCustody` / `baseUserCanSeeCustody`) is enabled.
+ * `access` folds the membership's policy (read from its highest-rank role)
+ * with the workspace's visibility toggles, resolved by the same
+ * `resolveRoleAccess` web's `requirePermission` uses, so the two platforms
+ * cannot disagree about what a workspace has granted. Its booking and custody
+ * visibility answers are independent: a workspace may grant either without
+ * the other. Neither widens a MUTATION: writes stay on the role's permission
+ * grant plus `validateBookingOwnership`.
  *
  * Used by mobile routes that call service layer functions requiring
- * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and
- * by routes that must gate custody visibility server-side.
+ * `getAssetIndexSettings` (e.g. bulkAssignCustody, bulkReleaseCustody) and by
+ * every route that must gate booking or custody visibility server-side.
  */
 export async function getMobileUserContext(
   userId: string,
   organizationId: string
 ): Promise<{
-  role: OrganizationRoles;
+  /** Every role on this membership, for matrix checks (`hasPermission`), which union held roles. */
+  roles: OrganizationRoles[];
+  /** The member's reach: effective role, booking/custody/audit scopes. Every gate reads this. */
+  access: RoleAccess;
   canUseBarcodes: boolean;
   canUseAudits: boolean;
-  canSeeAllCustody: boolean;
 }> {
   const userOrg = await db.userOrganization.findUnique({
     where: { userId_organizationId: { userId, organizationId } },
@@ -259,6 +372,12 @@ export async function getMobileUserContext(
           // here keeps it one query alongside the role.
           selfServiceCanSeeCustody: true,
           baseUserCanSeeCustody: true,
+          // why: the booking twins of the two custody flags above. Every
+          // mobile booking read - list, calendar, detail, dashboard - takes
+          // its visibility answer from this row, so the columns have to be
+          // here for the workspace setting to reach them at all.
+          selfServiceCanSeeBookings: true,
+          baseUserCanSeeBookings: true,
         },
       },
     },
@@ -273,19 +392,14 @@ export async function getMobileUserContext(
     });
   }
 
-  // why: roles is an array but we always operate on the first role; mirror
-  // the convention used in roles.server.ts and invite/service.server.ts so
-  // an empty array doesn't surface as `undefined` to downstream callers.
-  const role = userOrg.roles[0] ?? OrganizationRoles.BASE;
-
   return {
-    role,
+    roles: userOrg.roles,
+    access: resolveRoleAccess({
+      roles: userOrg.roles,
+      workspace: userOrg.organization,
+    }),
     canUseBarcodes: canUseBarcodes(userOrg.organization),
     canUseAudits: canUseAudits(userOrg.organization),
-    canSeeAllCustody: computeCanSeeAllCustody({
-      role,
-      organization: userOrg.organization,
-    }),
   };
 }
 
@@ -338,8 +452,15 @@ export const MOBILE_ASSET_SELECT = {
   id: true,
   title: true,
   status: true,
+  // The workspace-visible identifier ("SAM-0017"). Web shows it on the asset
+  // overview and the scanner invites you to type one, so every mobile surface
+  // that names an asset needs to be able to show WHICH id it is.
+  sequentialId: true,
   mainImage: true,
   thumbnailImage: true,
+  // Lets `resignAndShapeMobileAsset` tell a lapsed photo URL; the shaper drops
+  // it from the response.
+  mainImageExpiration: true,
   // Cover image of the asset's model. `shapeMobileAssetResponse` resolves the
   // cascade into `mainImage`/`thumbnailImage` before the row leaves the server,
   // so the companion inherits model images with no client release.
@@ -487,6 +608,8 @@ export type MobileAssetResponse = {
   id: string;
   title: string;
   status: string;
+  /** Workspace-visible identifier, e.g. "SAM-0017". Null until one is assigned. */
+  sequentialId: string | null;
   /** Model this asset belongs to, or null. Drives fulfil-scan matching. */
   assetModelId?: string | null;
   /**
@@ -559,8 +682,15 @@ export function shapeMobileAssetResponse(asset: {
   id: string;
   title: string;
   status: string;
+  sequentialId: string | null;
   mainImage: string | null;
   thumbnailImage: string | null;
+  /**
+   * Dropped below, so the response shape does not change. Optional because
+   * some callers build this argument by hand; {@link MobileAssetSelectRow}
+   * makes it required where a photo is re-signed.
+   */
+  mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
   category: { name: string } | null;
@@ -577,7 +707,13 @@ export function shapeMobileAssetResponse(asset: {
     custodian: { id: string; name: string; userId: string | null };
   }>;
 }): MobileAssetResponse {
-  const { assetKits, assetLocations, custody, ...rest } = asset;
+  const {
+    assetKits,
+    assetLocations,
+    custody,
+    mainImageExpiration: _mainImageExpiration,
+    ...rest
+  } = asset;
   const kit = assetKits[0]?.kit ?? null;
   /**
    * Collapse the model-image cascade before the row leaves the server. The
@@ -626,10 +762,43 @@ export function shapeMobileAssetResponse(asset: {
 }
 
 /**
- * `MobileAssetResponse` plus the custody-visibility metadata added by
- * {@link getMobileAssetForViewer}: `custodyListOthersCount` is the number of
+ * A row selected with `MOBILE_ASSET_SELECT`. Unlike the shaper's own parameter,
+ * `mainImageExpiration` is required, so a select that drops it fails to compile
+ * instead of silently skipping the photo re-sign.
+ */
+export type MobileAssetSelectRow = Parameters<
+  typeof shapeMobileAssetResponse
+>[0] & { mainImageExpiration: Date | null };
+
+/**
+ * Re-signs a `MOBILE_ASSET_SELECT` row's lapsed photo URL, then shapes the row
+ * for the companion.
+ *
+ * Every path that returns such a row goes through this one step: the scanner
+ * resolvers and the asset returned after a quantity or custody change.
+ *
+ * @param asset - A row selected with `MOBILE_ASSET_SELECT`.
+ * @param organizationId - The workspace that owns the asset. For a code
+ *   resolved in a sibling workspace, that workspace rather than the caller's.
+ * @returns The legacy flat mobile response shape.
+ * @see {@link file://./../asset/service.server.ts} refreshExpiredAssetImages
+ */
+export async function resignAndShapeMobileAsset(
+  asset: MobileAssetSelectRow,
+  organizationId: string
+): Promise<MobileAssetResponse> {
+  const [refreshed] = await refreshExpiredAssetImages([asset], {
+    organizationId,
+    ...ASSET_IMAGE_RESIGN_LIMITS,
+  });
+  return shapeMobileAssetResponse(refreshed);
+}
+
+/**
+ * `MobileAssetResponse` with its custody scoped to one viewer by
+ * `scopeMobileAssetCustodyToViewer`: `custodyListOthersCount` is the number of
  * holders hidden from the viewer (0 when the viewer can see all custody), so
- * the companion can render "+N others" — mirroring the web's
+ * the companion can render "+N others", mirroring the web's
  * `QuantityCustodyList` hidden-count (quantity-custody-list.tsx:126).
  */
 export type MobileAssetForViewer = MobileAssetResponse & {
@@ -649,7 +818,7 @@ export type MobileAssetForViewer = MobileAssetResponse & {
  * @param args.assetId - The asset to fetch (org-scoped)
  * @param args.organizationId - The caller's active organization
  * @param args.viewerUserId - The authenticated caller's user id
- * @param args.canSeeAllCustody - From {@link getMobileUserContext}
+ * @param args.canSeeAllCustody - The viewer's `access.custody.seeAll`, from {@link getMobileUserContext}
  * @returns The viewer-shaped asset, or null when not found in the org
  */
 export async function getMobileAssetForViewer({
@@ -676,29 +845,10 @@ export async function getMobileAssetForViewer({
 
   if (!asset) return null;
 
-  const shaped = shapeMobileAssetResponse(asset);
+  const shaped = await resignAndShapeMobileAsset(asset, organizationId);
 
-  const { custodyList, custodyListOthersCount } =
-    filterMobileCustodyListForViewer({
-      custodyList: shaped.custodyList,
-      custodyRows: asset.custody,
-      viewerUserId,
-      canSeeAllCustody,
-    });
-
-  // Legacy single `custody` follows the web's specific-custody rule (see
-  // viewerCanSeeLegacyCustody): hidden unless the viewer can see all custody
-  // or IS the (primary) custodian.
-  const primaryCustody = asset.custody[0] ?? null;
-  const custody =
-    primaryCustody &&
-    viewerCanSeeLegacyCustody({
-      custodianUserId: primaryCustody.custodian.userId,
-      viewerUserId,
-      canSeeAllCustody,
-    })
-      ? shaped.custody
-      : null;
-
-  return { ...shaped, custody, custodyList, custodyListOthersCount };
+  return scopeMobileAssetCustodyToViewer(shaped, {
+    viewerUserId,
+    canSeeAllCustody,
+  });
 }

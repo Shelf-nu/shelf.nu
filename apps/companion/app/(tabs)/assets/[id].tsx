@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -23,6 +24,7 @@ import {
   type TeamMember,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { useOrg } from "@/lib/org-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
@@ -36,33 +38,40 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
+import { pushIntoTab } from "@/lib/navigation";
+import { buildBookingCustodyRows } from "@/lib/asset-custody-rows";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { custodyAssignCap } from "@/lib/custody-scan-quantities";
+import {
+  assignSourceOptions,
+  ALL_SOURCES,
+  assignSourceRequestValue,
+  defaultAssignSourceOption,
+  describeHolderSources,
+  releaseAsksForSource,
+  releaseNoteSource,
+  releaseSourceOptions,
+  releaseSourceQuantity,
+  releaseSourceRequestValue,
+} from "@/lib/custody-source-options";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
+import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
+import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { InfoRow } from "@/components/shared/info-row";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
+import { useRoleAccess } from "@/hooks/use-role-access";
+import { mayReleaseAssetCustody } from "@/lib/role-access";
 import { useImageUpload } from "@/hooks/use-image-upload";
-// Lazy-loaded: ~50KB library only needed when viewing QR codes on asset detail
-let QRCode: typeof import("react-native-qrcode-svg").default | null = null;
-try {
-  // why: dynamic require keeps react-native-qrcode-svg out of the initial JS bundle
-  // for screens that don't render QR codes; static import would defeat the optimization
-  QRCode =
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg").default ??
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require("react-native-qrcode-svg");
-} catch {
-  // Will render graceful fallback instead of QR code
-}
+import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 
 export default function AssetDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -87,22 +96,28 @@ export default function AssetDetailScreen() {
     entity: "asset",
     action: "custody",
   });
-  // Self-service users may only release their OWN quantity-custody rows.
-  // The server enforces this with a 403 guard on the release endpoint; the
-  // client check only controls affordance visibility. Mirrors scanner.tsx.
-  const isSelfService = roles?.includes("SELF_SERVICE") ?? false;
+  const canCreateNote = userHasPermission({
+    roles,
+    entity: "note",
+    action: "create",
+  });
+  // Members whose custody scope is self may only take custody for themselves
+  // and release their OWN quantity-custody rows; the server enforces both.
+  // The client check only controls affordance visibility. Mirrors scanner.tsx.
+  const access = useRoleAccess();
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
   // Current auth user — used to recognize the caller's own custody row via
   // the server-provided custodian.userId (bearer-auth session user id).
   const { user } = useAuth();
   const { colors, statusBadge } = useTheme();
   const styles = useStyles();
   // Render dates in the acting user's format preferences + timezone.
-  const { formatDate } = useDateFormatter();
+  const { formatDate, formatDateTime } = useDateFormatter();
 
   // Asset data
   const {
     asset,
-    setAsset: _setAsset,
+    setAsset,
     isLoading,
     isRefreshing,
     error,
@@ -120,7 +135,51 @@ export default function AssetDetailScreen() {
     handleReleaseCustody,
     performAssignQuantity,
     performReleaseQuantity,
-  } = useCustodyActions({ asset, currentOrg, fetchAsset });
+  } = useCustodyActions({
+    asset,
+    currentOrg,
+    fetchAsset,
+    isSelfService: takesCustodyForSelfOnly,
+  });
+
+  // The placements and stock sheets submit through this: each stays open,
+  // showing the save in progress, until the server accepts its change.
+  const submitFromSheet = useSheetSubmit({
+    refresh: fetchAsset,
+    setSubmitting: setIsActionLoading,
+  });
+
+  /**
+   * Assigns units from the quantity sheet. When the server refuses (most
+   * often because the picked source's numbers moved since the asset was
+   * loaded), the asset is reloaded so the picker's counts and default
+   * refresh while the sheet stays open with the entered quantity. The
+   * reload only replaces the asset on success: a failed reload keeps the
+   * screen as it is instead of swapping it for an error state.
+   *
+   * @param member - The team member receiving the units
+   * @param quantity - Units to assign
+   * @param locationId - The source to take them from (see `performAssignQuantity`)
+   */
+  const assignQuantityFromSheet = async (
+    member: TeamMember,
+    quantity: number,
+    locationId?: string | null
+  ) => {
+    let accepted = false;
+    await performAssignQuantity(
+      member,
+      quantity,
+      () => {
+        accepted = true;
+        setAssignQtyMember(null);
+      },
+      locationId
+    );
+    if (accepted || !currentOrg) return;
+    const { data } = await api.asset(id, currentOrg.id);
+    if (data) setAsset(data.asset);
+  };
 
   // Image upload
   const { isUploadingImage, handleImagePress } = useImageUpload({
@@ -128,6 +187,30 @@ export default function AssetDetailScreen() {
     orgId: currentOrg?.id,
     fetchAsset,
   });
+
+  /**
+   * Self-service custody: resolve the caller's own team-member record and go
+   * straight to the operation — the picker would hold exactly one row (their
+   * own; the team-members endpoint is self-scoped for that role). QT assets
+   * continue into the quantity sheet; INDIVIDUAL assets confirm directly.
+   */
+  const handleTakeCustodySelf = async () => {
+    if (!currentOrg) return;
+    setIsActionLoading(true);
+    const { member, error: resolveError } = await resolveSelfTeamMember(
+      currentOrg.id
+    );
+    setIsActionLoading(false);
+    if (!member) {
+      Alert.alert("Error", resolveError ?? "Something went wrong.");
+      return;
+    }
+    if (isQtyTracked) {
+      setAssignQtyMember(member);
+    } else {
+      handleAssignCustody(member);
+    }
+  };
 
   // UI states
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
@@ -145,14 +228,108 @@ export default function AssetDetailScreen() {
   const [releaseQtyEntry, setReleaseQtyEntry] =
     useState<AssetCustodyListEntry | null>(null);
 
+  // "From location" for the assign and release sheets. Only a pool placed at
+  // two or more locations asks (the server says so through
+  // `custodySources.multiSource`); the picked row drives each sheet's cap.
+  const sourceSummary = asset?.custodySources ?? null;
+  const multiSource =
+    sourceSummary?.multiSource === true && sourceSummary.options.length > 0;
+  // The operator's picks, keyed by who the sheet is for, so a pick never
+  // leaks from one member (or holder) to the next. The effective value is
+  // derived during render: the pick when it belongs to the sheet that is
+  // open, else the default. No effect seeds state.
+  const [assignPick, setAssignPick] = useState<{
+    memberId: string;
+    value: string;
+  } | null>(null);
+  const [releasePick, setReleasePick] = useState<{
+    custodianId: string;
+    value: string;
+  } | null>(null);
+  // The row the assign sheet opens on: the location with the most left.
+  const defaultAssignValue = sourceSummary
+    ? defaultAssignSourceOption(sourceSummary.options)?.value ?? null
+    : null;
+  // A pick counts only while its row still exists: a refetch can drop the
+  // row it named (a location cleared, a source released in full).
+  const assignSource =
+    assignQtyMember && multiSource && sourceSummary
+      ? assignPick?.memberId === assignQtyMember.id &&
+        sourceSummary.options.some(
+          (option) => option.value === assignPick.value
+        )
+        ? assignPick.value
+        : defaultAssignValue
+      : null;
+  // Release goes by the HOLDER's sources, not the pool's current placements:
+  // custody recorded from two locations stays releasable per source even
+  // after the pool was moved to one location. Only a holder with two or
+  // more sources is asked; the picker opens on "All sources", their whole
+  // hold. With 0 or 1 sources there is nothing to choose.
+  const releaseSources = releaseAsksForSource(releaseQtyEntry?.sources)
+    ? releaseQtyEntry?.sources ?? null
+    : null;
+  // A pick counts only while its row still exists; otherwise the release
+  // falls back to all sources.
+  const releaseSource =
+    releaseQtyEntry && releaseSources
+      ? releasePick?.custodianId === releaseQtyEntry.custodian.id &&
+        releaseSourceQuantity(releaseSources, releasePick.value) !== null
+        ? releasePick.value
+        : ALL_SOURCES
+      : null;
+
   // Notes
   const [noteText, setNoteText] = useState("");
   const [isPostingNote, setIsPostingNote] = useState(false);
 
-  // ── Location Action ─────────────────────────────────
+  // ── Location / Placements Actions ───────────────────
 
+  // QUANTITY_TRACKED assets edit their location spread in the placements
+  // editor; INDIVIDUAL assets keep the picker + confirm-alert flow.
+  const [showPlacementsSheet, setShowPlacementsSheet] = useState(false);
+
+  /**
+   * Current placement rows for the placements card + editor seed. Prefers
+   * the server's `placements` array; a server that omits it degrades to a
+   * single synthesized row from the flat `location` field so the card and
+   * editor still reflect the primary placement.
+   */
+  const placements = useMemo(() => {
+    // why: isQuantityTracked is called directly — the screen's shared
+    // `isQtyTracked` const is declared after the loading/error returns,
+    // and hooks must run before them.
+    if (!asset || !isQuantityTracked(asset)) return [];
+    if (asset.placements) return asset.placements;
+    if (!asset.location) return [];
+    return [
+      {
+        locationId: asset.location.id,
+        locationName: asset.location.name,
+        quantity: asset.locationQuantity ?? asset.quantity ?? 1,
+        viaKit: null,
+      },
+    ];
+  }, [asset]);
+
+  /**
+   * Units not placed at any location. Manual rows only — kit-driven rows
+   * describe the same units from the kit's point of view and are bounded
+   * on their own axis, so they don't reduce the unplaced pool.
+   */
+  const unplacedUnits = useMemo(() => {
+    if (!asset || !isQuantityTracked(asset)) return 0;
+    const manualSum = placements.reduce(
+      (sum, p) => (p.viaKit === null ? sum + p.quantity : sum),
+      0
+    );
+    return Math.max(0, (asset.quantity ?? 0) - manualSum);
+  }, [asset, placements]);
+
+  /** INDIVIDUAL flow: picker selection confirms a whole-asset move. */
   const handleLocationSelect = (location: LocationType) => {
     setShowLocationPicker(false);
+
     if (location.id === asset?.location?.id) return; // same location
 
     Alert.alert(
@@ -165,6 +342,7 @@ export default function AssetDetailScreen() {
     );
   };
 
+  /** Applies an INDIVIDUAL asset's location update and refreshes. */
   const performUpdateLocation = async (locationId: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
@@ -181,12 +359,33 @@ export default function AssetDetailScreen() {
     setIsActionLoading(false);
   };
 
+  /**
+   * Replaces the manual placement set (QUANTITY_TRACKED) and refreshes.
+   * The sheet already validated the sum client-side; the server re-checks
+   * everything against the row-locked asset and reports conflicts (409)
+   * through the error alert. The sheet closes only once the server accepts
+   * the set, so a refusal leaves the edited rows on screen to fix or retry.
+   */
+  const performSavePlacements = async (
+    nextPlacements: { locationId: string; quantity: number }[]
+  ) => {
+    if (!currentOrg || !asset) return;
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () => api.managePlacements(orgId, assetId, nextPlacements),
+      () => setShowPlacementsSheet(false)
+    );
+  };
+
   // ── Adjust Quantity (stock) ─────────────────────────
 
   /**
    * Applies a stock adjustment and refreshes the asset. Web
    * QuickAdjustDialog parity: Add maps to RESTOCK, Remove maps to LOSS —
    * the server writes the ConsumptionLog row and fires the low-stock alert.
+   * The sheet closes only once the server accepts the adjustment, so a
+   * refusal keeps the entered quantity and note.
    */
   const performAdjustQuantity = async (args: {
     direction: "add" | "subtract";
@@ -194,20 +393,18 @@ export default function AssetDetailScreen() {
     note?: string;
   }) => {
     if (!currentOrg || !asset) return;
-    setShowAdjustSheet(false);
-    setIsActionLoading(true);
-    const { error: err } = await api.adjustQuantity(currentOrg.id, asset.id, {
-      quantity: args.quantity,
-      direction: args.direction,
-      category: args.direction === "add" ? "RESTOCK" : "LOSS",
-      note: args.note,
-    });
-    if (err) Alert.alert("Error", err);
-    else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      await fetchAsset();
-    }
-    setIsActionLoading(false);
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.adjustQuantity(orgId, assetId, {
+          quantity: args.quantity,
+          direction: args.direction,
+          category: args.direction === "add" ? "RESTOCK" : "LOSS",
+          note: args.note,
+        }),
+      () => setShowAdjustSheet(false)
+    );
   };
 
   // ── Notes Action ────────────────────────────────────
@@ -350,13 +547,19 @@ export default function AssetDetailScreen() {
     isQtyTracked && asset.custodyList && asset.custodyList.length > 0
       ? asset.custodyList
       : null;
-  // Cap for the assign-quantity step. Prefer the server's custodyAvailable
-  // (web-parity cap that also excludes kit earmarks); fall back for older
-  // servers to the broader `available`, then the plain total — the server
-  // re-validates the real cap on submit either way.
-  const assignMax = isQtyTracked
-    ? breakdown?.custodyAvailable ?? breakdown?.available ?? asset.quantity ?? 0
-    : 0;
+  // Custody held through a booking. Rendered only when neither custody source
+  // above has a row, the same precedence as the web asset page's card.
+  const bookingCustodyRows = buildBookingCustodyRows(asset.activeBooking, {
+    formatDateTime,
+    // The booking lives in another tab; the helper roots that tab at its list
+    // so "back" has somewhere to go.
+    onOpenBooking: (bookingId) =>
+      pushIntoTab("/(tabs)/bookings", `/(tabs)/bookings/${bookingId}`),
+  });
+  // Cap for the assign-quantity step, shared with the Scan tab's assign mode
+  // so both offer the same number. The server re-validates the real cap on
+  // submit either way.
+  const assignMax = isQtyTracked ? custodyAssignCap(asset) : 0;
   // Units releasable from the pending release target (operator rows only;
   // kit-held units are excluded). 0 while no row is pending.
   const releaseMax = releaseQtyEntry
@@ -366,6 +569,86 @@ export default function AssetDetailScreen() {
   // what the server does. Servers predating the field send no consumptionType,
   // which falls through to the returnable copy — the server's own default.
   const isConsumable = releaseCategory(asset.consumptionType) === "CONSUME";
+  // The assign sheet's picker and cap. With a source picked, the cap is what
+  // that source has left (never above the pool-wide cap).
+  const selectedAssignOption =
+    multiSource && sourceSummary && assignSource != null
+      ? sourceSummary.options.find((option) => option.value === assignSource) ??
+        null
+      : null;
+  const assignSheetMax = selectedAssignOption
+    ? Math.min(assignMax, Math.max(0, selectedAssignOption.left))
+    : assignMax;
+  // Why the cap is 0 when the picked source has nothing left. The server
+  // enforces the per-source cap, so the operator has to pick another row.
+  const assignSourceNotice =
+    selectedAssignOption && selectedAssignOption.left <= 0 && sourceSummary
+      ? !sourceSummary.options.some((option) => option.left > 0)
+        ? "No units are left at any location."
+        : selectedAssignOption.locationId === null
+        ? "No unplaced units are left. Pick a location."
+        : `Nothing left at ${selectedAssignOption.label}. Pick another location.`
+      : undefined;
+  const assignSourceProp =
+    multiSource && sourceSummary && assignSource != null
+      ? {
+          label: "From location",
+          options: assignSourceOptions(
+            sourceSummary.options,
+            asset.unitOfMeasure
+          ),
+          value: assignSource,
+          onChange: (value: string) => {
+            if (assignQtyMember) {
+              setAssignPick({ memberId: assignQtyMember.id, value });
+            }
+          },
+        }
+      : undefined;
+  // The release sheet's picker and cap: "All sources" plus one row per
+  // source the holder took units from, shown only when there are two or
+  // more. The cap is what the picked row holds (the whole hold for "All
+  // sources"), never above the releasable units.
+  const pickedReleaseQuantity =
+    releaseSources && releaseSource != null
+      ? releaseSourceQuantity(releaseSources, releaseSource)
+      : null;
+  const releaseSheetMax =
+    pickedReleaseQuantity !== null
+      ? Math.min(releaseMax, pickedReleaseQuantity)
+      : releaseMax;
+  // The source the "goes back to" note names: the picked row, or a holder's
+  // only source on a multi-location pool. Null for "All sources", which can
+  // return units to several places.
+  const selectedReleaseEntry = releaseNoteSource({
+    sources: releaseQtyEntry?.sources,
+    picked: releaseSource,
+    multiSource,
+  });
+  const releaseSourceProp =
+    releaseSources && releaseSource != null
+      ? {
+          label: "From",
+          options: releaseSourceOptions(releaseSources, asset.unitOfMeasure),
+          value: releaseSource,
+          onChange: (value: string) => {
+            if (releaseQtyEntry) {
+              setReleasePick({
+                custodianId: releaseQtyEntry.custodian.id,
+                value,
+              });
+            }
+          },
+        }
+      : undefined;
+  const releaseSourceNote =
+    selectedReleaseEntry && !selectedReleaseEntry.unrecorded
+      ? selectedReleaseEntry.locationId === null
+        ? "Goes back to the unplaced units."
+        : `Goes back to ${
+            selectedReleaseEntry.name ?? "its location"
+          }, where the units came from.`
+      : null;
   // Custody holders the server hid from this caller (privacy filtering for
   // roles without view-all-custody). Shown as a muted "+N others" row.
   const custodyOthersCount = isQtyTracked
@@ -457,22 +740,22 @@ export default function AssetDetailScreen() {
                 {availableUnits != null && (
                   <View style={styles.quantityBreakdownRow}>
                     <QuantityStat
-                      label="Available"
+                      label={ASSET_QTY_STATUS_LABELS.AVAILABLE}
                       value={`${availableUnits}${unitSuffix}`}
                       warning={isAvailableLowStock}
                     />
                     {breakdown && (
                       <>
                         <QuantityStat
-                          label="In custody"
+                          label={ASSET_QTY_STATUS_LABELS.IN_CUSTODY}
                           value={`${breakdown.inCustody}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Reserved"
+                          label={ASSET_QTY_STATUS_LABELS.RESERVED}
                           value={`${breakdown.reserved}${unitSuffix}`}
                         />
                         <QuantityStat
-                          label="Checked out"
+                          label={ASSET_QTY_STATUS_LABELS.CHECKED_OUT}
                           value={`${breakdown.checkedOut}${unitSuffix}`}
                         />
                       </>
@@ -486,9 +769,24 @@ export default function AssetDetailScreen() {
           {/* ── Quick Actions ──────────────────────────── */}
           <QuickActions
             asset={asset}
-            onAssignCustody={() => setShowCustodyPicker(true)}
+            onAssignCustody={() => {
+              if (takesCustodyForSelfOnly) {
+                void handleTakeCustodySelf();
+              } else {
+                setShowCustodyPicker(true);
+              }
+            }}
             onReleaseCustody={handleReleaseCustody}
-            onLocationPress={() => setShowLocationPicker(true)}
+            canReleaseCustody={mayReleaseAssetCustody({
+              access,
+              userId: user?.id,
+              custodianUserId: asset.custody?.custodian?.userId,
+            })}
+            onLocationPress={() =>
+              isQtyTracked
+                ? setShowPlacementsSheet(true)
+                : setShowLocationPicker(true)
+            }
             onEditPress={() =>
               router.push({
                 pathname: "/(tabs)/assets/edit",
@@ -502,6 +800,7 @@ export default function AssetDetailScreen() {
             canUpdate={canUpdateAsset}
             canDelete={canDeleteAsset}
             canCustody={canCustody}
+            isSelfService={takesCustodyForSelfOnly}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
           />
@@ -515,11 +814,60 @@ export default function AssetDetailScreen() {
                 value={asset.category.name}
               />
             )}
-            {asset.location && (
+            {/* INDIVIDUAL: single flat location row. QUANTITY_TRACKED
+                renders the placement rows below instead. */}
+            {!isQtyTracked && asset.location && (
               <InfoRow
                 icon="location-outline"
                 label="Location"
                 value={asset.location.name}
+              />
+            )}
+            {/* QUANTITY_TRACKED: the full location spread. One row per
+                placement (kit-driven rows named as such), plus the unplaced
+                remainder — so a partial move's result is readable right
+                here. The first row opens the placements editor. */}
+            {isQtyTracked &&
+              placements.map((p, idx) => (
+                <InfoRow
+                  key={`${p.locationId}-${p.viaKit?.id ?? "manual"}`}
+                  icon={idx === 0 ? "location-outline" : "return-down-forward"}
+                  label={idx === 0 ? "Locations" : "Also at"}
+                  value={`${p.locationName} · ${
+                    formatQuantity(p.quantity, asset.unitOfMeasure) ??
+                    p.quantity
+                  }${p.viaKit ? ` via kit ${p.viaKit.name}` : ""}`}
+                  // The row's value IS its a11y label (default), so a screen
+                  // reader reads the location + count; role=button + the
+                  // chevron signal it opens the editor. The QuickActions
+                  // "Placements" button carries the "Manage placements" label.
+                  onPress={
+                    idx === 0 && canUpdateAsset
+                      ? () => setShowPlacementsSheet(true)
+                      : undefined
+                  }
+                />
+              ))}
+            {isQtyTracked && unplacedUnits > 0 && (
+              <InfoRow
+                icon="ellipse-outline"
+                label={placements.length > 0 ? "Unplaced" : "Locations"}
+                value={
+                  placements.length > 0
+                    ? `${
+                        formatQuantity(unplacedUnits, asset.unitOfMeasure) ??
+                        unplacedUnits
+                      }`
+                    : `Unplaced · ${
+                        formatQuantity(unplacedUnits, asset.unitOfMeasure) ??
+                        unplacedUnits
+                      }`
+                }
+                onPress={
+                  placements.length === 0 && canUpdateAsset
+                    ? () => setShowPlacementsSheet(true)
+                    : undefined
+                }
               />
             )}
             {asset.kit && (
@@ -559,7 +907,8 @@ export default function AssetDetailScreen() {
                 const canReleaseRow =
                   canCustody &&
                   releasableQty > 0 &&
-                  (!isSelfService || entry.custodian.userId === user?.id);
+                  (!takesCustodyForSelfOnly ||
+                    entry.custodian.userId === user?.id);
                 return (
                   <InfoRow
                     key={entry.custodian.id}
@@ -567,8 +916,19 @@ export default function AssetDetailScreen() {
                     label={entry.custodian.name}
                     value={
                       kitHeldQty > 0
-                        ? `${qtyLabel ?? "In custody"} • ${kitHeldQty} via kit`
-                        : qtyLabel ?? "In custody"
+                        ? `${
+                            qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                          } • ${kitHeldQty} via kit`
+                        : qtyLabel ?? ASSET_QTY_STATUS_LABELS.IN_CUSTODY
+                    }
+                    // Where the holder's units came from, under the quantity
+                    // so it never truncates the count: "1 from Camera Room ·
+                    // 1 from Studio · 1 unplaced". Only a pool kept at two or
+                    // more locations says it.
+                    hint={
+                      (multiSource || (entry.sources?.length ?? 0) > 1
+                        ? describeHolderSources(entry.sources)
+                        : null) ?? undefined
                     }
                     onPress={
                       canReleaseRow
@@ -609,7 +969,18 @@ export default function AssetDetailScreen() {
                   value={formatDate(asset.custody.createdAt)}
                 />
               </>
-            ) : null}
+            ) : (
+              bookingCustodyRows.map((row) => (
+                <InfoRow
+                  key={row.key}
+                  icon={row.icon}
+                  label={row.label}
+                  value={row.value}
+                  onPress={row.onPress}
+                  accessibilityLabel={row.accessibilityLabel}
+                />
+              ))
+            )}
             {/* Holders hidden from this caller (privacy filtering) — one calm
                 muted row so partial lists don't read as the full picture. */}
             {custodyOthersCount > 0 && (
@@ -632,7 +1003,7 @@ export default function AssetDetailScreen() {
                 </Text>
               </View>
             )}
-            {asset.valuation != null && asset.valuation > 0 && (
+            {asset.valuation != null && (
               <InfoRow
                 icon="cash-outline"
                 label="Value"
@@ -642,6 +1013,42 @@ export default function AssetDetailScreen() {
                 )}
               />
             )}
+            {asset.assetModel?.name ? (
+              <InfoRow
+                icon="cube-outline"
+                label="Asset Model"
+                value={asset.assetModel.name}
+              />
+            ) : null}
+            {/* The identifier this workspace labels its assets with, resolved
+                server-side. Labelled with the code's own name ("Code 128") so
+                the reader can tell WHICH identifier they are looking at when
+                matching a physical label. */}
+            {asset.displayCode?.value ? (
+              <InfoRow
+                // `barcode-outline` rather than `pricetag-outline`: the Category
+                // row above already owns the pricetag, and it also matches the
+                // scanner affordance this row exists for.
+                icon="barcode-outline"
+                label={asset.displayCode.label}
+                value={asset.displayCode.value}
+              />
+            ) : null}
+            {/* The SAM ID keeps its own row whenever it is not already the row
+                above: the scanner's manual entry accepts a SAM ID, so the app
+                has to be able to tell you what an asset's SAM ID is whatever
+                the workspace prefers to display. */}
+            {asset.sequentialId &&
+            asset.displayCode?.value !== asset.sequentialId ? (
+              <InfoRow
+                // `keypad-outline`: this row exists because the scanner's
+                // manual entry takes a SAM ID, and a pricetag would read as a
+                // second Category row.
+                icon="keypad-outline"
+                label="SAM ID"
+                value={asset.sequentialId}
+              />
+            ) : null}
             <InfoRow
               icon="calendar-outline"
               label="Created"
@@ -668,43 +1075,15 @@ export default function AssetDetailScreen() {
             </View>
           )}
 
-          {/* ── QR Code ─────────────────────────────────── */}
-          {asset.qrCodes.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>QR Code</Text>
-              <View style={styles.qrCard}>
-                {QRCode ? (
-                  <QRCode
-                    value={`${
-                      process.env.EXPO_PUBLIC_QR_BASE_URL ||
-                      "https://app.shelf.nu"
-                    }/qr/${asset.qrCodes[0].id}`}
-                    size={160}
-                    backgroundColor={colors.white}
-                    color={colors.foreground}
-                  />
-                ) : (
-                  <View
-                    style={{
-                      width: 160,
-                      height: 160,
-                      justifyContent: "center",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Ionicons
-                      name="qr-code-outline"
-                      size={64}
-                      color={colors.muted}
-                    />
-                  </View>
-                )}
-                <Text style={styles.qrIdText} selectable numberOfLines={1}>
-                  {asset.qrCodes[0].id}
-                </Text>
-              </View>
-            </View>
-          )}
+          {/* ── Codes ──────────────────────────────────── */}
+          {/* Leads with the workspace's preferred code and offers the others.
+              The choice is the server's (`displayCode`); this screen never
+              re-derives it, because it does not receive the preference. */}
+          <CodeSection
+            displayCode={asset.displayCode}
+            barcodes={asset.barcodes}
+            qrCodes={asset.qrCodes}
+          />
 
           {/* ── Custom Fields ──────────────────────────── */}
           <CustomFieldsSection
@@ -720,10 +1099,10 @@ export default function AssetDetailScreen() {
             onPostNote={handlePostNote}
             isPostingNote={isPostingNote}
             // why: composer shows only when the workspace is resolved AND
-            // the role can update the asset (server requires asset:update
-            // to add a note). BASE/SELF_SERVICE get a read-only activity
-            // feed instead of a box that 403s on Post.
-            canPostNote={!!currentOrg?.id && canUpdateAsset}
+            // the member holds note:create, because the server gates adding a
+            // note on that same permission; members without it get a
+            // read-only activity feed instead of a box that 403s on Post.
+            canPostNote={!!currentOrg?.id && canCreateNote}
           />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -815,6 +1194,16 @@ export default function AssetDetailScreen() {
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
             <>
+              <ManagePlacementsSheet
+                visible={showPlacementsSheet}
+                orgId={currentOrg.id}
+                totalQuantity={asset.quantity ?? 1}
+                unitOfMeasure={asset.unitOfMeasure}
+                initialPlacements={placements}
+                isSubmitting={isActionLoading}
+                onSave={(next) => void performSavePlacements(next)}
+                onClose={() => setShowPlacementsSheet(false)}
+              />
               <AdjustQuantitySheet
                 visible={showAdjustSheet}
                 // Physical removal cap (custodyAvailable chain), NOT
@@ -824,25 +1213,43 @@ export default function AssetDetailScreen() {
                 // real floor (in-custody + peak concurrent reservations).
                 availableQuantity={assignMax}
                 unitOfMeasure={asset.unitOfMeasure}
+                isSubmitting={isActionLoading}
                 onSubmit={(args) => void performAdjustQuantity(args)}
                 onClose={() => setShowAdjustSheet(false)}
               />
               <QuantityInputSheet
                 visible={assignQtyMember != null}
-                title="Assign Quantity"
+                title={
+                  takesCustodyForSelfOnly ? "Take Quantity" : "Assign Quantity"
+                }
                 subtitle={
                   assignQtyMember
-                    ? `Assign to ${memberDisplayName(assignQtyMember)}`
+                    ? takesCustodyForSelfOnly
+                      ? "How many units are you taking?"
+                      : `Assign to ${memberDisplayName(assignQtyMember)}`
                     : undefined
                 }
-                max={assignMax}
+                max={assignSheetMax}
                 defaultValue={1}
                 unitOfMeasure={asset.unitOfMeasure}
-                confirmLabel="Assign"
+                source={assignSourceProp}
+                notice={assignSourceNotice}
+                confirmLabel={takesCustodyForSelfOnly ? "Take" : "Assign"}
+                isSubmitting={isActionLoading}
                 onSubmit={(quantity) => {
-                  const member = assignQtyMember;
-                  setAssignQtyMember(null);
-                  if (member) void performAssignQuantity(member, quantity);
+                  if (!assignQtyMember) return;
+                  void assignQuantityFromSheet(
+                    assignQtyMember,
+                    quantity,
+                    // Sent only when the pool asked. The default is sent
+                    // explicitly because the server records "location not
+                    // recorded" for a multi-source assign without one; the
+                    // server validates the cap, so a stale default is
+                    // refused rather than mis-recorded.
+                    assignSourceProp && assignSource != null
+                      ? assignSourceRequestValue(assignSource)
+                      : undefined
+                  );
                 }}
                 onClose={() => setAssignQtyMember(null)}
               />
@@ -855,20 +1262,25 @@ export default function AssetDetailScreen() {
                       ? `End the hold on how many of ${
                           releaseQtyEntry.custodian.name
                         }'s ${
-                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                          String(releaseMax)
+                          formatQuantity(
+                            releaseSheetMax,
+                            asset.unitOfMeasure
+                          ) ?? String(releaseSheetMax)
                         }, and how many were used up? Used-up units permanently reduce total stock.`
                       : `Release how many of ${
                           releaseQtyEntry.custodian.name
                         }'s ${
-                          formatQuantity(releaseMax, asset.unitOfMeasure) ??
-                          String(releaseMax)
-                        }?`
+                          formatQuantity(
+                            releaseSheetMax,
+                            asset.unitOfMeasure
+                          ) ?? String(releaseSheetMax)
+                        }?${releaseSourceNote ? ` ${releaseSourceNote}` : ""}`
                     : undefined
                 }
-                max={releaseMax}
+                source={releaseSourceProp}
+                max={releaseSheetMax}
                 // Web parity: the release dialog pre-fills a full release.
-                defaultValue={releaseMax}
+                defaultValue={releaseSheetMax}
                 unitOfMeasure={asset.unitOfMeasure}
                 secondary={
                   isConsumable
@@ -876,22 +1288,28 @@ export default function AssetDetailScreen() {
                         label: "Of those, how many were used up?",
                         // Pre-fill a full consume — the common case, and what
                         // the server defaults to when no split is sent.
-                        defaultValue: releaseMax,
+                        defaultValue: releaseSheetMax,
                       }
                     : undefined
                 }
                 confirmLabel={isConsumable ? "Confirm" : "Release"}
                 destructive
+                isSubmitting={isActionLoading}
                 onSubmit={(quantity, consumed) => {
-                  const entry = releaseQtyEntry;
-                  setReleaseQtyEntry(null);
-                  if (entry) {
-                    void performReleaseQuantity(
-                      entry.custodian.id,
-                      quantity,
-                      consumed
-                    );
-                  }
+                  if (!releaseQtyEntry) return;
+                  void performReleaseQuantity(
+                    releaseQtyEntry.custodian.id,
+                    quantity,
+                    consumed,
+                    () => setReleaseQtyEntry(null),
+                    // A specific source is sent only when the holder was
+                    // asked and picked one. "All sources", or a holder with
+                    // 0 or 1 sources, sends no locationId and the server
+                    // draws the holder's rows in its fixed order.
+                    releaseSources && releaseSource != null
+                      ? releaseSourceRequestValue(releaseSource)
+                      : undefined
+                  );
                 }}
                 onClose={() => setReleaseQtyEntry(null)}
               />
@@ -1182,28 +1600,6 @@ const useStyles = createStyles((colors, shadows) => ({
     borderColor: colors.border,
   },
   tagText: { fontSize: fontSize.sm, color: colors.gray700 },
-
-  // QR Code
-  qrCard: {
-    backgroundColor: colors.white,
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: "center",
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-    ...shadows.sm,
-  },
-  qrIdText: {
-    fontSize: fontSize.xs,
-    color: colors.mutedLight,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  qrExtraText: {
-    fontSize: fontSize.sm,
-    color: colors.muted,
-  },
 
   // Image zoom modal
   zoomOverlay: {

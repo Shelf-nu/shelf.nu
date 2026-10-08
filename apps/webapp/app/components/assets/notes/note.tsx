@@ -5,6 +5,7 @@ import { DateS } from "~/components/shared/date";
 import { Switch } from "~/components/shared/switch";
 import { Tag } from "~/components/shared/tag";
 import { timeAgo } from "~/utils/time-ago";
+import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
 
 /**
@@ -15,12 +16,7 @@ export type NoteWithUser = {
   content: string;
   type: "COMMENT" | "UPDATE";
   createdAt: string | Date;
-  user?: {
-    firstName: string;
-    lastName: string;
-    /** Optional display name for SSO users, used by resolveUserDisplayName */
-    displayName?: string;
-  };
+  user?: UserNameFields;
   /** Optional audit asset information for notes created on specific assets */
   auditAsset?: {
     id: string;

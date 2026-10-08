@@ -16,7 +16,7 @@ import When from "~/components/when/when";
 import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isDirectBookingBlockedByKit } from "~/modules/asset/utils";
 import { ALL_SELECTED_KEY, isSelectingAllItems } from "~/utils/list";
 import { isPersonalOrg } from "~/utils/organization";
@@ -58,7 +58,7 @@ function ConditionalActionsDropdown() {
   const [searchParams] = useSearchParams();
   /** Active / Archived / All view dimension (issue #382). */
   const archivedFilter = searchParams.get("archived") ?? "active";
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const allSelected = isSelectingAllItems(selectedAssets);
   const buttonTitle = `Book selection ${

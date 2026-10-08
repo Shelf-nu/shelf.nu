@@ -16,7 +16,7 @@ import { db } from "~/database/db.server";
 
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   advancedModeLoader,
   simpleModeLoader,
@@ -75,7 +75,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         currentOrganization,
         role,
         canUseBarcodes,
-        canSeeAllCustody,
+        access,
       },
       user,
     ] = await Promise.all([
@@ -114,8 +114,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     });
     const mode = settings.mode;
 
-    /** For base and self service users, we dont allow to view the advanced index */
-    if (mode === "ADVANCED" && ["BASE", "SELF_SERVICE"].includes(role)) {
+    /** The advanced index is a per-role capability; switch back if the role lacks it. */
+    if (mode === "ADVANCED" && !access.policy.ui.advancedAssetIndex) {
       await changeMode({
         userId,
         organizationId,
@@ -142,7 +142,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
+          access,
         })
       : await advancedModeLoader({
           request,
@@ -153,7 +154,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           currentOrganization,
           user,
           settings,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
+          access,
         });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
@@ -375,7 +377,7 @@ function useAssetsEmptyState() {
 }
 
 export default function AssetIndexPage() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
   const emptyStateContent = useAssetsEmptyState();
@@ -396,9 +398,7 @@ export default function AssetIndexPage() {
           </>
         </When>
       </Header>
-      <AssetsList
-        customEmptyStateContent={emptyStateContent}
-      />
+      <AssetsList customEmptyStateContent={emptyStateContent} />
     </div>
   );
 }

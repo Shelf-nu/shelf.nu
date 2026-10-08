@@ -753,6 +753,9 @@ export interface AssetInventoryPdfMeta extends ReportPdfMetaBase {
     location: string | null;
     custodian: string | null;
     valuation: number | null;
+    /** Workspace stock; null means one unit. The PDF value column and the
+     * total multiply by it, matching the on-screen quantity-aware math. */
+    quantity: number | null;
     qrId: string | null;
   }>;
 }
@@ -772,6 +775,9 @@ export interface CustodySnapshotPdfMeta extends ReportPdfMetaBase {
     assignedAt: string;
     daysInCustody: number;
     valuation: number | null;
+    /** Units held in this custody row (`Custody.quantity`); null means one.
+     * The PDF value column and the total multiply by it. */
+    quantity: number | null;
   }>;
 }
 

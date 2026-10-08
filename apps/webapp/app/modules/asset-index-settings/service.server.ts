@@ -1,14 +1,16 @@
 import {
   AssetIndexMode,
-  OrganizationRoles,
   type CustomField,
+  type OrganizationRoles,
   type Prisma,
 } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ShelfError, type ErrorLabel } from "~/utils/error";
+import { ROLE_POLICIES, resolveRole } from "~/utils/permissions/role-access";
 import type { Column, ColumnLabelKey } from "./helpers";
+import { syncCustomFieldColumn } from "./helpers";
 import {
   barcodeFields,
   defaultFields,
@@ -18,21 +20,18 @@ import {
 import { getOrganizationById } from "../organization/service.server";
 
 /**
- * Derive the default asset index mode for a given organization role.
- * BASE and SELF_SERVICE should remain in simple mode; elevated roles default to advanced.
+ * The asset index mode a member gets before saving a preference of their own:
+ * their role's `ui.defaultAssetIndexMode`. No role (a membership still loading)
+ * resolves to BASE, the least privileged role.
+ *
+ * @param role - The membership's effective role
+ * @returns The role's default mode
  */
-function getDefaultModeForRole(
+export function getDefaultModeForRole(
   role?: OrganizationRoles | null
 ): AssetIndexMode {
-  if (
-    !role ||
-    role === OrganizationRoles.BASE ||
-    role === OrganizationRoles.SELF_SERVICE
-  ) {
-    return AssetIndexMode.SIMPLE;
-  }
-
-  return AssetIndexMode.ADVANCED;
+  return ROLE_POLICIES[resolveRole(role ? [role] : [])].ui
+    .defaultAssetIndexMode;
 }
 
 const label: ErrorLabel = "Asset Index Settings";
@@ -274,35 +273,15 @@ export async function updateAssetIndexSettingsAfterCfUpdate({
     });
 
     const updates = settings.map((entry) => {
-      const columns = Array.from(entry.columns as Prisma.JsonArray) as Column[];
-      const cfIndex = columns.findIndex(
-        (col) => col?.name === `cf_${oldField.name}`
-      );
-
-      if (newField.active) {
-        /** Field is missing so we add it */
-        if (cfIndex === -1) {
-          const prevHighestPosition = columns.reduce(
-            (acc, col) => (col.position > acc ? col.position : acc),
-            0
-          );
-          columns.push({
-            name: `cf_${newField.name}`,
-            visible: true,
-            position: prevHighestPosition + 1,
-            cfType: newField.type,
-          });
-        } else {
-          columns[cfIndex] = {
-            name: `cf_${newField.name}`,
-            visible: columns[cfIndex].visible,
-            position: columns[cfIndex].position,
-            cfType: newField.type,
-          };
+      const columns = syncCustomFieldColumn(
+        Array.from(entry.columns as Prisma.JsonArray) as Column[],
+        {
+          oldName: oldField.name,
+          newName: newField.name,
+          active: newField.active,
+          cfType: newField.type,
         }
-      } else {
-        columns.splice(cfIndex, 1);
-      }
+      );
 
       return db.assetIndexSettings.update({
         // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: entry.id comes from the org-scoped findMany on lines 272-274 (where organizationId)

@@ -58,6 +58,42 @@ export async function getNextSequentialId(
 }
 
 /**
+ * The highest number currently issued under `prefix` in this organization.
+ *
+ * Read from the assets themselves rather than from the sequence, because the
+ * two can disagree — the sequence is a counter that anything may have moved,
+ * while the assets are the ids that actually exist and that
+ * `(organizationId, sequentialId)` is unique on.
+ *
+ * Numeric extraction, not string ordering: `SAM-9` sorts after `SAM-10` as
+ * text. Ids under a different prefix count as 0, since they cannot collide
+ * with one issued under this one.
+ *
+ * @param organizationId - The organization to look within
+ * @param prefix - The id prefix to measure, e.g. `SAM`
+ * @returns The highest number issued, or `0` when none has been issued
+ */
+async function getHighestIssuedNumber(
+  organizationId: string,
+  prefix: string
+): Promise<number> {
+  const rows = await db.$queryRaw<[{ max_num: number | null }]>`
+    SELECT COALESCE(MAX(
+      CASE
+        WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
+        THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
+        ELSE 0
+      END
+    ), 0) as max_num
+    FROM "Asset"
+    WHERE "organizationId" = ${organizationId}
+    AND "sequentialId" IS NOT NULL
+  `;
+
+  return rows[0]?.max_num || 0;
+}
+
+/**
  * Estimates what the next sequential ID would be without consuming the sequence
  * Safe to use for previews and UI display purposes
  *
@@ -112,20 +148,7 @@ export async function estimateNextSequentialId(
 
   // Fallback: derive the estimate from the highest existing sequential ID using proper
   // numeric extraction. This avoids string-sorting issues once IDs grow beyond 9999.
-  const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
-    SELECT COALESCE(MAX(
-      CASE
-        WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
-        THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
-        ELSE 0
-      END
-    ), 0) as max_num
-    FROM "Asset"
-    WHERE "organizationId" = ${organizationId}
-    AND "sequentialId" IS NOT NULL
-  `;
-
-  const highestNumber = maxExisting[0]?.max_num || 0;
+  const highestNumber = await getHighestIssuedNumber(organizationId, prefix);
   return formatSequentialId(highestNumber + 1, prefix);
 }
 
@@ -267,22 +290,10 @@ export async function generateBulkSequentialIdsEfficient(
     // Ensure sequence exists
     await createOrganizationSequence(organizationId);
 
-    // First, find the highest existing sequential ID to avoid conflicts
-    // Using proper regex pattern [0-9]+ instead of \d to handle 1000+ assets
-    const maxExisting = await db.$queryRaw<[{ max_num: number | null }]>`
-      SELECT COALESCE(MAX(
-        CASE 
-          WHEN "sequentialId" ~ ('^' || ${prefix} || '-[0-9]+$')
-          THEN CAST(SUBSTRING("sequentialId" FROM (${prefix} || '-([0-9]+)')) AS INTEGER)
-          ELSE 0 
-        END
-      ), 0) as max_num
-      FROM "Asset"
-      WHERE "organizationId" = ${organizationId} 
-      AND "sequentialId" IS NOT NULL
-    `;
-
-    const startingNumber = (maxExisting[0]?.max_num || 0) + 1;
+    // Number from above the highest id already issued, so nothing written here
+    // can collide with one that exists.
+    const startingNumber =
+      (await getHighestIssuedNumber(organizationId, prefix)) + 1;
 
     // The CTE approach is creating duplicates - let's use batch processing instead
     // First, get all asset IDs that need sequential IDs, ordered consistently
@@ -334,18 +345,28 @@ export async function generateBulkSequentialIdsEfficient(
     }
 
     const result = totalUpdated;
-    // Update the sequence to continue from the right place for new assets
-    const totalAssetsWithIds = await db.asset.count({
-      where: {
-        organizationId,
-        sequentialId: { not: null },
-      },
-    });
 
+    // Resume the sequence above the HIGHEST id now issued, never the count of
+    // them. The two agree only while numbering is unbroken: deleting a numbered
+    // asset drops the count and leaves the maximum where it was, so an
+    // organization that has ever deleted one would resume at a number it has
+    // already used. `(organizationId, sequentialId)` is unique, so the next
+    // asset creation collides — and `createAsset` gives up after three
+    // attempts, which a gap of three or more exhausts in front of the user.
+    //
+    // Re-read rather than deriving from `startingNumber + totalUpdated`: the
+    // batch writes are guarded on `sequentialId IS NULL`, so a row filled
+    // concurrently is skipped and the arithmetic would drift below the truth.
+    const highestIssued = await getHighestIssuedNumber(organizationId, prefix);
+
+    // Three-argument form: `is_called = false` makes the next `nextval` return
+    // exactly this value instead of one past it. That is what lets an
+    // organization with no assets still be handed id 1.
     await db.$executeRaw`
       SELECT setval(
-        'org_' || ${organizationId} || '_asset_sequence', 
-        GREATEST(${totalAssetsWithIds}, 1)
+        'org_' || ${organizationId} || '_asset_sequence',
+        ${highestIssued + 1},
+        false
       )
     `;
 

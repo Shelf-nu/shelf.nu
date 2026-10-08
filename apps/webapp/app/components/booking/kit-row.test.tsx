@@ -1,0 +1,610 @@
+/**
+ * Kit row — bulk-selection gating.
+ *
+ * A kit row is the second of the three selection surfaces on the booking's
+ * asset table, beside the asset rows and the select-all header. All three offer
+ * a checkbox only when the acting roles have a bulk action to take at this
+ * booking's status; a selection that can only ever feed an empty menu is dead
+ * UI, and a column that gains or loses a cell shifts every column beside it.
+ *
+ * `useBookingBulkActions` is deliberately NOT mocked here. Its own tests cover
+ * the rule; what these cover is that this row asks it — the half no amount of
+ * hook testing can reach.
+ *
+ * @see {@link file://./kit-row.tsx}
+ * @see {@link file://./../../hooks/use-booking-bulk-actions.ts}
+ */
+import type { ComponentProps, ReactNode } from "react";
+import { BookingStatus, KitStatus, OrganizationRoles } from "@prisma/client";
+import { cleanup, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
+
+import type { AssetWithBooking } from "~/routes/_layout+/bookings.$bookingId.overview.manage-assets";
+import KitRow from "./kit-row";
+
+const mockUseLoaderData = vi.fn();
+const mockUseOrganizationRoles = vi.fn();
+
+// why: the real hook reads the booking off route loader data, which needs a
+// router context these component tests don't mount.
+vi.mock("react-router", async () => {
+  const actual = (await vi.importActual("react-router")) as Record<
+    string,
+    unknown
+  >;
+  return { ...actual, useLoaderData: () => mockUseLoaderData() };
+});
+
+// why: each case picks the roles under test; the checkbox is gated on what
+// those roles may do with a selection.
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => mockUseOrganizationRoles(),
+}));
+
+/** The roles the organization-roles mock returns; the access mock reads the same. */
+let mockRoles: OrganizationRoles[] = [];
+
+// why: the row and the bulk-actions hook read the member's access from the
+// layout loader; drive it from the same roles the organization-roles mock returns
+vi.mock("~/hooks/use-role-access", () => ({
+  useRoleAccess: () => accessFor(mockRoles),
+}));
+
+// why: useCurrentOrganization reads route loader data under the hood; a minimal
+// org shape keeps the code-badge resolver receiving valid input.
+vi.mock("~/hooks/use-current-organization", () => ({
+  useCurrentOrganization: () => ({
+    barcodesEnabled: false,
+    qrIdDisplayPreference: "QR_ID",
+  }),
+}));
+
+// why: the checkbox under test — stubbed to a bare cell so its presence is
+// observable without pulling in the selection atoms.
+vi.mock("../list/bulk-actions/bulk-list-item-checkbox", () => ({
+  default: () => <td data-testid="bulk-checkbox" />,
+}));
+
+// why: Button renders a react-router Link, which needs a router context these
+// component tests deliberately don't mount.
+vi.mock("../shared/button", () => ({
+  Button: ({ children }: { children: ReactNode }) => (
+    <a href="/test">{children}</a>
+  ),
+}));
+
+// why: image rendering resolves signed URLs and is irrelevant to gating.
+vi.mock("../kits/kit-image", () => ({ default: () => <div /> }));
+
+// why: the row's Remove menu pulls in dialogs and a fetcher; a marker is enough
+// to observe whether the row offers it. A span, not a cell, so the
+// column-alignment test counts only the row's own cells.
+vi.mock("./kit-row-actions-dropdown", () => ({
+  default: () => <span data-testid="kit-row-actions" />,
+}));
+
+// why: expanded rows render the asset list, which has its own test file.
+vi.mock("./list-asset-content", () => ({ default: () => <tr /> }));
+
+// `status` is a KitStatus and the row reads only these fields; the cast keeps
+// the fixture to what the component actually touches.
+const kit = {
+  id: "kit-1",
+  name: "Camera Kit",
+  image: null,
+  imageExpiration: null,
+  status: KitStatus.AVAILABLE,
+  category: null,
+  location: null,
+  qrCodes: [],
+  barcodes: [],
+} as ComponentProps<typeof KitRow>["kit"];
+
+const assets = [
+  { id: "asset-1", title: "Camera", status: "AVAILABLE", bookings: [] },
+] as unknown as AssetWithBooking[];
+
+/** Renders one collapsed kit row on a booking in `status`, as `roles`. */
+const renderRow = (status: BookingStatus, roles: OrganizationRoles[]) => {
+  mockRoles = roles;
+  mockUseOrganizationRoles.mockReturnValue(roles);
+  mockUseLoaderData.mockReturnValue({
+    booking: { id: "booking-1", status, assets: [], custodianUser: null },
+  });
+
+  render(
+    <table>
+      <tbody>
+        <KitRow
+          kit={kit}
+          isExpanded={false}
+          bookingStatus={status}
+          bookingId="booking-1"
+          assets={assets}
+          partialCheckinDetails={{}}
+          shouldShowCheckinColumns={false}
+          partialCheckoutDetails={{}}
+          shouldShowCheckoutColumns={false}
+        />
+      </tbody>
+    </table>
+  );
+};
+
+describe("KitRow bulk-selection checkbox", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("offers a checkbox to a BASE user on a DRAFT booking", () => {
+    renderRow(BookingStatus.DRAFT, [OrganizationRoles.BASE]);
+
+    expect(screen.getByTestId("bulk-checkbox")).toBeInTheDocument();
+  });
+
+  /**
+   * BASE may not remove past DRAFT and holds neither check-in nor check-out, so
+   * a selection here has nothing to feed. This row was the surface that kept
+   * its checkbox after the asset rows lost theirs.
+   */
+  it("withholds it from a BASE user once the booking is reserved", () => {
+    renderRow(BookingStatus.RESERVED, [OrganizationRoles.BASE]);
+
+    expect(screen.queryByTestId("bulk-checkbox")).not.toBeInTheDocument();
+  });
+
+  it("keeps it for ADMIN on a live booking", () => {
+    renderRow(BookingStatus.ONGOING, [OrganizationRoles.ADMIN]);
+
+    expect(screen.getByTestId("bulk-checkbox")).toBeInTheDocument();
+  });
+
+  /**
+   * Status is held constant and only the role varies, so the checkbox is the
+   * single difference between the two renders — the row's other columns come
+   * and go with status, which would otherwise swamp the comparison.
+   */
+  it("keeps the column aligned when the checkbox is withheld", () => {
+    renderRow(BookingStatus.RESERVED, [OrganizationRoles.ADMIN]);
+    const withCheckbox = screen.getAllByRole("cell").length;
+
+    cleanup();
+
+    renderRow(BookingStatus.RESERVED, [OrganizationRoles.BASE]);
+    const withoutCheckbox = screen.getAllByRole("cell").length;
+
+    // An empty cell, not a missing one: dropping it would shift every column
+    // beside it for exactly the roles this gating targets.
+    expect(withoutCheckbox).toBe(withCheckbox);
+  });
+});
+
+/**
+ * The kit row's Remove menu follows the server's remove gate: the
+ * booking:update grant and the statuses the caller's policy lists.
+ */
+describe("KitRow Remove menu", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    // [roles, status, shown]
+    [[OrganizationRoles.BASE], BookingStatus.DRAFT, true],
+    [[OrganizationRoles.BASE], BookingStatus.RESERVED, false],
+    [[OrganizationRoles.SELF_SERVICE], BookingStatus.RESERVED, true],
+    [[OrganizationRoles.SELF_SERVICE], BookingStatus.ONGOING, false],
+    [[OrganizationRoles.ADMIN], BookingStatus.ONGOING, true],
+    [[OrganizationRoles.ADMIN], BookingStatus.OVERDUE, true],
+    [[OrganizationRoles.ADMIN], BookingStatus.COMPLETE, false],
+  ])("%j on a %s booking -> menu shown: %s", (roles, status, shown) => {
+    renderRow(status, roles);
+
+    expect(Boolean(screen.queryByTestId("kit-row-actions"))).toBe(shown);
+  });
+});
+
+/**
+ * "Already booked" signal for a kit made only of QUANTITY_TRACKED members.
+ *
+ * `hasAssetBookingConflicts` exempts QUANTITY_TRACKED assets — several
+ * bookings may legitimately share one asset's free pool — so a QT-only kit
+ * needs its own kit-driven-slice check (`hasKitBookingConflicts`) to ever
+ * show this badge. `~/modules/booking/helpers` is deliberately NOT mocked
+ * here, unlike `test/components/booking/availability-label.test.tsx`, so the
+ * real conflict rule runs.
+ */
+describe("KitRow already-booked signal (QT-only kit)", () => {
+  const checkedOutKit = {
+    id: "kit-1",
+    name: "Fabric Kit",
+    image: null,
+    imageExpiration: null,
+    status: KitStatus.CHECKED_OUT,
+    category: null,
+    location: null,
+    qrCodes: [],
+    barcodes: [],
+  } as ComponentProps<typeof KitRow>["kit"];
+
+  // A kit another booking has only RESERVED is still AVAILABLE: reserving never
+  // changes `Kit.status`.
+  const availableKit = {
+    ...checkedOutKit,
+    status: KitStatus.AVAILABLE,
+  } as ComponentProps<typeof KitRow>["kit"];
+
+  const renderKitRow = (
+    assets: AssetWithBooking[],
+    kit: ComponentProps<typeof KitRow>["kit"] = checkedOutKit
+  ) => {
+    mockUseOrganizationRoles.mockReturnValue([OrganizationRoles.ADMIN]);
+    mockRoles = [OrganizationRoles.ADMIN];
+    // RESERVED (not ONGOING/OVERDUE): the "Already booked" badge is
+    // withheld while THIS booking is itself in progress, since a kit it
+    // already holds needs no such warning.
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: BookingStatus.RESERVED,
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <KitRow
+            kit={kit}
+            isExpanded={false}
+            bookingStatus={BookingStatus.RESERVED}
+            bookingId="booking-1"
+            assets={assets}
+            partialCheckinDetails={{}}
+            shouldShowCheckinColumns={false}
+            partialCheckoutDetails={{}}
+            shouldShowCheckoutColumns={false}
+          />
+        </tbody>
+      </table>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("shows 'Already booked' when the kit is held on another overlapping booking through its kit slice", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Kit-driven slice of THIS kit ("kit-1"), still out: checked out
+            // and not yet checked in, on an ONGOING booking that overlaps.
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  /**
+   * A kit can be both double-booked and holding a not-bookable asset. They are
+   * different problems with different fixes, and they now occupy different
+   * columns, so neither hides the other.
+   */
+  it("shows 'Unavailable' and 'Already booked' together when both apply", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: false,
+        bookingAssets: [
+          {
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for a standalone row of the same asset on another booking", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Standalone slice (`assetKitId` null) — the asset's free pool,
+            // not a slice of this kit, so it must not trip the kit signal.
+            assetKitId: null,
+            sourceKitId: null,
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for a kit member detached mid-booking on another overlapping booking", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Detached: the member was removed from "kit-1" mid-booking, so
+            // `assetKitId` is cleared while `sourceKitId` still names the
+            // kit. This is a standalone row now, not a live slice of the
+            // kit, even though the other booking overlaps and is RESERVED.
+            assetKitId: null,
+            sourceKitId: "kit-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Already booked' for an AVAILABLE kit that another overlapping booking has reserved", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // Kit-driven slice of "kit-1" on a RESERVED booking that overlaps:
+            // nothing has left yet, so the kit itself still reads AVAILABLE.
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: null,
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets, availableKit);
+
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for an AVAILABLE kit whose other booking has returned it", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        bookingAssets: [
+          {
+            // The overlapping ONGOING booking took the kit out and checked it
+            // back in, so it no longer holds it.
+            assetKitId: "ak-1",
+            sourceKitId: "kit-1",
+            checkedOutAt: new Date("2024-01-01T09:00:00Z"),
+            checkedInAt: new Date("2024-01-02T09:00:00Z"),
+            booking: { id: "other-booking", status: BookingStatus.ONGOING },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets, availableKit);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Already booked' for a kit slice that names the kit only through its membership", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        // The asset's own membership of "kit-1" is what identifies the slice.
+        assetKits: [{ id: "ak-1", kitId: "kit-1" }],
+        bookingAssets: [
+          {
+            // A live kit-driven slice written without `sourceKitId`.
+            assetKitId: "ak-1",
+            sourceKitId: null,
+            checkedOutAt: null,
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.getByText("Already booked")).toBeInTheDocument();
+  });
+
+  it("does not show 'Already booked' for a slice held through the asset's membership of another kit", () => {
+    const assets = [
+      {
+        id: "asset-1",
+        title: "Fabric roll",
+        type: "QUANTITY_TRACKED",
+        status: "AVAILABLE",
+        availableToBook: true,
+        // The asset belongs to both kits; the other booking holds it via "kit-2".
+        assetKits: [
+          { id: "ak-1", kitId: "kit-1" },
+          { id: "ak-2", kitId: "kit-2" },
+        ],
+        bookingAssets: [
+          {
+            assetKitId: "ak-2",
+            sourceKitId: null,
+            checkedOutAt: null,
+            checkedInAt: null,
+            booking: { id: "other-booking", status: BookingStatus.RESERVED },
+          },
+        ],
+      },
+    ] as unknown as AssetWithBooking[];
+
+    renderKitRow(assets);
+
+    expect(screen.queryByText("Already booked")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The collapsed kit header's "unavailable" marker.
+ *
+ * `Asset.availableToBook` is an admin flag, independent of `Asset.status`: a
+ * flagged asset still reads AVAILABLE everywhere status is shown, while the
+ * Reserve guard refuses the whole booking over it. The kit header is the only
+ * place that fact can surface without expanding the kit, so an operator facing
+ * a disabled Reserve button has nothing else to go on.
+ *
+ * `KitStatusBadge` is deliberately NOT mocked here — it owns the marker, and
+ * the defect this covers was the row passing it a constant.
+ */
+describe("KitRow unavailable-member marker", () => {
+  const kit = {
+    id: "kit-1",
+    name: "Lighting Kit",
+    image: null,
+    imageExpiration: null,
+    status: KitStatus.AVAILABLE,
+    category: null,
+    location: null,
+    qrCodes: [],
+    barcodes: [],
+  } as ComponentProps<typeof KitRow>["kit"];
+
+  function member(overrides: Partial<AssetWithBooking>): AssetWithBooking {
+    return {
+      id: "asset-1",
+      title: "Barndoors",
+      status: "AVAILABLE",
+      availableToBook: true,
+      bookings: [],
+      ...overrides,
+    } as unknown as AssetWithBooking;
+  }
+
+  const renderRow = (assets: AssetWithBooking[]) => {
+    mockUseOrganizationRoles.mockReturnValue([OrganizationRoles.ADMIN]);
+    mockRoles = [OrganizationRoles.ADMIN];
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: BookingStatus.DRAFT,
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <KitRow
+            kit={kit}
+            isExpanded={false}
+            bookingStatus={BookingStatus.DRAFT}
+            bookingId="booking-1"
+            assets={assets}
+            partialCheckinDetails={{}}
+            shouldShowCheckinColumns={false}
+            partialCheckoutDetails={{}}
+            shouldShowCheckoutColumns={false}
+          />
+        </tbody>
+      </table>
+    );
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("marks the kit when one of its members is not bookable", () => {
+    renderRow([
+      member({ id: "asset-1", title: "Barndoors", availableToBook: false }),
+      member({ id: "asset-2", title: "Light", availableToBook: true }),
+    ]);
+
+    // Spelled out beside the kit's status chip. An icon-only marker there is
+    // too easy to miss next to a green "Available" chip, which is exactly how
+    // a flagged asset stayed hidden on a booking made entirely of kits.
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  });
+
+  it("leaves a kit alone when every member is bookable", () => {
+    renderRow([
+      member({ id: "asset-1", availableToBook: true }),
+      member({ id: "asset-2", availableToBook: true }),
+    ]);
+
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
+  });
+
+  /**
+   * A flagged asset keeps its AVAILABLE status, which is exactly why the
+   * status chip cannot carry this signal: the two say opposite things about
+   * the same row and both are correct.
+   */
+  it("marks the kit even though the flagged member reads as available", () => {
+    renderRow([
+      member({ id: "asset-1", status: "AVAILABLE", availableToBook: false }),
+    ]);
+
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  });
+});

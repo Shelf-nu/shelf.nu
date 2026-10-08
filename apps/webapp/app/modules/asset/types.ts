@@ -18,6 +18,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
+import type { BackupPlacement } from "./backup-placements";
 import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
@@ -143,7 +144,11 @@ export interface CreateAssetFromBackupImportPayload
   tags: {
     name: string;
   }[];
-  location:
+  /** Manual placements, by location name. Absent when the asset had none. */
+  assetLocations?: BackupPlacement[];
+  /** Only in a backup written before placements existed: the asset's one
+   * location. See `placementsForRestore`. */
+  location?:
     | {
         name: string;
         description?: string;
@@ -176,9 +181,12 @@ export type AdvancedAssetBooking = Pick<
   custodianTeamMember?: Pick<TeamMember, "id" | "name">;
   custodianUser?: Pick<
     User,
-    "id" | "firstName" | "lastName" | "profilePicture"
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
   >;
-  creator?: Pick<User, "id" | "firstName" | "lastName" | "profilePicture">;
+  creator?: Pick<
+    User,
+    "id" | "firstName" | "lastName" | "displayName" | "profilePicture"
+  >;
   /** BookingAsset.assetKitId of THIS slice: null = standalone (free pool),
    * non-null = kit-driven (FK → AssetKit.id). Availability view only. */
   assetKitId?: string | null;
@@ -188,6 +196,15 @@ export type AdvancedAssetBooking = Pick<
   /** Kit name for THIS slice (null when standalone), resolved via
    * AssetKit → Kit.name. Availability view only. */
   kitName?: string | null;
+  /** BookingAsset.checkedOutAt of THIS slice: null until the slice goes out.
+   * Advanced mode delivers an ISO string (jsonb), simple mode a Date.
+   * Availability view only. */
+  checkedOutAt?: string | Date | null;
+  /** BookingAsset.checkedInAt of THIS slice: set once the slice is fully
+   * reconciled, cleared again by a second departure. The calendar reads it
+   * together with `checkedOutAt` to decide whether the bar reads as returned.
+   * Availability view only. */
+  checkedInAt?: string | Date | null;
 };
 
 /** Type for advanced index query. We cannot infer it because we do a raw query so we need to create it ourselves. */
@@ -264,6 +281,7 @@ export type AdvancedIndexAsset = Pick<
             id: string;
             firstName: string | null;
             lastName: string | null;
+            displayName: string | null;
             profilePicture: string | null;
             email: string;
           } | null;

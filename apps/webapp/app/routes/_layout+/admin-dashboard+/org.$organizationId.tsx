@@ -28,6 +28,7 @@ import {
   toggleWorkspaceDisabled,
   toggleBarcodeEnabled,
   toggleAuditEnabled,
+  setRequireSsoLogin,
 } from "~/modules/organization/service.server";
 import { createDefaultWorkingHours } from "~/modules/working-hours/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -39,6 +40,7 @@ import { getParams, payload, error, parseData } from "~/utils/http.server";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { validateDomains } from "~/utils/sso.server";
+import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
   { title: appendToMetaTitle("Organization details") },
@@ -116,6 +118,7 @@ export const action = async ({
           "disableWorkspace",
           "toggleBarcodes",
           "toggleAudits",
+          "toggleRequireSsoLogin",
         ]),
       })
     );
@@ -182,6 +185,26 @@ export const action = async ({
 
         return payload({
           message: `Audits ${auditsEnabled ? "enabled" : "disabled"}`,
+        });
+      }
+      case "toggleRequireSsoLogin": {
+        const { requireSsoLogin } = parseData(
+          await request.formData(),
+          z.object({
+            requireSsoLogin: z
+              .string()
+              .transform((val) => val === "on")
+              .default("false"),
+          })
+        );
+        await setRequireSsoLogin({
+          organizationId,
+          requireSsoLogin,
+          actorUserId: userId,
+        });
+
+        return payload({
+          message: `Require SSO login ${requireSsoLogin ? "on" : "off"}`,
         });
       }
       case "updateSsoDetails": {
@@ -288,7 +311,7 @@ export default function OrgPage() {
         </Button>
         <h3>
           {" "}
-          Owner: {organization.owner.firstName} {organization.owner.lastName} -{" "}
+          Owner: {resolveUserDisplayName(organization.owner)} -{" "}
           {organization.owner.email}
         </h3>
       </div>
@@ -502,6 +525,42 @@ export default function OrgPage() {
                 </div>
               </div>
             </Form>
+            {organization.ssoDetails ? (
+              <>
+                <hr className="border-1 my-4 border-gray-700" />
+                <h4>Require SSO login</h4>
+                <p id="require-sso-login-description">
+                  When on, everyone on this workspace's SSO domain must sign in
+                  with SSO, except the workspace owner until converted. Turn off
+                  only while setting up and testing SSO.
+                </p>
+                <fetcher.Form
+                  method="post"
+                  onChange={(e) => fetcher.submit(e.currentTarget)}
+                >
+                  <div className="flex justify-between gap-3">
+                    <div>
+                      <p className="text-[14px] font-medium text-gray-700">
+                        Require SSO login
+                      </p>
+                    </div>
+                    <Switch
+                      name={"requireSsoLogin"}
+                      disabled={isFormProcessing(fetcher.state)}
+                      defaultChecked={organization.ssoDetails.requireSsoLogin}
+                      title={"Toggle Require SSO login"}
+                      aria-label="Require SSO login"
+                      aria-describedby="require-sso-login-description"
+                    />
+                    <input
+                      type="hidden"
+                      value="toggleRequireSsoLogin"
+                      name="intent"
+                    />
+                  </div>
+                </fetcher.Form>
+              </>
+            ) : null}
           </div>
         ) : null}
         <div className="w-[400px] bg-gray-200 p-4">

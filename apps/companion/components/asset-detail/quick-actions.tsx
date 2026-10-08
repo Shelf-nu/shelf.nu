@@ -6,10 +6,12 @@ import {
   ActivityIndicator,
   Platform,
   ActionSheetIOS,
+  Alert,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Ionicons } from "@expo/vector-icons";
 import type { AssetDetail } from "@/lib/api";
+import { kitMemberCustodyBlock } from "@/lib/kit-member-custody";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -26,6 +28,19 @@ interface QuickActionsProps {
   setShowOverflowMenu: (show: boolean) => void;
   /** Role can change custody (assign/release). Server-enforced; this hides the button. */
   canCustody: boolean;
+  /**
+   * Whether this member may release the asset's current custody. A member
+   * who may only take custody for themselves may only release their own, so
+   * the button is withheld on someone else's custody rather than offered and
+   * refused. Defaults to true.
+   */
+  canReleaseCustody?: boolean;
+  /**
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the button says "Take Custody"
+   * instead of "Assign Custody" (web parity).
+   */
+  isSelfService?: boolean;
   /** Role can update the asset (location/edit). */
   canUpdate: boolean;
   /** Role can delete the asset. */
@@ -57,6 +72,8 @@ export const QuickActions = memo(function QuickActions({
   isActionLoading,
   setShowOverflowMenu,
   canCustody,
+  canReleaseCustody = true,
+  isSelfService = false,
   canUpdate,
   canDelete,
   isQtyTracked = false,
@@ -70,7 +87,9 @@ export const QuickActions = memo(function QuickActions({
   // QUANTITY_TRACKED: the primary is always Assign (release lives on the
   // per-holder rows), regardless of status — a partially-custodied QT asset
   // can be IN_CUSTODY yet still have units to assign.
-  const showPrimary = canCustody && (isQtyTracked || hasCustody || isAvailable);
+  const showPrimary =
+    canCustody &&
+    (isQtyTracked || (hasCustody ? canReleaseCustody : isAvailable));
   const showSecondary = canUpdate || canDelete;
   // Disabled only when the server SENT a cap and it is exhausted; an absent
   // cap (older server) keeps the button live and lets the server validate.
@@ -78,6 +97,10 @@ export const QuickActions = memo(function QuickActions({
     isQtyTracked &&
     typeof custodyAvailable === "number" &&
     custodyAvailable <= 0;
+  // An individually tracked kit member takes custody through its kit. The
+  // button stays tappable so a tap can say why; the server refuses the request
+  // either way.
+  const kitBlock = kitMemberCustodyBlock(asset);
 
   if (isActionLoading) {
     return (
@@ -113,7 +136,11 @@ export const QuickActions = memo(function QuickActions({
               }}
               disabled={assignQtyDisabled}
               activeOpacity={0.7}
-              accessibilityLabel="Assign custody of asset"
+              accessibilityLabel={
+                isSelfService
+                  ? "Take custody of asset"
+                  : "Assign custody of asset"
+              }
               accessibilityRole="button"
               accessibilityState={{ disabled: assignQtyDisabled }}
             >
@@ -122,7 +149,9 @@ export const QuickActions = memo(function QuickActions({
                 size={20}
                 color={colors.primaryForeground}
               />
-              <Text style={styles.primaryActionText}>Assign Custody</Text>
+              <Text style={styles.primaryActionText}>
+                {isSelfService ? "Take Custody" : "Assign Custody"}
+              </Text>
             </TouchableOpacity>
             {assignQtyDisabled && (
               <Text style={styles.assignDisabledHint}>
@@ -149,23 +178,43 @@ export const QuickActions = memo(function QuickActions({
             <Text style={styles.primaryActionText}>Release Custody</Text>
           </TouchableOpacity>
         ) : isAvailable ? (
-          <TouchableOpacity
-            style={styles.primaryActionBlack}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              onAssignCustody();
-            }}
-            activeOpacity={0.7}
-            accessibilityLabel="Assign custody of asset"
-            accessibilityRole="button"
-          >
-            <Ionicons
-              name="person-add-outline"
-              size={20}
-              color={colors.primaryForeground}
-            />
-            <Text style={styles.primaryActionText}>Assign Custody</Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={[
+                styles.primaryActionBlack,
+                kitBlock && styles.primaryActionDisabled,
+              ]}
+              onPress={() => {
+                if (kitBlock) {
+                  Alert.alert(kitBlock.title, kitBlock.reason);
+                  return;
+                }
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onAssignCustody();
+              }}
+              activeOpacity={0.7}
+              accessibilityLabel={
+                isSelfService
+                  ? "Take custody of asset"
+                  : "Assign custody of asset"
+              }
+              accessibilityHint={kitBlock?.reason}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !!kitBlock }}
+            >
+              <Ionicons
+                name="person-add-outline"
+                size={20}
+                color={colors.primaryForeground}
+              />
+              <Text style={styles.primaryActionText}>
+                {isSelfService ? "Take Custody" : "Assign Custody"}
+              </Text>
+            </TouchableOpacity>
+            {kitBlock && (
+              <Text style={styles.assignDisabledHint}>{kitBlock.reason}</Text>
+            )}
+          </>
         ) : null)}
 
       {/* Secondary actions row */}
@@ -176,7 +225,9 @@ export const QuickActions = memo(function QuickActions({
               style={styles.secondaryAction}
               onPress={onLocationPress}
               activeOpacity={0.7}
-              accessibilityLabel="Update location"
+              accessibilityLabel={
+                isQtyTracked ? "Manage placements" : "Update location"
+              }
               accessibilityRole="button"
             >
               <Ionicons
@@ -184,8 +235,14 @@ export const QuickActions = memo(function QuickActions({
                 size={18}
                 color={colors.foreground}
               />
+              {/* QUANTITY_TRACKED opens the placements editor (spread across
+                  locations); INDIVIDUAL opens the single-location move flow. */}
               <Text style={styles.secondaryActionText}>
-                {asset.location ? "Move" : "Location"}
+                {isQtyTracked
+                  ? "Placements"
+                  : asset.location
+                  ? "Move"
+                  : "Location"}
               </Text>
             </TouchableOpacity>
           )}

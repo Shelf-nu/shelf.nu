@@ -33,14 +33,8 @@ type EditAuditDialogProps = {
     description: string | null;
     dueDate: Date | null;
     status: AuditStatus;
-    assignments: Array<{
-      userId: string;
-      user: {
-        id: string;
-        firstName: string | null;
-        lastName: string | null;
-      };
-    }>;
+    /** Only `userId` is read — it maps back to the assignee's team member. */
+    assignments: Array<{ userId: string }>;
   };
   teamMembers: Array<{
     id: string;

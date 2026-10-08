@@ -8,14 +8,51 @@
  * `items[].assets` are render-ready. Must work on serialized data (Date fields
  * are strings after the network / hydration); it never constructs Dates itself.
  *
+ * Also orders the mobile booking detail's assets, which arrive one row per
+ * asset rather than one per slice, by the same checked-out rule
+ * ({@link sortCollapsedBookingAssets}), so the phone and the web list a booking
+ * in the same order.
+ *
  * @see {@link file://./helpers.ts} filterBookingAssets / groupAndSortAssetsByKit
  * @see {@link file://../../utils/booking-assets.ts} resolveBookingRowQtyState
+ * @see {@link file://../../routes/api+/mobile+/bookings.$bookingId.ts} the mobile booking detail
  * @see docs/superpowers/specs/2026-06-01-booking-asset-search-in-memory-design.md
  */
 import { AssetStatus } from "@prisma/client";
 import type { PartialCheckinDetailsType } from "~/modules/booking/service.server";
+import type { BookingRowStatusInput } from "~/utils/booking-assets";
 import { resolveBookingRowQtyState } from "~/utils/booking-assets";
 import { filterBookingAssets, groupAndSortAssetsByKit } from "./helpers";
+
+/**
+ * Whether a booking row belongs in the Status sort's checked-out (bottom)
+ * bucket.
+ *
+ * A row is checked out when its RESOLVED badge status is CHECKED_OUT, from the
+ * same shared resolver the row badge uses, so the badge a user sees and the
+ * bucket the row sorts into never disagree. The resolver reads the per-slice
+ * counters first: a fully-checked-out kit slice sinks even though the
+ * multi-slice asset's GLOBAL status has not flipped, while a QT row with a
+ * partial return underway (or on a DRAFT/RESERVED booking) stays on top as its
+ * actionable state.
+ *
+ * @param row - One booking row (one `BookingAsset` slice) with its per-slice
+ *   quantity counters.
+ * @param partialCheckinDetails - The booking's partial check-in records, keyed
+ *   by asset id.
+ * @param bookingStatus - The parent booking's status.
+ * @returns `true` when the row sorts into the checked-out bucket.
+ */
+function isBookingRowCheckedOut(
+  row: BookingRowStatusInput,
+  partialCheckinDetails: PartialCheckinDetailsType,
+  bookingStatus: string
+): boolean {
+  return (
+    resolveBookingRowQtyState(row, partialCheckinDetails, bookingStatus)
+      .contextStatus === AssetStatus.CHECKED_OUT
+  );
+}
 
 /** A rendered pagination row: a grouped kit (with its assets) or a lone asset. */
 export type BookingPaginationItem<TAsset, TKit> = {
@@ -79,21 +116,15 @@ export function shapeBookingAssets<
   // 1. Search-filter (with kit re-expansion).
   const filtered = filterBookingAssets(rawAssets, search);
 
-  // 2. Group by kit + sort. A row counts as "checked out" (bottom bucket) when
-  //    its RESOLVED badge status is CHECKED_OUT — computed by the SAME shared
-  //    resolver the row badge uses, so the badge a user sees and the bucket the
-  //    row sorts into can never disagree. This covers per-slice QT correctly:
-  //    a fully-checked-out kit slice sinks even though the multi-slice asset's
-  //    GLOBAL status hasn't flipped, while a QT row with a partial return
-  //    underway (or DRAFT/RESERVED) stays on top as its actionable state.
+  // 2. Group by kit + sort. A row sorts into the checked-out (bottom) bucket
+  //    when its resolved badge status is CHECKED_OUT.
   const sortedAssets = groupAndSortAssetsByKit(
     filtered,
     orderBy,
     orderDirection,
     {
       isCheckedOut: (asset) =>
-        resolveBookingRowQtyState(asset, partialCheckinDetails, bookingStatus)
-          .contextStatus === AssetStatus.CHECKED_OUT,
+        isBookingRowCheckedOut(asset, partialCheckinDetails, bookingStatus),
     }
   );
 
@@ -135,4 +166,82 @@ export function shapeBookingAssets<
     totalKits: paginationItems.filter((i) => i.type === "kit").length,
     assetsCount: paginationItems.filter((i) => i.type === "asset").length,
   };
+}
+
+/**
+ * A booking row that collapses every slice one asset holds on the booking, as
+ * the mobile booking detail sends it.
+ */
+type CollapsedBookingAsset = Parameters<
+  typeof groupAndSortAssetsByKit
+>[0][number] & {
+  /** The asset's `AssetType`; quantity-tracked slices are judged by units. */
+  type: string;
+  /** One entry per `BookingAsset` slice the row holds, with its booked units. */
+  slices: ReadonlyArray<{ bookingAssetId: string; quantity: number }>;
+};
+
+/** Inputs for {@link sortCollapsedBookingAssets}. */
+export interface SortCollapsedBookingAssetsParams<TAsset> {
+  /** The booking's rows, one per asset. */
+  assets: TAsset[];
+  /** Units each quantity-tracked slice has checked out, by `BookingAsset.id`. */
+  checkedOutByBookingAsset: ReadonlyMap<string, number>;
+  /**
+   * Units each quantity-tracked slice has had returned, consumed, lost or
+   * damaged, by `BookingAsset.id`.
+   */
+  dispositionedByBookingAsset: ReadonlyMap<string, number>;
+  /** The booking's partial check-in records, keyed by asset id. */
+  partialCheckinDetails: PartialCheckinDetailsType;
+  /** Parent booking status — drives booking-context checked-out resolution. */
+  bookingStatus: string;
+}
+
+/**
+ * Orders rows that each collapse one asset's slices in the booking overview's
+ * default order: Status, descending. Rows still to check out come first and
+ * checked-out rows sink to the bottom; a kit sorts as one unit with its members
+ * kept together, and ties go A→Z by name (a kit by its own name).
+ *
+ * Each slice is judged by the same rule the booking overview applies to its
+ * rows. A collapsed row counts as checked out only when every slice it holds
+ * does, just as a kit counts as checked out only when every member does. A
+ * quantity-tracked asset booked both standalone and through a kit is a single
+ * row here, so it stays on top while any of its slices still has units to
+ * check out. Every other row holds one slice and is judged exactly as the
+ * booking overview judges it.
+ *
+ * @returns The rows in display order, with each kit's members contiguous.
+ */
+export function sortCollapsedBookingAssets<
+  TAsset extends CollapsedBookingAsset,
+>({
+  assets,
+  checkedOutByBookingAsset,
+  dispositionedByBookingAsset,
+  partialCheckinDetails,
+  bookingStatus,
+}: SortCollapsedBookingAssetsParams<TAsset>): TAsset[] {
+  // The booking overview's default sort. The phone offers no sort control, so
+  // this is the only order it shows.
+  return groupAndSortAssetsByKit(assets, "status", "desc", {
+    isCheckedOut: (asset) =>
+      asset.slices.every((slice) =>
+        isBookingRowCheckedOut(
+          {
+            id: asset.id,
+            status: asset.status,
+            type: asset.type,
+            bookedQuantity: slice.quantity,
+            checkedOutQuantity:
+              checkedOutByBookingAsset.get(slice.bookingAssetId) ?? 0,
+            dispositionedQuantity:
+              dispositionedByBookingAsset.get(slice.bookingAssetId) ?? 0,
+          },
+          partialCheckinDetails,
+          bookingStatus
+        )
+      ),
+  });
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Prisma } from "@prisma/client";
-import { KitStatus, OrganizationRoles } from "@prisma/client";
+import { KitStatus } from "@prisma/client";
 import type {
   MetaFunction,
   LoaderFunctionArgs,
@@ -34,11 +34,12 @@ import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import { db } from "~/database/db.server";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useIsAvailabilityView } from "~/hooks/use-is-availability-view";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import type { EntityForCodeResolution } from "~/modules/barcode/display";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
   getPaginatedAndFilterableKits,
@@ -75,13 +76,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, canSeeAllCustody, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.kit,
       action: PermissionAction.read,
     });
-    const isSelfService = role === OrganizationRoles.SELF_SERVICE;
+    const assignsSelfOnly = access.custody.assign === "self";
 
     const searchParams = getCurrentSearchParams(request);
     const hasActiveFilters = computeHasActiveFilters(searchParams);
@@ -109,7 +110,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const custodianFilterWhere = {
       deletedAt: null,
       organizationId,
-      userId: !canSeeAllCustody ? userId : undefined,
+      userId: !access.custody.seeAll ? userId : undefined,
     };
 
     let [
@@ -123,7 +124,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         organizationId,
         // Governs `?teamMember=`: a viewer who may not see all custody may
         // only ever filter this list by their own custody.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
@@ -150,6 +151,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
                   // PrismaClientValidationError on every kit search with
                   // ?view=availability (Sentry SHELF-WEBAPP-1P1).
                   ...(view === "availability" && {
+                    // why: out of this rule — a kit bar means "every member
+                    // slice returned", which needs a per-kit fold this select
+                    // does not carry, so kit bars keep the booking's period.
                     bookingAssets: {
                       where: {
                         booking: {
@@ -242,7 +246,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
     ]);
 
-    const currentUserTeamMember = isSelfService
+    const currentUserTeamMember = assignsSelfOnly
       ? teamMembers.find((tm) => tm.userId === userId) ?? null
       : null;
 
@@ -268,7 +272,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         // name and `user.email` shipped in this payload regardless, so a
         // restricted viewer read them straight out of `/kits.data` while the
         // page showed "private". Redact server-side.
-        items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+        items: redactCustodianForViewer(kits, {
+          canSeeAllCustody: access.custody.seeAll,
+          userId,
+        }),
         page,
         totalItems: totalKits,
         totalPages,
@@ -307,14 +314,27 @@ export const handle = {
 
 export default function KitsIndexPage() {
   const { items } = useLoaderData<typeof loader>();
-  const { roles, isBase } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  /**
+   * The bulk menu holds custody, edit and delete actions; any one opens it.
+   * Each item inside stays gated on its own permission.
+   */
+  const canBulkAct = userHasPermission({
+    roles,
+    entity: PermissionEntity.kit,
+    action: [
+      PermissionAction.custody,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+  });
   const canCreateKit = userHasPermission({
     roles,
     entity: PermissionEntity.kit,
     action: PermissionAction.create,
   });
   const { isAvailabilityView, shouldShowAvailabilityView } =
-    useIsAvailabilityView();
+    useAssetIndexView();
   const { resources, events } = useKitAvailabilityData(items);
 
   const organization = useCurrentOrganization();
@@ -405,12 +425,16 @@ export default function KitsIndexPage() {
                       to={`/kits/${resource.id}/assets`}
                       title={resource.title}
                     />
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <KitStatusBadge
                         status={resource.extendedProps?.status}
                         availableToBook={
                           resource.extendedProps?.availableToBook
                         }
+                      />
+                      <KitCalendarCodeBadge
+                        qrCodes={resource.extendedProps?.qrCodes}
+                        barcodes={resource.extendedProps?.barcodes}
                       />
                     </div>
                   </div>
@@ -425,7 +449,7 @@ export default function KitsIndexPage() {
           <List
             className="overflow-x-visible md:overflow-x-auto"
             ItemComponent={ListContent}
-            bulkActions={isBase ? undefined : <BulkActionsDropdown />}
+            bulkActions={canBulkAct ? <BulkActionsDropdown /> : undefined}
             customEmptyStateContent={{
               title: "No kits yet",
               text: "Kits let you group related assets together. Create a kit to bundle equipment that's typically used as a set.",
@@ -466,6 +490,42 @@ export default function KitsIndexPage() {
   );
 }
 
+/**
+ * The code chip for one kit row in the availability CALENDAR view.
+ *
+ * The list and calendar views of this page render the same kits, so they must
+ * render the same chip through the same resolver — see
+ * `.claude/rules/code-bearing-entity-list-consistency.md`. The calendar builds
+ * its rows from `extendedProps` rather than the loader payload, hence the two
+ * explicit props instead of a whole entity.
+ *
+ * A component rather than an inline block because it needs
+ * `useCurrentOrganization`, and the calendar renders rows inside a callback
+ * where a hook cannot go.
+ *
+ * @param qrCodes - QR rows forwarded by `useKitAvailabilityData`
+ * @param barcodes - Barcode rows forwarded by `useKitAvailabilityData`
+ * @returns The shared chip, or `null` before the organization resolves
+ */
+function KitCalendarCodeBadge({
+  qrCodes,
+  barcodes,
+}: {
+  qrCodes?: EntityForCodeResolution["qrCodes"];
+  barcodes?: EntityForCodeResolution["barcodes"];
+}) {
+  const organization = useCurrentOrganization();
+  if (!organization) return null;
+
+  const code = resolveDisplayCode({
+    entity: { qrCodes, barcodes },
+    organization,
+    entityKind: "kit",
+  });
+
+  return code ? <AssetCodeBadge {...code} /> : null;
+}
+
 function ListContent({
   item,
   bulkActions,
@@ -498,7 +558,11 @@ function ListContent({
   // back to QR when the workspace prefers SAM.
   const currentOrganization = useCurrentOrganization();
   const displayCode = currentOrganization
-    ? resolveDisplayCode({ entity: item, organization: currentOrganization })
+    ? resolveDisplayCode({
+        entity: item,
+        organization: currentOrganization,
+        entityKind: "kit",
+      })
     : null;
 
   return (

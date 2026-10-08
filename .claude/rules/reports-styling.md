@@ -218,18 +218,39 @@ const dayPickerStyles = {
 
 ## Data Fetching (helpers.server.ts)
 
-**Sorting should match filtering:**
+**Filter, display and sort on the same date:**
 
-- If filtering by due date (`to`), sort by due date
-- If filtering by start date (`from`), sort by start date
+A booking has two date pairs. `originalFrom`/`originalTo` are the **planned**
+period; `from`/`to` are the **live** one, which extension and check-in rewrite.
+Pick the one your report is about, then use it for the window predicate, the
+column you render, and the sort — mixing them puts a row in one period and
+labels it with another.
+
+Reports about whether a plan was honoured (Booking Compliance) read the planned
+end via `resolvePlannedEnd`; live operational lists (Overdue Items) read `to`.
+
+The planned end is a COALESCE across two columns, and Prisma's `orderBy` cannot
+express one. So a report keyed on it has to sort in memory — fetch the matching
+rows, resolve, sort, then paginate. That is why `bookingComplianceReport` reads
+the full result set while `overdueItemsReport`, keyed on the single `to` column,
+sorts in SQL and pages in the query.
 
 ```typescript
-// Booking Compliance: filter and sort by due date
-const where = { to: { gte: timeframe.from, lte: timeframe.to } };
+// Booking Compliance: planned end drives the window, the row and the sort.
+const where = {
+  OR: [
+    { originalTo: { gte: timeframe.from, lte: timeframe.to } },
+    { originalTo: null, to: { gte: timeframe.from, lte: timeframe.to } },
+  ],
+};
+// No `orderBy` — see above; the sort happens over the resolved value.
 const bookings = await db.booking.findMany({
   where,
-  orderBy: { to: "desc" }, // Sort matches filter field
+  select: { originalTo: true, to: true /* … */ },
 });
+const rows = bookings
+  .map((b) => ({ scheduledEnd: resolvePlannedEnd(b)! /* … */ }))
+  .sort((a, b) => b.scheduledEnd.getTime() - a.scheduledEnd.getTime());
 ```
 
 ## Compliance Constants

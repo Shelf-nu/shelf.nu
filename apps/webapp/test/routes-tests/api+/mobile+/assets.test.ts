@@ -10,16 +10,22 @@
  * Also exercises the back-compat response shape: the loader must pipe assets
  * through `shapeMobileAssetResponse` so the in-App-Store companion (since
  * 2026-05-20) keeps receiving the legacy flat `kit` / `kitId` / `location` /
- * single-or-null `custody` shape rather than the new pivot arrays.
+ * single-or-null `custody` shape rather than the new pivot arrays. That
+ * flattening keeps only the FIRST kit membership, so the kit cases below pin
+ * both halves of what makes the resulting label honest: a deterministic order
+ * on the pivot, and the `kitCount` that says the named kit is one of several.
  *
  * @see {@link file://./assets.ts} for the loader under test
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} for the helper + select
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -45,8 +51,18 @@ vi.mock("~/database/db.server", () => ({
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    // The loader reads the workspace's code preference once per page, to
+    // resolve which identifier each row shows.
+    organization: { findUniqueOrThrow: vi.fn() },
     $queryRaw: vi.fn(),
   },
+}));
+
+// why: `subscription.server` loads the Stripe client and billing config at
+// module load. Stubbing the capability helper also puts the add-on gate under
+// explicit control, independent of the ambient `ENABLE_PREMIUM_FEATURES`.
+vi.mock("~/utils/subscription.server", () => ({
+  canUseBarcodes: vi.fn(() => true),
 }));
 
 // why: auth + org-access are out of scope for these route-shape tests; stub
@@ -58,6 +74,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
   );
+  const { accessFor } = await import("@helpers/role-access");
   return {
     ...actual,
     requireMobileAuth: vi.fn(),
@@ -66,7 +83,7 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     // existing shape assertions to "may see all" so they keep measuring the
     // shaper, not the custody gate — which has its own tests below.
     getMobileUserContext: vi.fn().mockResolvedValue({
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     }),
   };
 });
@@ -91,6 +108,12 @@ beforeEach(() => {
 
   findManyMock.mockResolvedValue([]);
   countMock.mockResolvedValue(0);
+  // Default workspace: the stock QR_ID preference, no alternative codes. The
+  // display-code tests override exactly what they are about.
+  vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+    qrIdDisplayPreference: "QR_ID",
+    barcodesEnabled: false,
+  } as never);
   // why: default to no search matches — tests that exercise search override
   // this to a known id set.
   queryRawMock.mockResolvedValue([]);
@@ -207,6 +230,173 @@ describe("GET /api/mobile/assets", () => {
       custody: null,
     });
   });
+
+  it("orders kit memberships oldest-first so a row always names the same kit", async () => {
+    // `shapeMobileAssetResponse` takes `assetKits[0]`, and only INDIVIDUAL
+    // assets are capped at one membership — so an unordered relation lets a
+    // quantity-tracked asset name a different kit on each refresh. Oldest
+    // first (id breaking same-transaction ties) is the primary kit the web
+    // asset index picks, so the two surfaces agree.
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    await loader(args);
+
+    expect(findManyMock.mock.calls[0]![0]!.select).toMatchObject({
+      assetKits: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] },
+    });
+  });
+
+  it("reports how many kits an asset belongs to alongside the named one", async () => {
+    // The row can only show one name, so `kitCount` is what stops it from
+    // presenting the primary kit of three as the asset's only kit.
+    findManyMock.mockResolvedValueOnce([
+      {
+        id: "asset-multi",
+        title: "Gaffer tape",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        type: "QUANTITY_TRACKED",
+        quantity: 30,
+        assetKits: [
+          { kit: { id: "kit-1", name: "Camera Kit" } },
+          { kit: { id: "kit-2", name: "Audio Kit" } },
+        ],
+        assetLocations: [],
+        custody: [],
+      },
+      {
+        id: "asset-single",
+        title: "Tripod",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        assetKits: [{ kit: { id: "kit-1", name: "Camera Kit" } }],
+        assetLocations: [],
+        custody: [],
+      },
+      {
+        id: "asset-kitless",
+        title: "Clapperboard",
+        status: "AVAILABLE",
+        mainImage: null,
+        mainImageExpiration: null,
+        thumbnailImage: null,
+        availableToBook: true,
+        category: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+    countMock.mockResolvedValueOnce(3);
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        kit: { id: string; name: string } | null;
+        kitCount: number;
+      }>;
+    };
+
+    // The named kit is the first membership the (ordered) select returned.
+    expect(body.assets[0]).toMatchObject({
+      kit: { id: "kit-1", name: "Camera Kit" },
+      kitCount: 2,
+    });
+    expect(body.assets[1]).toMatchObject({ kitCount: 1 });
+    expect(body.assets[2]).toMatchObject({ kit: null, kitCount: 0 });
+  });
+
+  it("sends mainImageExpiration only when the asset's own image won the cascade", async () => {
+    // why: expiration describes the asset's OWN signed URL only. A model
+    // cover is a public URL that never expires, and the row's date can be
+    // stale residue from a removed own image — a client-side expiry check
+    // fed that pairing discards a valid image. This pins the source gate.
+    findManyMock.mockResolvedValueOnce([
+      // Own image: the signed URL and its expiration travel together.
+      {
+        id: "asset-own",
+        title: "Own image",
+        status: "AVAILABLE",
+        mainImage: "https://supabase.test/sign/assets/own.png",
+        thumbnailImage: "https://supabase.test/sign/assets/own-thumbnail.png",
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: null,
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+      // Inherited image: stale per-asset expiration residue must NOT ship
+      // next to the model's never-expiring public URL.
+      {
+        id: "asset-inherited",
+        title: "Inherited image",
+        status: "AVAILABLE",
+        mainImage: null,
+        thumbnailImage: null,
+        mainImageExpiration: "2026-08-01T00:00:00.000Z",
+        availableToBook: true,
+        category: null,
+        assetModel: {
+          image: "https://supabase.test/public/files/model.png",
+          thumbnailImage:
+            "https://supabase.test/public/files/model-thumbnail.png",
+        },
+        assetKits: [],
+        assetLocations: [],
+        custody: [],
+      },
+    ] as never);
+
+    // why: the loader runs findMany + count in parallel for the pagination
+    // envelope; the count must match the two mocked rows above.
+    countMock.mockResolvedValueOnce(2);
+
+    const args = createLoaderArgs({
+      request: new Request("http://localhost:3000/api/mobile/assets"),
+    });
+
+    const response = await loader(args);
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      assets: Array<{
+        id: string;
+        mainImage: string | null;
+        imageSource: string;
+        mainImageExpiration: string | null;
+      }>;
+    };
+
+    expect(body.assets[0]).toMatchObject({
+      id: "asset-own",
+      mainImage: "https://supabase.test/sign/assets/own.png",
+      imageSource: "asset",
+      mainImageExpiration: "2026-08-01T00:00:00.000Z",
+    });
+    expect(body.assets[1]).toMatchObject({
+      id: "asset-inherited",
+      mainImage: "https://supabase.test/public/files/model.png",
+      imageSource: "model",
+      mainImageExpiration: null,
+    });
+  });
 });
 
 describe("GET /api/mobile/assets — status filter", () => {
@@ -297,7 +487,7 @@ describe("GET /api/mobile/assets — search", () => {
 
   it("id-shaped searches also resolve via the single UNION query (superset, pre-approved)", async () => {
     // Previously ID-shaped terms took a narrow indexed fast path with a
-    // full-clause fallback on zero rows. The UNION always searches all 10
+    // full-clause fallback on zero rows. The UNION always searches all 11
     // sources in one query, so an ID-shaped search now returns the full
     // (more correct) result set directly — no second query.
     queryRawMock.mockResolvedValueOnce([{ id: "asset-9" }]);
@@ -402,7 +592,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
     // The mobile asset DETAIL route gated this; the list did not, so the same
     // holder name was readable one endpoint over.
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -434,7 +624,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
       },
     ] as never);
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: false,
+      access: accessFor(["BASE"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -446,7 +636,7 @@ describe("GET /api/mobile/assets — custody visibility", () => {
 
   it("keeps custody visible for a viewer who may see all of it", async () => {
     vi.mocked(getMobileUserContext).mockResolvedValue({
-      canSeeAllCustody: true,
+      access: accessFor(["ADMIN"]),
     } as Awaited<ReturnType<typeof getMobileUserContext>>);
 
     const response = await loader(createLoaderArgs({}));
@@ -454,4 +644,192 @@ describe("GET /api/mobile/assets — custody visibility", () => {
 
     expect(body.assets[0].custody?.custodian?.name).toBe("Colleague Name");
   });
+});
+
+/**
+ * Which identifier each list row shows.
+ *
+ * The list is where an operator matches a shelf full of printed labels against
+ * the app, so a workspace that labels its assets with Code 128 must see Code
+ * 128 on the rows — not the SAM ID the rows used to hardcode.
+ *
+ * Resolved server-side, once per page, by the same resolver every web asset
+ * row uses.
+ *
+ * @see {@link file://./../../../../app/modules/barcode/display.ts} `resolveDisplayCode`
+ */
+describe("GET /api/mobile/assets — display code", () => {
+  /** One list row carrying the code-resolution inputs the loader selects. */
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "asset-1",
+      title: "Drill",
+      status: "AVAILABLE",
+      sequentialId: "SAM-0017",
+      mainImage: null,
+      mainImageExpiration: null,
+      thumbnailImage: null,
+      availableToBook: true,
+      category: null,
+      assetKits: [],
+      assetLocations: [],
+      custody: [],
+      preferredBarcodeId: null,
+      qrCodes: [{ id: "qr-abc123" }],
+      barcodes: [] as { id: string; type: string; value: string }[],
+      ...overrides,
+    };
+  }
+
+  /** Runs the loader over one row and returns it as the response shaped it. */
+  async function loadRow(fixture: unknown) {
+    findManyMock.mockResolvedValueOnce([fixture] as never);
+    countMock.mockResolvedValueOnce(1);
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    return (
+      response.data as {
+        assets: {
+          displayCode: {
+            value: string;
+            label: string;
+            isFallback: boolean;
+          } | null;
+        }[];
+      }
+    ).assets[0];
+  }
+
+  it("shows the workspace's Code 128 value on the row, not the SAM ID", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(true);
+
+    const asset = await loadRow(
+      row({ barcodes: [{ id: "bc-1", type: "Code128", value: "CODE-000128" }] })
+    );
+
+    expect(asset.displayCode).toEqual({
+      value: "CODE-000128",
+      label: "Code 128",
+      type: "Code128",
+      isFallback: false,
+      fallbackNote: null,
+    });
+  });
+
+  it("shows the SAM ID when that is the workspace preference", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(false);
+
+    const asset = await loadRow(row());
+
+    expect(asset.displayCode).toMatchObject({
+      value: "SAM-0017",
+      label: "SAM ID",
+      isFallback: false,
+    });
+  });
+
+  it("marks a preference this row cannot satisfy", async () => {
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    } as never);
+    vi.mocked(canUseBarcodes).mockReturnValue(true);
+
+    const asset = await loadRow(row({ barcodes: [] }));
+
+    expect(asset.displayCode).toMatchObject({
+      value: "qr-abc123",
+      label: "QR Code ID",
+      isFallback: true,
+      fallbackNote:
+        "Your workspace prefers Code 128 but this item has no Code 128.",
+    });
+  });
+
+  it("reads the workspace preference once per page, not once per row", async () => {
+    // why: the preference is per-workspace. Resolving it per row would issue
+    // `perPage` identical queries on every list load.
+    vi.mocked(db.organization.findUniqueOrThrow).mockResolvedValue({
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    } as never);
+    findManyMock.mockResolvedValueOnce([
+      row(),
+      row({ id: "asset-2" }),
+    ] as never);
+    countMock.mockResolvedValueOnce(2);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/assets"),
+      })
+    );
+
+    expect(db.organization.findUniqueOrThrow).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads each row's QR in a fixed order, so one code wins on every load", async () => {
+    // why: `Qr.assetId` is not unique and the resolver takes the first QR. An
+    // unordered read could flip a row's code between loads — something a
+    // mocked database cannot exhibit, so the query is what this pins.
+    await loadRow(row());
+
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          qrCodes: {
+            take: 1,
+            orderBy: QR_CODES_ORDER_BY,
+            select: { id: true },
+          },
+        }),
+      })
+    );
+  });
+});
+
+describe("GET /api/mobile/assets — list scope", () => {
+  /** Runs the list as `role` and returns the where the query used. */
+  async function whereFor(role: "SELF_SERVICE" | "BASE" | "ADMIN", query = "") {
+    vi.mocked(getMobileUserContext).mockResolvedValue({
+      access: accessFor([role]),
+    } as Awaited<ReturnType<typeof getMobileUserContext>>);
+    await loader(
+      createLoaderArgs({
+        request: new Request(`http://localhost:3000/api/mobile/assets${query}`),
+      })
+    );
+    return findManyMock.mock.calls[0]![0]!.where;
+  }
+
+  it("lists only bookable assets to SELF_SERVICE, as the web index does", async () => {
+    expect(await whereFor("SELF_SERVICE")).toMatchObject({
+      availableToBook: true,
+    });
+  });
+
+  it("still lists every asset SELF_SERVICE holds on the custody tab", async () => {
+    expect(
+      await whereFor("SELF_SERVICE", "?myCustody=true")
+    ).not.toHaveProperty("availableToBook");
+  });
+
+  it.each(["BASE", "ADMIN"] as const)(
+    "does not narrow the list for %s",
+    async (role) => {
+      expect(await whereFor(role)).not.toHaveProperty("availableToBook");
+    }
+  );
 });

@@ -32,20 +32,26 @@ describe("formatDateForCsv", () => {
     );
   });
 
-  it("appends the time part for datetime columns, quoted (date/time comma)", () => {
+  it("appends the time part for datetime columns, UNQUOTED", () => {
     // A datetime renders "06/07/2026, 3:30 PM" — the date/time separator is a
-    // comma, so the whole field is quoted to stay one CSV column.
+    // comma, which does need quoting to stay one CSV column. That is now done
+    // once, centrally, by `escapeCsvField` in the export route; doing it here
+    // as well produced a doubly-quoted cell.
     expect(
       formatDateForCsv(new Date(Date.UTC(2026, 6, 6, 15, 30)), ddmm, {
         includeTime: true,
       })
-    ).toBe('"06/07/2026, 3:30 PM"');
+    ).toBe("06/07/2026, 3:30 PM");
   });
 
-  it("quotes a month-name value so its comma doesn't split the CSV column", () => {
+  it("returns a month-name value UNQUOTED, leaving quoting to the caller", () => {
+    // This used to assert the opposite. The function pre-quoted because its
+    // result bypassed the escaper; now the export route runs every cell
+    // through `escapeCsvField`, so pre-quoting was applied twice and a
+    // month-name date came out as `"""Jul 6, 2026"""`.
     expect(
       formatDateForCsv(new Date(Date.UTC(2026, 6, 6, 12)), monthName)
-    ).toBe('"Jul 6, 2026"');
+    ).toBe("Jul 6, 2026");
   });
 
   it("returns an empty string for a null date", () => {

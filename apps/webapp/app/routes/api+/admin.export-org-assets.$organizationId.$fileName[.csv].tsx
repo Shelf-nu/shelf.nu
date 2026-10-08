@@ -1,16 +1,19 @@
+/** Admin CSV export route for an organization's asset backup. */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { csvResponse } from "~/utils/csv-utf8";
 import { exportAssetsBackupToCsv } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getParams } from "~/utils/http.server";
+import { buildContentDisposition, error, getParams } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
 
+/** Exports an organization's asset backup as a CSV download for administrators. */
 export async function loader({ context, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
-  const { organizationId } = getParams(
+  const { organizationId, fileName } = getParams(
     params,
-    z.object({ organizationId: z.string() }),
+    z.object({ organizationId: z.string(), fileName: z.string() }),
     {
       additionalData: { userId },
     }
@@ -22,10 +25,12 @@ export async function loader({ context, params }: LoaderFunctionArgs) {
     /** Join the rows with a new line */
     const csvString = await exportAssetsBackupToCsv({ organizationId });
 
-    return new Response(csvString, {
-      status: 200,
+    return csvResponse(csvString, {
       headers: {
-        "content-type": "text/csv",
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "assets",
+          filename: `${fileName}.csv`,
+        }),
       },
     });
   } catch (cause) {

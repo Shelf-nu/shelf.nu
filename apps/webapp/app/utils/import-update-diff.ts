@@ -8,6 +8,7 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
 import type {
@@ -497,14 +498,11 @@ export function compareCoreField(
       const currentTags = asset.tags
         .map((t) => t.name)
         .sort((a, b) => a.localeCompare(b));
-      const csvTags = csvValue
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
+      const csvTags = decodeCsvListCell(csvValue).sort((a, b) =>
+        a.localeCompare(b)
+      );
 
       const currentStr = currentTags.join(", ");
-      const csvStr = csvTags.join(", ");
 
       // Case-insensitive set comparison
       const currentSet = new Set(currentTags.map((t) => t.toLowerCase()));
@@ -517,7 +515,10 @@ export function compareCoreField(
         return {
           field: displayName,
           currentValue: currentStr || "(none)",
-          newValue: csvStr,
+          // The cell verbatim, never the decoded list re-joined: `newValue` is
+          // what the apply flow decodes to resolve and connect the tags, and a
+          // plain join would hand it `Berlin, DE, small` to read as three.
+          newValue: csvValue,
         };
       }
       return null;

@@ -44,6 +44,7 @@ import {
   Tr,
 } from "~/components/scanner/drawer/generic-item-row";
 import { Button } from "~/components/shared/button";
+import { resolveScannedExpectedness } from "~/utils/audit-scan-expectedness";
 import { tw } from "~/utils/tw";
 
 /**
@@ -126,9 +127,17 @@ export function AuditItemRow({
       )}
       renderItem={(data: any) => {
         const isAsset = itemType === "asset";
-        const isExpected = isAsset && data?.id && expectedAssetIds.has(data.id);
-        const isUnexpected =
-          isAsset && data?.id && !expectedAssetIds.has(data.id);
+        // An asset row is one or the other; a non-asset row is neither.
+        const wasExpected =
+          isAsset &&
+          resolveScannedExpectedness({
+            assetId: data?.id,
+            assetDeleted: data?.assetDeleted,
+            isExpected: data?.isExpected,
+            expectedAssetIds,
+          });
+        const isExpected = wasExpected;
+        const isUnexpected = isAsset && !wasExpected;
         const auditAssetId =
           typeof data?.auditAssetId === "string"
             ? data.auditAssetId
@@ -163,7 +172,13 @@ export function AuditItemRow({
             tooltipContent:
               "This asset was not expected in this audit context.",
             priority: 90,
-            className: "border-red-200 bg-red-50 text-red-700",
+            // Warning, not danger: an asset in your hands but filed wrong is a
+            // lesser problem than one that is gone, which is what danger is
+            // reserved for. AUDIT_ASSET_STATUS_TONES in @shelf/labels holds the
+            // same pairing for the badge on this screen; these classes must stay
+            // visually equivalent to it, so change both together. warning-800 on
+            // warning-50 is 7.2:1.
+            className: "border-warning-200 bg-warning-50 text-warning-800",
           },
         ];
 
