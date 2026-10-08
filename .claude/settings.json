@@ -75,7 +75,11 @@
       "Read(**/.env.staging)",
       "Read(**/.env.test)",
       "Edit(**/.env)",
-      "Edit(**/.env.*)"
+      "Edit(**/.env.local)",
+      "Edit(**/.env.development)",
+      "Edit(**/.env.production)",
+      "Edit(**/.env.staging)",
+      "Edit(**/.env.test)"
     ],
     "ask": [
       "Bash(git push:*)",
