@@ -16,6 +16,7 @@ import { Dialog, DialogPortal } from "~/components/layout/dialog";
 import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 import { Spinner } from "~/components/shared/spinner";
+import { useSearchParams } from "~/hooks/search-params";
 import useApiQuery from "~/hooks/use-api-query";
 import type {
   ReportPdfMeta,
@@ -53,15 +54,22 @@ export function ReportPdf({
   const componentRef = useRef<HTMLDivElement>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pdfMeta, setPdfMeta] = useState<ReportPdfMeta | null>(null);
+  const [currentSearchParams] = useSearchParams();
 
   // Memoize so a new URLSearchParams reference doesn't refetch every render.
   const searchParams = useMemo(() => {
-    const params = new URLSearchParams();
+    // Seed from the page's current query string so the report's filters
+    // (team member, categories, sort, …) reach the PDF route — the server
+    // mirrors the page loader's params per report, and a PDF must contain
+    // the rows the filtered page shows. The timeframe props then take
+    // precedence: they carry the resolved custom-range dates in exactly the
+    // shape the route parses.
+    const params = new URLSearchParams(currentSearchParams);
     if (timeframe) params.set("timeframe", timeframe);
     if (customFrom) params.set("from", customFrom);
     if (customTo) params.set("to", customTo);
     return params;
-  }, [timeframe, customFrom, customTo]);
+  }, [currentSearchParams, timeframe, customFrom, customTo]);
 
   // Fetch via the shared hook so the underlying useEffect+fetch lives in one
   // dedicated place — mirrors the pattern in `audit-receipt-pdf.tsx`.

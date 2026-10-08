@@ -5,7 +5,7 @@ import { Notes } from "~/components/assets/notes";
 import { NoPermissionsIcon } from "~/components/icons/library";
 import type { HeaderData } from "~/components/layout/header/types";
 import TextualDivider from "~/components/shared/textual-divider";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getAsset } from "~/modules/asset/service.server";
 import { getPaginatedAndFilterableAssetNotes } from "~/modules/note/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -142,7 +142,7 @@ export const handle = {
 };
 
 export default function AssetActivity() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const canReadNotes = userHasPermission({
     roles,
     entity: PermissionEntity.note,

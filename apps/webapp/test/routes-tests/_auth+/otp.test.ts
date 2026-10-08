@@ -7,7 +7,7 @@ import {
   getSelectedOrganization,
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
-import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { detectFormatPrefsFromHints } from "~/utils/date-format";
 
@@ -23,7 +23,7 @@ vitest.mock("~/modules/auth/service.server", () => ({
 }));
 vitest.mock("~/modules/user/service.server", () => ({
   createUser: vitest.fn(),
-  findUserByEmail: vitest.fn(),
+  findUserById: vitest.fn(),
 }));
 vitest.mock("~/modules/user/utils.server", () => ({
   generateUniqueUsername: vitest.fn(),
@@ -77,7 +77,7 @@ describe("otp action — format pref detection", () => {
       email: USER_EMAIL,
     });
     // @ts-expect-error missing vitest type — user does not exist yet → signup branch
-    findUserByEmail.mockResolvedValue(null);
+    findUserById.mockResolvedValue(null);
     // @ts-expect-error missing vitest type
     generateUniqueUsername.mockResolvedValue(username);
     // @ts-expect-error missing vitest type
@@ -135,5 +135,78 @@ describe("otp action — format pref detection", () => {
         formatPrefs: { ...DETECTED, timeZone: null },
       })
     );
+  });
+});
+
+describe("otp action — account resolution", () => {
+  /** A sign-in request for the address as the person typed it. */
+  function otpRequest(email: string) {
+    const formData = new FormData();
+    formData.append("email", email);
+    formData.append("otp", "123456");
+    return new Request("http://localhost/otp", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    // why: the verified auth session is the identity; the address case the
+    // person typed does not change which auth user they are.
+    // @ts-expect-error missing vitest type
+    verifyOtpAndSignin.mockResolvedValue({
+      userId: USER_ID,
+      email: USER_EMAIL,
+    });
+    // @ts-expect-error missing vitest type
+    generateUniqueUsername.mockResolvedValue(username);
+    // @ts-expect-error missing vitest type
+    getSelectedOrganization.mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+    });
+    // @ts-expect-error missing vitest type
+    setSelectedOrganizationIdCookie.mockResolvedValue("org-cookie");
+    // @ts-expect-error missing vitest type
+    detectFormatPrefsFromHints.mockReturnValue(DETECTED);
+  });
+
+  it("signs an existing account in without creating another, whatever case is typed", async () => {
+    // why: the account already exists for this auth user.
+    // @ts-expect-error missing vitest type
+    findUserById.mockResolvedValue({ id: USER_ID, onboarded: true });
+
+    await action(actionArgs(otpRequest(USER_EMAIL.toUpperCase())));
+
+    expect(findUserById).toHaveBeenCalledWith(USER_ID);
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it("carries on when a concurrent sign-in created the account first", async () => {
+    // why: first read finds nothing, the create then loses the race, and the
+    // second read finds the row the other request wrote.
+    vitest
+      .mocked(findUserById)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: USER_ID, onboarded: false });
+    // @ts-expect-error missing vitest type
+    createUser.mockRejectedValue(new Error("Unique constraint failed on id"));
+
+    const response = await action(actionArgs(otpRequest(USER_EMAIL)));
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(302);
+  });
+
+  it("reports the failure when the account still does not exist", async () => {
+    // @ts-expect-error missing vitest type
+    findUserById.mockResolvedValue(null);
+    // @ts-expect-error missing vitest type
+    createUser.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await action(actionArgs(otpRequest(USER_EMAIL)));
+
+    expect(response).not.toBeInstanceOf(Response);
+    expect(findUserById).toHaveBeenCalledTimes(2);
   });
 });

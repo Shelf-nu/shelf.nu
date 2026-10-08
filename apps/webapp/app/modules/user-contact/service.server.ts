@@ -26,6 +26,59 @@ export async function getUserContactById(userId: string) {
   }
 }
 
+/** A user's contact details as the team profile renders them; empty when none are stored. */
+export type UserContactForDisplay = {
+  phone: string | null;
+  street: string | null;
+  city: string | null;
+  stateProvince: string | null;
+  zipPostalCode: string | null;
+  countryRegion: string | null;
+};
+
+/**
+ * Reads a user's contact details for display. Never writes: a user with no
+ * stored contact gets empty fields.
+ *
+ * @param userId - The user whose contact to read
+ * @returns The contact fields, `null` where unset
+ * @throws {ShelfError} When the read fails
+ */
+export async function getUserContactForDisplay(
+  userId: string
+): Promise<UserContactForDisplay> {
+  try {
+    const contact = await db.userContact.findUnique({
+      where: { userId },
+      select: {
+        phone: true,
+        street: true,
+        city: true,
+        stateProvince: true,
+        zipPostalCode: true,
+        countryRegion: true,
+      },
+    });
+    return (
+      contact ?? {
+        phone: null,
+        street: null,
+        city: null,
+        stateProvince: null,
+        zipPostalCode: null,
+        countryRegion: null,
+      }
+    );
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Failed to retrieve user contact information",
+      additionalData: { userId },
+      label,
+    });
+  }
+}
+
 export type UpdateUserContactPayload = {
   userId: string;
   phone?: string;

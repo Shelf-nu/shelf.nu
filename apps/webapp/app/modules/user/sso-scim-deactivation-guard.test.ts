@@ -31,6 +31,9 @@ const { staged, committed, txDepth } = vi.hoisted(() => ({
   txDepth: { value: 0 },
 }));
 
+/** What the membership row holds when the SSO transition locks it; `null` = no row. */
+const persisted = vi.hoisted(() => ({ roles: ["ADMIN"] as string[] | null }));
+
 // why: exercise the guard's real DB reads/writes without a database. The
 // delegates record what they wrote so the transaction stub below can model
 // commit-versus-rollback rather than just counting calls.
@@ -47,7 +50,21 @@ vi.mock("~/database/db.server", () => {
       }),
       delete: vi.fn(),
       update: vi.fn(),
+      // why: the SSO transition locks and re-reads the membership, and the
+      // role write re-reads it again; each case sets what is persisted, and
+      // the conditional delete reports whether it matched
+      findUnique: vi.fn(() =>
+        Promise.resolve(persisted.roles ? { roles: persisted.roles } : null)
+      ),
+      findFirst: vi.fn(() =>
+        Promise.resolve(persisted.roles ? { roles: persisted.roles } : null)
+      ),
+      deleteMany: vi.fn(() =>
+        Promise.resolve({ count: persisted.roles ? 1 : 0 })
+      ),
     },
+    // why: a role change is logged in the same transaction
+    roleChangeLog: { create: vi.fn() },
     // A grant writes the org association and the team member together, so the
     // team-member record is reachable only through this delegate now.
     teamMember: {
@@ -167,6 +184,7 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
     staged.length = 0;
     committed.length = 0;
     txDepth.value = 0;
+    persisted.roles = ["ADMIN"];
   });
 
   it("blocks the group-driven grant for a SCIM-deactivated user", async () => {
@@ -255,8 +273,11 @@ describe("updateUserFromSSO — SCIM deactivation guard", () => {
       ],
     });
 
-    const sql = (mockDb.db.$queryRaw as ReturnType<typeof vi.fn>).mock
-      .calls[0][0] as TemplateStringsArray;
+    // The last lock of the login is the repair's; the first is the role
+    // transition's, which commits before the repair opens its transaction.
+    const sql = (mockDb.db.$queryRaw as ReturnType<typeof vi.fn>).mock.calls.at(
+      -1
+    )?.[0] as TemplateStringsArray;
 
     expect(sql.join("?")).toContain("FOR UPDATE");
     expect(sql.join("?")).toContain('"UserOrganization"');

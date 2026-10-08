@@ -34,10 +34,10 @@ vi.mock("~/components/user/team-member-badge", () => ({
   }) => <span data-testid="team-member-badge">{teamMember?.name ?? ""}</span>,
 }));
 
-// why: useUserRoleHelper resolves roles via Remix loader data; tests do
+// why: useOrganizationRoles resolves roles via Remix loader data; tests do
 // not run inside a route, so we stub it to a single-role admin set.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: ["ADMIN"] }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => ["ADMIN"],
 }));
 
 // why: permission gating defaults to allow so the column always

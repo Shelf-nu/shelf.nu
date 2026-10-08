@@ -5,8 +5,8 @@ import { useSidebar } from "~/components/layout/sidebar/sidebar";
 import When from "~/components/when/when";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import {
   PermissionAction,
   PermissionEntity,
@@ -18,7 +18,7 @@ import { Button } from "../../shared/button";
 import { ButtonGroup } from "../../shared/button-group";
 
 export function AssetIndexPagination() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const fetcher = useFetcher({ key: "asset-index-settings-mode" });
   const { isMd } = useViewportHeight();
   const { state } = useSidebar();

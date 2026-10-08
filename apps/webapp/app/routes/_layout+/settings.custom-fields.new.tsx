@@ -5,7 +5,7 @@ import { data, redirect } from "react-router";
 import { dynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import {
   CustomFieldForm,
-  NewCustomFieldFormSchema,
+  CustomFieldSubmissionSchema,
 } from "~/components/custom-fields/form";
 import Header from "~/components/layout/header";
 import { getCategoriesForCreateAndEdit } from "~/modules/asset/service.server";
@@ -93,7 +93,7 @@ export async function action({ context, request }: LoaderFunctionArgs) {
 
     const payload = parseData(
       await request.formData(),
-      NewCustomFieldFormSchema
+      CustomFieldSubmissionSchema
     );
 
     const { name, helpText, required, type, active, options, categories } =

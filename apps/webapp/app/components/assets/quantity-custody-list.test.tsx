@@ -13,11 +13,11 @@
  * - `react-router`'s `useFetcher` — so each test can drive the response
  *   without a data router.
  * - `~/hooks/use-disabled` — stable `false`, so submit gating is ours.
- * - `~/components/shared/modal` — Radix AlertDialog portals its content and
- *   manages `open` internally, and this dialog keeps `open` in component
- *   state rather than a prop, so a click-to-open flow is not reliably
- *   drivable in happy-dom. The shell below renders content unconditionally:
- *   open/close gating belongs to Radix and is not what these tests are about.
+ * - `~/components/shared/modal` — Radix AlertDialog portals its content, which
+ *   is not reliably drivable in happy-dom. The shell below renders content
+ *   unconditionally but keeps the open/close wiring: clicking the trigger
+ *   calls `onOpenChange(true)`, because a server error is shown only when it
+ *   arrived while the dialog was open.
  * - `./quantity-custody-dialog` — the Assign counterpart, unrelated here and
  *   otherwise drags its own dependency graph into the render.
  *
@@ -27,7 +27,8 @@
 
 import type React from "react";
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { createContext, useContext } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QuantityCustodyList } from "./quantity-custody-list";
@@ -74,13 +75,32 @@ vi.mock("~/hooks/use-disabled", () => ({
   useDisabled: () => false,
 }));
 
-// why: see the file-level note — Radix portals content and owns `open`, which
-// this dialog holds in component state, so content is rendered unconditionally.
+/** Carries the dialog's `onOpenChange` from the mocked root to its trigger. */
+const OpenChangeContext = createContext<((open: boolean) => void) | null>(null);
+
+// why: see the file-level note. Radix portals content, so content renders
+// unconditionally here; the trigger still opens the dialog through
+// `onOpenChange`.
 vi.mock("~/components/shared/modal", () => ({
-  AlertDialog: ({ children }: { children: ReactNode }) => <>{children}</>,
-  AlertDialogTrigger: ({ children }: { children: ReactNode }) => (
-    <>{children}</>
+  AlertDialog: ({
+    children,
+    onOpenChange,
+  }: {
+    children: ReactNode;
+    onOpenChange?: (open: boolean) => void;
+  }) => (
+    <OpenChangeContext.Provider value={onOpenChange ?? null}>
+      {children}
+    </OpenChangeContext.Provider>
   ),
+  AlertDialogTrigger: function Trigger({ children }: { children: ReactNode }) {
+    const onOpenChange = useContext(OpenChangeContext);
+    return (
+      <span role="presentation" onClick={() => onOpenChange?.(true)}>
+        {children}
+      </span>
+    );
+  },
   AlertDialogContent: ({ children }: { children: ReactNode }) => (
     <div role="alertdialog">{children}</div>
   ),
@@ -115,7 +135,9 @@ const custodyRecord = {
 function renderList(
   props: Partial<React.ComponentProps<typeof QuantityCustodyList>> = {}
 ) {
-  return render(
+  // A fresh element per render: handing React the same element object lets
+  // it skip the subtree, and the new fetcher response would never be read.
+  const element = () => (
     <QuantityCustodyList
       custody={[custodyRecord]}
       assetId="asset-1"
@@ -125,6 +147,20 @@ function renderList(
       {...props}
     />
   );
+  const view = render(element());
+  return { ...view, rerenderList: () => view.rerender(element()) };
+}
+
+/** Opens the release dialog the way an operator does: its trigger button. */
+function openReleaseDialog() {
+  fireEvent.click(
+    screen.getAllByRole("button", { name: /release|mark as consumed/i })[0]
+  );
+}
+
+/** Sets the fetcher's response, as if the submitted release came back. */
+function respondWith(data: FetcherState["data"]) {
+  mockFetcherState = { state: "idle", data };
 }
 
 describe("QuantityCustodyList — release dialog server errors", () => {
@@ -135,16 +171,14 @@ describe("QuantityCustodyList — release dialog server errors", () => {
   it("surfaces a rejected release so the operator knows why nothing happened", () => {
     // The exact 400 `releaseQuantity` throws when the page is stale and the
     // custodian no longer holds what the form is trying to release.
-    mockFetcherState = {
-      state: "idle",
-      data: {
-        error: {
-          message: "Cannot release 10 units. The custodian only holds 4 units.",
-        },
+    const { rerenderList } = renderList();
+    openReleaseDialog();
+    respondWith({
+      error: {
+        message: "Cannot release 10 units. The custodian only holds 4 units.",
       },
-    };
-
-    renderList();
+    });
+    rerenderList();
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       /the custodian only holds 4 units/i
@@ -152,21 +186,31 @@ describe("QuantityCustodyList — release dialog server errors", () => {
   });
 
   it("surfaces a rejected consumed split", () => {
-    mockFetcherState = {
-      state: "idle",
-      data: {
-        error: {
-          message:
-            "Only consumable (one-way) assets can be marked as consumed.",
-        },
+    const { rerenderList } = renderList({ consumptionType: "TWO_WAY" });
+    openReleaseDialog();
+    respondWith({
+      error: {
+        message: "Only consumable (one-way) assets can be marked as consumed.",
       },
-    };
-
-    renderList({ consumptionType: "TWO_WAY" });
+    });
+    rerenderList();
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       /only consumable \(one-way\) assets/i
     );
+  });
+
+  it("does not show a refusal left over from before the dialog opened", () => {
+    // The fetcher is keyed, so it still holds the last attempt's response.
+    respondWith({
+      error: {
+        message: "Cannot release 10 units. The custodian only holds 4 units.",
+      },
+    });
+    renderList();
+    openReleaseDialog();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders no alert when the fetcher is idle and untouched", () => {

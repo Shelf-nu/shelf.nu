@@ -7,11 +7,21 @@ import type {
   Organization,
 } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
+import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
+import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
+import {
+  AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+  auditAcceptsComments,
+} from "~/modules/audit/comment-policy";
 import {
   createAssetNotesForAuditAddition,
   createAssetNotesForAuditRemoval,
@@ -25,7 +35,10 @@ import { getRedirectUrlFromRequest } from "~/utils/http";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import { wrapUserLinkForNote } from "~/utils/markdoc-wrappers";
-import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
+import {
+  assertAssetsBelongToOrg,
+  assertUserBelongsToOrg,
+} from "~/utils/org-validation.server";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import { removePublicFile } from "~/utils/storage.server";
 import type { UserNameFields } from "~/utils/user";
@@ -76,6 +89,108 @@ function assertAuditNotArchived(
       status: 400,
     });
   }
+}
+
+/**
+ * Refuses a new comment on a finished audit.
+ *
+ * @param status - The audit's current status
+ * @param details - Identifies the audit in the error's additional data
+ * @throws {ShelfError} 400 when the audit is completed, cancelled or archived
+ */
+export function assertAuditAcceptsComments(
+  status: AuditStatus,
+  details: { auditSessionId: string; organizationId: string }
+) {
+  if (!auditAcceptsComments(status)) {
+    throw new ShelfError({
+      cause: null,
+      message: AUDIT_CLOSED_TO_COMMENTS_MESSAGE,
+      additionalData: { ...details, status },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
+ * Runs a comment write while the audit is held open for it.
+ *
+ * Checking the status and then inserting leaves a gap: a complete or cancel can
+ * commit in between, and the comment lands on a finished audit. Locking the
+ * audit row first closes it in both orders. If the transition commits first, the
+ * lock waits for it and then reads the finished status, so the comment is
+ * refused. If the comment takes the lock first, the transition's own guarded
+ * write waits, and the comment becomes part of the audit before it closes.
+ *
+ * A comment write takes no audit-asset row locks, so locking the session first
+ * here cannot invert the order the scan path uses.
+ *
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @param write - Creates the comment, through the transaction it is handed
+ * @returns Whatever `write` returns
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function createWhileAuditAcceptsComments<T>(
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string },
+  write: (tx: Omit<ExtendedPrismaClient, ITXClientDenyList>) => Promise<T>
+): Promise<T> {
+  return db.$transaction(async (tx) => {
+    await assertAuditAcceptsCommentsOnLockedRow(tx, {
+      auditSessionId,
+      organizationId,
+    });
+
+    return write(tx);
+  });
+}
+
+/**
+ * Takes the audit row and refuses unless it still accepts comments.
+ *
+ * For a caller that already has a transaction of its own; everything else goes
+ * through {@link createWhileAuditAcceptsComments}.
+ *
+ * @param tx - The caller's transaction, which must hold the lock until it ends
+ * @param auditSessionId - The audit the comment belongs to
+ * @param organizationId - Its organization
+ * @throws {ShelfError} 404 when the audit is not in the organization; 400 when
+ *   it no longer accepts comments
+ */
+export async function assertAuditAcceptsCommentsOnLockedRow(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+  }: { auditSessionId: string; organizationId: string }
+): Promise<void> {
+  const [session] = await tx.$queryRaw<{ status: AuditStatus }[]>`
+    SELECT status FROM "AuditSession"
+    WHERE id = ${auditSessionId} AND "organizationId" = ${organizationId}
+    FOR UPDATE
+  `;
+
+  if (!session) {
+    throw new ShelfError({
+      cause: null,
+      message: "Audit not found",
+      additionalData: { auditSessionId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  assertAuditAcceptsComments(session.status, {
+    auditSessionId,
+    organizationId,
+  });
 }
 
 export const AUDIT_LIST_INCLUDE = {
@@ -291,6 +406,12 @@ export async function createAuditSession(
   const uniqueAssigneeIds = assignee ? [assignee] : [];
 
   const result = await db.$transaction(async (tx) => {
+    // The assignee arrives from the form: prove they are a workspace member
+    // before the assignment gives them access to the audit.
+    for (const assigneeId of uniqueAssigneeIds) {
+      await assertUserBelongsToOrg({ userId: assigneeId, organizationId }, tx);
+    }
+
     const session = await tx.auditSession.create({
       data: {
         name,
@@ -539,8 +660,13 @@ export async function updateAuditSession({
           where: { auditSessionId: id, userId: currentAssignee },
         });
       }
-      // Add new assignee if provided
+      // Add new assignee if provided. It arrives from the form, so prove
+      // they are a workspace member before the assignment grants access.
       if (newAssignee) {
+        await assertUserBelongsToOrg(
+          { userId: newAssignee, organizationId },
+          tx
+        );
         await tx.auditAssignment.create({
           data: { auditSessionId: id, userId: newAssignee },
         });
@@ -613,11 +739,19 @@ export async function getAuditSessionDetails({
   organizationId,
   userOrganizations,
   request,
+  refreshExpectedAssetImages,
 }: {
   id: AuditSession["id"];
   organizationId: string;
   userOrganizations?: Pick<UserOrganization, "organizationId">[];
   request?: Request;
+  /**
+   * Re-sign lapsed photo URLs on the expected assets. Pass `true` only from a
+   * caller that renders `expectedAssets`; a caller that reads `session` alone
+   * passes `false` and makes no storage calls. Required so every caller states
+   * which one it is.
+   */
+  refreshExpectedAssetImages: boolean;
 }): Promise<GetAuditSessionResult> {
   try {
     const otherOrganizationIds = userOrganizations?.map(
@@ -666,6 +800,8 @@ export async function getAuditSessionDetails({
                 title: true,
                 mainImage: true,
                 thumbnailImage: true,
+                // Lets the re-sign below tell a lapsed photo URL.
+                mainImageExpiration: true,
                 // Model cover image for assets with no image of their own
                 ...ASSET_MODEL_IMAGE_SELECT,
                 // Asset-code resolution: surface code data so the audit
@@ -764,9 +900,24 @@ export async function getAuditSessionDetails({
       });
     }
 
-    const expectedAssets: AuditExpectedAsset[] = session.assets
-      .filter((auditAsset) => auditAsset.expected && auditAsset.asset)
-      .map((auditAsset) => {
+    const expectedAuditAssets = session.assets.flatMap((auditAsset) =>
+      auditAsset.expected && auditAsset.asset
+        ? [{ auditAsset, asset: auditAsset.asset }]
+        : []
+    );
+    const expectedAssetRows = expectedAuditAssets.map(({ asset }) => asset);
+    // Only expected rows are rendered, so only they are re-signed. The owning
+    // workspace scopes the write-back, since a sibling-workspace session also
+    // resolves here. The result lines up with `expectedAuditAssets`.
+    const refreshedExpectedAssets = refreshExpectedAssetImages
+      ? await refreshExpiredAssetImages(expectedAssetRows, {
+          organizationId: session.organizationId,
+          ...ASSET_IMAGE_RESIGN_LIMITS,
+        })
+      : expectedAssetRows;
+
+    const expectedAssets: AuditExpectedAsset[] = expectedAuditAssets.map(
+      ({ auditAsset }, index) => {
         // why: prefer the User's display fields when the custodian is a
         // real user; fall back to the TeamMember's name for non-user
         // "external" custodians (contractors etc.). Routes through the
@@ -793,10 +944,11 @@ export async function getAuditSessionDetails({
          * Placeholder stays `null` so the existing client-side "no image"
          * branches keep working — same contract as `serializeAssetImage`.
          */
+        const asset = refreshedExpectedAssets[index];
         const image = resolveAssetImage({
-          mainImage: auditAsset.asset?.mainImage ?? null,
-          thumbnailImage: auditAsset.asset?.thumbnailImage ?? null,
-          assetModel: auditAsset.asset?.assetModel ?? null,
+          mainImage: asset.mainImage,
+          thumbnailImage: asset.thumbnailImage,
+          assetModel: asset.assetModel,
         });
         const hasImage = image.source !== "placeholder";
 
@@ -814,7 +966,8 @@ export async function getAuditSessionDetails({
           categoryName: auditAsset.asset?.category?.name ?? null,
           custodianName,
         };
-      });
+      }
+    );
 
     return {
       session,
@@ -1828,9 +1981,10 @@ export async function removeAuditScan(
         ]);
 
       await Promise.all([
-        tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditSessionId proven to belong to organizationId by the findFirst above (404 otherwise); update() requires a unique where
-          where: { id: auditSessionId },
+        updateAuditSessionWhileInStatus(tx, {
+          auditSessionId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
           data: { foundAssetCount, missingAssetCount, unexpectedAssetCount },
         }),
         createAssetScanRemovedNote({
@@ -2058,6 +2212,64 @@ export async function getAuditScans({
 }
 
 /**
+ * Writes to an audit session only while it is still in one of `allowedStatuses`.
+ *
+ * A status read earlier in the same transaction does not hold: under READ
+ * COMMITTED a concurrent complete, cancel or archive can commit between that
+ * read and this write. With the status in the write's own predicate, Postgres
+ * re-checks it against the committed row, so a transition that already landed
+ * matches nothing. That is refused here, and because it throws, the caller's
+ * transaction rolls back everything it did before the write — asset rows,
+ * notes and events included.
+ *
+ * Kept as the last session write rather than a lock taken up front: the scan
+ * path locks audit-asset rows before the session row, and locking the session
+ * first here would take the two in the opposite order.
+ *
+ * @param tx - The caller's transaction
+ * @param auditSessionId - The audit being written
+ * @param organizationId - Its organization
+ * @param allowedStatuses - The statuses in which this write is still valid
+ * @param data - The session fields to write
+ * @throws {ShelfError} 409 when the audit has moved out of `allowedStatuses`
+ */
+async function updateAuditSessionWhileInStatus(
+  tx: Omit<ExtendedPrismaClient, ITXClientDenyList>,
+  {
+    auditSessionId,
+    organizationId,
+    allowedStatuses,
+    data,
+  }: {
+    auditSessionId: string;
+    organizationId: string;
+    allowedStatuses: AuditStatus[];
+    data: Prisma.AuditSessionUpdateManyMutationInput;
+  }
+): Promise<void> {
+  const result = await tx.auditSession.updateMany({
+    where: {
+      id: auditSessionId,
+      organizationId,
+      status: { in: allowedStatuses },
+    },
+    data,
+  });
+
+  if (result.count !== 1) {
+    throw new ShelfError({
+      cause: null,
+      message:
+        "This audit changed while your change was being saved. Please refresh and try again.",
+      additionalData: { auditSessionId, organizationId, allowedStatuses },
+      label,
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/**
  * Completes an audit session by finalizing all asset statuses.
  * Expected assets that were not scanned are marked as MISSING.
  * Updates the session status to COMPLETED and sets completedAt timestamp.
@@ -2157,10 +2369,12 @@ export async function completeAuditSession({
           }),
         ]);
 
-      // Update session to completed
-      await tx.auditSession.update({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: sessionId proven to belong to organizationId by the findUnique guard at the top of this tx (throws 404 otherwise); update() requires a unique-only where so organizationId cannot be added here.
-        where: { id: sessionId },
+      // Update session to completed — only if it is still open, so a cancel or
+      // archive that landed since the check above is not overwritten.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: sessionId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING, AuditStatus.ACTIVE],
         data: {
           status: AuditStatus.COMPLETED,
           completedAt: new Date(),
@@ -2329,7 +2543,8 @@ export async function completeAuditSession({
 export async function getAuditsForOrganization(params: {
   organizationId: AuditSession["organizationId"];
   userId?: string;
-  isSelfServiceOrBase?: boolean;
+  /** Restrict to audits assigned to `userId` (the caller's `audits.seeAll` is false). */
+  assignedOnly?: boolean;
   /** Page number. Starts at 1 */
   page?: number;
   /** Items to be loaded per page */
@@ -2362,7 +2577,7 @@ export async function getAuditsForOrganization(params: {
   const {
     organizationId,
     userId,
-    isSelfServiceOrBase,
+    assignedOnly,
     page = 1,
     perPage = 8,
     search,
@@ -2373,16 +2588,14 @@ export async function getAuditsForOrganization(params: {
     prioritizeDeadlines = false,
   } = params;
 
-  // why: BASE/SELF_SERVICE roles MUST be scoped to their own assignments.
-  // If a caller signals "scope to role" but forgets to pass userId, the
-  // predicate would silently collapse to null and leak the whole org list.
-  // Fail loud — and OUTSIDE the try/catch below so the precise error reaches
-  // the caller (the catch wraps everything in a generic "fetch failed").
-  if (isSelfServiceOrBase && !userId) {
+  // why: a caller limited to assigned audits MUST pass `userId`: without it
+  // the predicate would collapse to null and list the whole workspace. Fails
+  // loud, outside the try/catch, so the precise error reaches the caller.
+  if (assignedOnly && !userId) {
     throw new ShelfError({
       cause: null,
       message: "Missing user context for assignment-scoped audit query.",
-      additionalData: { organizationId, isSelfServiceOrBase },
+      additionalData: { organizationId, assignedOnly },
       label,
       status: 400,
     });
@@ -2394,15 +2607,11 @@ export async function getAuditsForOrganization(params: {
 
     const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-    // Filter by assignee for BASE/SELF_SERVICE users, OR when the caller
-    // explicitly asks for "assigned to me". Both paths use the same
-    // `assignments.some.userId` predicate so an admin/owner who opts into
-    // the filter via `assignedToUserId` gets the same scoping the role
-    // check would apply automatically for low-permission users. The
-    // BASE/SELF_SERVICE branch can rely on `userId` being non-null
-    // thanks to the guard above.
+    // Filter by assignee when the caller is limited to assigned audits, or
+    // asks for "assigned to me". Both use the same predicate. The first
+    // branch relies on `userId` being non-null thanks to the guard above.
     const assigneeFilterUserId =
-      (isSelfServiceOrBase ? userId : null) ?? assignedToUserId ?? null;
+      (assignedOnly ? userId : null) ?? assignedToUserId ?? null;
     if (assigneeFilterUserId) {
       where.assignments = {
         some: {
@@ -2465,31 +2674,29 @@ export async function getAuditsForOrganization(params: {
 /**
  * Validates that the user may act on the audit session.
  *
- * ADMIN/OWNER users (isSelfServiceOrBase = false) always pass: they manage
- * every audit in their workspace, mirroring both
- * requireAuditAssigneeForBaseSelfService and the ADMIN/OWNER allow-all
- * short-circuit in @shelf/permissions. BASE/SELF_SERVICE users must be
- * assignees of the audit.
+ * Callers who see every audit (`access.audits.seeAll`) always pass; everyone
+ * else must be an assignee.
  *
- * @throws {ShelfError} 403 error if a BASE/SELF_SERVICE user is not an assignee
+ * @throws {ShelfError} 404 if the audit is not in the workspace, 403 if a
+ *   caller limited to assigned audits is not an assignee
  */
 export async function requireAuditAssignee({
   auditSessionId,
   organizationId,
   userId,
-  isSelfServiceOrBase = true,
+  assignedOnly = true,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  /** When true (BASE/SELF_SERVICE), require assignee. When false (admin/owner), always allow. */
-  isSelfServiceOrBase?: boolean;
+  /** When true, the caller must be an assignee; when false (the caller's `audits.seeAll`), always allowed. */
+  assignedOnly?: boolean;
 }): Promise<void> {
-  // ADMIN/OWNER act on any audit in their workspace. Returning before the
-  // session fetch is safe: every caller's downstream service re-verifies the
-  // session against organizationId (recordAuditScan, completeAuditSession,
-  // requireAuditAssetInSession all 404 on cross-org ids).
-  if (!isSelfServiceOrBase) {
+  // Callers who see every audit act on any audit in their workspace.
+  // Returning before the fetch is safe: every downstream service re-verifies
+  // the session against organizationId (recordAuditScan,
+  // completeAuditSession, requireAuditAssetInSession all 404 on cross-org ids).
+  if (!assignedOnly) {
     return;
   }
 
@@ -2547,23 +2754,29 @@ export async function requireAuditAssignee({
 }
 
 /**
- * Validates that a BASE/SELF_SERVICE user is assigned to an audit.
- * For ADMIN/OWNER users, this check is skipped (they can access all audits).
+ * Refuses an audit the caller is not assigned to when the caller is limited
+ * to assigned audits (`!access.audits.seeAll`). Callers who see every audit
+ * pass unchecked.
  *
- * @throws {ShelfError} If BASE/SELF_SERVICE user is not assigned to the audit
+ * @param args.audit - The audit, with its assignments already loaded
+ * @param args.userId - The caller
+ * @param args.assignedOnly - The caller sees only audits assigned to them
+ * @param args.auditId - The audit id, for error context
+ * @throws {ShelfError} 403 if the caller is limited to assigned audits and is
+ *   not an assignee
  */
-export function requireAuditAssigneeForBaseSelfService({
+export function requireAuditAssigneeForScopedViewer({
   audit,
   userId,
-  isSelfServiceOrBase,
+  assignedOnly,
   auditId,
 }: {
   audit: { assignments: { userId: string }[] };
   userId: string;
-  isSelfServiceOrBase: boolean;
+  assignedOnly: boolean;
   auditId: string;
 }) {
-  if (isSelfServiceOrBase) {
+  if (assignedOnly) {
     const isAssignee = audit.assignments.some(
       (assignment) => assignment.userId === userId
     );
@@ -2585,31 +2798,31 @@ export function requireAuditAssigneeForBaseSelfService({
 /**
  * Cancels an audit session.
  *
- * The creator of an audit can always cancel it. Workspace admins and owners
- * can also cancel any audit in their org (regardless of who created it) so
- * that team-managed audits don't get stuck when the creator is unavailable
- * or no longer responsible — this matches archive/delete permissions.
+ * The creator of an audit can always cancel it. A caller who manages audits
+ * created by others can also cancel any audit in the workspace, so
+ * team-managed audits don't get stuck when the creator is unavailable or no
+ * longer responsible. This matches archive/delete permissions.
  *
  * Cannot cancel an audit that is already COMPLETED, CANCELLED, or ARCHIVED.
  *
- * @param isAdminOrOwner - Whether the acting user is admin/owner in the
- *   audit's organization. The route layer derives this from the workspace
- *   role and passes it in; the service trusts it.
+ * @param canManageOthers - The caller may manage audits created by others
+ *   (`access.policy.audits.manageOthers`). The route layer derives this from
+ *   the membership and passes it in; the service trusts it.
  * @throws {ShelfError} 404 if the audit isn't found, 403 if the user is
- *   neither the creator nor an admin/owner, 400 if the audit is in a
- *   terminal status that can't be cancelled.
+ *   neither the creator nor allowed to manage others' audits, 400 if the
+ *   audit is in a terminal status that can't be cancelled.
  */
 export async function cancelAuditSession({
   auditSessionId,
   organizationId,
   userId,
-  isAdminOrOwner,
+  canManageOthers,
   hints,
 }: {
   auditSessionId: string;
   organizationId: string;
   userId: string;
-  isAdminOrOwner: boolean;
+  canManageOthers: boolean;
   hints: ClientHint;
 }) {
   try {
@@ -2676,10 +2889,10 @@ export async function cancelAuditSession({
       organizationId,
     });
 
-    // Allow the creator to cancel their own audit. Also allow workspace
-    // admins/owners to cancel any audit in the org — needed when team
-    // members create audits the supervisor needs to clean up later.
-    if (auditSession.createdById !== userId && !isAdminOrOwner) {
+    // The creator may cancel their own audit. A caller who manages others'
+    // audits may cancel any audit in the workspace, so a supervisor can clean
+    // up audits team members created.
+    if (auditSession.createdById !== userId && !canManageOthers) {
       throw new ShelfError({
         cause: null,
         message:
@@ -2823,13 +3036,11 @@ export async function cancelAuditSession({
     }
 
     // Use email helper to send cancellation emails with HTML template.
-    // The fallback is role-aware: when the acting user has no resolvable
-    // display name (e.g. a freshly-created account), pick a label that
-    // matches who actually cancelled — "a workspace admin" for the
-    // admin/owner branch, "the audit creator" otherwise. Avoids the
-    // earlier hard-coded "an admin" mis-attributing creator-cancels.
+    // The fallback names who cancelled when the acting user has no
+    // resolvable display name: "a workspace admin" when the caller manages
+    // others' audits, "the audit creator" otherwise.
     const resolvedCancellerName = resolveUserDisplayName(actingUser);
-    const fallbackCancellerName = isAdminOrOwner
+    const fallbackCancellerName = canManageOthers
       ? "a workspace admin"
       : "the audit creator";
     sendAuditCancelledEmails({
@@ -2987,10 +3198,11 @@ export async function addAssetsToAudit({
           })),
         });
 
-        // Update audit session counts
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
+        // Update audit session counts — only while it is still pending.
+        await updateAuditSessionWhileInStatus(tx, {
+          auditSessionId: auditId,
+          organizationId,
+          allowedStatuses: [AuditStatus.PENDING],
           data: {
             expectedAssetCount: { increment: newAssetIds.length },
             missingAssetCount: { increment: newAssetIds.length },
@@ -3148,18 +3360,19 @@ export async function removeAssetFromAudit({
         });
       }
 
-      // Update audit session counts
-      // If it was an expected asset, decrement expectedAssetCount
-      if (auditAsset.expected) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: 1 },
-            missingAssetCount: { decrement: 1 },
-          },
-        });
-      }
+      // Update audit session counts, which move only for an expected asset.
+      // Written unconditionally — a zero delta for an unexpected one — so the
+      // removal is refused whenever the audit is no longer pending.
+      const expectedDelta = auditAsset.expected ? 1 : 0;
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedDelta },
+          missingAssetCount: { decrement: expectedDelta },
+        },
+      });
 
       // Create activity note
       await createAssetRemovedFromAuditNote({
@@ -3291,17 +3504,18 @@ export async function removeAssetsFromAudit({
         });
       }
 
-      // Update audit session counts
-      if (expectedCount > 0) {
-        await tx.auditSession.update({
-          // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: auditId proven org-owned by the tx.auditSession.findUnique({ where: { id: auditId, organizationId } }) guard at the top of this fn (throws 404 otherwise); update() requires a unique-only where.
-          where: { id: auditId },
-          data: {
-            expectedAssetCount: { decrement: expectedCount },
-            missingAssetCount: { decrement: expectedCount },
-          },
-        });
-      }
+      // Update audit session counts. Written unconditionally — a zero delta
+      // when only unexpected assets were removed — so the removal is refused
+      // whenever the audit is no longer pending.
+      await updateAuditSessionWhileInStatus(tx, {
+        auditSessionId: auditId,
+        organizationId,
+        allowedStatuses: [AuditStatus.PENDING],
+        data: {
+          expectedAssetCount: { decrement: expectedCount },
+          missingAssetCount: { decrement: expectedCount },
+        },
+      });
 
       // Create activity note
       await createAssetsRemovedFromAuditNote({
@@ -3441,25 +3655,26 @@ export async function archiveAuditSession({
  * @param organizationId - The organization ID for scoping
  * @param currentSearchParams - Serialized URL search params from the index page
  * @param userId - The current user (used for assignment-scoped filters)
- * @param isSelfServiceOrBase - When true, restrict to audits assigned to userId
- *   (mirrors the loader's behavior in {@link getAuditsForOrganization})
+ * @param assignedOnly - When true (the caller's `audits.seeAll` is false),
+ *   restrict to audits assigned to userId (mirrors the loader's behavior in
+ *   {@link getAuditsForOrganization})
  */
 export function getAuditWhereInput({
   organizationId,
   currentSearchParams,
   userId,
-  isSelfServiceOrBase,
+  assignedOnly,
 }: {
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
   userId?: string;
-  isSelfServiceOrBase?: boolean;
+  assignedOnly?: boolean;
 }): Prisma.AuditSessionWhereInput {
   const where: Prisma.AuditSessionWhereInput = { organizationId };
 
-  // Filter by assignee for BASE/SELF_SERVICE users so select-all
-  // never pulls in audits outside the user's visible scope
-  if (isSelfServiceOrBase && userId) {
+  // Callers limited to assigned audits: select-all must never reach an
+  // audit outside their visible scope
+  if (assignedOnly && userId) {
     where.assignments = {
       some: {
         userId,
@@ -3516,8 +3731,9 @@ export function getAuditWhereInput({
  * @param params.organizationId - Scoping organization
  * @param params.userId - The user performing the archive (for activity notes)
  * @param params.currentSearchParams - Serialized URL params for select-all filtering
- * @param params.isSelfServiceOrBase - When true, restrict select-all resolution
- *   to audits assigned to userId (matches the index loader's assignment scope)
+ * @param params.assignedOnly - When true (the caller's `audits.seeAll` is
+ *   false), restrict select-all resolution to audits assigned to userId
+ *   (matches the index loader's assignment scope)
  * @throws {ShelfError} If the selection is empty or any selected audit is not
  *   in a terminal state
  */
@@ -3526,13 +3742,13 @@ export async function bulkArchiveAudits({
   organizationId,
   userId,
   currentSearchParams,
-  isSelfServiceOrBase,
+  assignedOnly,
 }: {
   auditIds: AuditSession["id"][];
   organizationId: Organization["id"];
   userId: string;
   currentSearchParams?: string | null;
-  isSelfServiceOrBase?: boolean;
+  assignedOnly?: boolean;
 }) {
   try {
     /** When all items are selected, resolve from filters instead of IDs */
@@ -3543,7 +3759,7 @@ export async function bulkArchiveAudits({
           currentSearchParams,
           organizationId,
           userId,
-          isSelfServiceOrBase,
+          assignedOnly,
         })
       : { id: { in: auditIds }, organizationId };
 
@@ -3869,10 +4085,10 @@ export async function deleteAuditSession({
  * {@link getAuditWhereInput} AND is further narrowed to `status: ARCHIVED`
  * so non-archived audits in the filtered view can never be pulled in.
  *
- * Note: `isSelfServiceOrBase` is intentionally not a parameter here.
- * `PermissionAction.delete` on the audit entity is ADMIN/OWNER-only
- * (see `permission.data.ts`), so by the time we reach this function the
- * caller is already guaranteed not to be self-service/base. Wiring the
+ * Note: `assignedOnly` is intentionally not a parameter here.
+ * `PermissionAction.delete` on the audit entity is granted only to roles
+ * that see every audit (see `permission.data.ts`), so by the time we reach
+ * this function the caller is not limited to assigned audits. Wiring the
  * flag through would be dead plumbing that implies a policy choice
  * (delete-your-assigned-archives) no one has actually made.
  *

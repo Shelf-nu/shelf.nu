@@ -5,15 +5,22 @@ import type {
   Organization,
   Prisma,
   Kit,
-  OrganizationRoles,
 } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
-import { validateBookingOwnership } from "~/utils/booking-authorization.server";
+import type { ResolvedDisplayCode } from "~/modules/barcode/display";
+import {
+  QR_CODES_ORDER_BY,
+  resolveDisplayCode,
+} from "~/modules/barcode/display";
+import type { PdfCodeImage } from "~/modules/barcode/pdf-code-image";
+import { buildPdfCodeImageMap } from "~/modules/barcode/pdf-code-image.server";
+import { assertCanDownloadBookingDocuments } from "~/utils/booking-authorization.server";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { getClientHint } from "~/utils/client-hints";
-import { ShelfError } from "~/utils/error";
+import { rethrowIfClientError, ShelfError } from "~/utils/error";
+import type { RoleAccess } from "~/utils/permissions/role-access";
 import type { PdfSnapshotKit } from "./helpers";
 import {
   buildPdfAssetRows,
@@ -22,7 +29,6 @@ import {
   groupAndSortAssetsByKit,
 } from "./helpers";
 import { getBooking } from "./service.server";
-import { getQrCodeMaps } from "../qr/service.server";
 import { TAG_WITH_COLOR_SELECT } from "../tag/constants";
 
 export interface SortParams {
@@ -87,9 +93,35 @@ export interface PdfDbResult {
   totalValue: string;
   organization: Pick<
     Organization,
-    "id" | "name" | "imageId" | "currency" | "updatedAt"
+    | "id"
+    | "name"
+    | "imageId"
+    | "currency"
+    | "updatedAt"
+    // Read by `resolveDisplayCode` when building `assetIdToDisplayCodeMap`.
+    | "qrIdDisplayPreference"
+    | "barcodesEnabled"
+    // Whether the sheet prints the code pictures at all.
+    | "showQrCodesOnPdfs"
   >;
-  assetIdToQrCodeMap: Record<string, string>;
+  /**
+   * The picture printed for each row's code, keyed by `Asset.id`, with where
+   * it prints (the Code cell or a full-width line under the row). It is a
+   * picture of the code in `assetIdToDisplayCodeMap`: an SVG of the barcode
+   * when that code is one, otherwise the Shelf QR. An asset with no entry
+   * prints its code as text only. Built by `buildPdfCodeImageMap`.
+   */
+  assetIdToCodeImageMap: Record<string, PdfCodeImage>;
+  /**
+   * The code to PRINT in each row's Code cell, the same one the workspace's
+   * on-screen asset lists show: the QR id, the SAM id, or a barcode value,
+   * with a per-asset override winning over the workspace preference.
+   *
+   * Keyed by `Asset.id`, not by `bookingAssetId`: the render list is
+   * per-slice, so a QUANTITY_TRACKED asset booked standalone + via kits has
+   * several rows that all resolve to this one entry.
+   */
+  assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode>;
   /**
    * Outstanding model-level reservations on the booking (Phase 3d).
    * Only rows with `quantity > 0` are meaningful for the PDF — the
@@ -103,14 +135,32 @@ export interface PdfDbResult {
   originalTo?: string;
 }
 
+/** Optional switches for {@link fetchAllPdfRelatedData}. */
+export interface PdfDataOptions {
+  /**
+   * Whether to draw a code picture per asset. `true` by default, so a sheet
+   * that prints code pictures needs no opt-in.
+   *
+   * A sheet that prints only the text code passes `false`: the encode is a
+   * per-asset cost and puts a data URL per asset into a response that nothing
+   * reads. The workspace's own `showQrCodesOnPdfs` still wins over a `true`
+   * here: this switch can only turn generation off, never on.
+   */
+  includeCodeImages?: boolean;
+}
+
 export async function fetchAllPdfRelatedData(
   bookingId: string,
   organizationId: string,
   userId: string,
-  role: OrganizationRoles | undefined,
+  /** The caller's access; `undefined` for system callers, which skip the check. */
+  access: RoleAccess | undefined,
   request: Request,
-  sortParams?: SortParams
+  sortParams?: SortParams,
+  options?: PdfDataOptions
 ): Promise<PdfDbResult> {
+  const includeCodeImages = options?.includeCodeImages ?? true;
+
   try {
     const booking = await getBooking({
       id: bookingId,
@@ -119,13 +169,12 @@ export async function fetchAllPdfRelatedData(
       extraInclude: { tags: TAG_WITH_COLOR_SELECT },
     });
 
-    if (role) {
-      validateBookingOwnership({
+    if (access) {
+      assertCanDownloadBookingDocuments({
+        access,
         booking,
         userId,
-        role,
         action: "view",
-        checkCustodianOnly: true,
       });
     }
 
@@ -179,7 +228,14 @@ export async function fetchAllPdfRelatedData(
               name: true,
             },
           },
-          qrCodes: true,
+          // why: out of this rule: `getQrCodeMaps` renders the image from
+          // `Qr.version`/`errorCorrection`, so the tight select cannot be used.
+          // Ordered so the QR picture and the QR id printed under it are the
+          // same first code on every print.
+          qrCodes: { orderBy: QR_CODES_ORDER_BY },
+          // Feeds `resolveDisplayCode` so a barcode-preference workspace gets
+          // its barcode value printed instead of the QR id.
+          barcodes: { select: { id: true, type: true, value: true } },
           assetLocations: {
             select: {
               location: {
@@ -219,6 +275,11 @@ export async function fetchAllPdfRelatedData(
           id: true,
           currency: true,
           updatedAt: true,
+          // Which code the workspace wants printed, and whether its picture is
+          // printed at all.
+          qrIdDisplayPreference: true,
+          barcodesEnabled: true,
+          showQrCodesOnPdfs: true,
         },
       }),
       // SECURITY (cross-org IDOR): `sourceKitId`'s FK accepts a `Kit` in ANY
@@ -266,21 +327,45 @@ export async function fetchAllPdfRelatedData(
       orderDirection
     );
 
-    // Deduplicate by asset id before QR generation: `sortedAssets` is now
-    // one row PER SLICE, so a QT asset booked standalone + via kits appears
-    // several times. `getQrCodeMaps` generates a QR per row and keys the
-    // result by asset id, so passing duplicates only repeats identical work —
-    // pass each asset once. The render still reads the map by `asset.id`, so
-    // every slice row resolves to the same (correct) QR.
-    const uniqueAssetsForQr = Array.from(
+    // Deduplicate by asset id: `sortedAssets` is one row PER SLICE, so a QT
+    // asset booked standalone + via kits appears several times. The code and
+    // its picture are properties of the asset, so each asset is resolved and
+    // drawn once, and every slice row reads the same entry by `asset.id`.
+    const uniqueAssets = Array.from(
       new Map(sortedAssets.map((asset) => [asset.id, asset])).values()
     );
-    const assetIdToQrCodeMap = await getQrCodeMaps({
-      assets: uniqueAssetsForQr,
-      userId,
-      organizationId,
-      size: "small",
-    });
+
+    // Resolved once per unique asset. Resolving per rendered row would repeat
+    // identical work for every slice of a QUANTITY_TRACKED asset and would have
+    // to be threaded through `PdfAssetRow`; a map keyed by asset id leaves the
+    // row types untouched.
+    const assetIdToDisplayCodeMap: Record<string, ResolvedDisplayCode> =
+      Object.fromEntries(
+        uniqueAssets.map((asset) => [
+          asset.id,
+          resolveDisplayCode({
+            entity: asset,
+            organization,
+            entityKind: "asset",
+          }),
+        ])
+      );
+
+    // Drawn only when the sheet will print them: a workspace that turned code
+    // pictures off, or a caller whose sheet has no picture at all, renders
+    // nothing from this map, so drawing it would cost an encode per asset and
+    // put a data URL per asset in the response that nothing reads. The renderer
+    // treats a missing entry as "text only", so an empty map needs no handling
+    // of its own.
+    const assetIdToCodeImageMap =
+      organization.showQrCodesOnPdfs && includeCodeImages
+        ? await buildPdfCodeImageMap({
+            assets: uniqueAssets,
+            displayCodes: assetIdToDisplayCodeMap,
+            userId,
+            organizationId,
+          })
+        : {};
 
     // Phase 3d (Book-by-Model): surface outstanding model-level
     // reservations so the PDF can render a dedicated "Requested models"
@@ -302,9 +387,37 @@ export async function fetchAllPdfRelatedData(
       },
     }));
 
+    // Everything dropped here is fetch-only. The code relations have done their
+    // job in the two maps above; `assetKits` and `assetLocations` were reduced
+    // to this row's `kit` and `location` by `buildPdfAssetRows`. Nothing reads
+    // any of them again, here or in the browser, and the render list is one row
+    // per SLICE — so a QUANTITY_TRACKED asset booked standalone and through
+    // three kits would otherwise serialise four copies of each.
+    const printableAssets = sortedAssets.map(
+      ({
+        qrCodes: _qrCodes,
+        barcodes: _barcodes,
+        assetKits: _assetKits,
+        assetLocations: _assetLocations,
+        ...row
+      }) => row
+    );
+
+    // `getBooking` returns the whole booking, and `BOOKING_WITH_ASSETS_INCLUDE`
+    // hangs two things off it that the sheet never reads: `bookingAssets`,
+    // carrying a second, select-shaped copy of every asset — code relations
+    // included — once per slice, and `modelRequests` with full `AssetModel`
+    // rows, which the sheet reads from the projection above instead. The
+    // booking itself is here for its name, description, custodian and tags.
+    const {
+      bookingAssets: _bookingAssets,
+      modelRequests: _bookingModelRequests,
+      ...printableBooking
+    } = booking as typeof booking & { modelRequests?: unknown };
+
     return {
-      booking,
-      assets: sortedAssets,
+      booking: printableBooking,
+      assets: printableAssets,
       // Keep the total aligned with the exported (search-filtered) rows so a
       // searched PDF doesn't show a subset of assets with a full-booking total.
       totalValue: calculateTotalValueOfAssets({
@@ -324,10 +437,14 @@ export async function fetchAllPdfRelatedData(
         locale: getClientHint(request).locale,
       }),
       organization,
-      assetIdToQrCodeMap,
+      assetIdToCodeImageMap,
+      assetIdToDisplayCodeMap,
       modelRequests,
     };
   } catch (cause) {
+    // A refusal (the caller may not see this booking or its documents) keeps
+    // its own 4xx status; only unexpected failures become a 500.
+    rethrowIfClientError(cause);
     throw new ShelfError({
       cause,
       message: "Error fetching booking data for PDF",

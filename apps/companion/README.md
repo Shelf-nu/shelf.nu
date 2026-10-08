@@ -1,5 +1,7 @@
 # Shelf Companion App
 
+> **License:** this directory is **not open source** and is not under the AGPL-3.0 license of the rest of this repository. Its source is available under the [PolyForm Internal Use License 1.0.0](./LICENSE). You may not distribute this app or an app based on it. Publishing on the Apple App Store, Google Play or any other store is distribution.
+
 > **Status:** Under review — ready for local testing
 > **Branch:** `feat/mobile-companion-app` (162 files, ~33k lines)
 > **Decision needed:** Where should this code live? See [Architecture Decision](#architecture-decision-monorepo-vs-separate-repo) below.
@@ -374,6 +376,26 @@ All at `/api/mobile/*` — JWT Bearer auth required.
 | `/api/mobile/categories`               | GET    | Category list (cached)                  |
 | `/api/mobile/locations`                | GET    | Location list (cached)                  |
 | `/api/mobile/team-members`             | GET    | Team member list (cached)               |
+
+---
+
+## Role access
+
+Every role decision in the app comes from `@shelf/permissions`:
+`userHasPermission` (`lib/permissions.ts`) for the permission matrix and
+`useRoleAccess()` (`hooks/use-role-access.ts`) for reach: whose bookings,
+custody scope, audit scope, booking item rules. `/api/mobile/me` sends each
+workspace's visibility toggles for this. Never compare role strings in the app:
+`local-rules/no-direct-role-checks` (shared with the webapp, wired in
+`eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
+outside tests.
+
+**Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update
+to every live `runtimeVersion` (1.5.0, 1.4.0, 1.3.0, 1.2.0). Builds older than
+1.2.0 cannot update over the air; for them an unknown role denies every
+client-gated affordance, and server-computed booking actions keep working.
+A companion bundle that reaches a device before the server sends the toggles
+reads them as off, which only under-offers.
 
 ---
 

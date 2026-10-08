@@ -5,7 +5,6 @@ import {
   type Qr,
   type User,
   type CustomTierLimit,
-  OrganizationRoles,
   type UserBusinessIntel,
   type Prisma,
 } from "@prisma/client";
@@ -39,6 +38,7 @@ import {
   isDelete,
   parseData,
 } from "~/utils/http.server";
+import { isWorkspaceOwner } from "~/utils/permissions/role-access";
 import { requireAdmin } from "~/utils/roles.server";
 import type { CustomerWithSubscriptions } from "~/utils/stripe.server";
 import {
@@ -49,6 +49,7 @@ import {
   getCustomerSubscriptionsWithProducts,
 } from "~/utils/stripe.server";
 import { resolveUserDisplayName } from "~/utils/user";
+import { requiredNumberFromString } from "~/utils/zod-numeric";
 
 export const meta = () => [{ title: appendToMetaTitle("User details") }];
 
@@ -166,7 +167,7 @@ export const loader = async ({ context, params }: LoaderFunctionArgs) => {
       (uo) =>
         uo.organization.enabledSso &&
         uo.organization.ssoDetails &&
-        uo.roles.some((role) => role === OrganizationRoles.OWNER)
+        isWorkspaceOwner(uo.roles)
     );
 
     /** Process the data you already have - no second query needed! */
@@ -296,7 +297,9 @@ export const action = async ({
         const { maxOrganizations, isEnterprise } = parseData(
           await request.formData(),
           z.object({
-            maxOrganizations: z.string().transform((val) => +val),
+            maxOrganizations: requiredNumberFromString({
+              fieldName: "Max organizations",
+            }),
             isEnterprise: z
               .string()
               .optional()

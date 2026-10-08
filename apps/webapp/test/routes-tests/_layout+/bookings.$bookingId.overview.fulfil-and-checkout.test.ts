@@ -1,22 +1,25 @@
 /**
- * Web fulfil-and-checkout — permission mapping and cross-user guard.
+ * Web fulfil-and-checkout: who may open the scanner, and what a direct POST,
+ * which skips the loader, is held to before `fulfilAndCheckOut` runs.
  *
- * Two defects, both reachable by a direct POST that skips the loader:
+ * The page is a check-out, so it takes the check-out rule: Self service opens
+ * it on its own reserved booking, like every other check-out.
  *
- *  1. The action gated on `PermissionAction.update`. BASE holds `update` and
- *     deliberately does NOT hold `checkout`, so a BASE user could check out
- *     through this route despite the role being denied that capability.
- *  2. The action had no ownership check at all — `canUserManageBookingAssets`
- *     runs only in the loader, and `fulfilModelRequestsAndCheckout` does not
- *     check ownership itself. So SELF_SERVICE, who legitimately holds
- *     `booking:checkout`, could check out anyone else's booking.
- *
- * detail.dev finding D017 — the web twin of D005.
+ * Pins:
+ *  - the permission demanded: `booking:checkout`, which BASE does not hold,
+ *    rather than `booking:update`, which it does;
+ *  - the ownership guard: SELF_SERVICE holds `booking:checkout` but may only
+ *    check out a booking they created or are custodian of, and it runs before
+ *    the workspace settings are read;
+ *  - the `requireExplicitCheckout` flag handed to `fulfilAndCheckOut`;
+ *  - a refused check-out reaching the user as an error notification.
  *
  * @see {@link file://./../../../app/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout.tsx}
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { createBookingSettings } from "@factories";
+import { permissionContext } from "@helpers/role-access";
 
 // why: mocking Remix's data() so the action's error path returns a Response
 // whose status is assertable (React Router v7 single fetch).
@@ -37,8 +40,8 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
-// why: the permission gate is the first defect under test — mocking it lets
-// each case choose the caller's role, and asserts which action was demanded.
+// why: the permission gate is under test — mocking it lets each case choose
+// the caller's role, and asserts which action was demanded.
 const { requirePermissionMock } = vi.hoisted(() => ({
   requirePermissionMock: vi.fn(),
 }));
@@ -54,42 +57,73 @@ vi.mock("~/database/db.server", () => ({
   db: { booking: { findUniqueOrThrow: bookingFindUniqueOrThrow } },
 }));
 
-// why: the sink we assert is never reached on a refused request.
-const { fulfilMock } = vi.hoisted(() => ({ fulfilMock: vi.fn() }));
+// why: the loader's booking read; each loader case supplies the booking.
 vi.mock("~/modules/booking/service.server", () => ({
-  fulfilModelRequestsAndCheckout: fulfilMock,
   getBooking: vi.fn(),
 }));
 
+// why: the sink we assert is never reached on a refused request. The
+// orchestrator has its own suite; this file pins what the action hands over.
+const { fulfilMock } = vi.hoisted(() => ({ fulfilMock: vi.fn() }));
+vi.mock("~/modules/booking/fulfil-and-checkout.server", () => ({
+  fulfilAndCheckOut: fulfilMock,
+}));
+
+// why: the loader asks where each multi-location pool's units leave from,
+// a database read with its own suite; these tests pin who the loader admits.
+vi.mock("~/modules/booking/checkout-source-location.server", () => ({
+  getCheckoutSourceQuestions: vi.fn().mockResolvedValue([]),
+}));
+
 // why: the emitter pushes to a live SSE stream keyed to a real session; there
-// is none in a route-level test, and the notification is a side effect of the
-// success path rather than anything these assertions inspect.
+// is none in a route-level test. The mock records what the user is told.
 vi.mock("~/utils/emitter/send-notification.server", () => ({
   sendNotification: vi.fn(),
 }));
 
-import { action } from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
+const { bookingSettingsMock } = vi.hoisted(() => ({
+  bookingSettingsMock: vi.fn(),
+}));
+// why: the explicit check-out rule reads the workspace settings; the hoisted
+// mock above lets each case choose the switch state without a database.
+vi.mock("~/modules/booking-settings/service.server", () => ({
+  getBookingSettingsForOrganization: bookingSettingsMock,
+}));
+
+import { getBooking } from "~/modules/booking/service.server";
+import {
+  action,
+  loader,
+} from "~/routes/_layout+/bookings.$bookingId.overview.fulfil-and-checkout";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
+import { ShelfError } from "~/utils/error";
 
 // @vitest-environment node
 
-/** POSTs to the action as a caller holding `roles`. */
+/**
+ * POSTs to the action as a caller holding `roles`. `requireExplicitCheckoutForAdmin`
+ * sets the workspace switch the action reads; the decision itself is applied
+ * by the service, so this file asserts what the action hands over.
+ */
 function post({
   roles,
   creatorId = "someone-else",
   custodianUserId = "someone-else",
+  requireExplicitCheckoutForAdmin = false,
 }: {
   roles: OrganizationRoles[];
   creatorId?: string;
   custodianUserId?: string;
+  requireExplicitCheckoutForAdmin?: boolean;
 }) {
-  const role = roles[0];
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    role,
-    isSelfServiceOrBase:
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE,
+  fulfilMock.mockResolvedValue({
+    booking: { id: "booking-1", name: "Load-in", status: "ONGOING" },
+    remainingAssetCount: 0,
   });
+  bookingSettingsMock.mockResolvedValue(
+    createBookingSettings({ requireExplicitCheckoutForAdmin })
+  );
+  requirePermissionMock.mockResolvedValue(permissionContext({ roles }));
   bookingFindUniqueOrThrow.mockResolvedValue({
     from: new Date("2026-01-01T09:00:00Z"),
     to: new Date("2026-01-02T09:00:00Z"),
@@ -122,8 +156,8 @@ describe("fulfil-and-checkout action", () => {
   it("demands booking:checkout, not booking:update", async () => {
     await post({ roles: [OrganizationRoles.ADMIN] });
 
-    // BASE holds `update` and not `checkout`; gating on `update` is exactly
-    // what let a BASE user check out here.
+    // BASE holds `update` and not `checkout`; gating on `update` would let a
+    // BASE user check out here.
     expect(requirePermissionMock).toHaveBeenCalledWith(
       expect.objectContaining({ action: "checkout" })
     );
@@ -166,5 +200,137 @@ describe("fulfil-and-checkout action", () => {
     await post({ roles: [OrganizationRoles.ADMIN] });
 
     expect(fulfilMock).toHaveBeenCalled();
+  });
+
+  it("hands the service requireExplicitCheckout: true for an ADMIN when the Admin switch is on", async () => {
+    await post({
+      roles: [OrganizationRoles.ADMIN],
+      requireExplicitCheckoutForAdmin: true,
+    });
+
+    expect(fulfilMock).toHaveBeenCalledTimes(1);
+    expect(fulfilMock.mock.calls[0][0]).toMatchObject({
+      assetIds: ["asset-1"],
+      requireExplicitCheckout: true,
+    });
+  });
+
+  it("hands the service requireExplicitCheckout: false when no switch applies", async () => {
+    await post({ roles: [OrganizationRoles.ADMIN] });
+
+    expect(fulfilMock.mock.calls[0][0]).toMatchObject({
+      requireExplicitCheckout: false,
+    });
+    expect(bookingSettingsMock).toHaveBeenCalledWith("org-1");
+  });
+
+  it("checks ownership before it reads the workspace settings", async () => {
+    // A SELF_SERVICE user on someone else's booking is refused first; the
+    // explicit check-out rule is never consulted for a booking they cannot
+    // touch, so a stale link answers with the ownership error, not policy.
+    await post({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      requireExplicitCheckoutForAdmin: true,
+    });
+
+    expect(fulfilMock).not.toHaveBeenCalled();
+    expect(bookingSettingsMock).not.toHaveBeenCalled();
+  });
+
+  it("tells the user why a check-out was refused", async () => {
+    const message = "Scan at least one item to check out.";
+    fulfilMock.mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        status: 400,
+        label: "Booking",
+        message,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const result = await post({ roles: [OrganizationRoles.ADMIN] });
+
+    expect((result as unknown as Response).status).toBe(400);
+    // The drawer renders no action data, so this notification is the only
+    // place the operator sees the refusal.
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message,
+        icon: { name: "x", variant: "error" },
+        senderId: "user-1",
+      })
+    );
+    expect(sendNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Checked out" })
+    );
+  });
+});
+
+describe("fulfil-and-checkout loader", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** Loads the page as `roles` against a booking in `status` owned by `creatorId`. */
+  function load({
+    roles,
+    status,
+    creatorId = "user-1",
+  }: {
+    roles: OrganizationRoles[];
+    status: string;
+    creatorId?: string;
+  }) {
+    requirePermissionMock.mockResolvedValue(permissionContext({ roles }));
+    bookingSettingsMock.mockResolvedValue(createBookingSettings({}));
+    vi.mocked(getBooking).mockResolvedValue({
+      id: "booking-1",
+      name: "Load-in",
+      status,
+      creatorId,
+      custodianUserId: creatorId,
+      bookingAssets: [],
+      modelRequests: [
+        {
+          assetModelId: "model-1",
+          quantity: 2,
+          fulfilledQuantity: 0,
+          fulfilledAt: null,
+          assetModel: { id: "model-1", name: "Tripod" },
+        },
+      ],
+    } as never);
+
+    return loader({
+      request: new Request(
+        "https://app.shelf.nu/bookings/booking-1/overview/fulfil-and-checkout"
+      ),
+      params: { bookingId: "booking-1" },
+      context: { getSession: () => ({ userId: "user-1" }) },
+    } as unknown as Parameters<typeof loader>[0]);
+  }
+
+  it("opens for SELF_SERVICE on its own reserved booking", async () => {
+    await expect(
+      load({ roles: [OrganizationRoles.SELF_SERVICE], status: "RESERVED" })
+    ).resolves.toBeDefined();
+  });
+
+  it("refuses SELF_SERVICE on someone else's booking", async () => {
+    const thrown = await load({
+      roles: [OrganizationRoles.SELF_SERVICE],
+      status: "RESERVED",
+      creatorId: "someone-else",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(403);
+  });
+
+  it("answers 400 for a booking that cannot be checked out", async () => {
+    const thrown = await load({
+      roles: [OrganizationRoles.ADMIN],
+      status: "COMPLETE",
+    }).catch((response: Response) => response);
+
+    expect((thrown as Response).status).toBe(400);
   });
 });

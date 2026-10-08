@@ -20,14 +20,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  ASSET_BOOKING_PSEUDO_STATUS_LABELS,
+  ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_LABELS,
   AUDIT_ASSET_STATUS_TONES,
   AUDIT_DELETED_ASSET_LABELS,
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
+  ASSET_TYPE_ADJECTIVES,
+  ASSET_TYPE_LABELS,
+  CONSUMPTION_TYPE_ADJECTIVES,
+  CONSUMPTION_TYPE_DESCRIPTIONS,
+  CONSUMPTION_TYPE_LABELS,
+  KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
   isAuditCompleted,
+  kitMemberCustodyBlockedReason,
+  kitMemberCustodyRefusal,
+  kitMembersCustodyRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -61,6 +73,35 @@ test("AUDIT_ASSET_STATUS_LABELS covers the AuditAssetStatus enum", () => {
     "MISSING",
     "UNEXPECTED",
   ]);
+});
+
+test("KIT_STATUS_LABELS covers the KitStatus enum", () => {
+  // enum KitStatus { AVAILABLE, IN_CUSTODY, CHECKED_OUT }
+  // PARTIALLY_CHECKED_IN is not persisted: a booking derives it when every
+  // member it holds has been checked back in.
+  assertSameKeys(KIT_STATUS_LABELS, [
+    "AVAILABLE",
+    "IN_CUSTODY",
+    "CHECKED_OUT",
+    "PARTIALLY_CHECKED_IN",
+  ]);
+});
+
+test("a kit and an asset say the same thing about being back", () => {
+  assert.equal(
+    KIT_STATUS_LABELS.PARTIALLY_CHECKED_IN,
+    ASSET_BOOKING_PSEUDO_STATUS_LABELS.ALREADY_CHECKED_IN
+  );
+});
+
+test("a kit and an asset are named alike", () => {
+  // A booking lists a kit and the assets inside it on one screen, so the three
+  // states both enums share have to read identically. The two maps stay
+  // separate — their key sets follow different database enums — which is why
+  // the agreement is pinned here rather than expressed as a spread.
+  for (const status of ["AVAILABLE", "IN_CUSTODY", "CHECKED_OUT"]) {
+    assert.equal(KIT_STATUS_LABELS[status], ASSET_STATUS_LABELS[status]);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -154,6 +195,8 @@ test("an archived audit that was completed stays completed", () => {
 
 test("the exported maps cannot be mutated by a consumer", () => {
   for (const map of [
+    ASSET_STATUS_LABELS,
+    KIT_STATUS_LABELS,
     AUDIT_STATUS_LABELS,
     AUDIT_ASSET_STATUS_LABELS,
     AUDIT_DELETED_ASSET_LABELS,
@@ -185,4 +228,65 @@ test("a deleted asset with no snapshotted title says only what it is", () => {
 
 test("surrounding whitespace never reaches the rendered name", () => {
   assert.equal(auditDeletedAssetLabel("  Tripod  "), "Tripod (deleted)");
+});
+
+test("ASSET_TYPE maps cover the AssetType enum", () => {
+  // enum AssetType { INDIVIDUAL, QUANTITY_TRACKED }
+  assertSameKeys(ASSET_TYPE_LABELS, ["INDIVIDUAL", "QUANTITY_TRACKED"]);
+  // The adjective is used wherever the label would sit in front of a noun, so
+  // a missing one renders "undefined assets".
+  assertSameKeys(ASSET_TYPE_ADJECTIVES, Object.keys(ASSET_TYPE_LABELS));
+});
+
+test("CONSUMPTION_TYPE maps cover the ConsumptionType enum", () => {
+  // enum ConsumptionType { ONE_WAY, TWO_WAY }
+  assertSameKeys(CONSUMPTION_TYPE_LABELS, ["ONE_WAY", "TWO_WAY"]);
+  // A label without its description would render "Used up (one-way) —
+  // undefined" wherever the two are joined.
+  assertSameKeys(
+    CONSUMPTION_TYPE_DESCRIPTIONS,
+    Object.keys(CONSUMPTION_TYPE_LABELS)
+  );
+});
+
+test("the kit-member custody reasons name the kit and give both ways out", () => {
+  // The single-asset reason, the server refusal and the bulk reason are read
+  // side by side (a disabled menu item, then the 400 from a direct request), so
+  // all three must offer the same two ways out.
+  const waysOut =
+    /Assign custody to the kit, or remove (the asset|them) from the kit first\.$/;
+
+  assert.equal(
+    kitMemberCustodyBlockedReason("Camera Kit"),
+    'This asset is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.equal(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    '"Tripod" is part of kit "Camera Kit". Assign custody to the kit, or remove the asset from the kit first.'
+  );
+  assert.match(kitMemberCustodyBlockedReason("Camera Kit"), waysOut);
+  assert.match(
+    kitMemberCustodyRefusal({ assetTitle: "Tripod", kitName: "Camera Kit" }),
+    waysOut
+  );
+  assert.match(KIT_MEMBERS_CUSTODY_BLOCKED_REASON, waysOut);
+});
+
+test("the multi-member refusal counts the members and names the first three", () => {
+  const member = (assetTitle) => ({ assetTitle, kitName: "Camera Kit" });
+
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod")]),
+    kitMemberCustodyRefusal(member("Tripod"))
+  );
+  assert.equal(
+    kitMembersCustodyRefusal([member("Tripod"), member("Gimbal")]),
+    '2 of the selected assets are part of a kit: "Tripod" and "Gimbal". Assign custody to the kit, or remove them from the kit first.'
+  );
+  assert.equal(
+    kitMembersCustodyRefusal(
+      ["Tripod", "Gimbal", "Mic", "Light", "Stand"].map(member)
+    ),
+    '5 of the selected assets are part of a kit: "Tripod", "Gimbal", "Mic" and 2 more. Assign custody to the kit, or remove them from the kit first.'
+  );
 });

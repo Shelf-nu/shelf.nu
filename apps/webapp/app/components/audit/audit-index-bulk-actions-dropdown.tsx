@@ -19,7 +19,7 @@ import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { AuditListItem } from "~/routes/_layout+/audits._index";
 import { isSelectingAllItems } from "~/utils/list";
 import {
@@ -100,7 +100,7 @@ function ConditionalDropdown() {
   const selectAllButFilterNotArchived =
     allSelected && statusFilter !== "ARCHIVED";
 
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const isLoading = useDisabled();
 

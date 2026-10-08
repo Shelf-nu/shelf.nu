@@ -446,11 +446,47 @@ describe("overdueItemsReport — booked-unit value math", () => {
     };
     vi.mocked(db.booking.findMany).mockResolvedValue([overdueBooking] as any);
 
-    const result = await overdueItemsReport({ organizationId: "org-1" });
+    const result = await overdueItemsReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
 
     expect(result.rows[0].valueAtRisk).toBe(500);
     const vaRKpi = result.kpis.find((k) => k.id === "total_value_at_risk");
     expect(vaRKpi?.rawValue).toBe(500);
+  });
+
+  it("formats the Value at Risk KPI in the workspace currency", async () => {
+    // The KPI value string is assembled server-side, so the workspace
+    // currency must be threaded in — a EUR workspace must never see "$".
+    const overdueBooking = {
+      id: "booking-eur",
+      name: "EUR Overdue",
+      to: new Date("2026-04-10T12:00:00Z"),
+      custodianUserId: null,
+      custodianUser: null,
+      custodianTeamMember: null,
+      bookingAssets: [
+        {
+          quantity: 5,
+          asset: { id: "asset-1", valuation: 100 },
+        },
+      ],
+      partialCheckins: [],
+      _count: { bookingAssets: 1 },
+    };
+    vi.mocked(db.booking.findMany).mockResolvedValue([overdueBooking] as any);
+
+    const result = await overdueItemsReport({
+      organizationId: "org-1",
+      currency: "EUR",
+    });
+
+    const vaRKpi = result.kpis.find((k) => k.id === "total_value_at_risk");
+    // Server-built KPI strings use the fixed en-US locale (the CSV export
+    // convention); the workspace currency drives the symbol and decimals.
+    expect(vaRKpi?.value).toBe("€500.00");
+    expect(vaRKpi?.value).not.toContain("$");
   });
 });
 
@@ -491,7 +527,10 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
       },
     ] as any);
 
-    const result = await assetDistributionReport({ organizationId: "org-1" });
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
 
     const catBucket = result.distributionBreakdown!.byCategory.find(
       (b) => b.id === "cat-1"
@@ -535,7 +574,10 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
       },
     ] as any);
 
-    const result = await assetDistributionReport({ organizationId: "org-1" });
+    const result = await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
 
     const byLocation = result.distributionBreakdown!.byLocation;
     expect(byLocation.find((b) => b.id === "loc-1")?.totalValue).toBe(30);
@@ -547,7 +589,10 @@ describe("assetDistributionReport — quantity-aware bucket values", () => {
   it("reads the asset table once for all three breakdowns", async () => {
     vi.mocked(db.asset.findMany).mockResolvedValue([] as any);
 
-    await assetDistributionReport({ organizationId: "org-1" });
+    await assetDistributionReport({
+      organizationId: "org-1",
+      currency: "USD",
+    });
 
     expect(vi.mocked(db.asset.findMany)).toHaveBeenCalledTimes(1);
   });

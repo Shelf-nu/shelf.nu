@@ -10,6 +10,11 @@ import { makeShelfError } from "~/utils/error";
  *
  * Returns the authenticated user's profile and organizations.
  * Mobile clients use this after login to set up the app context.
+ *
+ * Each organization in the response carries the four workspace visibility
+ * toggles (`selfServiceCanSeeBookings`, `baseUserCanSeeBookings`,
+ * `selfServiceCanSeeCustody`, `baseUserCanSeeCustody`), so the companion can
+ * resolve the same access the server resolves for that workspace.
  */
 export async function loader({ request }: LoaderFunctionArgs) {
   try {

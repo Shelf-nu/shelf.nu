@@ -17,6 +17,7 @@ export function BookingPageContent() {
     teamMembers,
     teamMembersForForm,
     bookingFlags,
+    unavailableAssets,
     totalAssets,
     totalKits,
     totalValue,
@@ -51,6 +52,7 @@ export function BookingPageContent() {
               name: booking.name,
               description: booking.description,
               bookingFlags,
+              unavailableAssets,
               custodianRef: custodian?.id || "", // We have an old bug that some users dont have a teamMember attached to them. This is a safety just so the UI doesnt break until we solve the data
               tags: booking.tags,
             }}
