@@ -2,6 +2,7 @@ import { QrIdDisplayPreference } from "@prisma/client";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import type { ScimTokenItem } from "./edit-form";
 import { TooltipProvider } from "../shared/tooltip";
 
@@ -100,9 +101,10 @@ const routeLoaderDefaults: Record<string, unknown> = {
       },
     },
   },
-  // useUserRoleHelper → useRouteLoaderData("routes/_layout+/_layout")
+  // useRoleAccess and useOrganizationRoles → useRouteLoaderData("routes/_layout+/_layout")
   "routes/_layout+/_layout": {
     currentOrganizationUserRoles: ["OWNER"],
+    roleAccess: accessFor(["OWNER"]),
   },
 };
 

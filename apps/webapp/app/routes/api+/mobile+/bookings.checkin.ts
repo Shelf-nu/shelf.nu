@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -12,16 +11,14 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { checkinBooking } from "~/modules/booking/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
-import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 
 /**
  * POST /api/mobile/bookings/checkin
@@ -44,32 +41,6 @@ export async function action({ request }: ActionFunctionArgs) {
     });
 
     await assertMobileCanUseBookings(organizationId);
-
-    // PARITY with the web check-in action (bookings.$bookingId.overview.tsx
-    // :1034-1054): when the workspace requires EXPLICIT check-in for the
-    // caller's role, the quick "check in all" path is forbidden — they must
-    // scan / select the assets (the partial-checkin path). The mobile app must
-    // NEVER be more permissive than the web / a workspace's settings, so we
-    // enforce the same policy server-side here.
-    const { role, roles } = await getMobileUserContext(user.id, organizationId);
-    const bookingSettings =
-      await getBookingSettingsForOrganization(organizationId);
-    const explicitCheckinRequired =
-      (role === OrganizationRoles.ADMIN &&
-        bookingSettings.requireExplicitCheckinForAdmin) ||
-      (role === OrganizationRoles.SELF_SERVICE &&
-        bookingSettings.requireExplicitCheckinForSelfService);
-    if (explicitCheckinRequired) {
-      throw new ShelfError({
-        cause: null,
-        title: "Not allowed to quick check-in",
-        message:
-          "This workspace requires explicit check-in. Scan or select the assets to check them in.",
-        label: "Booking",
-        status: 403,
-        shouldBeCaptured: false,
-      });
-    }
 
     const { bookingId, timeZone } = await parseMobileBody(
       z.object({
@@ -105,14 +76,44 @@ export async function action({ request }: ActionFunctionArgs) {
     // Cross-user IDOR guard, mirroring the checkout routes: SELF_SERVICE holds
     // `booking:checkin`, so the role gate above passes for ANY booking id in
     // the organization, and `checkinBooking` does not check ownership itself.
-    // No-op for ADMIN/OWNER. `role` is already resolved above for the
-    // explicit-checkin policy.
+    // No-op when `access.bookings.writeAll`.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check in",
     });
+
+    // PARITY with the web booking action's `checkIn` guard: when the workspace
+    // requires EXPLICIT check-in for the caller's role, the quick "check in
+    // all" path is forbidden — they must scan / select the assets (the
+    // partial-checkin path). The mobile app must NEVER be more permissive than
+    // the web / a workspace's settings, so we enforce the same policy
+    // server-side here. Judged by the caller's access (its effective role), as
+    // the loader's `canQuickCheckin` is, so the app never offers a button this
+    // refuses.
+    // Decided after the booking and ownership checks, so a missing or foreign
+    // booking answers 404 as before and the settings are only read for a
+    // booking the caller may act on.
+    const bookingSettings =
+      await getBookingSettingsForOrganization(organizationId);
+    const explicitCheckinRequired = isExplicitScanRequired({
+      access,
+      settings: bookingSettings,
+      direction: "checkin",
+    });
+    if (explicitCheckinRequired) {
+      throw new ShelfError({
+        cause: null,
+        title: "Not allowed to quick check-in",
+        message:
+          "This workspace requires explicit check-in. Scan or select the assets to check them in.",
+        label: "Booking",
+        status: 403,
+        shouldBeCaptured: false,
+      });
+    }
 
     const booking = await checkinBooking({
       id: bookingId,

@@ -91,9 +91,9 @@ export function DisabledReasonHoverCard({
       is invisible to a screen reader. This mirror is what `aria-describedby`
       resolves against. */}
       {descriptionId ? (
-        <span id={descriptionId} className="sr-only">
+        <div id={descriptionId} className="sr-only">
           {reason}
-        </span>
+        </div>
       ) : null}
 
       {/* why: aria-hidden — this is the VISUAL copy of the reason. Assistive
@@ -101,9 +101,12 @@ export function DisabledReasonHoverCard({
       would announce it twice.
       why: collisionPadding keeps the card inside the viewport — the default
       bottom placement runs off-screen for wide buttons on narrow screens. */}
+      {/* `reason` is a ReactNode, and callers pass lists as well as sentences,
+      so both copies wrap it in a div: a list inside a `p` or a `span` is
+      invalid markup the browser silently reflows. */}
       <HoverCardContent collisionPadding={8} aria-hidden>
         <h5 className="text-left text-[14px]">{title}</h5>
-        <p className="text-left text-[14px]">{reason}</p>
+        <div className="text-left text-[14px]">{reason}</div>
       </HoverCardContent>
     </HoverCard>
   );

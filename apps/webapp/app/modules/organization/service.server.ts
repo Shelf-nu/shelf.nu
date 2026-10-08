@@ -12,8 +12,16 @@ import { sendEmail } from "~/emails/mail.server";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { ADMIN_EMAIL } from "~/utils/env";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
+import { assertUploadedImageContentType } from "~/utils/image-upload.server";
+import { Logger } from "~/utils/logger";
 import { emailMatchesDomains } from "~/utils/misc";
+import { holdsRoleWhere } from "~/utils/permissions/membership-access";
+import { isWorkspaceOwner, rolesWhere } from "~/utils/permissions/role-access";
 import {
   createStripeCustomer,
   customerHasPaymentMethod,
@@ -29,6 +37,7 @@ import { defaultFields } from "../asset-index-settings/helpers";
 import { defaultUserCategories } from "../category/default-categories";
 import { updateUserTierId } from "../tier/service.server";
 import { USER_NAME_SELECT } from "../user/fields";
+import { lockMembership } from "../user/membership-lock.server";
 import { getDefaultWeeklySchedule } from "../working-hours/service.server";
 
 const label: ErrorLabel = "Organization";
@@ -147,6 +156,31 @@ export async function getOrganizationsBySsoDomain(emailDomain: string) {
   }
 }
 
+/**
+ * Reads an uploaded workspace logo and pairs its bytes with the content type
+ * they prove.
+ *
+ * The type comes from the bytes, never from the caller's `File.type`: the row
+ * is served back inline by `api+/image.$imageId`, so the stored type decides
+ * how a browser renders it.
+ *
+ * @param image - The uploaded file
+ * @param userId - Acting user, for the error context
+ * @returns The bytes to persist and the content type to persist them under
+ * @throws {ShelfError} 400 when the bytes are not a supported image format
+ */
+async function readValidatedLogo(image: File, userId: User["id"]) {
+  const blob = new Uint8Array(await image.arrayBuffer());
+
+  return {
+    blob,
+    contentType: assertUploadedImageContentType(blob, {
+      userId,
+      field: "image",
+    }),
+  };
+}
+
 export async function createOrganization({
   name,
   userId,
@@ -166,6 +200,16 @@ export async function createOrganization({
         displayName: true,
       },
     });
+
+    /**
+     * Validated before anything is written. The workspace counts against the
+     * caller's plan limit from the moment it exists, and nothing cleans one up,
+     * so a logo this service is going to refuse must not cost the caller a slot.
+     */
+    const logo =
+      image?.size && image.size > 0
+        ? await readValidatedLogo(image, userId)
+        : null;
 
     const data = {
       name,
@@ -225,11 +269,11 @@ export async function createOrganization({
 
     const org = await db.organization.create({ data });
 
-    if (image?.size && image?.size > 0) {
+    if (logo) {
       await db.image.create({
         data: {
-          blob: Buffer.from(await image.arrayBuffer()),
-          contentType: image.type,
+          blob: logo.blob,
+          contentType: logo.contentType,
           ownerOrg: {
             connect: {
               id: org.id,
@@ -251,6 +295,11 @@ export async function createOrganization({
 
     return org;
   } catch (cause) {
+    // A refused logo is a deliberate 400 with a message written for the user;
+    // the generic wrapper below would tell them to retry a request that cannot
+    // succeed.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message:
@@ -324,9 +373,18 @@ export async function updateOrganization({
         });
       }
 
+      const blob = Buffer.from(await image.arrayBuffer());
+
       const imageData = {
-        blob: Buffer.from(await image.arrayBuffer()),
-        contentType: image.type,
+        blob,
+        // Derived from the bytes, never from the caller's `File.type`: this
+        // row is served back inline by `api+/image.$imageId`, so the stored
+        // content type decides how a browser renders it.
+        contentType: assertUploadedImageContentType(blob, {
+          userId,
+          organizationId: id,
+          field: "image",
+        }),
         ownerOrg: {
           connect: {
             id: id,
@@ -443,6 +501,37 @@ export type OrganizationFromUser = Prisma.OrganizationGetPayload<{
   select: typeof ORGANIZATION_SELECT_FIELDS;
 }>;
 
+/**
+ * Whether a user signs in through SSO.
+ *
+ * Each membership carries its user's flag, so an already-fetched membership list
+ * answers without another query. A user with no memberships at all has nothing
+ * to read it from, and that is precisely the SSO user who belongs on the
+ * pending-assignment page — so the user row answers instead of defaulting to
+ * "not SSO".
+ *
+ * @param userId - The user in question
+ * @param userOrganizations - Their memberships, as `getUserOrganizations` returns them
+ * @returns `true` when the user is an SSO user
+ */
+export async function isSsoUser({
+  userId,
+  userOrganizations,
+}: {
+  userId: string;
+  userOrganizations: Array<{ user: { sso: boolean } }>;
+}): Promise<boolean> {
+  if (userOrganizations.length > 0) {
+    return userOrganizations[0].user.sso === true;
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { sso: true },
+  });
+  return user?.sso === true;
+}
+
 export async function getUserOrganizations({ userId }: { userId: string }) {
   try {
     return await db.userOrganization.findMany({
@@ -469,69 +558,37 @@ export async function getUserOrganizations({ userId }: { userId: string }) {
   }
 }
 
-export async function getOrganizationAdminsEmails({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
-  try {
-    const admins = await db.userOrganization.findMany({
-      where: {
-        organizationId,
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
-      },
-      select: {
-        user: {
-          select: {
-            email: true,
-          },
-        },
-      },
-    });
-
-    return admins.map((a) => a.user.email);
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message:
-        "Something went wrong while fetching organization admins emails. Please try again or contact support.",
-      additionalData: { organizationId },
-      label,
-    });
-  }
-}
+/** A workspace-wide notification audience, named after its policy field. */
+export type NotificationAudience = "orgBookingBroadcasts" | "inventoryAlerts";
 
 /**
- * Returns admin and owner users for an organization with their full
- * notification-relevant fields: `id`, `email`, `firstName`, `lastName`, plus
- * the four raw date/time format-preference columns (`dateFormat`,
- * `timeFormat`, `weekStart`, `timeZone`) so recipient-specific email
- * formatting resolves from the loaded row.
+ * The users of an organization who receive one kind of workspace-wide
+ * notification, with the fields a notification needs: `id` (so the resolver
+ * can exclude the editor), `email`, the name fields, and the four raw
+ * format-preference columns so each email resolves its recipient's own date
+ * and time formatting from the loaded row.
  *
- * This differs from `getOrganizationAdminsEmails()` (which returns only
- * email strings) because the notification recipient resolver needs the
- * `userId` to perform editor exclusion — if the admin performing an action
- * is also in the recipient list, they should be filtered out so they don't
- * email themselves. Returning bare email strings would not support that
- * matching.
+ * The roles come from the policy table (`notifications.<audience>`), so a role
+ * that should hear about bookings but not about stock is one field away.
  *
- * @param organizationId - The organization to fetch admins for
- * @returns Array of user objects with id, email, firstName, lastName
+ * @param args.organizationId - The organization
+ * @param args.audience - `orgBookingBroadcasts` (new-reservation "pickup"
+ *   alerts) or `inventoryAlerts` (low stock)
+ * @returns The audience's users
+ * @throws {ShelfError} when the query fails
  */
-export async function getOrganizationAdminsForNotification({
+export async function getOrganizationNotificationAudience({
   organizationId,
+  audience,
 }: {
   organizationId: string;
+  audience: NotificationAudience;
 }) {
   try {
-    const admins = await db.userOrganization.findMany({
+    const members = await db.userOrganization.findMany({
       where: {
         organizationId,
-        roles: {
-          hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN],
-        },
+        roles: { hasSome: rolesWhere((p) => p.notifications[audience]) },
       },
       select: {
         user: {
@@ -539,10 +596,10 @@ export async function getOrganizationAdminsForNotification({
             id: true,
             email: true,
             ...USER_NAME_SELECT,
-            // Format-preference columns so the booking notification resolver
-            // can carry them onto each recipient and resolve recipient-specific
-            // email date/time formatting from the loaded row (no per-recipient
-            // DB fetch). See `NotificationRecipient`.
+            // Format-preference columns so the notification resolver can carry
+            // them onto each recipient and resolve recipient-specific email
+            // date/time formatting from the loaded row (no per-recipient DB
+            // fetch). See `NotificationRecipient`.
             dateFormat: true,
             timeFormat: true,
             weekStart: true,
@@ -552,13 +609,13 @@ export async function getOrganizationAdminsForNotification({
       },
     });
 
-    return admins.map((a) => a.user);
+    return members.map((m) => m.user);
   } catch (cause) {
     throw new ShelfError({
       cause,
       message:
-        "Something went wrong while fetching organization admins for notification. Please try again or contact support.",
-      additionalData: { organizationId },
+        "Something went wrong while fetching who to notify. Please try again or contact support.",
+      additionalData: { organizationId, audience },
       label,
     });
   }
@@ -666,6 +723,76 @@ export async function toggleAuditEnabled({
   }
 }
 
+/**
+ * Sets the "Require SSO login" switch (`SsoDetails.requireSsoLogin`) on a
+ * workspace's SSO setup. While every workspace linked to an SSO domain has it
+ * off, unconverted accounts on the domain keep password, email code and
+ * password reset sign-in (see `~/modules/auth/sso-enforcement.server`).
+ * Staff-only: callers must already have checked the admin role.
+ *
+ * The switch lives on the `SsoDetails` row, which several workspaces can
+ * share, so it changes for every workspace on that row.
+ *
+ * @param args.organizationId - the workspace whose SSO setup is changed
+ * @param args.requireSsoLogin - `true` to refuse legacy sign-in, `false` to
+ *   allow it while SSO is being set up and tested
+ * @param args.actorUserId - the staff member making the change, logged so a
+ *   relaxed domain can be traced to who relaxed it
+ * @returns the updated `SsoDetails` row
+ * @throws {ShelfError} 400 when the workspace has no SSO details; 500 when the
+ *   lookup or the update fails
+ */
+export async function setRequireSsoLogin({
+  organizationId,
+  requireSsoLogin,
+  actorUserId,
+}: {
+  organizationId: string;
+  requireSsoLogin: boolean;
+  actorUserId: string;
+}) {
+  try {
+    const organization = await db.organization.findUnique({
+      where: { id: organizationId },
+      select: { ssoDetailsId: true },
+    });
+
+    if (!organization?.ssoDetailsId) {
+      throw new ShelfError({
+        cause: null,
+        title: "No SSO details",
+        message:
+          "This workspace has no SSO details yet. Save the SSO details first.",
+        additionalData: { organizationId, requireSsoLogin },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
+    const updated = await db.ssoDetails.update({
+      where: { id: organization.ssoDetailsId },
+      data: { requireSsoLogin },
+    });
+
+    Logger.info(
+      `SSO: Require SSO login set to ${requireSsoLogin} on SSO details ${organization.ssoDetailsId} (workspace ${organizationId}) by ${actorUserId}`
+    );
+
+    return updated;
+  } catch (cause) {
+    rethrowIfClientError(cause);
+
+    throw new ShelfError({
+      cause,
+      message:
+        "Something went wrong while changing the Require SSO login setting. Please try again or contact support.",
+      additionalData: { organizationId, requireSsoLogin },
+      label,
+    });
+  }
+}
+
 /** Permissions functions */
 
 /**
@@ -717,15 +844,28 @@ export function updateOrganizationPermissions({
   });
 }
 
+/**
+ * Members who may be chosen as the new owner in an ownership transfer
+ * (`membership.eligibleAsNewOwner`). `transferOwnership` re-checks the same
+ * policy, so the candidate list and the transfer cannot disagree.
+ *
+ * @param args.organizationId - The workspace being transferred
+ * @returns The eligible members' users
+ * @throws {ShelfError} If the query fails
+ */
 export async function getOrganizationAdmins({
   organizationId,
 }: {
   organizationId: Organization["id"];
 }) {
   try {
-    /** Get all the admins in current organization */
     const admins = await db.userOrganization.findMany({
-      where: { organizationId, roles: { has: OrganizationRoles.ADMIN } },
+      where: {
+        organizationId,
+        roles: {
+          hasSome: rolesWhere((p) => p.membership.eligibleAsNewOwner),
+        },
+      },
       select: {
         user: {
           select: {
@@ -798,7 +938,11 @@ export async function transferOwnership({
         organizationId: currentOrganization.id,
         OR: [
           { userId: newOwnerId },
-          { roles: { has: OrganizationRoles.OWNER } },
+          {
+            roles: {
+              hasSome: rolesWhere((p) => p.membership.ownsWorkspace),
+            },
+          },
         ],
       },
       select: {
@@ -830,7 +974,7 @@ export async function transferOwnership({
      * all, so the two identities must stay separate.
      */
     const currentOwnerUserOrg = userOrganization.find((userOrg) =>
-      userOrg.roles.includes(OrganizationRoles.OWNER)
+      isWorkspaceOwner(userOrg.roles)
     );
     if (!currentOwnerUserOrg) {
       throw new ShelfError({
@@ -869,8 +1013,13 @@ export async function transferOwnership({
       });
     }
 
-    /** Validate if the new owner is ADMIN in the current organization */
-    if (!newOwnerUserOrg.roles.includes(OrganizationRoles.ADMIN)) {
+    /** The new owner must hold a role eligible to own the workspace */
+    if (
+      !holdsRoleWhere(
+        newOwnerUserOrg.roles,
+        (p) => p.membership.eligibleAsNewOwner
+      )
+    ) {
       throw new ShelfError({
         cause: null,
         message: "New owner is not an admin of the organization.",
@@ -899,6 +1048,70 @@ export async function transferOwnership({
     const currentOwnerTierId: TierId = currentOwnerUserOrg.user.tierId;
 
     await db.$transaction(async (tx) => {
+      /**
+       * The checks above read both memberships before this transaction, so a
+       * concurrent role change could have committed since: a demotion of the
+       * new owner, or the current owner's role moving. Lock both memberships
+       * (the same lock every role-changing path takes first) in `userId`
+       * order, so two transfers between the same pair cannot deadlock, then
+       * decide again from the locked rows before writing either role.
+       */
+      const [firstUserId, secondUserId] = [
+        currentOwnerUserOrg.user.id,
+        newOwnerUserOrg.user.id,
+      ].sort();
+      const lockedRoles = new Map([
+        [
+          firstUserId,
+          await lockMembership(tx, {
+            userId: firstUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+        [
+          secondUserId,
+          await lockMembership(tx, {
+            userId: secondUserId,
+            organizationId: currentOrganization.id,
+          }),
+        ],
+      ]);
+      const lockedOwner = lockedRoles.get(currentOwnerUserOrg.user.id);
+      const lockedNewOwner = lockedRoles.get(newOwnerUserOrg.user.id);
+
+      if (!lockedOwner || !isWorkspaceOwner(lockedOwner.roles)) {
+        throw new ShelfError({
+          cause: null,
+          title: "Ownership changed",
+          message:
+            "The workspace owner changed while this transfer was being made. Please reload and try again.",
+          additionalData: { organizationId: currentOrganization.id },
+          label,
+          status: 409,
+          shouldBeCaptured: false,
+        });
+      }
+
+      if (
+        !lockedNewOwner ||
+        !holdsRoleWhere(
+          lockedNewOwner.roles,
+          (p) => p.membership.eligibleAsNewOwner
+        )
+      ) {
+        throw new ShelfError({
+          cause: null,
+          message: "New owner is not an admin of the organization.",
+          additionalData: {
+            organizationId: currentOrganization.id,
+            newOwnerId,
+          },
+          label,
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+
       /** Update the owner of the organization */
       await tx.organization.update({
         where: { id: currentOrganization.id },
@@ -920,6 +1133,32 @@ export async function transferOwnership({
         where: { id: newOwnerUserOrg.id },
         data: { roles: { set: [OrganizationRoles.OWNER] } },
       });
+
+      /**
+       * A free trial belongs to the person, not to the workspace: once the
+       * outgoing owner has spent theirs, whoever receives the workspace does
+       * not get a second one on the same equipment.
+       *
+       * This runs for EVERY transfer, including the ones that carry no
+       * subscription. A workspace whose plan has already ended or been
+       * cancelled has nothing left to hand over, yet it still arrives full of
+       * assets the new owner would otherwise trial on. It rides in the
+       * ownership transaction so the workspace and the spent trial can never
+       * come apart.
+       *
+       * The flag is written whether or not billing is switched on, so the
+       * record of who has already had their trial stays true on any instance.
+       */
+      if (
+        currentOwnerUserOrg.user.usedFreeTrial &&
+        !newOwnerUserOrg.user.usedFreeTrial
+      ) {
+        await tx.user.update({
+          where: { id: newOwnerId },
+          data: { usedFreeTrial: true },
+          select: { id: true },
+        });
+      }
     });
 
     // Handle subscription transfer AFTER the ownership transfer succeeds
@@ -970,16 +1209,6 @@ export async function transferOwnership({
             }
 
             subscriptionTransferred = true;
-
-            // Transfer usedFreeTrial flag if original owner used it
-            // This prevents the new owner from starting another trial
-            if (currentOwnerUserOrg.user.usedFreeTrial) {
-              await db.user.update({
-                where: { id: newOwnerId },
-                data: { usedFreeTrial: true },
-                select: { id: true },
-              });
-            }
 
             // Check if new owner has a payment method on their Stripe customer
             // If not, set the warning flag so they see the banner

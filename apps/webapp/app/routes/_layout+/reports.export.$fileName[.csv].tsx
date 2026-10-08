@@ -45,13 +45,25 @@ import { csvResponse } from "~/utils/csv-utf8";
 import { type ResolvedFormatPrefs } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { getIntParam } from "~/utils/search-params-number";
 
+/**
+ * Builds the report named by `?reportId` as a CSV download, applying the same
+ * filters as the report page but reading up to 10,000 rows instead of one page.
+ *
+ * @returns The CSV as an attachment, or the failure with its status — 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export
+ */
 export const loader = async ({
   context,
   request,
@@ -188,7 +200,10 @@ export const loader = async ({
       }
 
       case "idle-assets": {
-        const idleThreshold = parseInt(searchParams.get("days") || "30", 10);
+        // Same floor as the report page, so the CSV matches what was on screen.
+        const idleThreshold = getIntParam(searchParams, "days", 30, {
+          min: 1,
+        });
         const reportData = await idleAssetsReport({
           organizationId,
           currency,
@@ -329,7 +344,10 @@ export const loader = async ({
 
     return csvResponse(csvString, {
       headers: {
-        "content-disposition": `attachment; filename="${fileName}.csv"`,
+        "content-disposition": buildContentDisposition(null, {
+          fallback: `${reportId}-export`,
+          filename: `${fileName}.csv`,
+        }),
         "cache-control": "no-cache",
       },
     });

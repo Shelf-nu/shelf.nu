@@ -18,12 +18,17 @@
  * When only the quick option applies the component renders it as a single
  * button instead of a dropdown.
  *
+ * When the workspace requires explicit check-out for the viewer's role, the
+ * quick option is refused on the server, so the component renders only the
+ * "Scan to check out" button.
+ *
  * @see {@link file://./checkout-dialog.tsx} - the "Check Out" trigger/flow
  * @see {@link file://./forms/edit-booking-form.tsx} - the call site
  */
 import type { Booking } from "@prisma/client";
 import { ChevronRightIcon, ScanLine } from "lucide-react";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import type { CheckoutSourceQuestion } from "~/modules/booking/checkout-source-location";
 import { tw } from "~/utils/tw";
 import CheckoutDialog from "./checkout-dialog";
 import type { ButtonProps } from "../shared/button";
@@ -62,14 +67,30 @@ type CheckoutDropdownProps = {
   canCheckOutRemaining: boolean;
   /** Whether the progressive "Scan to check out" option is available */
   canScanCheckOut: boolean;
+  /**
+   * True when the workspace requires explicit check-out for the viewer's
+   * role. The server then refuses both quick options, so only "Scan to check
+   * out" is offered, and nothing at all when there is nothing left to scan.
+   */
+  requireExplicitCheckout?: boolean;
+  /**
+   * Pools at two or more locations that the quick option would send out for
+   * the first time. Non-empty turns the quick option into a confirm dialog
+   * with a "From location" select per pool; see `CheckoutDialog`.
+   */
+  sourceQuestions?: CheckoutSourceQuestion[];
 };
 
 /**
  * Renders the check-out control for a booking.
  *
+ * Render it only when at least one option applies; the call site guarantees
+ * that through the booking status.
+ *
  * @param props - {@link CheckoutDropdownProps}
- * @returns A dropdown when both options apply, otherwise a single button, or
- *   `null` when neither option is available.
+ * @returns Only the "Scan to check out" button when explicit check-out is
+ *   required; otherwise a single button when one option applies, or a
+ *   dropdown when both do.
  */
 export default function CheckoutDropdown({
   disabled,
@@ -80,6 +101,8 @@ export default function CheckoutDropdown({
   canFullCheckOut,
   canCheckOutRemaining,
   canScanCheckOut,
+  requireExplicitCheckout,
+  sourceQuestions,
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
@@ -135,6 +158,27 @@ export default function CheckoutDropdown({
     </Button>
   );
 
+  // Explicit check-out is required for this role: the server refuses both
+  // quick options, so offer only the scanner. It keeps the primary variant
+  // while RESERVED, where checking out is the main action. With nothing left
+  // to scan there is nothing to offer at all, the same answer the unrestricted
+  // path gives when only a quick option would remain.
+  if (requireExplicitCheckout) {
+    if (!canScanCheckOut) return null;
+    return (
+      <Button
+        variant={triggerVariant}
+        icon="scan"
+        size="sm"
+        className="grow whitespace-nowrap"
+        to={`/bookings/${booking.id}/overview/checkout-assets`}
+        disabled={disabled}
+      >
+        Scan to check out
+      </Button>
+    );
+  }
+
   // Only the progressive scan applies (no quick option). Render a single
   // secondary button — no dropdown needed.
   if (canScanCheckOut && !hasQuickCheckout) {
@@ -164,6 +208,7 @@ export default function CheckoutDropdown({
         intent={quickCheckoutIntent}
         label={quickCheckoutLabel}
         suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+        sourceQuestions={sourceQuestions}
       />
     );
   }
@@ -238,6 +283,7 @@ export default function CheckoutDropdown({
                 label={quickCheckoutLabel}
                 variant="dropdown"
                 suppressEarlyCheckoutPrompt={canCheckOutRemaining}
+                sourceQuestions={sourceQuestions}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="py-1 lg:p-0">

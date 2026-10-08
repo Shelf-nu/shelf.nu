@@ -9,11 +9,12 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { partialCheckoutBooking } from "~/modules/booking/service.server";
 import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+  mobileSourceLocationsSchema,
+  sourceSubmissionFromRecord,
+} from "~/modules/booking/checkout-source-location";
+import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -55,35 +56,46 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, checkouts, timeZone } = await parseMobileBody(
-      z.object({
-        bookingId: z.string().min(1),
-        // Optional: a QT-only check-out sends its quantities in `checkouts` with
-        // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
-        // service 400s if BOTH are empty, so we don't require a minimum here
-        // (mirrors the partial-checkin route).
-        assetIds: z.array(z.string().cuid()).optional(),
-        /**
-         * Optional per-asset checkout payload mirroring the webapp check-in
-         * JSON shape. When present, the service uses it to perform partial
-         * (sub-quantity) checkouts for PARTIAL-tracked assets. Legacy mobile
-         * clients omit this field and continue to receive INDIVIDUAL
-         * semantics driven solely by `assetIds`.
-         */
-        checkouts: z
-          .array(
-            z.object({
-              assetId: z.string().cuid(),
-              bookingAssetId: z.string().cuid().nullable().optional(),
-              quantity: z.number().int().positive(),
-            })
-          )
-          .optional(),
-        timeZone: z.string().optional(),
-      }),
-      request,
-      "Booking"
-    );
+    const { bookingId, assetIds, checkouts, timeZone, sourceLocations } =
+      await parseMobileBody(
+        z.object({
+          bookingId: z.string().min(1),
+          // Optional: a QT-only check-out sends its quantities in `checkouts` with
+          // an empty `assetIds`. INDIVIDUAL rows still flow through `assetIds`. The
+          // service 400s if BOTH are empty, so we don't require a minimum here
+          // (mirrors the partial-checkin route).
+          // Any non-empty id: asset ids come in more than one shape (imported
+          // and seeded rows carry ids that no single format check describes),
+          // and the id is proven against the booking downstream anyway. The
+          // check-in twin takes the same shape.
+          assetIds: z.array(z.string().min(1)).optional(),
+          /**
+           * Optional per-asset checkout payload mirroring the webapp check-in
+           * JSON shape. When present, the service uses it to perform partial
+           * (sub-quantity) checkouts for PARTIAL-tracked assets. Legacy mobile
+           * clients omit this field and continue to receive INDIVIDUAL
+           * semantics driven solely by `assetIds`.
+           */
+          checkouts: z
+            .array(
+              z.object({
+                assetId: z.string().min(1),
+                bookingAssetId: z.string().nullish(),
+                quantity: z.number().int().positive(),
+              })
+            )
+            .optional(),
+          timeZone: z.string().optional(),
+          /**
+           * Where each pool's units leave from, keyed by `bookingAssetId` or
+           * `assetId` (`null` = Unplaced). Only read for a slice going out for
+           * the first time; an app that omits it gets the default.
+           */
+          sourceLocations: mobileSourceLocationsSchema,
+        }),
+        request,
+        "Booking"
+      );
 
     // Derive hints the standard way: locale from the request's Accept-Language
     // header and timeZone from the CH-time-zone cookie (UTC fallback). Native
@@ -109,15 +121,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
     // permission map, so the role gate above passes for ANY booking id in the
-    // organization — they may only check out bookings they created or are
-    // custodian of. No-op for ADMIN/OWNER. `partialCheckoutBooking` does not check
-    // ownership itself, so without this the route is more permissive than web.
-    // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
-    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // organization. They may only check out bookings they created or are
+    // custodian of. No-op when `access.bookings.writeAll`.
+    // `partialCheckoutBooking` does not check ownership itself, so without this
+    // the route is more permissive than web. Mirrors the guard on
+    // bookings.fulfil-and-checkout.ts.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check out",
     });
 
@@ -128,6 +141,7 @@ export async function action({ request }: ActionFunctionArgs) {
       checkouts,
       userId: user.id,
       hints,
+      sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
     return data({

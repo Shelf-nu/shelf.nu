@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Prisma } from "@prisma/client";
 import { KitStatus } from "@prisma/client";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -21,7 +21,6 @@ import {
   selectedBulkItemsAtom,
   selectedBulkItemsCountAtom,
   setSelectedBulkItemAtom,
-  setSelectedBulkItemsAtom,
 } from "~/atoms/list";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { CategoryBadge } from "~/components/assets/category-badge";
@@ -53,6 +52,7 @@ import { Td, Th } from "~/components/table";
 import UnsavedChangesAlert from "~/components/unsaved-changes-alert";
 import { db } from "~/database/db.server";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useSeedFormSelection } from "~/hooks/use-seed-form-selection";
 import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { getPaginatedAndFilterableKits } from "~/modules/kit/service.server";
@@ -76,7 +76,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId, canSeeAllCustody } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.location,
@@ -114,7 +114,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         // Only reaches `?teamMember=` here; pass the resolved rule so an
         // admin's custodian filter still works on this dialog.
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         userId,
         extraInclude: {
           location: LOCATION_WITH_HIERARCHY,
@@ -138,7 +138,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // whether the UI draws them, so a viewer without custody visibility can
       // read them straight out of the route's data payload. Redact here, not
       // in the component.
-      items: redactCustodianForViewer(kits, { canSeeAllCustody, userId }),
+      items: redactCustodianForViewer(kits, {
+        canSeeAllCustody: access.custody.seeAll,
+        userId,
+      }),
       page,
       search,
       totalItems: totalKits,
@@ -216,7 +219,6 @@ export default function ManageLocationKits() {
 
   const selectedBulkItems = useAtomValue(selectedBulkItemsAtom);
   const updateItem = useSetAtom(setSelectedBulkItemAtom);
-  const setSelectedBulkItems = useSetAtom(setSelectedBulkItemsAtom);
   const selectedBulkItemsCount = useAtomValue(selectedBulkItemsCountAtom);
   const hasSelectedAllItems = isSelectingAllItems(selectedBulkItems);
 
@@ -236,11 +238,11 @@ export default function ManageLocationKits() {
   );
 
   /**
-   * Set selected items for kit based on the route data
+   * Pre-tick the kits already at this location, once per location. The loader
+   * revalidates on every filter change and returns the same kits again, so
+   * re-seeding from it would re-tick kits the user has unticked.
    */
-  useEffect(() => {
-    setSelectedBulkItems(location.kits);
-  }, [location.kits, setSelectedBulkItems]);
+  useSeedFormSelection(location.id, location.kits);
 
   return (
     <Tabs

@@ -36,9 +36,8 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.custody,
     });
 
-    // Caller's role — required so releaseCustody can enforce the SELF_SERVICE
-    // self-restriction (only release custody of assets assigned to themselves).
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    // The caller's custody scope: `releaseCustody` enforces it.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     const { assetId } = await parseMobileBody(
       z.object({
@@ -103,7 +102,7 @@ export async function action({ request }: ActionFunctionArgs) {
       assetId,
       organizationId,
       userId: user.id,
-      role,
+      custodyAssign: access.custody.assign,
       activityEvent: {
         actorUserId: user.id,
         teamMemberId: custodyRecord?.custodian?.id,

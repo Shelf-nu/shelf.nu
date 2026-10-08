@@ -27,13 +27,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
-      "bulk-delete": PermissionAction.update,
+      "bulk-delete": PermissionAction.delete,
     };
 
     const { organizationId } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
+      entity: PermissionEntity.nonRegisteredMember,
       action: intentToActionMap[intent],
     });
 

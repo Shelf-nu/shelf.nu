@@ -2,14 +2,16 @@ import { useState } from "react";
 import { Alert } from "react-native";
 import * as Haptics from "expo-haptics";
 import { api, type AssetDetail, type TeamMember } from "@/lib/api";
+import { useSheetSubmit } from "@/hooks/use-sheet-submit";
 
 interface UseCustodyActionsParams {
   asset: AssetDetail | null;
   currentOrg: { id: string } | null;
   fetchAsset: () => Promise<void>;
   /**
-   * SELF_SERVICE users can only ever take custody for themselves, so their
-   * confirm says "Take" rather than naming a custodian to assign to.
+   * The member may only take custody for themselves
+   * (`access.custody.assign === "self"`), so the confirm says "Take" rather
+   * than naming a custodian to assign to.
    */
   isSelfService?: boolean;
 }
@@ -23,24 +25,42 @@ interface UseCustodyActionsReturn {
    * Assign `quantity` units of a QUANTITY_TRACKED asset to `member`.
    * No Alert confirm step: the QuantityInputSheet's explicit submit IS the
    * confirmation (a second Alert would be double-confirmation).
+   *
+   * The request runs with the sheet still open. `closeSheet` runs only once
+   * the server accepts the assignment, so a refusal leaves the entered
+   * quantity on screen.
    */
   performAssignQuantity: (
     member: TeamMember,
-    quantity: number
+    quantity: number,
+    closeSheet: () => void,
+    /**
+     * Where the units come from, for a pool placed at two or more locations:
+     * a location id, or `null` for the unplaced units. Leave it out and the
+     * server records its own default.
+     */
+    locationId?: string | null
   ) => Promise<void>;
   /**
    * Release `quantity` units of a QUANTITY_TRACKED asset from the custodian
-   * identified by `custodianId` (team-member id). Confirmed by the sheet,
-   * same as `performAssignQuantity`.
+   * identified by `custodianId` (team-member id). Confirmed by the sheet, and
+   * closes it only once accepted, same as `performAssignQuantity`.
    *
    * `consumed` records how many of those units were used up rather than
-   * handed back. Omit it and the server derives the outcome from the asset's
-   * consumptionType.
+   * handed back. Pass `undefined` and the server derives the outcome from the
+   * asset's consumptionType.
    */
   performReleaseQuantity: (
     custodianId: string,
     quantity: number,
-    consumed?: number
+    consumed: number | undefined,
+    closeSheet: () => void,
+    /**
+     * Release only the units taken from this source: a location id, `null`
+     * for the unplaced units, or `"unrecorded"`. Leave it out and the server
+     * draws the holder's rows in its fixed order.
+     */
+    locationId?: string | null
   ) => Promise<void>;
 }
 
@@ -125,62 +145,57 @@ export function useCustodyActions({
   };
 
   // ── Quantity-custody actions (QUANTITY_TRACKED assets only) ──────────
-  // Same success/error shape as performAssign/performRelease above, but the
-  // Alert confirm step is replaced by the QuantityInputSheet's explicit
-  // submit (the sheet already shows amount + custodian + unit). On success
-  // the detail refetch (fetchAsset) refreshes quantityBreakdown, custodyList,
-  // and status in one shot.
+  // The QuantityInputSheet's explicit submit replaces the Alert confirm step
+  // (the sheet already shows amount + custodian + unit). The request runs with
+  // the sheet still open, and the sheet closes only once the server accepts;
+  // the detail refetch (fetchAsset) then refreshes quantityBreakdown,
+  // custodyList, and status in one shot.
+  const submitFromSheet = useSheetSubmit({
+    refresh: fetchAsset,
+    setSubmitting: setIsActionLoading,
+  });
 
   const performAssignQuantity = async (
     member: TeamMember,
-    quantity: number
+    quantity: number,
+    closeSheet: () => void,
+    locationId?: string | null
   ) => {
     if (!currentOrg || !asset) return;
-    setIsActionLoading(true);
-    try {
-      const { error: err } = await api.assignQuantityCustody(
-        currentOrg.id,
-        asset.id,
-        member.id,
-        quantity
-      );
-      if (err) Alert.alert("Error", err);
-      else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        await fetchAsset();
-      }
-    } catch {
-      Alert.alert("Error", "Something went wrong");
-    } finally {
-      setIsActionLoading(false);
-    }
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.assignQuantityCustody(
+          orgId,
+          assetId,
+          member.id,
+          quantity,
+          undefined,
+          locationId
+        ),
+      closeSheet
+    );
   };
 
   const performReleaseQuantity = async (
     custodianId: string,
     quantity: number,
-    consumed?: number
+    consumed: number | undefined,
+    closeSheet: () => void,
+    locationId?: string | null
   ) => {
     if (!currentOrg || !asset) return;
-    setIsActionLoading(true);
-    try {
-      const { error: err } = await api.releaseQuantityCustody(
-        currentOrg.id,
-        asset.id,
-        custodianId,
-        quantity,
-        { consumed }
-      );
-      if (err) Alert.alert("Error", err);
-      else {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        await fetchAsset();
-      }
-    } catch {
-      Alert.alert("Error", "Something went wrong");
-    } finally {
-      setIsActionLoading(false);
-    }
+    const orgId = currentOrg.id;
+    const assetId = asset.id;
+    await submitFromSheet(
+      () =>
+        api.releaseQuantityCustody(orgId, assetId, custodianId, quantity, {
+          consumed,
+          locationId,
+        }),
+      closeSheet
+    );
   };
 
   return {

@@ -11,6 +11,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { FakeCheckbox } from "~/components/forms/fake-checkbox";
 import { ChevronRight, HandleIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useKeyboardReorder } from "~/hooks/use-keyboard-reorder";
 import {
@@ -20,6 +21,19 @@ import {
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { tw } from "~/utils/tw";
 
+/**
+ * Picks which asset columns the advanced index shows, and in what order.
+ *
+ * The same setting drives two tables, so the control names its target. On the
+ * list view it configures the rows in front of the reader. On the model view the
+ * rows are models, which have their own fixed columns; the setting still governs
+ * the asset table inside a model's drill-down, which is the only place asset
+ * columns are rendered there. It is labelled for that table and says so when
+ * opened, because a control that silently governs something off screen reads as
+ * a broken one.
+ *
+ * @see {@link file://./asset-model-assets-sheet.tsx}
+ */
 export function ConfigureColumnsDropdown() {
   const fetcher = useFetcher({
     key: "asset-index-settings-columns",
@@ -27,6 +41,10 @@ export function ConfigureColumnsDropdown() {
 
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const { settings } = useLoaderData<AssetIndexLoaderData>();
+  const { isModelView } = useAssetIndexView();
+  const triggerLabel = isModelView
+    ? "Columns for a model's asset list"
+    : "Columns configuration";
   const initialColumns = (settings?.columns as Column[])?.sort(
     (a, b) => a.position - b.position
   );
@@ -86,8 +104,8 @@ export function ConfigureColumnsDropdown() {
           icon="columns"
           className="mt-2 font-normal text-gray-500 md:mt-0"
           width="full"
-          title="Columns configuration"
-          aria-label={"Columns configuration"}
+          title={triggerLabel}
+          aria-label={triggerLabel}
         />
       </PopoverTrigger>
       <PopoverPortal>
@@ -109,6 +127,12 @@ export function ConfigureColumnsDropdown() {
               {announcement}
             </div>
             <div className="content-inner relative mb-[60px] max-h-[412px] overflow-y-scroll">
+              {isModelView ? (
+                <p className="border-b px-[10px] py-2 text-xs text-gray-500">
+                  These columns apply to the asset list inside a model, not to
+                  the model rows.
+                </p>
+              ) : null}
               <div className="py-[2px]">
                 <div className="px-[10px] py-2 text-gray-500">
                   Fixed columns

@@ -1,10 +1,10 @@
 import type { EventContentArg } from "@fullcalendar/core";
 import { ExternalLinkIcon } from "@radix-ui/react-icons";
-import { ArrowRightIcon, Boxes } from "lucide-react";
+import { ArrowRightIcon, Boxes, CheckIcon } from "lucide-react";
 
 import { type CalendarExtendedProps } from "~/routes/_layout+/calendar";
 import { bookingStatusColorMap } from "~/utils/bookings";
-import { isOneDayEvent } from "~/utils/calendar";
+import { calendarDisplayStatus, isOneDayEvent } from "~/utils/calendar";
 import { tw } from "~/utils/tw";
 import { BookingStatusBadge } from "../booking/booking-status-badge";
 import { DateS } from "../shared/date";
@@ -196,7 +196,9 @@ export default function renderEventCard({ event }: EventCardProps) {
     (element as any)._cleanup = cleanup;
   };
 
-  const colors = bookingStatusColorMap[booking.status];
+  // The bar's text colour follows what the bar is drawn as, so a returned
+  // bar reads green throughout; the popover badge below keeps the real status.
+  const colors = bookingStatusColorMap[calendarDisplayStatus(booking)];
   return (
     <HoverCard openDelay={0} closeDelay={0}>
       <HoverCardTrigger asChild>
@@ -216,8 +218,20 @@ export default function renderEventCard({ event }: EventCardProps) {
                 <div className="fc-daygrid-event-dot inline-block" />
               </When>
             )}
-            <DateS date={booking.start} options={{ timeStyle: "short" }} /> |{" "}
-            {event.title}
+            {/* The bar must read without hovering: a returned asset shows
+                when it came back instead of when the booking started. */}
+            {booking.returnedAt ? (
+              <span data-testid="event-card-returned-prefix">
+                Returned{" "}
+                <DateS
+                  date={booking.returnedAt}
+                  options={{ timeStyle: "short" }}
+                />
+              </span>
+            ) : (
+              <DateS date={booking.start} options={{ timeStyle: "short" }} />
+            )}{" "}
+            | {event.title}
             {showKitGlyph ? (
               <span
                 className="inline-flex items-center gap-0.5"
@@ -296,6 +310,18 @@ export function EventCardContent({
         <ArrowRightIcon className="size-3 text-gray-600" />
         <DateS date={booking.end} options={DATE_FORMAT_OPTIONS} />
       </div>
+
+      {/* The period above is the booking's; this asset left it earlier. */}
+      {booking.returnedAt ? (
+        <div
+          className="mb-3 flex w-full items-center gap-x-2 text-sm text-success-700"
+          data-testid="event-card-returned"
+        >
+          <CheckIcon className="size-3" aria-hidden="true" />
+          <span>Returned</span>
+          <DateS date={booking.returnedAt} options={DATE_FORMAT_OPTIONS} />
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-5">
         <div>

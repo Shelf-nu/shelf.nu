@@ -1,3 +1,13 @@
+/**
+ * Mobile API route: home dashboard.
+ *
+ * Serves the companion's Home screen in one request: KPI counts, assets by
+ * status, the newest assets, upcoming, active and overdue bookings, and active
+ * audits. Org-scoped behind the mobile bearer auth. Lapsed photo URLs on the
+ * newest assets are re-signed before the response is sent.
+ *
+ * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
+ */
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -7,6 +17,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import {
+  ASSET_IMAGE_RESIGN_LIMITS,
+  refreshExpiredAssetImages,
+} from "~/modules/asset/service.server";
 import {
   getBookings,
   resolveCustodianScope,
@@ -37,10 +51,13 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // (canUseAudits, surfaced through getMobileUserContext) so the
     // dashboard never serves activeAudits to non-add-on workspaces — a
     // paywall bypass / data leak even with the client cards hidden.
-    // The same call yields `canSeeAllBookings`, which decides which bookings
-    // the sections may draw from, and `canSeeAllCustody` for their names.
-    const { canUseAudits, canSeeAllBookings, canSeeAllCustody } =
-      await getMobileUserContext(user.id, organizationId);
+    // The same call yields `access.bookings.seeAll`, which decides which
+    // bookings the sections may draw from, and `access.custody.seeAll` for
+    // their names.
+    const { canUseAudits, access } = await getMobileUserContext(
+      user.id,
+      organizationId
+    );
 
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
@@ -48,10 +65,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // in the workspace — with custodian names attached — straight off the
     // dashboard.
     //
-    // `canSeeAllBookings` is that decision: ADMIN and OWNER see every booking,
-    // SELF_SERVICE and BASE see only the ones they hold unless the workspace
-    // has switched their override on. The role alone cannot answer it — it does
-    // not know what the workspace decided — so Home reads the same flag the
+    // `access.bookings.seeAll` is that decision: ADMIN and OWNER see every
+    // booking, SELF_SERVICE and BASE see only the ones they hold unless the
+    // workspace has switched their override on. Home reads the same flag the
     // website does and lands on the same set of bookings.
     //
     // `resolveCustodianScope` rather than a bare `{ userId }`: custody lives
@@ -67,7 +83,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // empty for both). The companion's Home tab is the app's landing screen
     // for every role, not an admin analytics surface — denying it would leave
     // those users on a permanent error state rather than a scoped dashboard.
-    const custodianScope = canSeeAllBookings
+    const custodianScope = access.bookings.seeAll
       ? null
       : await resolveCustodianScope({ userId: user.id, organizationId });
 
@@ -79,7 +95,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       teamMemberCount,
       assetsByStatus,
       myCustodyCount,
-      newestAssets,
+      storedNewestAssets,
       upcomingBookingsResult,
       activeBookingsResult,
       overdueBookingsResult,
@@ -133,6 +149,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           mainImage: true,
           thumbnailImage: true,
+          // Lets the re-sign below tell a lapsed photo URL.
+          mainImageExpiration: true,
           // Model cover image; `serializeAssetImage` below resolves the cascade
           ...ASSET_MODEL_IMAGE_SELECT,
           category: { select: { id: true, name: true, color: true } },
@@ -238,6 +256,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           organizationId,
           status: { in: ["PENDING", "ACTIVE"] },
           ...(canUseAudits ? {} : { id: { in: [] } }),
+          // Roles limited to assigned audits see only theirs, the same
+          // predicate `/api/mobile/audits` applies through `assignedOnly`.
+          ...(!access.audits.seeAll && {
+            assignments: { some: { userId: user.id } },
+          }),
         },
         select: {
           id: true,
@@ -297,6 +320,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
       _count?: { bookingAssets: number };
     };
 
+    const newestAssets = await refreshExpiredAssetImages(storedNewestAssets, {
+      organizationId,
+      ...ASSET_IMAGE_RESIGN_LIMITS,
+    });
+
     // Format booking results
     const formatBooking = (b: MobileDashboardBooking) => ({
       id: b.id,
@@ -308,7 +336,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // is what keeps Home naming a booking's holder the same way the list and
       // the calendar do.
       custodianName: resolveBookingCustodianName({
-        canSeeAllCustody,
+        canSeeAllCustody: access.custody.seeAll,
         booking: b,
         userId: user.id,
       }),

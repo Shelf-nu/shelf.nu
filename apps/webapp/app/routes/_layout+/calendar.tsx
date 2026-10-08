@@ -41,6 +41,7 @@ import {
 } from "~/modules/team-member/service.server";
 import calendarStyles from "~/styles/layout/calendar.css?url";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import {
   getCalendarTitleAndSubtitle,
   getStatusClasses,
@@ -105,6 +106,14 @@ export type CalendarExtendedProps = {
    * physical units (always qty 1), so the calendar hides the per-slice `Qty`
    * and the booked-units total for them — the number is redundant noise. */
   quantityTracked?: boolean;
+  /** Availability view only: true when every folded slice of this asset has
+   * been checked in from the booking. The bar then ends at `returnedAt` and
+   * is styled as complete, while `status` keeps the booking's real status
+   * for the popover badge. Absent on the booking calendar. */
+  returned?: boolean;
+  /** Availability view only: ISO instant of the latest check-in among the
+   * folded slices; null unless `returned`. */
+  returnedAt?: string | null;
 };
 
 // Loader Function to Return Bookings Data
@@ -113,18 +122,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
   const { userId } = authSession;
 
   try {
-    const {
-      isSelfServiceOrBase,
-      currentOrganization,
-      organizationId,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { currentOrganization, organizationId, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -150,27 +154,29 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       calendarFeedUrl,
     ] = await Promise.all([
-      // Team members for filters - when canSeeAllCustody is false, only current user's team member
+      // Team members for filters: when custody is not visible to the caller,
+      // only the caller's own team member
       getTeamMemberForCustodianFilter({
         organizationId,
         selectedTeamMembers: teamMemberIds,
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody,
+        filterByUserId: !access.custody.seeAll,
         userId,
       }),
-      // Team members for CreateBookingDialog - BASE/SELF_SERVICE always get their team member
-      isSelfServiceOrBase
+      // Team members for CreateBookingDialog: a member whose booking custodian
+      // is fixed to themself always gets their own team member.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
       getTagsForBookingTagsFilter({
         organizationId,
       }),
@@ -178,8 +184,8 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
         request,
         organizationId,
         userId,
-        canSeeAllBookings,
-        canSeeAllCustody,
+        canSeeAllBookings: access.bookings.seeAll,
+        canSeeAllCustody: access.custody.seeAll,
       }),
       getMemberCalendarFeedUrl({ organizationId, userId }),
     ]);
@@ -194,14 +200,13 @@ export const loader = async ({ request, context }: LoaderFunctionArgs) => {
       events,
       organizationId,
       ...teamMembersData,
-      // For BASE/SELF_SERVICE users, provide dedicated form team members
-      // For ADMIN users, reuse the filter team members
+      // Members fixed to themselves get dedicated form team members;
+      // everyone else reuses the filter team members.
       teamMembersForForm:
         teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
       currentOrganization,
       ...tagsData,
       modelName,
-      isSelfServiceOrBase,
       userId,
       calendarFeedUrl,
       searchFieldTooltip: {
