@@ -40,7 +40,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowRight,
     title: "Check-Out",
     description:
-      "On the start date of your booking, an administrator will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
+      "On the start date of your booking, an administrator or manager will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
     iconClassName: "bg-violet-100 text-violet-500",
   },
   {
@@ -48,7 +48,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowLeft,
     title: "Check-In",
     description:
-      "At the end of you booking period, return the equipment to the administrator who will perform the check in action.",
+      "At the end of your booking period, return the equipment to the administrator or manager who will perform the check in action.",
     iconClassName: "bg-indigo-100 text-indigo-500",
   },
 ];
