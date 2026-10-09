@@ -9795,16 +9795,25 @@ export async function partialCheckoutBooking({
         }
 
         /**
-         * What each pool has on the shelf before this session: its stock less
-         * the units custody, kits and every booking (this one included) hold
-         * out. Read under the row locks above and before any write below, so
-         * the free-stock check after attribution measures this session's
-         * departures against the shelf as it found it. `physicalAvailable` is
-         * window-independent, so no window is passed.
+         * Each pool's availability before this session, read under the row
+         * locks above and before any write below, so the free-stock check
+         * after attribution measures this session's departures against the
+         * pool as it found it. `physicalAvailable` (stock less what custody,
+         * kits and every booking hold out) ignores the window; `bookable`
+         * also sets aside other bookings' reservations over this booking's
+         * window, the figure the Check out button's guard reads.
          */
         const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
           qtyDispositionAssetIds,
-          { organizationId, window: null, db: tx }
+          {
+            organizationId,
+            window:
+              bookingFound.from && bookingFound.to
+                ? { from: bookingFound.from, to: bookingFound.to }
+                : null,
+            excludeBookingId: id,
+            db: tx,
+          }
         );
 
         // ONE batched committed-remaining read (booking total − Σ prior PBC
@@ -10364,11 +10373,12 @@ export async function partialCheckoutBooking({
          * against the pool's free stock. Kit-driven slices draw on their
          * kit's allocation, which the free figure already sets aside.
          *
-         * Only units physically held count here, not other bookings'
-         * reservations: a booking already out outranks a reservation (see
-         * {@link outranksReservations}). The Check out button's in-tx guard,
-         * which a batch covering the whole booking reaches through the
-         * delegate above, also counts reservations overlapping its window.
+         * A booking already out outranks a reservation (see
+         * {@link outranksReservations}), so for it only units physically held
+         * count. A reserved booking does not yet, so other bookings'
+         * reservations over its window count too: the same `bookable` limit
+         * the Check out button's in-tx guard applies to a batch covering the
+         * whole booking, which reaches it through the delegate above.
          */
         const standaloneUnitsByAsset = new Map<string, number>();
         for (const ba of bookingFound.bookingAssets) {
@@ -10385,13 +10395,18 @@ export async function partialCheckoutBooking({
         }
         const freeStockShortfalls: string[] = [];
         for (const [assetId, units] of standaloneUnitsByAsset) {
-          const free =
-            availabilityBeforeByAsset.get(assetId)?.physicalAvailable ?? 0;
+          const availability = availabilityBeforeByAsset.get(assetId);
+          const physicalFree = availability?.physicalAvailable ?? 0;
+          const free = inFlight
+            ? physicalFree
+            : Math.min(physicalFree, availability?.bookable ?? 0);
           if (units > free) {
             freeStockShortfalls.push(
               `"${
                 titleByAssetId.get(assetId) ?? ""
-              }": requested ${units}, only ${Math.max(0, free)} free right now`
+              }": requested ${units}, only ${Math.max(0, free)} available ${
+                inFlight ? "right now" : "in this window"
+              }`
             );
           }
         }
@@ -10403,7 +10418,7 @@ export async function partialCheckoutBooking({
             shouldBeCaptured: false,
             message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
               "\n"
-            )}\nThe rest are in custody, in kits or out on bookings. Release custody or check units in, then try again.`,
+            )}\nThe rest are in custody, in kits, or out on or reserved for other bookings. Release custody, check units in or adjust quantities, then try again.`,
             additionalData: { bookingId: id, organizationId },
           });
         }

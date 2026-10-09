@@ -305,7 +305,10 @@ vitest.mock("~/modules/asset/availability.server", async (importOriginal) => {
           new Map(
             assetIds.map((id) => [
               id,
-              { physicalAvailable: Number.MAX_SAFE_INTEGER },
+              {
+                physicalAvailable: Number.MAX_SAFE_INTEGER,
+                bookable: Number.MAX_SAFE_INTEGER,
+              },
             ])
           )
         )
@@ -3055,11 +3058,14 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
   describe("free stock of the pool", () => {
     /**
-     * Sets each pool's free stock before this session (stock less custody,
-     * kits and every booking's units out), as the batched availability read
-     * answers it for the next check-out.
+     * Sets each pool's availability before this session, as the batched read
+     * answers it for the next check-out: `physical` is stock less custody,
+     * kits and every booking's units out; `bookable` also sets aside other
+     * bookings' reservations over the window (defaults to `physical`).
      */
-    function freeStock(freeByAssetId: Record<string, number>) {
+    function freeStock(
+      byAssetId: Record<string, { physical: number; bookable?: number }>
+    ) {
       (
         getAssetAvailabilityBatch as ReturnType<typeof vitest.fn>
       ).mockImplementationOnce((assetIds: string[]) =>
@@ -3067,7 +3073,11 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
           new Map(
             assetIds.map((id) => [
               id,
-              { physicalAvailable: freeByAssetId[id] ?? 0 },
+              {
+                physicalAvailable: byAssetId[id]?.physical ?? 0,
+                bookable:
+                  byAssetId[id]?.bookable ?? byAssetId[id]?.physical ?? 0,
+              },
             ])
           )
         )
@@ -3091,7 +3101,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue({ ...qtyOnlyBooking, status: BookingStatus.ONGOING });
-      freeStock({ "asset-qty-1": 2 });
+      freeStock({ "asset-qty-1": { physical: 2 } });
 
       await expect(
         partialCheckoutBooking({
@@ -3100,7 +3110,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
             { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
           ],
         })
-      ).rejects.toThrow(/"Pens": requested 5, only 2 free right now/);
+      ).rejects.toThrow(/"Pens": requested 5, only 2 available right now/);
 
       // Refused before any unit is counted out.
       expect(checkedOutIncrements()).toEqual([]);
@@ -3114,11 +3124,13 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue(qtyOnlyBooking);
-      freeStock({ "asset-qty-1": 0 });
+      freeStock({ "asset-qty-1": { physical: 0 } });
 
       await expect(
         partialCheckoutBooking({ ...baseParams, assetIds: ["asset-qty-1"] })
-      ).rejects.toThrow(/"Pens": requested 50, only 0 free right now/);
+      ).rejects.toThrow(
+        /"Pens": requested 50, only 0 available in this window/
+      );
     });
 
     it("sends out a claim that fits the free stock exactly", async () => {
@@ -3127,7 +3139,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
       ).mockResolvedValue({ ...qtyOnlyBooking, status: BookingStatus.ONGOING });
-      freeStock({ "asset-qty-1": 5 });
+      freeStock({ "asset-qty-1": { physical: 5 } });
 
       await partialCheckoutBooking({
         ...baseParams,
@@ -3180,7 +3192,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
           assetKitId: "ak-1",
         },
       ]);
-      freeStock({ "asset-qty-1": 0 });
+      freeStock({ "asset-qty-1": { physical: 0 } });
 
       await partialCheckoutBooking({
         ...baseParams,
@@ -3194,6 +3206,52 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       });
 
       expect(checkedOutIncrements()).toEqual([["ba-qty-kit", 5]]);
+    });
+
+    it("counts other bookings' reservations against a reserved booking's first scan", async () => {
+      expect.assertions(2);
+
+      // 10 on the shelf, but 7 of them promised to an overlapping
+      // reservation: a booking not yet out cannot take them.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      freeStock({ "asset-qty-1": { physical: 10, bookable: 3 } });
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+          ],
+        })
+      ).rejects.toThrow(/"Pens": requested 5, only 3 available in this window/);
+
+      // Read over this booking's own window, without its own reservation.
+      expect(getAssetAvailabilityBatch).toHaveBeenCalledWith(["asset-qty-1"], {
+        organizationId: "org-1",
+        window: { from: futureFrom, to: futureTo },
+        excludeBookingId: "booking-1",
+        db,
+      });
+    });
+
+    it("lets a booking already out take units a reservation also holds", async () => {
+      expect.assertions(1);
+
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue({ ...qtyOnlyBooking, status: BookingStatus.ONGOING });
+      freeStock({ "asset-qty-1": { physical: 10, bookable: 3 } });
+
+      await partialCheckoutBooking({
+        ...baseParams,
+        checkouts: [
+          { assetId: "asset-qty-1", bookingAssetId: "ba-qty-1", quantity: 5 },
+        ],
+      });
+
+      expect(checkedOutIncrements()).toEqual([["ba-qty-1", 5]]);
     });
   });
 
