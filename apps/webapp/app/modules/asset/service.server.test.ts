@@ -13,8 +13,10 @@ import {
   recordEvents,
 } from "~/modules/activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
+import { isModelShortfallMessage } from "~/modules/asset/archive-shortfall";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
+import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -234,6 +236,13 @@ vitest.mock("~/database/db.server", () => ({
 
 // why: lockAssetForQuantityUpdate runs a raw SELECT ... FOR UPDATE that we
 // cannot execute against a mocked tx — stub it to return a controlled asset
+// why: the model-reservation shortfall check measures booking pools through a
+// chain of model-request reads; its own suite covers that. Here only the
+// archive's response to its answer matters. Default: nothing falls short.
+vitest.mock("~/modules/booking-model-request/service.server", () => ({
+  findModelReservationsShortAfterArchive: vitest.fn().mockResolvedValue([]),
+}));
+
 // why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
 // mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
 // the guard's own behaviour is what these suites assert on.
@@ -6038,6 +6047,64 @@ describe("archiveAsset", () => {
       archiveAsset({ id: "x", organizationId: "org-1" })
     ).rejects.toMatchObject({ status: 404 });
     expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("warns instead of archiving when a model reservation would fall short", async () => {
+    // A booking reserved units of this asset's model by model request; taking
+    // the unit out of the pool would leave it promised more than exists.
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+    // why: the shortfall check reports one booking left short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: "Sony A7",
+          short: 1,
+        },
+      ]);
+
+    const outcome = archiveAsset({ id: "a1", organizationId: "org-1" });
+
+    await expect(outcome).rejects.toMatchObject({ status: 409 });
+    await expect(outcome).rejects.toSatisfy((e: { message: string }) =>
+      isModelShortfallMessage(e.message)
+    );
+    // Thrown inside the transaction, so the archive write rolls back and no
+    // event is recorded.
+    expect(mockRecordEvent).not.toHaveBeenCalled();
+  });
+
+  it("archives anyway once the user has confirmed the shortfall", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+      assetModelId: "model-1",
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      confirmModelShortfall: true,
+    });
+
+    // Confirmed: not even measured, and the archive goes through.
+    expect(findModelReservationsShortAfterArchive).not.toHaveBeenCalled();
+    expect(mockRecordEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "ASSET_ARCHIVED" }),
+      expect.anything()
+    );
   });
 
   it("throws 409 when already archived", async () => {

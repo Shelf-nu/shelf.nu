@@ -136,6 +136,11 @@ export interface CreateAssetFromBackupImportPayload
   }[];
   /** Manual placements, by location name. Absent when the asset had none. */
   assetLocations?: BackupPlacement[];
+  /**
+   * When the asset was archived (issue #382), or empty/absent for an active
+   * one. Restored as-is, so an archived asset does not come back active.
+   */
+  archivedAt?: string | null;
   /** Only in a backup written before placements existed: the asset's one
    * location. See `placementsForRestore`. */
   location?:

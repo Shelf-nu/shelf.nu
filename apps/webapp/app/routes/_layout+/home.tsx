@@ -170,21 +170,23 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // 1c. Monthly asset creation counts (last 12 months)
+      // Archived assets count here (issue #382): the chart says when assets
+      // were added, so archiving one must not rewrite a past month. Its last
+      // point can sit above the active-assets KPI beside it, by design.
       db.$queryRaw<{ month_start: Date; assets_created: number }[]>`
         SELECT date_trunc('month', "createdAt") AS month_start,
                COUNT(*)::int AS assets_created
         FROM "Asset"
         WHERE "organizationId" = ${organizationId}
-          AND "archivedAt" IS NULL
           AND "createdAt" >= ${twelveMonthsAgo}
         GROUP BY 1
         ORDER BY 1`,
 
       // 1c. Baseline count (assets before the 12-month window)
       db.asset.count({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: growth history counts every asset ever added, archived included, so past months stay fixed
         where: {
           organizationId,
-          archivedAt: null,
           createdAt: { lt: twelveMonthsAgo },
         },
       }),

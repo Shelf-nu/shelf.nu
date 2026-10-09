@@ -22,6 +22,7 @@ import {
   assertOutstandingModelRequestsFit,
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
+  findModelReservationsShortAfterArchive,
   getAssetModelAvailability,
   getBookingModelTabData,
   materializeModelRequestForAsset,
@@ -477,6 +478,90 @@ describe("getAssetModelAvailability", () => {
       (whereOf(db.bookingAsset.aggregate)?.asset as Record<string, unknown>)
         ?.archivedAt
     ).toBeNull();
+  });
+});
+
+describe("findModelReservationsShortAfterArchive (issue #382)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  /**
+   * The archive transaction's view of the pool: `total` units left active
+   * after the archive, nothing in custody or out on other bookings.
+   *
+   * why: a client distinct from the mocked global `db` makes "the pool is
+   * measured through the archive's transaction" observable, and its counts
+   * make the arithmetic checkable.
+   */
+  function archiveTx(total: number) {
+    return {
+      asset: {
+        count: vitest.fn().mockResolvedValue(total),
+        // The booking holds no units of the model by name.
+        findMany: vitest.fn().mockResolvedValue([]),
+      },
+      custody: {
+        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      },
+      bookingAsset: {
+        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
+      },
+      bookingModelRequest: {
+        aggregate: vitest
+          .fn()
+          .mockResolvedValue({ _sum: { quantity: 0, fulfilledQuantity: 0 } }),
+      },
+    };
+  }
+
+  it("names a booking whose reservation no longer fits the shrunken pool", async () => {
+    // why: one booking reserved 3 units of the model by model request.
+    vitest.mocked(db.bookingModelRequest.findMany).mockResolvedValueOnce([
+      {
+        bookingId: "b1",
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        fulfilledQuantity: 0,
+        booking: { name: "Shoot", from, to },
+        assetModel: { name: "Sony A7" },
+      },
+    ] as never);
+
+    const shortfalls = await findModelReservationsShortAfterArchive({
+      assetModelIds: [MODEL_ID],
+      organizationId: ORG_ID,
+      // 2 units left once the archive lands: one short of the 3 promised.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tx: archiveTx(2) as any,
+    });
+
+    expect(shortfalls).toEqual([
+      { bookingId: "b1", bookingName: "Shoot", modelName: "Sony A7", short: 1 },
+    ]);
+  });
+
+  it("reports nothing when every reservation still fits", async () => {
+    // why: the same 3-unit reservation against a pool of 3.
+    vitest.mocked(db.bookingModelRequest.findMany).mockResolvedValueOnce([
+      {
+        bookingId: "b1",
+        assetModelId: MODEL_ID,
+        quantity: 3,
+        fulfilledQuantity: 0,
+        booking: { name: "Shoot", from, to },
+        assetModel: { name: "Sony A7" },
+      },
+    ] as never);
+
+    const shortfalls = await findModelReservationsShortAfterArchive({
+      assetModelIds: [MODEL_ID],
+      organizationId: ORG_ID,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tx: archiveTx(3) as any,
+    });
+
+    expect(shortfalls).toEqual([]);
   });
 });
 

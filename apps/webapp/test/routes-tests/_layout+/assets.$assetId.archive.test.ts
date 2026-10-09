@@ -122,6 +122,8 @@ describe("asset detail action: archive and reinstate", () => {
       id: "a1",
       organizationId: "org-1",
       actorUserId: "user-1",
+      // Not confirmed: a model-reservation shortfall would be warned about.
+      confirmModelShortfall: false,
     });
     expect(unarchiveAsset).not.toHaveBeenCalled();
   });

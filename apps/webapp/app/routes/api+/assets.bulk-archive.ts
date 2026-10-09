@@ -13,6 +13,10 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkArchiveSchema } from "~/components/assets/bulk-archive-dialog";
 import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
+import {
   bulkArchiveAssets,
   bulkUnarchiveAssets,
 } from "~/modules/asset/service.server";
@@ -74,6 +78,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
         settings,
         actorUserId: userId,
         timeZone,
+        // Set by the dialog's "Archive anyway" after the shortfall warning.
+        confirmModelShortfall:
+          formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
       });
 
       sendNotification({
@@ -113,6 +120,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
     return data(payload({ success: true }));
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
-    return data(error(reason), { status: reason.status });
+    // The model-reservation warning is a question, not a failure: the dialog
+    // shows it with "Archive anyway", so no error toast.
+    const isShortfallWarning = isModelShortfallMessage(reason.message);
+    return data(error(reason, !isShortfallWarning), { status: reason.status });
   }
 }

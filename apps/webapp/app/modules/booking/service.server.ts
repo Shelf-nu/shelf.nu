@@ -10995,7 +10995,8 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  * @param params.existingAssetKitIds - Optional set of `AssetKit.id`s already
  *   represented on the target booking; matching memberships are skipped so
  *   re-adding a kit that's already (partly) present is idempotent per slice.
- * @returns One slice spec per newly-added `AssetKit` membership
+ * @returns One slice spec per newly-added `AssetKit` membership of an active
+ *   (not archived) asset
  * @throws {ShelfError} If the database lookup fails
  */
 export async function buildKitSlicesForBooking({
@@ -11012,7 +11013,14 @@ export async function buildKitSlicesForBooking({
 
   try {
     const assetKits = await db.assetKit.findMany({
-      where: { kitId: { in: kitIds }, organizationId },
+      // Archived members are left out (issue #382): the kit is booked with its
+      // active members, the same way kit custody and kit moves skip archived
+      // ones. Refusing the whole kit stranded a kit with one archived member.
+      where: {
+        kitId: { in: kitIds },
+        organizationId,
+        asset: { archivedAt: null },
+      },
       // `kitId` is already the filter column, so selecting it costs nothing.
       select: { id: true, assetId: true, quantity: true, kitId: true },
     });
@@ -18236,10 +18244,18 @@ export async function duplicateBooking({
         );
       }
 
-      return created;
+      return {
+        booking: created,
+        droppedArchivedCount: archivedAssetIds.size,
+      };
     });
 
-    return newBooking;
+    // The caller tells the user how many archived assets were left out,
+    // rather than letting them vanish from the copy unannounced.
+    return {
+      ...newBooking.booking,
+      droppedArchivedCount: newBooking.droppedArchivedCount,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

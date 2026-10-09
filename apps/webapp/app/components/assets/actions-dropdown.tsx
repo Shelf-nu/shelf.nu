@@ -22,6 +22,10 @@ import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
 import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
+import {
   getPrimaryKit,
   isIndividualKitMember,
   isQuantityTracked,
@@ -43,6 +47,15 @@ import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dial
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../shared/modal";
 import When from "../when/when";
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -108,9 +121,24 @@ const ConditionalActionsDropdown = () => {
       : null;
 
   // Archive / reinstate. Fetcher-driven (posts to the asset detail action).
-  const archiveFetcher = useFetcher();
+  const archiveFetcher = useFetcher<{ error?: { message?: string } | null }>();
   const isArchiveSubmitting = useDisabled(archiveFetcher);
   const isArchived = Boolean(asset.archivedAt);
+
+  /**
+   * Archiving would leave a model reservation short (issue #382). The server
+   * refuses the first attempt with a warning instead of an error toast; this
+   * turns it into an "Archive anyway" prompt. A warning the user cancelled
+   * stays dismissed until the next attempt returns a fresh one.
+   */
+  const shortfallWarning =
+    archiveFetcher.state === "idle" &&
+    isModelShortfallMessage(archiveFetcher.data?.error?.message)
+      ? archiveFetcher.data?.error?.message ?? null
+      : null;
+  const [dismissedWarning, setDismissedWarning] = useState<string | null>(null);
+  const isShortfallPromptOpen =
+    shortfallWarning !== null && shortfallWarning !== dismissedWarning;
   /**
    * Why archiving is blocked for this asset, if at all. Mirrors the server
    * guard in `archiveAsset` so the UI explains the disabled state up-front.
@@ -526,6 +554,47 @@ const ConditionalActionsDropdown = () => {
         </PopoverPortal>
       </Popover>
 
+      <AlertDialog
+        open={isShortfallPromptOpen}
+        onOpenChange={(open) => {
+          if (!open) setDismissedWarning(shortfallWarning);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Model reservations affected</AlertDialogTitle>
+            <AlertDialogDescription>{shortfallWarning}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <div className="flex justify-center gap-2">
+              <AlertDialogCancel asChild>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isArchiveSubmitting}
+                >
+                  Cancel
+                </Button>
+              </AlertDialogCancel>
+              <Button
+                type="button"
+                disabled={isArchiveSubmitting}
+                onClick={() => {
+                  void archiveFetcher.submit(
+                    {
+                      intent: "archive",
+                      [CONFIRM_MODEL_SHORTFALL_FIELD]: "true",
+                    },
+                    { method: "post", action: `/assets/${asset.id}` }
+                  );
+                }}
+              >
+                Archive anyway
+              </Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
           key={asset.qrCodes[0]?.id || asset.id}

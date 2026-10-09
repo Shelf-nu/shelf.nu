@@ -1943,8 +1943,9 @@ export async function buildKitCustodyInheritData({
   if (assetIds.length === 0) return [];
 
   const assets = await tx.asset.findMany({
-    // Archived members never inherit kit custody (issue #382). Callers filter
-    // them out already; this keeps every caller honest.
+    // Archived members never inherit kit custody (issue #382). Callers take
+    // the archive row lock on `assetIds` first, so this read also catches an
+    // archive that committed after the caller's own read.
     // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIds` are resolved org-scoped by the caller (updateKitAssets fetches them via the org-scoped `where: { id: { in }, organizationId }` asset query) before this helper runs
     where: { id: { in: assetIds }, archivedAt: null },
     select: {
@@ -4136,6 +4137,16 @@ export async function bulkAssignKitCustody({
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
 
+      // The archive row lock on every member, taken once and in sorted order,
+      // so an archive cannot commit between the members read above and the
+      // custody written below and leave an archived asset in custody
+      // (issue #382). The helper and the re-read below then see the truth.
+      await lockAssetsForArchiveGuard(
+        tx,
+        allAssetsOfAllKits.map((asset) => asset.id),
+        organizationId
+      );
+
       /** Creating custodies over assets of kits — one row per (asset, kit-custody) */
       const inheritDataPerKit = await Promise.all(
         kits.map(async (kit) => {
@@ -4154,6 +4165,27 @@ export async function bulkAssignKitCustody({
       if (inheritData.length > 0) {
         await tx.custody.createMany({ data: inheritData });
       }
+
+      /**
+       * The members read before this transaction may have been archived since.
+       * Their archive lock is held (above), so this re-read is authoritative:
+       * only active members take the status, note and event.
+       */
+      const activeMemberIds = new Set(
+        (
+          await tx.asset.findMany({
+            where: {
+              id: { in: allAssetsOfAllKits.map((asset) => asset.id) },
+              organizationId,
+              archivedAt: null,
+            },
+            select: { id: true },
+          })
+        ).map((asset) => asset.id)
+      );
+      const custodyMembers = allAssetsOfAllKits.filter((asset) =>
+        activeMemberIds.has(asset.id)
+      );
 
       // Per-(kit-custody, asset) inherited quantity — the units this kit
       // actually moved into custody (kit slice capped by free pool), NOT the
@@ -4177,7 +4209,7 @@ export async function bulkAssignKitCustody({
       // @see {@link file://./../asset/custody-status.server.ts}
       await setCustodyDrivenAssetStatus(
         tx,
-        allAssetsOfAllKits.map((asset) => asset.id),
+        custodyMembers.map((asset) => asset.id),
         organizationId,
         AssetStatus.IN_CUSTODY
       );
@@ -4189,7 +4221,7 @@ export async function bulkAssignKitCustody({
         : // Free-form fallback name, rendered as literal bold text.
           `**${stripMarkdocDelimiters(custodianName)}**`;
       await tx.note.createMany({
-        data: allAssetsOfAllKits.map((asset) => {
+        data: custodyMembers.map((asset) => {
           const kitLink = asset.kit
             ? wrapLinkForNote(`/kits/${asset.kit.id}`, asset.kit.name.trim())
             : "**Unknown Kit**";
@@ -4210,7 +4242,7 @@ export async function bulkAssignKitCustody({
       // `meta.quantity` mirrors the quantity persisted on the child Custody
       // row so reports can aggregate by units, not just rows.
       await recordEvents(
-        allAssetsOfAllKits.map((asset) => ({
+        custodyMembers.map((asset) => ({
           organizationId,
           actorUserId: userId,
           action: "CUSTODY_ASSIGNED",

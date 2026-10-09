@@ -43,6 +43,7 @@ import { AssetType, BookingStatus } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import type { ModelReservationShortfall } from "~/modules/asset/archive-shortfall";
 import { canEditModelReservations } from "~/utils/booking-model-requests";
 import type { ErrorLabel } from "~/utils/error";
 import { ShelfError } from "~/utils/error";
@@ -1073,6 +1074,96 @@ export async function measureModelPoolFit({
 /* -------------------------------------------------------------------------- */
 /*                    lockModelsForOutstandingRequests                        */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Model reservations an archive would leave short (issue #382).
+ *
+ * Archiving an asset takes one unit out of its model's pool, and a booking
+ * that reserved units of that model by model request can then be promised
+ * more than the pool holds. Called INSIDE the archive transaction, after the
+ * archive write: the pool is measured through `tx`, so it already excludes
+ * the assets being archived ({@link getAssetModelAvailability} counts only
+ * active units).
+ *
+ * Drafts are included although they do not claim the pool yet: a draft that
+ * no longer fits is refused when it is reserved, so its owner should hear
+ * about it now, not then.
+ *
+ * Advisory: the archive goes ahead once the user confirms, so this takes no
+ * model lock. A reservation written concurrently is measured by its own
+ * guards.
+ *
+ * @param args.assetModelIds - Models of the assets being archived
+ * @param args.organizationId - The caller's workspace
+ * @param args.tx - The archive transaction, already holding the archive write
+ * @returns One entry per booking left short, empty when every reservation fits
+ */
+export async function findModelReservationsShortAfterArchive({
+  assetModelIds,
+  organizationId,
+  tx,
+}: {
+  assetModelIds: string[];
+  organizationId: string;
+  tx: ModelPoolFitClient;
+}): Promise<ModelReservationShortfall[]> {
+  const modelIds = [...new Set(assetModelIds)];
+  if (modelIds.length === 0) return [];
+
+  // The reservations themselves are untouched by the archive, so the plain
+  // client reads them; only the pool below needs the transaction's view.
+  const requests = await db.bookingModelRequest.findMany({
+    where: {
+      assetModelId: { in: modelIds },
+      fulfilledAt: null,
+      booking: {
+        organizationId,
+        status: {
+          in: [
+            BookingStatus.DRAFT,
+            BookingStatus.RESERVED,
+            BookingStatus.ONGOING,
+            BookingStatus.OVERDUE,
+          ],
+        },
+      },
+    },
+    select: {
+      bookingId: true,
+      assetModelId: true,
+      quantity: true,
+      fulfilledQuantity: true,
+      booking: { select: { name: true, from: true, to: true } },
+      assetModel: { select: { name: true } },
+    },
+  });
+
+  const shortfalls: ModelReservationShortfall[] = [];
+  for (const request of requests) {
+    const outstanding = request.quantity - request.fulfilledQuantity;
+    if (outstanding <= 0) continue;
+
+    const fit = await measureModelPoolFit({
+      bookingId: request.bookingId,
+      assetModelId: request.assetModelId,
+      organizationId,
+      from: request.booking.from,
+      to: request.booking.to,
+      outstanding,
+      tx,
+    });
+    if (fit.fits) continue;
+
+    shortfalls.push({
+      bookingId: request.bookingId,
+      bookingName: request.booking.name,
+      modelName: request.assetModel.name,
+      short:
+        fit.namedNotInCustody + fit.outstanding - fit.availability.available,
+    });
+  }
+  return shortfalls;
+}
 
 /**
  * Locks every `AssetModel` a booking still owes units for.

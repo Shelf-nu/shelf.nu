@@ -14,6 +14,10 @@
 
 import { useZorm } from "react-zorm";
 import { z } from "zod";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 import { Button } from "../shared/button";
 
@@ -58,35 +62,59 @@ export default function BulkArchiveDialog({
       actionUrl="/api/assets/bulk-archive"
       arrayFieldId="assetIds"
     >
-      {({ fetcherError, disabled, handleCloseDialog }) => (
-        <div className="modal-content-wrapper">
-          <input type="hidden" name="type" value={type} />
+      {({ fetcherError, disabled, handleCloseDialog }) => {
+        /**
+         * Archiving would leave a model reservation short (issue #382). That
+         * is a question for the user, not a failure: show the warning and let
+         * the same form go again with the confirmation set.
+         */
+        const needsShortfallConfirm =
+          isArchive && isModelShortfallMessage(fetcherError);
 
-          {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
-          ) : null}
+        return (
+          <div className="modal-content-wrapper">
+            <input type="hidden" name="type" value={type} />
+            {needsShortfallConfirm ? (
+              <input
+                type="hidden"
+                name={CONFIRM_MODEL_SHORTFALL_FIELD}
+                value="true"
+              />
+            ) : null}
 
-          <div className="flex gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-              onClick={handleCloseDialog}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              width="full"
-              disabled={disabled}
-            >
-              Confirm
-            </Button>
+            {needsShortfallConfirm ? (
+              <p
+                role="alert"
+                className="mb-4 rounded border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+              >
+                {fetcherError}
+              </p>
+            ) : fetcherError ? (
+              <p className="text-sm text-error-500">{fetcherError}</p>
+            ) : null}
+
+            <div className="flex gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                width="full"
+                disabled={disabled}
+                onClick={handleCloseDialog}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                width="full"
+                disabled={disabled}
+              >
+                {needsShortfallConfirm ? "Archive anyway" : "Confirm"}
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      }}
     </BulkUpdateDialogContent>
   );
 }

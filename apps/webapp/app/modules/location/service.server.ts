@@ -47,6 +47,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   getFileUploadPath,
   MAX_PUBLIC_FILES_PER_REMOVE,
@@ -2134,6 +2135,14 @@ export async function updateLocationAssets({
     const actuallyNewAssetIds = assetIds.filter(
       (id) => !existingAssetIds.has(id)
     );
+
+    // Archived assets are frozen (issue #382): none can be moved INTO this
+    // location. Ones already placed here stay listed (the location page shows
+    // them with a badge), and removing them stays allowed.
+    await assertAssetsAreNotArchived({
+      assetIds: actuallyNewAssetIds,
+      organizationId,
+    });
 
     /**
      * Qty-edit set: assets already at this location whose submitted

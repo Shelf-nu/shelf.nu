@@ -85,6 +85,7 @@ import {
   importDataHasBarcodes,
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
+import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
 import {
   createCategoriesIfNotExists,
   getCategory,
@@ -184,6 +185,7 @@ import {
 } from "~/utils/storage.server";
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
+import { formatModelShortfallMessage } from "./archive-shortfall";
 import { custodiesForRestore } from "./backup-custody";
 import {
   placementsForRestore,
@@ -3588,20 +3590,79 @@ const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
  * @returns The archived asset id and the archive timestamp.
  * @throws {ShelfError} On a failed guard or a database error.
  */
+/**
+ * Refuses an archive that would leave a model reservation short, unless the
+ * user has confirmed it (issue #382).
+ *
+ * Runs inside the archive transaction AFTER the archive write, so the pool it
+ * measures already excludes the assets being archived; throwing rolls the
+ * archive back. The 409 carries the warning text from
+ * `formatModelShortfallMessage`, which the UI recognises and turns into an
+ * "Archive anyway" prompt rather than a plain failure.
+ *
+ * @param args.assetModelIds - Models of the assets just archived
+ * @param args.organizationId - The caller's workspace
+ * @param args.confirmed - The user already chose to archive anyway
+ * @param args.tx - The archive transaction
+ * @throws {ShelfError} 409 naming every booking left short, when unconfirmed
+ */
+async function assertNoModelShortfallUnlessConfirmed({
+  assetModelIds,
+  organizationId,
+  confirmed,
+  tx,
+}: {
+  assetModelIds: string[];
+  organizationId: string;
+  confirmed: boolean;
+  tx: Parameters<typeof findModelReservationsShortAfterArchive>[0]["tx"];
+}): Promise<void> {
+  if (confirmed || assetModelIds.length === 0) return;
+
+  const shortfalls = await findModelReservationsShortAfterArchive({
+    assetModelIds,
+    organizationId,
+    tx,
+  });
+  if (shortfalls.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    title: "Model reservations affected",
+    message: formatModelShortfallMessage(shortfalls),
+    additionalData: { organizationId, shortfalls },
+    label,
+    status: 409,
+    shouldBeCaptured: false,
+  });
+}
+
 export async function archiveAsset({
   id,
   organizationId,
   actorUserId,
+  confirmModelShortfall = false,
 }: Pick<Asset, "id"> & {
   organizationId: Organization["id"];
   /** Optional — caller-supplied userId for the activity event actor. */
   actorUserId?: string;
+  /**
+   * The user has seen the model-reservation warning and archives anyway. See
+   * {@link assertNoModelShortfallUnlessConfirmed}.
+   */
+  confirmModelShortfall?: boolean;
 }) {
   try {
     const asset = await db.asset.findFirst({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archive service reads archivedAt to answer 409 already archived
       where: { id, organizationId },
-      select: { id: true, type: true, status: true, archivedAt: true },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        archivedAt: true,
+        assetModelId: true,
+      },
     });
 
     if (!asset) {
@@ -3709,6 +3770,13 @@ export async function archiveAsset({
           shouldBeCaptured: false,
         });
       }
+
+      await assertNoModelShortfallUnlessConfirmed({
+        assetModelIds: asset.assetModelId ? [asset.assetModelId] : [],
+        organizationId,
+        confirmed: confirmModelShortfall,
+        tx,
+      });
 
       // Activity event inside the tx for atomicity (wires the dormant action).
       await recordEvent(
@@ -3894,6 +3962,7 @@ export async function bulkArchiveAssets({
   settings,
   actorUserId,
   timeZone = "UTC",
+  confirmModelShortfall = false,
 }: {
   organizationId: Asset["organizationId"];
   assetIds: Asset["id"][];
@@ -3907,6 +3976,11 @@ export async function bulkArchiveAssets({
    * off-by-one for non-UTC users). Defaults to "UTC".
    */
   timeZone?: string;
+  /**
+   * The user has seen the model-reservation warning and archives anyway. See
+   * {@link assertNoModelShortfallUnlessConfirmed}.
+   */
+  confirmModelShortfall?: boolean;
 }): Promise<{ archivedCount: number; skippedCount: number }> {
   try {
     const resolvedIds = await resolveAssetIdsForBulkOperation({
@@ -3981,11 +4055,22 @@ export async function bulkArchiveAssets({
 
       const written = await tx.asset.findMany({
         where: { id: { in: eligibleIds }, organizationId, archivedAt },
-        select: { id: true },
+        select: { id: true, assetModelId: true },
       });
       archivedIds = written.map((a) => a.id);
 
       if (archivedIds.length === 0) return;
+
+      // The whole batch is refused (and rolled back) on an unconfirmed
+      // shortfall, so the warning names every booking it would affect at once.
+      await assertNoModelShortfallUnlessConfirmed({
+        assetModelIds: written.flatMap((a) =>
+          a.assetModelId ? [a.assetModelId] : []
+        ),
+        organizationId,
+        confirmed: confirmModelShortfall,
+        tx,
+      });
 
       await recordEvents(
         archivedIds.map((assetId) => ({
@@ -6315,6 +6400,9 @@ export async function createAssetsFromBackupImport({
           status: asset.status,
           createdAt: new Date(asset.createdAt),
           updatedAt: new Date(asset.updatedAt),
+          // Archived assets stay archived through a backup round-trip
+          // (issue #382). An empty or absent value means active.
+          archivedAt: asset.archivedAt ? new Date(asset.archivedAt) : null,
           qrCodes: {
             create: [
               {

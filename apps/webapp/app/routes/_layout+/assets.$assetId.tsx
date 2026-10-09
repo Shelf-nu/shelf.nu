@@ -20,6 +20,10 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
 import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
@@ -367,7 +371,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "archive": {
-        await archiveAsset({ id, organizationId, actorUserId: userId });
+        await archiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+          // Set by the "Archive anyway" prompt after the shortfall warning.
+          confirmModelShortfall:
+            formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
+        });
 
         sendNotification({
           title: "Asset archived",
@@ -531,7 +542,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return data(error(reason), { status: reason.status });
+    // The model-reservation warning is a question, not a failure: the Actions
+    // menu turns it into an "Archive anyway" prompt, so no error toast.
+    const isShortfallWarning = isModelShortfallMessage(reason.message);
+    return data(error(reason, !isShortfallWarning), { status: reason.status });
   }
 }
 

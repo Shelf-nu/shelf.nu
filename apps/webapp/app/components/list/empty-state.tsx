@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
@@ -50,13 +50,18 @@ export const EmptyState = ({
    * and later searches for it was being told it does not exist — the exact
    * fear archiving was built to remove. Say where it went instead.
    *
-   * Kept to the assets model and to the views that actually hide something:
-   * the All view hides nothing, so the plain wording is right there.
+   * Kept to the asset index itself (the only page with the Archived tab;
+   * pickers and other asset lists never offer archived assets) and to the
+   * views that actually hide something: the All view hides nothing, so the
+   * plain wording is right there.
    */
+  const { pathname } = useLocation();
+  const onAssetIndex = pathname === "/assets";
   const archivedParam = searchParams.get("archived");
   const viewHidesArchived =
     archivedParam !== "archived" && archivedParam !== "all";
-  const searchMayBeHidingArchived = plural === "assets" && viewHidesArchived;
+  const searchMayBeHidingArchived =
+    plural === "assets" && onAssetIndex && viewHidesArchived;
 
   /**
    * Only ADMIN / OWNER get the Archived tab (see `useCanArchiveAssets`), so

@@ -3542,6 +3542,28 @@ describe("buildKitSlicesForBooking", () => {
     expect(slices).toHaveLength(2);
   });
 
+  it("reads only active members, so a kit with an archived member still books (issue #382)", async () => {
+    // why: the membership read is the only query; its WHERE is the contract.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await buildKitSlicesForBooking({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+    });
+
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          kitId: { in: ["kit-1"] },
+          organizationId: "org-1",
+          asset: { archivedAt: null },
+        },
+      })
+    );
+  });
+
   it("excludes memberships already represented on the booking", async () => {
     expect.assertions(1);
 
@@ -3582,7 +3604,11 @@ describe("buildKitSlicesForBooking", () => {
 
     expect(db.assetKit.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { kitId: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+        where: {
+          kitId: { in: ["kit-1", "kit-2"] },
+          organizationId: "org-1",
+          asset: { archivedAt: null },
+        },
       })
     );
   });
@@ -8055,7 +8081,7 @@ describe("duplicateBooking", () => {
           args?.where?.archivedAt ? [{ id: "asset-archived" }] : []
         )) as never);
 
-    await duplicateBooking({
+    const result = await duplicateBooking({
       bookingId: "booking-1",
       organizationId: "org-1",
       userId: "user-1",
@@ -8064,6 +8090,9 @@ describe("duplicateBooking", () => {
       request: new Request("https://example.com"),
       access: accessFor([OrganizationRoles.ADMIN]),
     });
+
+    // The caller is told, so the user hears what was left out.
+    expect(result.droppedArchivedCount).toBe(1);
 
     const created = vitest.mocked(db.booking.create).mock.calls[0][0] as {
       data: { bookingAssets: { create: { assetId: string }[] } };
@@ -8150,7 +8179,7 @@ describe("duplicateBooking", () => {
         }),
       })
     );
-    expect(result).toEqual(duplicatedBooking);
+    expect(result).toEqual({ ...duplicatedBooking, droppedArchivedCount: 0 });
 
     // Lifecycle event for the duplicated booking — same recordEvent
     // contract as createBooking.
