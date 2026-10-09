@@ -11,7 +11,10 @@ import { createLoadUserForNotes } from "~/modules/note/load-user-for-notes.serve
 import type { NotesTxClient } from "~/modules/note/service.server";
 import { createNotes } from "~/modules/note/service.server";
 import { ASSET_MAX_IMAGE_UPLOAD_SIZE, PUBLIC_BUCKET } from "~/utils/constants";
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -471,6 +474,35 @@ async function recordAssetModelDeletionUnlinks(
       tx
     );
   }
+}
+
+/**
+ * Refuses a single asset model delete unless the user typed its name, as the delete
+ * dialog asks. A asset model that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The asset model to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertAssetModelDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.assetModel
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((model) => model?.name ?? null),
+    label,
+  });
 }
 
 /**

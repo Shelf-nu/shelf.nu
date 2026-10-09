@@ -122,7 +122,10 @@ import {
   type ResolvedFormatPrefs,
 } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
@@ -13914,6 +13917,35 @@ export async function removeAssets({
       label,
     });
   }
+}
+
+/**
+ * Refuses a single booking delete unless the user typed its name, as the delete
+ * dialog asks. A booking that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The booking to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertBookingDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.booking
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((booking) => booking?.name ?? null),
+    label,
+  });
 }
 
 /**

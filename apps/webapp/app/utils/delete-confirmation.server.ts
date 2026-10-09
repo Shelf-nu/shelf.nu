@@ -84,9 +84,10 @@ export function assertBulkDeleteConfirmed({
 /**
  * Refuses a single delete whose typed confirmation is not the item's name.
  *
- * Called by the web delete routes with the item's current name (an account's
- * email for the admin user delete). The mobile delete endpoints do not call
- * it: installed phone apps that predate the typed sheet post no confirmation.
+ * Called with the item's current name, through {@link assertDeleteConfirmedFor}
+ * by the module services, and directly by the admin user delete (an account's
+ * email). The mobile delete endpoints do not call it yet: installed phone apps
+ * that predate the typed sheet post no confirmation (see #3175).
  *
  * @param params.confirmation - What the user typed, from the `confirmation` field
  * @param params.expected - The item's current name, as the dialog showed it
@@ -114,4 +115,44 @@ export function assertDeleteConfirmed({
     status: 400,
     shouldBeCaptured: false,
   });
+}
+
+/**
+ * Reads an item's current name and refuses the delete unless it was typed.
+ *
+ * The module services wrap this with their own lookup (e.g.
+ * `assertKitDeleteConfirmed`), so the routes make one call and never query
+ * the database themselves.
+ *
+ * @param params.confirmation - What the user typed, from the `confirmation` field
+ * @param params.findName - Reads the name to type. Returns null when no typed
+ *   confirm applies: the item is gone (the delete itself reports that) or, for
+ *   a category or tag, nothing uses it
+ * @param params.label - The calling module's error label
+ * @throws {ShelfError} 400 when the confirmation does not match; 500 when the
+ *   lookup fails
+ */
+export async function assertDeleteConfirmedFor({
+  confirmation,
+  findName,
+  label,
+}: {
+  confirmation: string | null | undefined;
+  findName: () => Promise<string | null>;
+  label: ErrorLabel;
+}) {
+  let expected: string | null;
+  try {
+    expected = await findName();
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking the delete confirmation.",
+      label,
+    });
+  }
+
+  if (expected === null) return;
+
+  assertDeleteConfirmed({ confirmation, expected, label });
 }

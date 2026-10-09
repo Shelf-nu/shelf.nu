@@ -25,7 +25,10 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -993,6 +996,35 @@ async function safeRemoveImageFilesOfLocations(
       );
     }
   }
+}
+
+/**
+ * Refuses a single location delete unless the user typed its name, as the delete
+ * dialog asks. A location that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The location to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertLocationDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.location
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((location) => location?.name ?? null),
+    label,
+  });
 }
 
 /**

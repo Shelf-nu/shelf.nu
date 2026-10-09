@@ -1,7 +1,10 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
@@ -104,14 +107,8 @@ export async function getCategories(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
-          // Everything a delete would change: in use means a typed confirm.
           _count: {
-            select: {
-              assets: true,
-              kits: true,
-              customFields: true,
-              assetModelDefaults: true,
-            },
+            select: { assets: true },
           },
         },
       }),
@@ -129,6 +126,89 @@ export async function getCategories(params: {
       label,
     });
   }
+}
+
+/** What uses a category: everything a delete would change. */
+export type CategoryUsage = {
+  assets: number;
+  kits: number;
+  customFields: number;
+  assetModelDefaults: number;
+};
+
+/**
+ * Reads a category's name and what uses it, for the delete dialog and the
+ * delete action. Counted for the one category being deleted, on demand, so the
+ * categories index never pays for it.
+ *
+ * @param params.id - The category
+ * @param params.organizationId - The caller's organization
+ * @returns The name and usage counts, or null when the category is not found
+ * @throws {ShelfError} If the lookup fails
+ */
+export async function getCategoryUsage({
+  id,
+  organizationId,
+}: Pick<Category, "id"> & { organizationId: Organization["id"] }): Promise<{
+  name: string;
+  usage: CategoryUsage;
+} | null> {
+  try {
+    const category = await db.category.findFirst({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        _count: {
+          select: {
+            assets: true,
+            kits: true,
+            customFields: true,
+            assetModelDefaults: true,
+          },
+        },
+      },
+    });
+
+    return category ? { name: category.name, usage: category._count } : null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking what uses the category.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Refuses a single category delete unless the user typed its name, when
+ * anything uses it. An unused category deletes with one click, and one that is
+ * already gone passes so the delete itself reports it.
+ *
+ * @param params.id - The category to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the category is in use and the confirmation
+ *   does not match
+ */
+export async function assertCategoryDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: Pick<Category, "id"> & {
+  organizationId: Organization["id"];
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: async () => {
+      const found = await getCategoryUsage({ id, organizationId });
+      return found && Object.values(found.usage).some((n) => n > 0)
+        ? found.name
+        : null;
+    },
+    label,
+  });
 }
 
 export async function deleteCategory({

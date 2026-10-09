@@ -24,6 +24,7 @@ import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
 import {
+  assertAssetDeleteConfirmed,
   deleteAsset,
   deleteOtherImages,
   getAsset,
@@ -47,7 +48,6 @@ import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
-import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -323,17 +323,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         );
 
         // The dialog asks for the asset's title; refuse a request that skipped it.
-        const toDelete = await db.asset.findFirst({
-          where: { id, organizationId },
-          select: { title: true },
-        });
-        if (toDelete) {
-          assertDeleteConfirmed({
-            confirmation,
-            expected: toDelete.title,
-            label: "Assets",
-          });
-        }
+        await assertAssetDeleteConfirmed({ id, organizationId, confirmation });
 
         // Name the actor, or the activity event records the deletion as
         // "System" — the mobile delete route already passes it, so the same

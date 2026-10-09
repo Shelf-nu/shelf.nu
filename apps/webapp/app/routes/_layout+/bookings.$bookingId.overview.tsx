@@ -52,6 +52,7 @@ import {
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
+  assertBookingDeleteConfirmed,
   archiveBooking,
   cancelBooking,
   checkinAssets,
@@ -111,7 +112,6 @@ import {
 } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
-import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
@@ -1550,17 +1550,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // The dialog asks for the booking's name; refuse a request that skipped
       // it. A booking already gone is left to `deleteBooking` to report.
       const { confirmation } = parseData(formData, DeleteConfirmationSchema);
-      const toDelete = await db.booking.findFirst({
-        where: { id, organizationId },
-        select: { name: true },
-      });
-      if (toDelete) {
-        assertDeleteConfirmed({
-          confirmation,
-          expected: toDelete.name,
-          label: "Booking",
-        });
-      }
+      await assertBookingDeleteConfirmed({ id, organizationId, confirmation });
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },

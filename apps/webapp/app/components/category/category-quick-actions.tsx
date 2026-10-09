@@ -10,14 +10,12 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
-import type { CategoryUsage } from "./delete-category";
 import { DeleteCategory } from "./delete-category";
 
 type CategoryQuickActionsProps = {
   className?: string;
   style?: CSSProperties;
-  /** `_count` lets the delete dialog ask for a typed name only when in use. */
-  category: Pick<Category, "id" | "name"> & { _count?: CategoryUsage };
+  category: Pick<Category, "id" | "name">;
 };
 
 export default function CategoryQuickActions({

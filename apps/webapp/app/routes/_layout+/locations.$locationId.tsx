@@ -26,6 +26,7 @@ import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
 import {
+  assertLocationDeleteConfirmed,
   deleteLocation,
   getLocation,
   getLocationDescendantsTree,
@@ -40,7 +41,6 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
-import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
@@ -177,17 +177,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       await request.formData(),
       DeleteConfirmationSchema
     );
-    const toDelete = await db.location.findFirst({
-      where: { id, organizationId },
-      select: { name: true },
-    });
-    if (toDelete) {
-      assertDeleteConfirmed({
-        confirmation,
-        expected: toDelete.name,
-        label: "Location",
-      });
-    }
+    await assertLocationDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteLocation({ id, organizationId });
 

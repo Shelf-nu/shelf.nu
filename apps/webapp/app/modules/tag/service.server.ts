@@ -8,7 +8,10 @@ import type {
 import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
@@ -90,8 +93,6 @@ export async function getTags(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
-        // A tag in use needs the typed confirm before it is deleted.
-        include: { _count: { select: { assets: true, bookings: true } } },
       }),
 
       /** Count them */
@@ -147,6 +148,77 @@ export async function createTag({
       },
     });
   }
+}
+
+/** What carries a tag: everything a delete would change. */
+export type TagUsage = { assets: number; bookings: number };
+
+/**
+ * Reads a tag's name and what carries it, for the delete dialog and the delete
+ * action. Counted for the one tag being deleted, on demand, so the tags index
+ * never pays for it.
+ *
+ * @param params.id - The tag
+ * @param params.organizationId - The caller's organization
+ * @returns The name and usage counts, or null when the tag is not found
+ * @throws {ShelfError} If the lookup fails
+ */
+export async function getTagUsage({
+  id,
+  organizationId,
+}: Pick<Tag, "id"> & { organizationId: Organization["id"] }): Promise<{
+  name: string;
+  usage: TagUsage;
+} | null> {
+  try {
+    const tag = await db.tag.findFirst({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        _count: { select: { assets: true, bookings: true } },
+      },
+    });
+
+    return tag ? { name: tag.name, usage: tag._count } : null;
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while checking what uses the tag.",
+      additionalData: { id, organizationId },
+      label,
+    });
+  }
+}
+
+/**
+ * Refuses a single tag delete unless the user typed its name, when any asset
+ * or booking carries it. An unused tag deletes with one click, and one that is
+ * already gone passes so the delete itself reports it.
+ *
+ * @param params.id - The tag to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the tag is in use and the confirmation does
+ *   not match
+ */
+export async function assertTagDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: Pick<Tag, "id"> & {
+  organizationId: Organization["id"];
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: async () => {
+      const found = await getTagUsage({ id, organizationId });
+      return found && Object.values(found.usage).some((n) => n > 0)
+        ? found.name
+        : null;
+    },
+    label,
+  });
 }
 
 export async function deleteTag({

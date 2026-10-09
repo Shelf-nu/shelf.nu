@@ -34,6 +34,7 @@ import {
 } from "~/modules/barcode/validation";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
+  assertKitDeleteConfirmed,
   deleteKit,
   deleteKitImage,
   emitAssetKitDetachmentNotes,
@@ -57,7 +58,6 @@ import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
-import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -333,17 +333,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       case "delete": {
         // The dialog asks for the kit's name; refuse a request that skipped it.
         const { confirmation } = parseData(formData, DeleteConfirmationSchema);
-        const toDelete = await db.kit.findFirst({
-          where: { id: kitId, organizationId },
-          select: { name: true },
+        await assertKitDeleteConfirmed({
+          id: kitId,
+          organizationId,
+          confirmation,
         });
-        if (toDelete) {
-          assertDeleteConfirmed({
-            confirmation,
-            expected: toDelete.name,
-            label: "Kit",
-          });
-        }
 
         await deleteKit({ id: kitId, organizationId, actorUserId: userId });
 

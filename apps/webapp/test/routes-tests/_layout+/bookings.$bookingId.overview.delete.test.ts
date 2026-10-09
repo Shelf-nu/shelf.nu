@@ -42,7 +42,9 @@ const { getBookingMock, deleteBookingMock, extendBookingMock } = vi.hoisted(
     extendBookingMock: vi.fn(),
   })
 );
-vi.mock("~/modules/booking/service.server", () => ({
+vi.mock("~/modules/booking/service.server", async (importOriginal) => ({
+  // The typed-confirmation check stays real, reading the mocked database below.
+  ...(await importOriginal<object>()),
   getBooking: getBookingMock,
   deleteBooking: deleteBookingMock,
   extendBooking: extendBookingMock,
@@ -69,8 +71,8 @@ vi.mock("~/modules/organization/context.server", () => ({
 const findBookingMock = vi.hoisted(() => vi.fn());
 
 // why: no database in tests; the delete intent reads only the booking's name
-// directly (for the typed confirmation), everything else goes through the
-// mocked services above
+// (for the typed confirmation, through the real `assertBookingDeleteConfirmed`),
+// everything else goes through the mocked services above
 vi.mock("~/database/db.server", () => ({
   db: { booking: { findFirst: findBookingMock } },
 }));

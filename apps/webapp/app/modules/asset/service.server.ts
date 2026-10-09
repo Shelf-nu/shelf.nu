@@ -137,7 +137,10 @@ import {
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
-import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -3376,6 +3379,35 @@ export async function updateAsset({
       additionalData: { userId, id, organizationId },
     });
   }
+}
+
+/**
+ * Refuses a single asset delete unless the user typed its title, as the delete
+ * dialog asks. A asset that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The asset to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertAssetDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.asset
+        .findFirst({ where: { id, organizationId }, select: { title: true } })
+        .then((asset) => asset?.title ?? null),
+    label,
+  });
 }
 
 export async function deleteAsset({

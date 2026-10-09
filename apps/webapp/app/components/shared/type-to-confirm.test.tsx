@@ -4,7 +4,9 @@
  * Each dialog keeps its destructive button disabled until the user types the
  * item's name, accepts it with any case and stray spaces (the shared rule from
  * `@shelf/labels`), and starts empty again when reopened. Category and tag ask
- * only when something uses them; an unused one keeps the one-click confirm.
+ * only when something uses them, loaded from their usage endpoint when the
+ * dialog opens; an unused one keeps the one-click confirm, and usage that has
+ * not arrived (or failed) asks anyway.
  *
  * Rendered in a router stub with the real Radix dialogs, so what is asserted is
  * what a user sees.
@@ -12,10 +14,10 @@
  * @see {@link file://./type-to-confirm.tsx}
  */
 import type React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DeleteAssetModel } from "~/components/asset-model/delete-asset-model";
 import { DeleteAsset } from "~/components/assets/delete-asset";
 import { DeleteAuditDialog } from "~/components/audit/delete-audit-dialog";
@@ -29,6 +31,38 @@ import { DeleteLocation } from "~/components/location/delete-location";
 import { DeleteTag, describeTagUsage } from "~/components/tag/delete-tag";
 import { DeleteUser } from "~/components/user/delete-user";
 import { TypeToConfirm, useTypeToConfirm } from "./type-to-confirm";
+
+/**
+ * What each usage endpoint answers, keyed by url. A url missing here fails the
+ * request, the way a network error would.
+ */
+const USAGE: Record<string, unknown> = {
+  "/api/categories/c1/usage": {
+    usage: { assets: 3, kits: 0, customFields: 0, assetModelDefaults: 0 },
+  },
+  "/api/categories/c2/usage": {
+    usage: { assets: 0, kits: 0, customFields: 0, assetModelDefaults: 0 },
+  },
+  "/api/tags/t1/usage": { usage: { assets: 0, bookings: 1 } },
+  "/api/tags/t2/usage": { usage: { assets: 0, bookings: 0 } },
+};
+
+beforeEach(() => {
+  // why: the category and tag dialogs read their usage over the network when
+  // they open; there is no server in a component test
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url in USAGE
+        ? new Response(JSON.stringify(USAGE[url]))
+        : Promise.reject(new TypeError("Failed to fetch"))
+    )
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 /** Renders inside a router so `Form`, fetchers and navigation state work. */
 function renderInRouter(element: React.ReactElement) {
@@ -108,16 +142,7 @@ const SURFACES: Surface[] = [
     name: "category in use",
     element: (
       <DeleteCategory
-        category={{
-          id: "c1",
-          name: "Cameras",
-          _count: {
-            assets: 3,
-            kits: 0,
-            customFields: 0,
-            assetModelDefaults: 0,
-          },
-        }}
+        category={{ id: "c1", name: "Cameras" }}
         trigger={openButton}
       />
     ),
@@ -128,10 +153,7 @@ const SURFACES: Surface[] = [
   {
     name: "tag in use",
     element: (
-      <DeleteTag
-        tag={{ id: "t1", name: "Fragile", _count: { assets: 0, bookings: 1 } }}
-        trigger={openButton}
-      />
+      <DeleteTag tag={{ id: "t1", name: "Fragile" }} trigger={openButton} />
     ),
     expected: "Fragile",
     confirmLabel: /^delete$/i,
@@ -232,16 +254,7 @@ describe("categories and tags nobody uses", () => {
       name: "unused category",
       element: (
         <DeleteCategory
-          category={{
-            id: "c2",
-            name: "Spare",
-            _count: {
-              assets: 0,
-              kits: 0,
-              customFields: 0,
-              assetModelDefaults: 0,
-            },
-          }}
+          category={{ id: "c2", name: "Spare" }}
           trigger={openButton}
         />
       ),
@@ -250,7 +263,9 @@ describe("categories and tags nobody uses", () => {
       trigger: /open/i,
     });
 
-    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    await waitFor(() =>
+      expect(within(dialog).queryByRole("textbox")).toBeNull()
+    );
     expect(
       within(dialog).getByRole("button", { name: /^delete$/i })
     ).toBeEnabled();
@@ -260,20 +275,52 @@ describe("categories and tags nobody uses", () => {
     const { dialog } = await openDialog({
       name: "unused tag",
       element: (
-        <DeleteTag
-          tag={{ id: "t2", name: "Old", _count: { assets: 0, bookings: 0 } }}
-          trigger={openButton}
-        />
+        <DeleteTag tag={{ id: "t2", name: "Old" }} trigger={openButton} />
       ),
       expected: "Old",
       confirmLabel: /^delete$/i,
       trigger: /open/i,
     });
 
-    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    await waitFor(() =>
+      expect(within(dialog).queryByRole("textbox")).toBeNull()
+    );
     expect(
       within(dialog).getByRole("button", { name: /^delete$/i })
     ).toBeEnabled();
+  });
+
+  it("names what uses a category once its usage arrives", async () => {
+    const categoryInUse = SURFACES.find((s) => s.name === "category in use");
+    if (!categoryInUse) throw new Error("missing surface");
+    const { dialog } = await openDialog(categoryInUse);
+
+    expect(
+      await within(dialog).findByText(/This category is used by 3 assets\./)
+    ).toBeInTheDocument();
+  });
+
+  it("asks for the name when the usage cannot be loaded", async () => {
+    const { dialog } = await openDialog({
+      name: "category with unknown usage",
+      element: (
+        <DeleteCategory
+          category={{ id: "unknown", name: "Lenses" }}
+          trigger={openButton}
+        />
+      ),
+      expected: "Lenses",
+      confirmLabel: /^delete$/i,
+      trigger: /open/i,
+    });
+
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(
+      within(dialog).getByRole("textbox", { name: "Confirmation" })
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /^delete$/i })
+    ).toBeDisabled();
   });
 
   it("describe what uses them in plain words", () => {

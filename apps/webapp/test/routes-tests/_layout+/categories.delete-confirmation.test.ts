@@ -30,11 +30,14 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: the deletes themselves are covered by the service tests; here only
-// whether the route calls them is observed
-vi.mock("~/modules/category/service.server", () => ({
+// whether the route calls them is observed. The typed-confirmation check stays
+// real, reading the mocked database above.
+vi.mock("~/modules/category/service.server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   deleteCategory: mocks.deleteCategory,
 }));
-vi.mock("~/modules/tag/service.server", () => ({
+vi.mock("~/modules/tag/service.server", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   deleteTag: mocks.deleteTag,
 }));
 

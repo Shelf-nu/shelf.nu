@@ -18,13 +18,15 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
-import type { TagUsage } from "~/components/tag/delete-tag";
 import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
-import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
-import { deleteTag, getTags } from "~/modules/tag/service.server";
+import {
+  assertTagDeleteConfirmed,
+  deleteTag,
+  getTags,
+} from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
@@ -32,7 +34,6 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
-import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -140,20 +141,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     // A tag on any asset or booking needs its name typed, as the dialog asks;
     // an unused one deletes with one click.
-    const toDelete = await db.tag.findFirst({
-      where: { id, organizationId },
-      select: {
-        name: true,
-        _count: { select: { assets: true, bookings: true } },
-      },
-    });
-    if (toDelete && Object.values(toDelete._count).some((n) => n > 0)) {
-      assertDeleteConfirmed({
-        confirmation,
-        expected: toDelete.name,
-        label: "Tag",
-      });
-    }
+    await assertTagDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteTag({ id, organizationId });
 
@@ -229,9 +217,7 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color"> & {
-    _count?: TagUsage;
-  };
+  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color">;
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>
