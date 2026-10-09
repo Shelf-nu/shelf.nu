@@ -14,8 +14,8 @@ forgets them quietly offers or counts them again, and typecheck cannot tell.
 - Pickers, counts, KPIs, availability pools, anything that starts NEW work →
   `archivedAt: null`.
 - Surfaces that show assets already part of a record or a physical label (the
-  asset's own pages, a booking holding it, location/kit pages, audits, QR scan,
-  history reports, backup export), guards that read the archive state, and ID
+  asset's own pages, a booking holding it, audits, QR scan, history reports,
+  backup export), guards that read the archive state, and ID
   allocation → reach archived on purpose, with a reason:
 
 ```ts
@@ -30,6 +30,7 @@ db.asset.count({ where: { organizationId, archivedAt: null } });
 db.asset.findFirst({ where: { id, organizationId } });
 ```
 
-List views read the `?archived=` toggle only through `honorArchivedView`, which
-callers pass for members holding `asset: archive`. See
-`apps/webapp/eslint-local-rules/README.md`.
+Asset lists with the Active / Archived / All menu (the index, a kit's assets, a
+location's assets) read `?archived=` only for members holding `asset: archive`:
+the index through `honorArchivedView`, the kit and location pages through
+`resolveArchivedViewForMember`. See `apps/webapp/eslint-local-rules/README.md`.

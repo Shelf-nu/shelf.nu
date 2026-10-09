@@ -49,6 +49,7 @@ import {
   refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
+import type { ArchivedFilter } from "./utils.server";
 import {
   getAllSelectedValuesFromFilters,
   getArchivedFilterFromParams,
@@ -584,6 +585,30 @@ function canViewArchivedAssets(access: RoleAccess): boolean {
     entity: PermissionEntity.asset,
     action: PermissionAction.archive,
   });
+}
+
+/**
+ * The Active / Archived / All view an asset list shows this member.
+ *
+ * What `?archived=` asks for when the member may open the archived views (see
+ * {@link canViewArchivedAssets}), and Active otherwise. Every list that offers
+ * the view menu resolves it here, so the menu and the rows it governs follow
+ * the same grant on every page.
+ *
+ * @param args.access - The member's resolved access, from `requirePermission`
+ * @param args.searchParams - The request's search params
+ * @returns The view to filter the list by
+ */
+export function resolveArchivedViewForMember({
+  access,
+  searchParams,
+}: {
+  access: RoleAccess;
+  searchParams: URLSearchParams;
+}): ArchivedFilter {
+  return canViewArchivedAssets(access)
+    ? getArchivedFilterFromParams(searchParams)
+    : "active";
 }
 
 /**

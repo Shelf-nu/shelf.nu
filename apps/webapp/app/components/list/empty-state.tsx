@@ -23,6 +23,10 @@ export interface CustomEmptyState {
   };
 }
 
+/** Paths of the asset lists that offer the Active / Archived / All menu. */
+const ARCHIVED_VIEW_LIST_PATH =
+  /^\/(assets|kits\/[^/]+\/assets|locations\/[^/]+\/assets)\/?$/;
+
 export const EmptyState = ({
   className,
   customContent,
@@ -44,28 +48,25 @@ export const EmptyState = ({
   const isFiltered = hasSearch || !!hasActiveFilters;
 
   /**
-   * On the asset index, "did not match any assets in the database" can be
-   * flatly untrue: an archived asset IS in the database, it is just hidden
-   * from the default Active view (issue #382). Someone who archived an asset
-   * and later searches for it was being told it does not exist — the exact
-   * fear archiving was built to remove. Say where it went instead.
+   * "Did not match any assets in the database" can be untrue on a list that
+   * hides archived assets: an archived asset IS in the database, just outside
+   * the Active view. Say where it went instead.
    *
-   * Kept to the asset index itself (the only page with the Archived tab;
-   * pickers and other asset lists never offer archived assets) and to the
-   * views that actually hide something: the All view hides nothing, so the
-   * plain wording is right there.
+   * Limited to the lists that offer the Active / Archived / All menu (the asset
+   * index, a kit's assets, a location's assets; pickers never offer archived
+   * assets) and to the Active view, the only one that hides something.
    */
   const { pathname } = useLocation();
-  const onAssetIndex = pathname === "/assets";
+  const offersArchivedView = ARCHIVED_VIEW_LIST_PATH.test(pathname);
   const archivedParam = searchParams.get("archived");
   const viewHidesArchived =
     archivedParam !== "archived" && archivedParam !== "all";
   const searchMayBeHidingArchived =
-    plural === "assets" && onAssetIndex && viewHidesArchived;
+    plural === "assets" && offersArchivedView && viewHidesArchived;
 
   /**
-   * Only ADMIN / OWNER get the Archived tab (see `useCanArchiveAssets`), so
-   * only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
+   * Only members who can archive get the view menu (see `useCanArchiveAssets`),
+   * so only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
    * their role does not render would be worse than the original wording, so
    * they get the same fact plus the action actually open to them.
    */
@@ -77,7 +78,7 @@ export const EmptyState = ({
         p: !searchMayBeHidingArchived
           ? `Your search for "${search}" did not match any ${plural} in the database.`
           : canArchiveAssets
-          ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Check the Archived tab.`
+          ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Pick Archived from the menu on the list title.`
           : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }
     : {

@@ -1,5 +1,5 @@
 /**
- * Who may archive and reinstate assets, and so who sees the Archived tab
+ * Who may archive and reinstate assets, and so who sees the Archived view
  * (issue #382). The grant is `asset: archive`: ADMIN and OWNER hold it, BASE
  * and SELF_SERVICE do not.
  *
@@ -51,7 +51,7 @@ describe("who may archive and reinstate assets", () => {
   });
 
   it("refuses while the layout data has not loaded", () => {
-    // The gate must fail closed, not flash the Archived tab.
+    // The gate must fail closed, not flash the Archived view.
     expect(canArchive(undefined)).toBe(false);
     expect(canArchive([])).toBe(false);
   });

@@ -7,6 +7,7 @@ import type {
 } from "react-router";
 import { data, useLoaderData } from "react-router";
 import { z } from "zod";
+import { ArchivedViewMenu } from "~/components/assets/archived-view-menu";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
 import { ImportButton } from "~/components/assets/import-button";
 import { NewAssetDropdown } from "~/components/assets/new-asset-dropdown";
@@ -16,6 +17,7 @@ import { db } from "~/database/db.server";
 
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   advancedModeLoader,
@@ -352,7 +354,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 /**
  * Empty-state copy per Active/Archived/All view (issue #382).
  *
- * The Archived tab needs its own: falling through to the default would either
+ * The Archived view needs its own: falling through to the default would either
  * blame filters the user never applied, or urge someone with a full inventory
  * to "create your first asset". Neither is true, and the archived one is the
  * moment a worried user most needs to be told their asset is safe.
@@ -381,6 +383,7 @@ export default function AssetIndexPage() {
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
   const emptyStateContent = useAssetsEmptyState();
+  const canArchiveAssets = useCanArchiveAssets();
 
   return (
     <div className="relative">
@@ -398,7 +401,12 @@ export default function AssetIndexPage() {
           </>
         </When>
       </Header>
-      <AssetsList customEmptyStateContent={emptyStateContent} />
+      <AssetsList
+        customEmptyStateContent={emptyStateContent}
+        titleContent={
+          canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+        }
+      />
     </div>
   );
 }

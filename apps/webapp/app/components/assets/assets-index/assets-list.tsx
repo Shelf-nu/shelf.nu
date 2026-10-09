@@ -25,7 +25,6 @@ import When from "~/components/when/when";
 import { AssetIndexSettingsProvider } from "~/context/asset-index-settings-context";
 import { useAssetIndexColumns } from "~/hooks/use-asset-index-columns";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
@@ -50,7 +49,6 @@ import { AssetStatusBadge } from "../asset-status-badge";
 import BulkActionsDropdown from "../bulk-actions-dropdown";
 import { AdvancedAssetRow } from "./advanced-asset-row";
 import { AdvancedTableHeader } from "./advanced-table-header";
-import { ArchivedViewToggle } from "./archived-view-toggle";
 import { AssetIndexPagination } from "./asset-index-pagination";
 import { AssetModelRow } from "./asset-model-row";
 import { AssetModelSortHeader } from "./asset-model-sort-header";
@@ -99,11 +97,18 @@ export const AssetsList = ({
   disableTeamMemberFilter,
   disableBulkActions,
   wrapperClassName,
+  titleContent,
 }: {
   customEmptyStateContent?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
   wrapperClassName?: string;
+  /**
+   * Replaces the title of the asset list (not the model view). The asset index
+   * passes its Active / Archived / All menu here; leave it out on pages whose
+   * loader ignores `?archived=`, where that menu would change nothing.
+   */
+  titleContent?: ListProps["titleContent"];
 }) => {
   const {
     items,
@@ -137,7 +142,6 @@ export const AssetsList = ({
       PermissionAction.delete,
     ],
   });
-  const canArchiveAssets = useCanArchiveAssets();
   const fetchers = useFetchers();
   const { resources, events } = useAssetAvailabilityData(items);
   // Workspace pref + addon entitlement — used by the availability-view
@@ -532,17 +536,7 @@ export const AssetsList = ({
               customEmptyStateContent={
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
-              /**
-               * Active/Archived/All lives beside the item count, not in the
-               * filter row (issue #382). It is a view SCOPE, not a filter —
-               * it is in NON_FILTER_PARAMS and Clear Filters leaves it alone —
-               * and it changes what "N assets out of M" counts, so it belongs
-               * next to that number, and the filter row has no room for it.
-               * One slot serves both index modes, so it cannot drift.
-               */
-              headerTitleContent={
-                canArchiveAssets ? <ArchivedViewToggle /> : undefined
-              }
+              titleContent={titleContent}
               headerChildren={headerChildren}
               extraItemComponentProps={
                 modeIsSimple ? undefined : advancedExtraProps

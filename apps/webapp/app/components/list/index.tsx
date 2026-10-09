@@ -77,15 +77,15 @@ export type ListProps = {
   /** Any extra content to the right in Header */
   headerExtraContent?: ReactNode;
   /**
-   * Rendered beside the title and item count, in the LEFT half of the header
-   * row.
+   * Replaces the plain title text, for a title that is itself a control.
    *
-   * For controls that change WHICH SET the list is showing, so they sit next
-   * to the count they govern — "20 assets out of 66" means something different
-   * per set. `headerExtraContent` is the right half, which is an actions zone
-   * (export, bulk actions); a scope switch is not an action.
+   * For controls that change WHICH SET the list is showing (the asset lists'
+   * Active / Archived / All menu): the title and the count under it describe
+   * that set, so the switch belongs on the title. It also stays on screen when
+   * the chosen set is empty, so a member is never left in an empty view with
+   * no way back.
    */
-  headerTitleContent?: ReactNode;
+  titleContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 
@@ -126,7 +126,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     title,
     ItemComponent,
     headerChildren,
-    headerTitleContent,
+    titleContent,
     hideFirstHeaderColumn = false,
     navigate,
     className,
@@ -165,10 +165,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       )}
     >
       {!hasItems ? (
-        <EmptyState
-          className={emptyStateClassName}
-          customContent={customEmptyStateContent}
-        />
+        <>
+          {titleContent ? (
+            <div className="border-b p-4 pb-2 text-left text-text-sm">
+              {titleContent}
+            </div>
+          ) : null}
+          <EmptyState
+            className={emptyStateClassName}
+            customContent={customEmptyStateContent}
+          />
+        </>
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
@@ -186,8 +193,8 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 items={items}
                 countLabel={countLabel}
                 countLabelIsTotal={countLabelIsTotal}
+                titleContent={titleContent}
               />
-              <When truthy={!!headerTitleContent}>{headerTitleContent}</When>
             </div>
             <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>

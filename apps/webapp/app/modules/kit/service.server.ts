@@ -99,10 +99,14 @@ import type {
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
+  applyArchivedFilter,
   getAssetsWhereInput,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
-import type { AllowedCustodianFilterIds } from "../asset/utils.server";
+import type {
+  AllowedCustodianFilterIds,
+  ArchivedFilter,
+} from "../asset/utils.server";
 import { recordCheckoutSourceLocations } from "../booking/checkout-source-location.server";
 import { PLANNING_BOOKING_STATUSES } from "../booking/constants";
 import { lockBookingForStatusCheck } from "../booking/utils.server";
@@ -2787,6 +2791,7 @@ export async function getAssetsForKits({
   extraWhere,
   kitId,
   ignoreFilters,
+  archivedFilter,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -2794,6 +2799,11 @@ export async function getAssetsForKits({
   extraWhere?: Prisma.AssetWhereInput;
   /** Set this to true if you don't want the search filters to be applied */
   ignoreFilters?: boolean;
+  /**
+   * Which members to list by archive state. Resolve it with
+   * `resolveArchivedViewForMember`, so it follows the member's grant.
+   */
+  archivedFilter: ArchivedFilter;
 }) {
   const searchParams = getCurrentSearchParams(request);
   const paramsValues = getParamsValues(searchParams);
@@ -2811,6 +2821,7 @@ export async function getAssetsForKits({
       organizationId,
       assetKits: { some: { kitId } },
     };
+    applyArchivedFilter(where, archivedFilter);
 
     if (search && !ignoreFilters) {
       const searchTerm = search.toLowerCase().trim();

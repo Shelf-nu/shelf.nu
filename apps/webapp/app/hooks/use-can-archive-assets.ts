@@ -3,9 +3,9 @@
  *
  * Gates every archive surface on the client (issue #382): the Archive /
  * Reinstate item in the asset Actions menu, the two bulk-menu items and their
- * dialogs, the Active/Archived/All view toggle on the asset index, and the
+ * dialogs, the Active/Archived/All menu on the asset, kit and location lists, and the
  * wording of the "nothing matched your search" empty state. Keying them all off
- * one check keeps the view and the actions in step: you see the Archived tab if
+ * one check keeps the view and the actions in step: you see the Archived view if
  * and only if you can act on what is in it.
  *
  * The grant is `asset: archive`, the same one the server enforces on the detail

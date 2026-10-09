@@ -69,10 +69,12 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
+  applyArchivedFilter,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import type { ArchivedFilter } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
 import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
@@ -176,6 +178,12 @@ export async function getLocation(
     request?: Request;
     include?: Prisma.LocationInclude;
     teamMemberIds?: string[] | null;
+    /**
+     * Which of the location's assets to list by archive state. Pages that
+     * offer the view menu resolve it with `resolveArchivedViewForMember`;
+     * everything else lists them all.
+     */
+    archivedFilter?: ArchivedFilter;
   }
 ) {
   const {
@@ -190,6 +198,7 @@ export async function getLocation(
     orderDirection,
     include,
     teamMemberIds,
+    archivedFilter = "all",
   } = params;
 
   try {
@@ -200,12 +209,15 @@ export async function getLocation(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Build where object for querying related assets */
-    // Archived assets stay VISIBLE here, shown with an "Archived" badge (issue
-    // #382). A location is a place the asset is accessed, so per the
-    // calm-state-visible-everywhere rule we surface it rather than hide it. The
-    // count below is unfiltered too, so the list and the count stay consistent.
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    /**
+     * Where clause for the location's assets. The list and the count below
+     * share it, so the count always describes the rows the view shows.
+     * Archived assets that the view includes render with an "Archived" badge.
+     */
+    const assetsWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      {},
+      archivedFilter
+    );
 
     if (search) {
       assetsWhere.title = {
@@ -307,6 +319,11 @@ export async function getLocation(
       ...assetsWhere,
     };
 
+    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      { assetLocations: { some: { locationId: id } } },
+      archivedFilter
+    );
+
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -323,10 +340,8 @@ export async function getLocation(
 
       /** Count them */
       db.asset.count({
-        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a location's own page lists archived assets with a badge; the count must match that list
-        where: {
-          assetLocations: { some: { locationId: id } },
-        },
+        // Follows the archived view so the count matches the list it heads.
+        where: assetsCountWhere,
       }),
 
       /**
