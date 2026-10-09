@@ -11,7 +11,10 @@ import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 
 import { db } from "~/database/db.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
-import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
+import {
+  getAssetAvailability,
+  getAssetAvailabilityBatch,
+} from "~/modules/asset/availability.server";
 import {
   createSystemBookingNote,
   createSystemBookingNotes,
@@ -298,6 +301,10 @@ vitest.mock("~/modules/asset/availability.server", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
+    getAssetAvailability: vitest.fn().mockResolvedValue({
+      physicalAvailable: Number.MAX_SAFE_INTEGER,
+      bookable: Number.MAX_SAFE_INTEGER,
+    }),
     getAssetAvailabilityBatch: vitest
       .fn()
       .mockImplementation((assetIds: string[]) =>
@@ -3234,6 +3241,36 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
         excludeBookingId: "booking-1",
         db,
       });
+    });
+
+    it("refuses a whole-booking scan that the Check out button's guard handles, when the units are not on the shelf", async () => {
+      expect.assertions(2);
+
+      // Every remaining unit scanned on a reserved booking with no earlier
+      // session: the batch is handed to `checkoutBooking`, whose guard has to
+      // hold units out elsewhere back even when they are free in this window.
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(qtyOnlyBooking);
+      (
+        getAssetAvailability as ReturnType<typeof vitest.fn>
+      ).mockResolvedValueOnce({ physicalAvailable: 10, bookable: 50 });
+
+      await expect(
+        partialCheckoutBooking({
+          ...baseParams,
+          checkouts: [
+            {
+              assetId: "asset-qty-1",
+              bookingAssetId: "ba-qty-1",
+              quantity: 50,
+            },
+          ],
+        })
+      ).rejects.toThrow(/"Pens": requested 50, only 10 available right now/);
+
+      // Refused by the delegate's guard, before this path's own check runs.
+      expect(getAssetAvailabilityBatch).not.toHaveBeenCalled();
     });
 
     it("lets a booking already out take units a reservation also holds", async () => {

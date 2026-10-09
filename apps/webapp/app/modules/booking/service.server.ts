@@ -3038,13 +3038,18 @@ async function checkoutBookingWritesWithinTx(
     for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
       await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
-      const { bookable } = await getAssetAvailability({
+      const { bookable, physicalAvailable } = await getAssetAvailability({
         assetId,
         organizationId,
         window: { from, to },
         excludeBookingId: bookingId,
         db: tx,
       });
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon.
+      const available = Math.min(bookable, physicalAvailable);
 
       // Sum the requested STANDALONE units for this asset on this booking.
       // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
@@ -3055,15 +3060,15 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > bookable) {
+      if (requested > available) {
         const title =
           qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
             .title ?? "";
         insufficientQtyWarnings.push(
           `"${title}": requested ${requested}, only ${Math.max(
             0,
-            bookable
-          )} available in this window`
+            available
+          )} available ${available < bookable ? "right now" : "in this window"}`
         );
       }
     }
