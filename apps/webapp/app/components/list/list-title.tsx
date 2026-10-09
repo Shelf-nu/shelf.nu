@@ -83,6 +83,9 @@ type ListTitleProps = {
    * @returns e.g. `"18 assets and 2 kits"`.
    */
   countLabel?: () => ReactNode;
+
+  /** Rendered in place of the title text; see `List`'s `titleContent`. */
+  titleContent?: ReactNode;
 };
 
 export default function ListTitle({
@@ -94,6 +97,7 @@ export default function ListTitle({
   titleClassName,
   countLabel,
   countLabelIsTotal = false,
+  titleContent,
 }: ListTitleProps) {
   const loaderData = useLoaderData<LoaderData>();
   const {
@@ -149,7 +153,7 @@ export default function ListTitle({
           titleClassName
         )}
       >
-        {title || plural}
+        {titleContent ?? (title || plural)}
       </div>
       <div className="h-7">
         {hasBulkActions && hasSelectedItems ? (

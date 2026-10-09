@@ -78,7 +78,7 @@ export default function UpdateLocationDrawer({
       count: errors.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong> $
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
           {count > 1 ? "are" : "is"} invalid.
         </>
       ),
@@ -89,9 +89,6 @@ export default function UpdateLocationDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeItemsFromList([...errors.map(([qrId]) => qrId)]);
-    },
   });
 
   // Render item row
@@ -244,7 +241,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className="relative z-50 my-8">
+          <div className="relative z-50 mb-3 mt-2">
             <h5 className="mb-1">Update location:</h5>
             <LocationSelect
               isBulk
@@ -258,7 +255,7 @@ function AddToLocationForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className="mb-4 flex gap-3">
+          <div className="mb-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"

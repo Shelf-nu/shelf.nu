@@ -227,7 +227,7 @@ async function runLowStockCheck({
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
     // (cross-org IDOR guard).
-    where: { id: assetId, organizationId },
+    where: { id: assetId, organizationId, archivedAt: null },
     select: {
       id: true,
       title: true,

@@ -178,6 +178,7 @@ export async function action({ request }: ActionFunctionArgs) {
         }),
         db.asset.findMany({
           // Kit membership is the AssetKit pivot now (quantities restructure).
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: kit members on the booking may be archived; removing them stays allowed
           where: {
             assetKits: { some: { kitId: { in: kitIds } } },
             organizationId,
@@ -197,6 +198,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // `bookings: { some }` filter scopes both the disconnect set and the
     // note titles to real members.
     const assets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: assets already on the booking may be archived; removing them stays allowed
       where: {
         id: { in: candidateAssetIds },
         organizationId,

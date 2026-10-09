@@ -56,13 +56,12 @@ import {
   scannedItemsAtom,
 } from "~/atoms/qr-scanner";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
-import { BookingStatusBadge } from "~/components/booking/booking-status-badge";
 import CheckinDialog from "~/components/booking/checkin-dialog";
 import { Form } from "~/components/custom-form";
 import { CheckIcon } from "~/components/icons/library";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
+import { ScanBookingHeader } from "~/components/scanner/drawer/scan-booking-header";
 import { Button } from "~/components/shared/button";
-import { DateS } from "~/components/shared/date";
 import { Progress } from "~/components/shared/progress";
 import {
   Tooltip,
@@ -86,7 +85,8 @@ import {
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { DefaultLoadingState, GenericItemRow, Tr } from "../generic-item-row";
-import { PendingItemsList, SectionHeader } from "./pending-items-list";
+import { ScanItemGroup } from "../scan-item-group";
+import { PendingItemsList } from "./pending-items-list";
 
 /**
  * Shape of a single per-asset disposition submitted by the check-in drawer.
@@ -321,80 +321,6 @@ function bookingAssetIdForScannedItem(
     (a) => a.kind === "QUANTITY_TRACKED" && a.id === assetId && a.remaining > 0
   );
   return slice?.bookingAssetId;
-}
-
-/**
- * Props required to render the booking header row at the top of the
- * drawer.
- *
- * Date fields are typed as `Date | string` because the loader serializes
- * them through React Router (`useLoaderData`). `DateS` accepts both, so
- * threading the wider shape avoids a `Pick<Booking, …>` mismatch when the
- * full `useLoaderData<typeof loader>().booking` is passed in.
- */
-type BookingHeaderBooking = Pick<
-  Booking,
-  "id" | "name" | "status" | "custodianUserId"
-> & {
-  from: Date | string;
-  to: Date | string;
-};
-
-/**
- * Renders the booking summary strip at the top of the partial check-in drawer.
- * Hoisted to module scope (instead of being a nested component) to avoid
- * remounting the header on every render of the parent drawer.
- */
-function BookingHeader({
-  booking,
-}: {
-  booking: BookingHeaderBooking;
-}): ReactNode {
-  return (
-    <div className="border border-b-0 bg-gray-50 p-4">
-      <div className="flex items-center justify-between">
-        {/* Left side: Booking name and status */}
-        <div className="flex items-center gap-3">
-          <div className="min-w-[130px]">
-            <span className="word-break mb-1 block font-medium">
-              <Button
-                to={`/bookings/${booking.id}`}
-                variant="link"
-                className="text-left font-medium text-gray-900 hover:text-gray-700"
-              >
-                {booking.name}
-              </Button>
-            </span>
-            <div>
-              <BookingStatusBadge
-                status={booking.status}
-                custodianUserId={booking.custodianUserId || undefined}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Right side: Dates and progress */}
-        <div className="flex items-center gap-6 text-sm">
-          {/* From date */}
-          <div className="text-right">
-            <span className="block text-gray-600">From</span>
-            <span className="block font-medium text-gray-900">
-              <DateS date={booking.from} includeTime />
-            </span>
-          </div>
-
-          {/* To date */}
-          <div className="text-right">
-            <span className="block text-gray-600">To</span>
-            <span className="block font-medium text-gray-900">
-              <DateS date={booking.to} includeTime />
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -975,7 +901,8 @@ export default function PartialCheckinDrawer({
       count: errors.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+          {count > 1 ? "are" : "is"} invalid.
         </>
       ),
       onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
@@ -1015,19 +942,6 @@ export default function PartialCheckinDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInBookingIds]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfKitsNotInBooking,
-        ...qrIdsOfRedundantAssets,
-        ...qrIdsOfAlreadyCheckedInAssets,
-        ...qrIdsOfNeverCheckedOutAssets,
-        ...qrIdsOfAlreadyCheckedInKits,
-        ...qrIdsOfZeroDispositionQty,
-        ...qrIdsOfOverReturnQty,
-      ]);
-    },
   });
 
   /**
@@ -1101,7 +1015,7 @@ export default function PartialCheckinDrawer({
       /**
        * Scanning a kit QR counts as "I've got all the assets in this
        * kit". The pending / progress logic has to honour that —
-       * otherwise the kit row lands in "Checked in this session" but
+       * otherwise the kit row lands in "Scanned this session" but
        * each of its child assets still shows up under Pending, and
        * `0/N units checked in` stays unchanged.
        *
@@ -1302,9 +1216,6 @@ export default function PartialCheckinDrawer({
     return { num, denom };
   }, [expectedAssets, scannedAssetIds, dispositions]);
 
-  // (BookingHeader is defined at module scope above — no nested component
-  // here so we don't shadow it or remount on every render.)
-
   // Stable callback reference for the row's onRemove — keeps the
   // extracted `ScannedItemRow` component's prop identity stable across
   // renders so React can reconcile it in place.
@@ -1355,12 +1266,12 @@ export default function PartialCheckinDrawer({
   }, [expectedKits]);
 
   /**
-   * Unified renderer: interleave all buckets in the order described on
-   * `buckets`. Pending buckets render via their own `Tr`-wrapped
-   * components; scanned buckets render through `GenericItemRow` which
-   * uses its own `Tr`.
+   * Renders the drawer list as foldable groups, each its own card, in the
+   * bucket order described on `buckets`: "Scanned this session" (reopens on
+   * a new scan), "Pending", and "Already checked in" (folded by default). A
+   * group with nothing in it is not rendered.
    */
-  const customRenderAllItems = useCallback((): ReactNode => {
+  const renderGroups = useCallback((): ReactNode => {
     const {
       scannedWithPending,
       scannedComplete,
@@ -1389,49 +1300,51 @@ export default function PartialCheckinDrawer({
 
     return (
       <>
-        {/* Header for scanned section — only render when non-empty so
-            an empty drawer doesn't show a "Checked in (0)" label. */}
+        {/* Scanned group: only when non-empty, so an empty drawer shows no
+            "Scanned this session" card. */}
         {scannedCount > 0 ? (
-          <SectionHeader
-            label={`Checked in this session (${scannedCount})`}
+          <ScanItemGroup
+            label="Scanned this session"
+            count={scannedCount}
             tone="active"
-          />
-        ) : null}
-
-        {/* Scanned rows (buckets 1–3). A scanned kit also renders an
+            openWhenCountGrows
+          >
+            {/* Scanned rows (buckets 1–3). A scanned kit also renders an
             editable disposition row for each of its qty-tracked members
             (Polish-7b) so the operator can split their consumption log —
             individuals are covered by the kit row's summary. */}
-        {scannedQrIdsInOrder.map((qrId) => {
-          const item = items[qrId];
-          const kitId =
-            item?.type === "kit"
-              ? (item.data as { id?: string } | undefined)?.id
-              : undefined;
-          const qtyMembers = kitId
-            ? expectedAssets.filter(
-                (a): a is QtyExpectedAsset =>
-                  a.kind === "QUANTITY_TRACKED" &&
-                  a.kitId === kitId &&
-                  activatedQtyBookingAssetIds.has(a.bookingAssetId)
-              )
-            : [];
-          return (
-            <Fragment key={qrId}>
-              <ScannedItemRow
-                qrId={qrId}
-                item={item}
-                onRemove={onRemoveScanned}
-              />
-              {qtyMembers.map((member) => (
-                <ScannedKitQtyMemberRow
-                  key={`scanned-kit-qty-${member.bookingAssetId}`}
-                  asset={member}
-                />
-              ))}
-            </Fragment>
-          );
-        })}
+            {scannedQrIdsInOrder.map((qrId) => {
+              const item = items[qrId];
+              const kitId =
+                item?.type === "kit"
+                  ? (item.data as { id?: string } | undefined)?.id
+                  : undefined;
+              const qtyMembers = kitId
+                ? expectedAssets.filter(
+                    (a): a is QtyExpectedAsset =>
+                      a.kind === "QUANTITY_TRACKED" &&
+                      a.kitId === kitId &&
+                      activatedQtyBookingAssetIds.has(a.bookingAssetId)
+                  )
+                : [];
+              return (
+                <Fragment key={qrId}>
+                  <ScannedItemRow
+                    qrId={qrId}
+                    item={item}
+                    onRemove={onRemoveScanned}
+                  />
+                  {qtyMembers.map((member) => (
+                    <ScannedKitQtyMemberRow
+                      key={`scanned-kit-qty-${member.bookingAssetId}`}
+                      asset={member}
+                    />
+                  ))}
+                </Fragment>
+              );
+            })}
+          </ScanItemGroup>
+        ) : null}
 
         {/**
          * Pending section (Polish-7b — grouped by each entry's OWN
@@ -1447,21 +1360,32 @@ export default function PartialCheckinDrawer({
          * Renderer lives in `pending-items-list.tsx` so the check-out
          * drawer can reuse it under `mode="checkout"`.
          */}
-        <PendingItemsList
-          mode="checkin"
-          pendingIndividuals={pendingIndividuals}
-          pendingQtyTracked={pendingQtyTracked}
-          kitMetaById={kitMetaById}
-          onQuickAction={handleQuickCheckin}
-          pendingCount={pendingCount}
-        />
+        {pendingCount > 0 ? (
+          <ScanItemGroup label="Pending" count={pendingCount} tone="muted">
+            <PendingItemsList
+              mode="checkin"
+              pendingIndividuals={pendingIndividuals}
+              pendingQtyTracked={pendingQtyTracked}
+              kitMetaById={kitMetaById}
+              onQuickAction={handleQuickCheckin}
+            />
+          </ScanItemGroup>
+        ) : null}
 
-        {/* Bucket 6: already fully reconciled (dimmed, collapsed). */}
+        {/* Bucket 6: already fully reconciled. Folded by default: the
+            operator usually only cares about what is still outstanding. */}
         {alreadyReconciled.length > 0 ? (
-          <AlreadyReconciledCollapser
-            assets={alreadyReconciled}
-            kitMetaById={kitMetaById}
-          />
+          <ScanItemGroup
+            label="Already checked in"
+            count={alreadyReconciled.length}
+            tone="done"
+            defaultOpen={false}
+          >
+            <AlreadyReconciledRows
+              assets={alreadyReconciled}
+              kitMetaById={kitMetaById}
+            />
+          </ScanItemGroup>
         ) : null}
       </>
     );
@@ -1509,7 +1433,7 @@ export default function PartialCheckinDrawer({
         }
         title={progressLabel}
         isLoading={isLoading}
-        customRenderAllItems={customRenderAllItems}
+        renderGroups={renderGroups}
         // Render body even when nothing has been scanned yet — pending
         // rows still need to be visible so the operator knows what's
         // expected.
@@ -1521,7 +1445,7 @@ export default function PartialCheckinDrawer({
           className
         )}
         style={style}
-        headerContent={<BookingHeader booking={booking} />}
+        headerContent={<ScanBookingHeader booking={booking} />}
       />
     </DispositionContext.Provider>
   );
@@ -1576,11 +1500,10 @@ function ScannedItemRow({
 }
 
 /**
- * Collapser wrapping the "already fully reconciled" rows at the bottom
- * of the drawer. Closed by default — the operator usually only cares
- * about what's still outstanding.
+ * The "already fully reconciled" rows, grouped by kit. The caller boxes them in
+ * a folded `ScanItemGroup`.
  */
-function AlreadyReconciledCollapser({
+function AlreadyReconciledRows({
   assets,
   kitMetaById,
 }: {
@@ -1590,10 +1513,6 @@ function AlreadyReconciledCollapser({
     { id: string; name: string; mainImage: string | null }
   >;
 }) {
-  // `<details>` doesn't make sense inside a <tbody>, so we fall back
-  // to a button-toggled state.
-  const [open, setOpen] = useState(false);
-
   /**
    * Group reconciled assets by kit (mirror of the pending section) so a
    * checked-in kit reads as one unit instead of N scattered green rows.
@@ -1627,34 +1546,14 @@ function AlreadyReconciledCollapser({
 
   return (
     <>
-      <Tr key="already-reconciled-header" skipEntrance>
-        <td
-          colSpan={2}
-          className="bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600"
-        >
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            className="flex w-full items-center gap-2"
-            aria-expanded={open}
-          >
-            <span>{open ? "▾" : "▸"}</span>
-            <span>Already checked in ({assets.length})</span>
-          </button>
-        </td>
-      </Tr>
-      {open ? (
-        <>
-          {kitGroups.map(({ kit, assets: kitAssets }) => (
-            <ReconciledKitGroup
-              key={`reconciled-kit-${kit.id}`}
-              kit={kit}
-              assets={kitAssets}
-            />
-          ))}
-          {looseAssets.map((asset) => renderAlreadyReconciledAsset(asset))}
-        </>
-      ) : null}
+      {kitGroups.map(({ kit, assets: kitAssets }) => (
+        <ReconciledKitGroup
+          key={`reconciled-kit-${kit.id}`}
+          kit={kit}
+          assets={kitAssets}
+        />
+      ))}
+      {looseAssets.map((asset) => renderAlreadyReconciledAsset(asset))}
     </>
   );
 }
@@ -2492,10 +2391,10 @@ const CustomForm = ({
     <Form
       ref={setFormElement}
       id="partial-checkin-form"
-      className="mb-4 flex max-h-full w-full"
+      className="flex max-h-full w-full"
       method="post"
     >
-      <div className="flex w-full gap-2 p-3">
+      <div className="flex w-full gap-2 px-3 py-2">
         {/* Hidden form fields */}
         {assetIdsForCheckin.map((assetId, index) => (
           <input

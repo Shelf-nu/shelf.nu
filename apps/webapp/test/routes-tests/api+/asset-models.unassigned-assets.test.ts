@@ -402,6 +402,8 @@ describe("unassigned assets endpoint", () => {
       // this view, so counting them would describe a set the sheet never lists.
       type: "INDIVIDUAL",
       assetModelId: null,
+      // The default Active view hides archived assets (issue #382).
+      archivedAt: null,
     });
 
     const body = (await response.json()) as { unfilteredAssets: number | null };

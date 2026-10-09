@@ -89,6 +89,7 @@ export async function loadPoolSourceSnapshots(
 
   const [assets, placements, operatorCustody, bookedOut] = await Promise.all([
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id snapshot of pools on the booking being checked out; archive refusal is the guard's job
       where: { id: { in: uniqueAssetIds }, organizationId },
       select: { id: true, title: true, quantity: true, unitOfMeasure: true },
     }),

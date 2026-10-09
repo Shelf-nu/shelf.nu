@@ -90,10 +90,12 @@ export type PartialCheckoutBlockerArgs = {
   removeItemsFromList: (qrIds: string[]) => void;
 };
 
-/** A built list, plus the resolve-all that clears every row it named. */
+/**
+ * A built list. "Resolve all" is derived from it by `createBlockers` (every
+ * shown blocker's `onResolve`), so the builder does not supply one.
+ */
 export type PartialCheckoutBlockers = {
   blockerConfigs: BlockerConfig[];
-  onResolveAll: () => void;
 };
 
 /** Scanned rows that resolved to an asset. */
@@ -390,7 +392,8 @@ export function buildPartialCheckoutBlockers({
       count: errorQrIds.length,
       message: (count: number) => (
         <>
-          <strong>{`${count} QR codes `}</strong> are invalid.
+          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+          {count > 1 ? "are" : "is"} invalid.
         </>
       ),
       onResolve: () => removeItemsFromList(errorQrIds),
@@ -399,19 +402,5 @@ export function buildPartialCheckoutBlockers({
 
   return {
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsNotInBookingIds]);
-      removeItemsFromList([
-        ...errorQrIds,
-        ...qrIdsOfKitsNotInBooking,
-        ...qrIdsOfRedundantAssets,
-        ...qrIdsOfAlreadyCheckedOutAssets,
-        ...qrIdsOfAssetsInCustody,
-        ...qrIdsOfAlreadyCheckedOutKits,
-        ...qrIdsOfKitsInCustody,
-        ...qrIdsOfKitsHeldElsewhere,
-        ...qrIdsOfAssetsHeldElsewhere,
-      ]);
-    },
   };
 }

@@ -213,6 +213,7 @@ export async function fetchAllPdfRelatedData(
 
     const [rawAssets, organization, snapshotKits] = await Promise.all([
       db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: booking PDF lists every asset the booking already holds, archived ones included
         where: {
           id: { in: visibleAssetIds },
           // Defense-in-depth: scope to the caller's org even though the

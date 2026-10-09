@@ -241,6 +241,36 @@ describe("ListAssetContent", () => {
     expect(assetStatusBadgeMock).not.toHaveBeenCalled();
   });
 
+  it("still says Archived beside Returned for an asset archived after it came back (issue #382)", () => {
+    mockUseLoaderData.mockReturnValue({
+      booking: {
+        id: "booking-1",
+        status: "COMPLETE",
+        assets: [],
+        custodianUser: null,
+      },
+    });
+
+    render(
+      <table>
+        <tbody>
+          <tr>
+            <ListAssetContent
+              item={{ ...baseAsset, archivedAt: new Date("2026-09-01") }}
+              partialCheckinDetails={basePartialDetails}
+              shouldShowCheckinColumns={false}
+              partialCheckoutDetails={{}}
+              shouldShowCheckoutColumns={false}
+            />
+          </tr>
+        </tbody>
+      </table>
+    );
+
+    expect(screen.getByText("Returned")).toBeInTheDocument();
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+  });
+
   it("does NOT show the returned badge for a never-checked-out asset on a complete booking", () => {
     // Progressive checkout: checkout records exist (for asset-2), but the asset
     // being rendered (asset-1) was never checked out, so it must NOT be marked

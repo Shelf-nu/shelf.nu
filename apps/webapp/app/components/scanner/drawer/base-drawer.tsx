@@ -7,6 +7,7 @@ import { useRouteLoaderData } from "react-router";
 import { Button } from "~/components/shared/button";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { loader as layoutLoader } from "~/routes/_layout+/_layout";
+import { observeChromeAbove } from "~/utils/observe-chrome-above";
 import { tw } from "~/utils/tw";
 import { useGlobalModeViaObserver } from "../code-scanner";
 import { resolveDrawerHeight } from "./drawer-height";
@@ -90,6 +91,42 @@ export default function BaseDrawer({
   // per
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   // This handles switches only; the mount case is seeded above.
+  // Bottom of the code-entry panel in scanner mode, so the drawer starts just
+  // below it whatever chrome the page puts above the scanner. `null` until
+  // measured (and outside scanner mode), which falls back to a fixed gap.
+  const [scannerInputBottom, setScannerInputBottom] = useState<number | null>(
+    null
+  );
+  useEffect(() => {
+    if (mode !== "scanner") {
+      setScannerInputBottom(null);
+      return;
+    }
+    const panel = document.querySelector<HTMLElement>(
+      "[data-scanner-input-panel]"
+    );
+    if (!panel) return;
+
+    const measure = () => {
+      const next = Math.round(panel.getBoundingClientRect().bottom);
+      setScannerInputBottom((current) => (current === next ? current : next));
+    };
+    measure();
+
+    // The panel resizes rarely but MOVES whenever chrome above it changes
+    // height (a banner mounting or wrapping), which neither its own size nor a
+    // window resize reports.
+    const observer = new ResizeObserver(measure);
+    observer.observe(panel);
+    const stopWatchingChrome = observeChromeAbove(panel, measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      stopWatchingChrome();
+      window.removeEventListener("resize", measure);
+    };
+  }, [mode, vh]);
+
   const previousModeRef = useRef(mode);
   if (previousModeRef.current !== mode) {
     previousModeRef.current = mode;
@@ -174,6 +211,7 @@ export default function BaseDrawer({
           height: resolveDrawerHeight({
             expanded,
             isScannerMode: mode === "scanner",
+            scannerInputBottom,
             viewportHeight: vh,
             // Only drawers with custom header content are measured; the rest
             // fall back to the `collapsedHeight` constant plus the footer.
@@ -228,7 +266,7 @@ export default function BaseDrawer({
               ref={baseHeaderRef}
               className="default-base-drawer-header flex shrink-0 items-center justify-between border-b text-left"
             >
-              <div className="py-4">{title}</div>
+              <div className="py-2">{title}</div>
 
               {hasItems && onClear && (
                 <Button
@@ -247,7 +285,9 @@ export default function BaseDrawer({
                 a long list would push the footer out of the drawer entirely
                 instead of scrolling inside it. */}
             {!shouldRenderBody ? (
-              <div className="flex shrink-0 flex-col items-center px-3 py-6 text-center">
+              // Fills the list area so the footer's form stays at the bottom of
+              // the drawer instead of floating under a short empty message.
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-6 text-center">
                 {typeof emptyStateContent === "function"
                   ? emptyStateContent(expanded)
                   : emptyStateContent}

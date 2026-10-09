@@ -470,6 +470,7 @@ export async function deleteAssetModel({
      * placeholder on its own.
      */
     const assetsLosingTheModel = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
       where: { assetModelId: id, organizationId },
       select: { id: true, assetModel: { select: { id: true, name: true } } },
     });
@@ -709,6 +710,7 @@ export async function bulkDeleteAssetModels({
     const assetsLosingTheirModel =
       modelsToDelete.length > 0
         ? await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ON DELETE SET NULL unlinks archived assets too, so their unlink history must be recorded
             where: {
               assetModelId: { in: modelsToDelete.map((model) => model.id) },
               organizationId,

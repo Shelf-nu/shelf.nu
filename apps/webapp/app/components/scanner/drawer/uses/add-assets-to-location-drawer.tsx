@@ -173,13 +173,6 @@ export default function AddAssetsKitsToLocationDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([...assetsAlreadyAddedIds]);
-      removeItemsFromList([
-        ...errors.map(([qrId]) => qrId),
-        ...qrIdsOfAlreadyAddedKits,
-      ]);
-    },
   });
 
   // Render item row

@@ -377,6 +377,9 @@ vitest.mock("~/modules/activity-event/service.server", () => ({
 // why: org-validation guard used by the full checkout delegate; pass it.
 vitest.mock("~/utils/org-validation.server", () => ({
   assertAssetsBelongToOrg: vitest.fn().mockResolvedValue(undefined),
+  // why: the checkout backstop refuses archived assets (issue #382); none of
+  // these fixtures are archived.
+  assertAssetsAreNotArchived: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: prevent real email sends from the full-checkout delegate path.

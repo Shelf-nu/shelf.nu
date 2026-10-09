@@ -53,6 +53,7 @@ import {
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
+import { resolveTeamMemberName } from "~/utils/user";
 
 /**
  * GET /api/mobile/assets/:assetId
@@ -80,6 +81,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail screen must still load an archived asset
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
@@ -266,10 +268,26 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       return data({ error: { message: "Asset not found" } }, { status: 404 });
     }
 
-    const [asset] = await refreshExpiredAssetImages([storedAsset], {
+    const [refreshedAsset] = await refreshExpiredAssetImages([storedAsset], {
       organizationId,
       ...ASSET_IMAGE_RESIGN_LIMITS,
     });
+
+    // The companion prints `custodian.name` as it arrives, in the custody
+    // card and in every `custodyList` row. The stored `TeamMember.name` can
+    // be empty for a registered member, so each holder is named here the way
+    // the web names them: the user's display name first, the stored name for
+    // a non-registered member.
+    const asset = {
+      ...refreshedAsset,
+      custody: refreshedAsset.custody.map((row) => ({
+        ...row,
+        custodian: {
+          ...row.custodian,
+          name: resolveTeamMemberName(row.custodian),
+        },
+      })),
+    };
 
     // Flatten kit / location / custody via the shared mobile shaper so the
     // legacy companion contract (`asset.kit`, `asset.kitId`, `asset.location`,

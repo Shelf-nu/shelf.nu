@@ -16,6 +16,7 @@ import { isAuditCompleted } from "@shelf/labels";
 import { ImageIcon, MessageSquare } from "lucide-react";
 import { useLoaderData } from "react-router";
 
+import { ArchivedBadge } from "~/components/assets/archived-badge";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { ListItemTagsColumn } from "~/components/assets/assets-index/list-item-tags-column";
@@ -160,8 +161,9 @@ export function AuditAssetListItem({ item }: { item: AuditAssetItem }) {
                 column). Keeps composition consistent across surfaces per
                 `.claude/rules/code-bearing-entity-list-consistency.md`.
               */}
-              {displayCode || hasEvidence ? (
+              {displayCode || hasEvidence || item.archivedAt ? (
                 <div className="flex flex-wrap items-center gap-2">
+                  {item.archivedAt ? <ArchivedBadge /> : null}
                   {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
                   {/*
                     why: the row is the only place someone looks when asking

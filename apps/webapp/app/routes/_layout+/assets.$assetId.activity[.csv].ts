@@ -35,6 +35,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const asset = await db.asset.findFirstOrThrow({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own activity CSV export must still work for an archived asset
       where: { id: assetId, organizationId },
       select: { title: true },
     });

@@ -49,10 +49,12 @@ export type AssignCustodyBlockerArgs = CustodyBlockerArgs & {
   pickedSources: Record<string, string>;
 };
 
-/** A built list, plus the resolve-all that clears every row it named. */
+/**
+ * A built list. "Resolve all" is derived from it by `createBlockers` (every
+ * shown blocker's `onResolve`), so the builder does not supply one.
+ */
 export type CustodyBlockers = {
   blockerConfigs: BlockerConfig[];
-  onResolveAll: () => void;
 };
 
 /** Scanned rows that resolved to an asset. */
@@ -100,7 +102,8 @@ function invalidCodesBlocker(
     count: errorQrIds.length,
     message: (count: number) => (
       <>
-        <strong>{`${count} QR codes `}</strong> are invalid.
+        <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
+        {count > 1 ? "are" : "is"} invalid.
       </>
     ),
     onResolve: () => removeItemsFromList(errorQrIds),
@@ -313,21 +316,6 @@ export function buildAssignCustodyBlockers({
 
   return {
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...qtyAssetsWithNothingFree,
-        ...qtyAssetsWithEmptySource,
-        ...assetsAlreadyInCustody,
-        ...assetsAreCheckedOut,
-        ...assetsArePartOfKit,
-      ]);
-      removeItemsFromList([
-        ...errorQrIds,
-        ...qrIdsOfKitsInCustody,
-        ...qrIdsOfKitsWithAssetsInCustody,
-        ...qrIdsOfKitsCheckedOut,
-      ]);
-    },
   };
 }
 
@@ -490,15 +478,5 @@ export function buildReleaseCustodyBlockers({
 
   return {
     blockerConfigs,
-    onResolveAll: () => {
-      removeAssetsFromList([
-        ...qtyAssetsHeldViaKitOnly,
-        ...qtyAssetsWithNothingHeld,
-        ...qtyAssetsWithSeveralHolders,
-        ...assetsNotInCustody,
-        ...assetsArePartOfKit,
-      ]);
-      removeItemsFromList([...errorQrIds, ...qrIdsOfKitsNotInCustody]);
-    },
   };
 }

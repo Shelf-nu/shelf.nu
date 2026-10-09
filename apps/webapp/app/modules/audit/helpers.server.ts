@@ -79,6 +79,7 @@ export async function createAssetScanNote({
   // org-scoped data for this note, so prefetchedUser remains a safe shortcut.
   const [asset, scanner] = await Promise.all([
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -132,6 +133,7 @@ export async function createAssetScanRemovedNote({
 }) {
   const [asset, remover] = await Promise.all([
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -769,6 +771,7 @@ export async function createAssetsAddedToAuditNote({
       },
     }),
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; archived assets in the audit must still be named
       where: { id: { in: addedAssetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },
@@ -831,6 +834,7 @@ export async function createAssetRemovedFromAuditNote({
       },
     }),
     tx.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; an archived asset in the audit must still be named
       where: { id: assetId, organizationId },
       select: { id: true, title: true },
     }),
@@ -885,6 +889,7 @@ export async function createAssetsRemovedFromAuditNote({
       },
     }),
     tx.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: title lookup for an audit note; archived assets in the audit must still be named
       where: { id: { in: assetIds }, organizationId },
       select: { id: true, title: true },
       orderBy: { title: "asc" },

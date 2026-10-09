@@ -134,6 +134,7 @@ import {
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import { numberInputWheelGuard } from "~/utils/number-input-wheel-guard";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -854,6 +855,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (assetId) => !existingAssetIds.includes(assetId)
     );
 
+    /**
+     * Archived assets are frozen and cannot be booked (issue #382). The picker
+     * already hides them, but `assetIds` is raw form input — a crafted POST
+     * would otherwise put an archived asset straight into the booking. Guard
+     * the newly added ids only, so a booking that already holds an asset
+     * archived after the fact can still be saved and emptied.
+     */
+    await assertAssetsAreNotArchived({ assetIds: newAssetIds, organizationId });
+
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =
       await getDetailedPartialCheckinData(bookingId);
@@ -953,7 +963,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
        * include asset detail.
        */
       const newAssets = await db.asset.findMany({
-        where: { id: { in: newAssetIds }, organizationId },
+        // Archived ids were already refused by updateBookingAssets above.
+        where: { id: { in: newAssetIds }, organizationId, archivedAt: null },
         select: { id: true, title: true, type: true },
       });
       const newAssetById = new Map(newAssets.map((a) => [a.id, a]));
@@ -1196,6 +1207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (removedAssetIds.length > 0) {
       // Get the removed assets with their titles for proper note generation
       const removedAssets = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removed assets may be archived; removing an archived asset from a booking stays allowed and its note needs the title
         where: {
           id: { in: removedAssetIds },
           organizationId,
