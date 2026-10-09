@@ -276,7 +276,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "bookable" },
     custody: { see: "own-unless-workspace-allows", assign: "none" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {

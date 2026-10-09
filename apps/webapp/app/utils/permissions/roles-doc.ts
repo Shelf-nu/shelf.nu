@@ -22,10 +22,17 @@ export type EffectiveAccessSnapshot = {
   "D-14": Record<string, Record<string, boolean>>;
   "D-28": Record<string, Record<string, boolean>>;
   "D-21": Record<string, string[]>;
+  "D-31": Record<string, string>;
   "D-33": Record<string, string>;
 };
 
 const ALL_TOGGLES_ON = "ssB,baB,ssC,baC";
+
+/** Plain-language cell for an `assets.listScope` value. */
+const LIST_SCOPE_LABELS: Record<string, string> = {
+  all: "Every asset",
+  bookable: "Only assets available for bookings",
+};
 const yesNo = (value: boolean) => (value ? "yes" : "no");
 
 /** A "no value" cell: a word, never a dash, per the doc's own no-dash rule. */
@@ -82,6 +89,13 @@ export function renderEffectiveAccessMarkdown(
     [
       "Removes booking items in",
       ...roles.map((role) => snapshot["D-21"][role].join(", ") || NONE),
+    ],
+    [
+      "Asset list shows",
+      ...roles.map(
+        (role) =>
+          LIST_SCOPE_LABELS[snapshot["D-31"][role]] ?? snapshot["D-31"][role]
+      ),
     ],
     ["Default asset index", ...roles.map((role) => snapshot["D-33"][role])],
   ]);

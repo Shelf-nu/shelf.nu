@@ -138,22 +138,22 @@ describe("command-palette search", () => {
     expect(JSON.stringify(where)).toContain('"userId":"caller"');
   });
 
-  it("searches only bookable assets for SELF_SERVICE", async () => {
-    await search(["SELF_SERVICE"]);
-    expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
-      availableToBookOnly: true,
-    });
-  });
-
-  it.each([["BASE"], ["ADMIN"]])(
-    "searches every asset for %s",
+  it.each([["SELF_SERVICE"], ["BASE"]])(
+    "searches only bookable assets for %s",
     async (role) => {
       await search([role]);
       expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
-        availableToBookOnly: false,
+        availableToBookOnly: true,
       });
     }
   );
+
+  it("searches every asset for ADMIN", async () => {
+    await search(["ADMIN"]);
+    expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
+      availableToBookOnly: false,
+    });
+  });
 
   /** An asset found by search, held by the given custodian user. */
   function assetHeldBy(holderUserId: string) {
