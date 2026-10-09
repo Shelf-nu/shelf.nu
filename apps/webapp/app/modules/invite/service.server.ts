@@ -53,7 +53,8 @@ import {
   validateImportUserRows,
 } from "./import-users-preflight.server";
 import { processInvitationMessage } from "./message-validator.server";
-import { isInvitableRole } from "./roles";
+import type { InvitableRole } from "./roles";
+import { isInvitableRole, parseInvitableRole } from "./roles";
 import { createTeamMember } from "../team-member/service.server";
 import { createUserOrAttachOrg } from "../user/service.server";
 
@@ -867,13 +868,15 @@ export async function bulkInviteUsers({
     }
 
     // The actor rule, before any lookup: only the workspace owner may grant an
-    // owner-only role, and one such row refuses the whole file. Rows whose
-    // role is not invitable at all are left to the preflight to report.
+    // owner-only role, and one such row refuses the whole file. Roles are read
+    // with the preflight's own parser, so a role written as its label
+    // ("Administrator") is checked exactly as the row will be written. Rows
+    // whose role is not invitable at all are left to the preflight to report.
     assertCanAssignRoles({
       actorOwnsWorkspace,
       roles: users
-        .map((user) => (user.role ?? "").trim().toUpperCase())
-        .filter(isInvitableRole),
+        .map((user) => parseInvitableRole(user.role ?? ""))
+        .filter((role): role is InvitableRole => role !== null),
       organizationId,
     });
 

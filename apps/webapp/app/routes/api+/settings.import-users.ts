@@ -9,7 +9,6 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
