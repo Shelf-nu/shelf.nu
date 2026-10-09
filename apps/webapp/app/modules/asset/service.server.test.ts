@@ -5969,14 +5969,21 @@ describe("getAssets search via UNION", () => {
 });
 
 /**
- * The unfinished-booking precondition both archive writes must carry. Order of
- * the statuses is irrelevant to Postgres, so it is not asserted.
+ * The booking statuses that block archiving: reserved and checked-out
+ * bookings. DRAFT is deliberately absent, since a draft has promised nothing
+ * yet. Order is irrelevant to Postgres, so the set is compared sorted.
  */
-const UNFINISHED_BOOKING_GUARD = {
+const ARCHIVE_BLOCKING_STATUSES = ["ONGOING", "OVERDUE", "RESERVED"];
+
+/** The booking precondition both archive writes must carry. */
+const ARCHIVE_BLOCKING_BOOKING_GUARD = {
   none: {
     booking: {
       status: {
-        in: expect.arrayContaining(["DRAFT", "RESERVED", "ONGOING", "OVERDUE"]),
+        in: expect.toSatisfy(
+          (statuses: string[]) =>
+            [...statuses].sort().join() === ARCHIVE_BLOCKING_STATUSES.join()
+        ),
       },
     },
   },
@@ -6022,7 +6029,7 @@ describe("archiveAsset", () => {
           archivedAt: null,
           // Pins the booking precondition INTO the write, so a booking added
           // after the eligibility read still blocks the archive.
-          bookingAssets: UNFINISHED_BOOKING_GUARD,
+          bookingAssets: ARCHIVE_BLOCKING_BOOKING_GUARD,
         }),
         data: expect.objectContaining({ archivedAt: expect.any(Date) }),
       })
@@ -6120,10 +6127,10 @@ describe("archiveAsset", () => {
     expect(mockUpdateMany).not.toHaveBeenCalled();
   });
 
-  it("blocks an asset that is still in an unfinished booking", async () => {
-    // why: a DRAFT or RESERVED booking leaves Asset.status AVAILABLE, so the
-    // status check above cannot see it. Without this the asset could be
-    // archived and then checked out from the booking it was already in.
+  it("blocks an asset that is in a reserved or checked-out booking", async () => {
+    // why: a RESERVED booking leaves Asset.status AVAILABLE, so the status
+    // check above cannot see it. Without this the asset could be archived and
+    // then checked out from the booking it was already in.
     mockFindFirst.mockResolvedValue({
       id: "a1",
       type: "INDIVIDUAL",
@@ -6138,6 +6145,27 @@ describe("archiveAsset", () => {
       archiveAsset({ id: "a1", organizationId: "org-1" })
     ).rejects.toMatchObject({ status: 400 });
     expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("only counts reserved and checked-out bookings, never drafts", async () => {
+    // why: a draft has promised nothing, so an asset that is only in a draft
+    // can be archived. The draft is refused at reserve or check-out instead.
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    const countMock = db.bookingAsset.count as ReturnType<typeof vitest.fn>;
+    countMock.mockResolvedValue(1);
+
+    await expect(
+      archiveAsset({ id: "a1", organizationId: "org-1" })
+    ).rejects.toMatchObject({ status: 400 });
+
+    const statuses: string[] =
+      countMock.mock.calls[0][0].where.booking.status.in;
+    expect([...statuses].sort()).toEqual(ARCHIVE_BLOCKING_STATUSES);
   });
 
   it("blocks quantity-tracked assets (v1 INDIVIDUAL-only)", async () => {
@@ -6305,7 +6333,7 @@ describe("bulkArchiveAssets", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           archivedAt: null,
-          bookingAssets: UNFINISHED_BOOKING_GUARD,
+          bookingAssets: ARCHIVE_BLOCKING_BOOKING_GUARD,
         }),
       })
     );

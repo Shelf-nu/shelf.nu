@@ -3547,21 +3547,18 @@ export async function deleteAsset({
 }
 
 /**
- * Booking states in which an asset is still spoken for, DRAFT included.
- * Terminal states (COMPLETE / CANCELLED / ARCHIVED) are history and block
- * nothing.
+ * Booking states that stop an asset from being archived: the booking has
+ * committed to the asset (RESERVED) or the asset is out on it (ONGOING,
+ * OVERDUE). The AVAILABLE status check does not cover RESERVED, because an
+ * asset in a reserved booking still reads AVAILABLE.
  *
- * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: an asset in any of
- * these bookings cannot be archived (issue #382). The AVAILABLE status check
- * does not cover it, because an asset in a DRAFT or RESERVED booking still
- * reads AVAILABLE.
+ * DRAFT is not here: a draft has promised nothing yet. An archived asset left
+ * in a draft is refused when the draft is reserved or checked out, so the
+ * booking cannot take it out of the archive.
  *
- * Named apart from the `ACTIVE_BOOKING_STATUSES` sets in
- * `@shelf/quantity-control` and the model-request service, which leave DRAFT
- * out, so the wrong set is never reached for here.
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets} (issue #382).
  */
-const UNFINISHED_BOOKING_STATUSES: BookingStatus[] = [
-  BookingStatus.DRAFT,
+const ARCHIVE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.RESERVED,
   BookingStatus.ONGOING,
   BookingStatus.OVERDUE,
@@ -3719,7 +3716,7 @@ export async function archiveAsset({
     const activeBookingCount = await db.bookingAsset.count({
       where: {
         assetId: id,
-        booking: { status: { in: UNFINISHED_BOOKING_STATUSES } },
+        booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
       },
     });
 
@@ -3728,7 +3725,7 @@ export async function archiveAsset({
         cause: null,
         title: "Can't archive this asset",
         message:
-          "This asset is in a booking that hasn't finished yet. Remove it from that booking, then archive it.",
+          "This asset is in a reserved or checked-out booking. Remove it from that booking, then archive it.",
         status: 400,
         label,
         shouldBeCaptured: false,
@@ -3757,7 +3754,9 @@ export async function archiveAsset({
           // WHERE the authoritative guard: a raced booking lands in the
           // count === 0 branch instead of archiving a booked asset.
           bookingAssets: {
-            none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
+            none: {
+              booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+            },
           },
         },
         data: { archivedAt },
@@ -4010,13 +4009,15 @@ export async function bulkArchiveAssets({
         type: AssetType.INDIVIDUAL,
         status: AssetStatus.AVAILABLE,
         archivedAt: null,
-        // Same rule the single-asset path enforces: an asset still sitting in
-        // an unfinished booking is spoken for, and AVAILABLE alone does not
-        // say so (a DRAFT/RESERVED booking leaves the status untouched).
+        // Same rule the single-asset path enforces: an asset in a reserved or
+        // checked-out booking is spoken for, and AVAILABLE alone does not say
+        // so (a RESERVED booking leaves the status untouched).
         // Skipped rather than thrown — bulk reports counts, it doesn't fail
         // the batch on one ineligible row.
         bookingAssets: {
-          none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
+          none: {
+            booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+          },
         },
       },
       select: { id: true },
@@ -4054,7 +4055,9 @@ export async function bulkArchiveAssets({
           status: AssetStatus.AVAILABLE,
           archivedAt: null,
           bookingAssets: {
-            none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
+            none: {
+              booking: { status: { in: ARCHIVE_BLOCKING_BOOKING_STATUSES } },
+            },
           },
         },
         data: { archivedAt },

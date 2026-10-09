@@ -87,7 +87,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         title: "Assets archived",
         message:
           skippedCount > 0
-            ? `${archivedCount} archived, ${skippedCount} skipped (checked out, in custody, in an unfinished booking, quantity-tracked, or already archived).`
+            ? `${archivedCount} archived, ${skippedCount} skipped (checked out, in custody, in a reserved or checked-out booking, quantity-tracked, or already archived).`
             : `${archivedCount} ${
                 archivedCount === 1 ? "asset" : "assets"
               } archived.`,
