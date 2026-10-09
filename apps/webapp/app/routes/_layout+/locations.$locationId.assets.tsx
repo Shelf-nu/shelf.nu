@@ -67,7 +67,10 @@ import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
-import { resolveArchivedViewForMember } from "~/modules/asset/data.server";
+import {
+  canViewArchivedAssets,
+  resolveArchivedViewForMember,
+} from "~/modules/asset/data.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
@@ -236,7 +239,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.location,
@@ -290,6 +293,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           locationId,
           currentSearchParams,
+          // Select all covers the view the list showed (Active by default).
+          honorArchivedView: canViewArchivedAssets(access),
         });
 
         if (resolvedAssetIds.length === 0) {

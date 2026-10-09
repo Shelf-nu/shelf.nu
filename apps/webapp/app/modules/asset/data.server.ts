@@ -579,7 +579,7 @@ export async function simpleModeLoader({
  * @param access - The member's resolved access, from `requirePermission`
  * @returns `true` when the member holds `asset: archive`
  */
-function canViewArchivedAssets(access: RoleAccess): boolean {
+export function canViewArchivedAssets(access: RoleAccess): boolean {
   return roleHasPermission({
     roles: [access.role],
     entity: PermissionEntity.asset,
