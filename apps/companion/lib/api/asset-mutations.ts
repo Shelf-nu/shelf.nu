@@ -146,11 +146,14 @@ export const assetMutationsApi = {
     return result;
   },
 
-  /** Delete an asset */
-  deleteAsset: (orgId: string, assetId: string) =>
+  /**
+   * Delete an asset. `confirmation` is the title the user typed in the delete
+   * sheet; the server checks it once every supported build sends it (#3175).
+   */
+  deleteAsset: (orgId: string, assetId: string, confirmation: string) =>
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {
       method: "POST",
-      body: JSON.stringify({ assetId }),
+      body: JSON.stringify({ assetId, confirmation }),
     }),
 
   /**

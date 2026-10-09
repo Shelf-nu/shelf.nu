@@ -851,10 +851,14 @@ export default function BookingDetailScreen() {
     setShowDeleteSheet(true);
   };
 
-  const performDelete = async () => {
+  const performDelete = async (confirmation: string) => {
     if (!booking || !currentOrg) return;
     setIsActioning(true);
-    const { error: err } = await api.deleteBooking(currentOrg.id, booking.id);
+    const { error: err } = await api.deleteBooking(
+      currentOrg.id,
+      booking.id,
+      confirmation
+    );
     setIsActioning(false);
     setShowDeleteSheet(false);
     if (err) {
@@ -2523,7 +2527,7 @@ export default function BookingDetailScreen() {
           message={DELETE_CONSEQUENCE_LABELS.BOOKING}
           expected={booking.name}
           isDeleting={isActioning}
-          onConfirm={() => void performDelete()}
+          onConfirm={(confirmation) => void performDelete(confirmation)}
           onClose={() => setShowDeleteSheet(false)}
         />
       )}

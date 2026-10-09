@@ -443,10 +443,14 @@ export default function AssetDetailScreen() {
     setShowDeleteSheet(true);
   };
 
-  const performDeleteAsset = async () => {
+  const performDeleteAsset = async (confirmation: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
-    const { error: err } = await api.deleteAsset(currentOrg.id, asset.id);
+    const { error: err } = await api.deleteAsset(
+      currentOrg.id,
+      asset.id,
+      confirmation
+    );
     setIsActionLoading(false);
     setShowDeleteSheet(false);
     if (err) {
@@ -1194,7 +1198,9 @@ export default function AssetDetailScreen() {
               message={DELETE_CONSEQUENCE_LABELS.ASSET}
               expected={asset.title}
               isDeleting={isActionLoading}
-              onConfirm={() => void performDeleteAsset()}
+              onConfirm={(confirmation) =>
+                void performDeleteAsset(confirmation)
+              }
               onClose={() => setShowDeleteSheet(false)}
             />
           )}

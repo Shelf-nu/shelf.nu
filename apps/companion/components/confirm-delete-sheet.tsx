@@ -42,8 +42,11 @@ type Props = {
   expected: string;
   /** True while the delete request is in flight. */
   isDeleting: boolean;
-  /** Runs the delete. The caller closes the sheet once it is done. */
-  onConfirm: () => void;
+  /**
+   * Runs the delete with what the user typed, which the caller posts as the
+   * request's `confirmation`. The caller closes the sheet once it is done.
+   */
+  onConfirm: (confirmation: string) => void;
   /** Called when the user dismisses the sheet without deleting. */
   onClose: () => void;
 };
@@ -139,7 +142,7 @@ export default function ConfirmDeleteSheet({
           <TouchableOpacity
             testID="confirm-delete-button"
             style={[styles.deleteButton, !isArmed && styles.buttonDisabled]}
-            onPress={onConfirm}
+            onPress={() => onConfirm(typed)}
             disabled={!isArmed}
             activeOpacity={0.8}
             accessibilityLabel={title}
