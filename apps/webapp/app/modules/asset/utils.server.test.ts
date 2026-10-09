@@ -917,8 +917,23 @@ describe("getAssetsWhereInput archived default", () => {
       organizationId: "org-1",
       currentSearchParams: "archived=all",
       allowedTeamMemberIds: "all",
+      honorArchivedView: true,
     });
     expect(where.archivedAt).toBeUndefined();
+  });
+
+  it("ignores the archived param unless the caller opts in", () => {
+    // `?archived=` is raw URL input. A select-all caller that has not proven
+    // the member may see archived assets must act on active ones only, or it
+    // would touch rows the member was never shown.
+    for (const view of ["archived", "all"]) {
+      const where = getAssetsWhereInput({
+        organizationId: "org-1",
+        currentSearchParams: `archived=${view}`,
+        allowedTeamMemberIds: "all",
+      });
+      expect(where.archivedAt).toBeNull();
+    }
   });
 });
 

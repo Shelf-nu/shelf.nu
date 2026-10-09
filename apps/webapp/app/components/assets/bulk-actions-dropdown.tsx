@@ -91,10 +91,18 @@ function ConditionalDropdown() {
   const allSelected = isSelectingAllItems(selectedAssets);
 
   const [searchParams] = useSearchParams();
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAssets = useCanArchiveAssets();
+  /**
+   * The view the list actually shows. The server honours `?archived=` only
+   * for members who can archive; anyone else sees the Active view whatever
+   * the URL says, so their menu must not act as if it were the Archived one.
+   */
+  const viewParam = canArchiveAssets ? searchParams.get("archived") : null;
   // In the Archived view the selection is archived assets, which are frozen:
   // every bulk action is disabled except Reinstate (the calm "archived =
   // read-only except reinstate" rule, issue #382).
-  const archivedView = searchParams.get("archived") === "archived";
+  const archivedView = viewParam === "archived";
   /**
    * Whether this selection is frozen. The view alone is not enough: the All
    * view mixes active and archived rows, so an archived asset picked there
@@ -106,7 +114,7 @@ function ConditionalDropdown() {
   const selectionIsArchived = archivedView
     ? true
     : allSelected
-    ? searchParams.get("archived") === "all"
+    ? viewParam === "all"
     : selectedAssets.some((asset) => !!asset.archivedAt);
   const archivedBulkDisabled: { reason: string } | false = selectionIsArchived
     ? {
@@ -116,8 +124,6 @@ function ConditionalDropdown() {
     : false;
 
   const roles = useOrganizationRoles();
-  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
-  const canArchiveAssets = useCanArchiveAssets();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 

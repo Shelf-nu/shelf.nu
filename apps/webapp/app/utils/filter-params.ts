@@ -20,10 +20,9 @@ export const NON_FILTER_PARAMS = new Set([
   "index",
   "view",
   // `archived` is the Active/Archived/All VIEW dimension on the asset index
-  // (issue #382), not a filter the user applied. Counting it as one made the
-  // empty Archived tab say "no assets match the applied filters, try clearing
-  // them" and offer a Clear Filters button, when the user had applied no
-  // filters at all — they had clicked a tab.
+  // (issue #382), not a filter the user applied. It must never count as one:
+  // an empty Archived view is "nothing archived", not "your filters exclude
+  // everything", and Clear Filters must not appear for a tab.
   "archived",
 ]);
 

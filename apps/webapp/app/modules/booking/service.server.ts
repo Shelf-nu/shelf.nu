@@ -11015,7 +11015,7 @@ export async function buildKitSlicesForBooking({
     const assetKits = await db.assetKit.findMany({
       // Archived members are left out (issue #382): the kit is booked with its
       // active members, the same way kit custody and kit moves skip archived
-      // ones. Refusing the whole kit stranded a kit with one archived member.
+      // ones, so one archived member never makes the whole kit unbookable.
       where: {
         kitId: { in: kitIds },
         organizationId,

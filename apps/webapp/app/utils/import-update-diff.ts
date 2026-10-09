@@ -1065,9 +1065,8 @@ export function computeAssetDiffs({
     }
 
     // Archived assets are read-only (issue #382). `updateAsset` refuses them at
-    // apply time regardless; surfacing it here keeps the preview's promise —
-    // it exists to say what will happen BEFORE anything is saved, and without
-    // this it counted an archived row as "to update" and then failed it.
+    // apply time regardless; the preview reports the row as failed up front,
+    // because its job is to say what will happen BEFORE anything is saved.
     if (existingAsset.archivedAt) {
       failedRows.push({
         rowNumber,

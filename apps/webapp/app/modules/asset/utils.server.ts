@@ -679,6 +679,7 @@ export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  honorArchivedView = false,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
@@ -692,6 +693,13 @@ export function getAssetsWhereInput({
    * which a BASE user can reach with `qr: read`.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Apply the `?archived=` view (issue #382). Off by default: the param is raw
+   * URL input, so a "select all" caller gets active assets unless it opts in
+   * for a member allowed to see archived ones. See
+   * `resolveAssetIdsForBulkOperation`.
+   */
+  honorArchivedView?: boolean;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
@@ -704,8 +712,11 @@ export function getAssetsWhereInput({
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  // Active/Archived/All dimension (defaults to active = hide archived).
-  applyArchivedFilter(where, getArchivedFilterFromParams(searchParams));
+  // Active/Archived/All dimension: active unless the caller opted in.
+  applyArchivedFilter(
+    where,
+    honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
+  );
 
   const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
 

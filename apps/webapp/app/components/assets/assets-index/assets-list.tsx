@@ -537,8 +537,7 @@ export const AssetsList = ({
                * filter row (issue #382). It is a view SCOPE, not a filter —
                * it is in NON_FILTER_PARAMS and Clear Filters leaves it alone —
                * and it changes what "N assets out of M" counts, so it belongs
-               * next to that number. The filter row was also full: 12 controls
-               * ending 33px short of a 1440px viewport, where this took 14%.
+               * next to that number, and the filter row has no room for it.
                * One slot serves both index modes, so it cannot drift.
                */
               headerTitleContent={

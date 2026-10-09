@@ -706,8 +706,7 @@ export async function getAssets(params: {
     // Active/Archived/All dimension (defaults to active = hide archived).
     // Sits on the top-level `where`, so it ANDs with the search `where.OR`
     // below: the UNION resolves candidate ids across all assets, then Prisma
-    // filters them by archived state. The fallback-re-query bookkeeping that
-    // used to live here went away with the UNION rewrite (#2849).
+    // filters them by archived state. No re-query is needed on this path.
     applyArchivedFilter(where, archivedFilter);
 
     if (availableToBookOnly) {
@@ -2068,7 +2067,8 @@ export async function updateAsset({
      * else (issue #382). The guard lives HERE rather than on each route
      * because `updateAsset` is the single write chokepoint every surface goes
      * through — web routes, the CSV import-update, and all of the companion
-     * app's asset writes. Guarding per-route left the mobile paths open.
+     * app's asset writes. A guard on each route would have to be repeated on
+     * every one of them, mobile included.
      *
      * There is no carve-out. Re-signing an expired image URL writes the
      * column directly (`api+/asset.refresh-main-image`, the mobile refresh)
@@ -3547,16 +3547,20 @@ export async function deleteAsset({
 }
 
 /**
- * Booking states in which an asset is still spoken for. Terminal states
- * (COMPLETE / CANCELLED / ARCHIVED) are history and don't block anything.
+ * Booking states in which an asset is still spoken for, DRAFT included.
+ * Terminal states (COMPLETE / CANCELLED / ARCHIVED) are history and block
+ * nothing.
  *
- * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: the AVAILABLE
- * status check alone does NOT cover this, because an asset sitting in a DRAFT
- * or RESERVED booking is still AVAILABLE. Without this guard an asset could be
- * archived and then reserved and checked out from the booking it was already
- * in, which contradicts "archived assets can't be booked" (issue #382).
+ * Used by {@link archiveAsset} / {@link bulkArchiveAssets}: an asset in any of
+ * these bookings cannot be archived (issue #382). The AVAILABLE status check
+ * does not cover it, because an asset in a DRAFT or RESERVED booking still
+ * reads AVAILABLE.
+ *
+ * Named apart from the `ACTIVE_BOOKING_STATUSES` sets in
+ * `@shelf/quantity-control` and the model-request service, which leave DRAFT
+ * out, so the wrong set is never reached for here.
  */
-const ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+const UNFINISHED_BOOKING_STATUSES: BookingStatus[] = [
   BookingStatus.DRAFT,
   BookingStatus.RESERVED,
   BookingStatus.ONGOING,
@@ -3715,7 +3719,7 @@ export async function archiveAsset({
     const activeBookingCount = await db.bookingAsset.count({
       where: {
         assetId: id,
-        booking: { status: { in: ACTIVE_BOOKING_STATUSES } },
+        booking: { status: { in: UNFINISHED_BOOKING_STATUSES } },
       },
     });
 
@@ -3753,7 +3757,7 @@ export async function archiveAsset({
           // WHERE the authoritative guard: a raced booking lands in the
           // count === 0 branch instead of archiving a booked asset.
           bookingAssets: {
-            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+            none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
           },
         },
         data: { archivedAt },
@@ -3992,6 +3996,9 @@ export async function bulkArchiveAssets({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
     });
 
     // Fetch the eligible subset first so we can emit one event per asset
@@ -4009,7 +4016,7 @@ export async function bulkArchiveAssets({
         // Skipped rather than thrown — bulk reports counts, it doesn't fail
         // the batch on one ineligible row.
         bookingAssets: {
-          none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+          none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
         },
       },
       select: { id: true },
@@ -4047,7 +4054,7 @@ export async function bulkArchiveAssets({
           status: AssetStatus.AVAILABLE,
           archivedAt: null,
           bookingAssets: {
-            none: { booking: { status: { in: ACTIVE_BOOKING_STATUSES } } },
+            none: { booking: { status: { in: UNFINISHED_BOOKING_STATUSES } } },
           },
         },
         data: { archivedAt },
@@ -4145,6 +4152,9 @@ export async function bulkUnarchiveAssets({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
     });
 
     const eligible = await db.asset.findMany({
@@ -7282,6 +7292,9 @@ export async function bulkDeleteAssets({
       // SELF_SERVICE do not hold, so the custodian filter needs no narrowing.
       allowedTeamMemberIds: "all",
       timeZone,
+      // Acts ON archived assets in the view the user selected from; reached
+      // only with asset:archive / asset:delete (ADMIN, OWNER). Issue #382.
+      honorArchivedView: true,
     });
 
     /**

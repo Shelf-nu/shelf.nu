@@ -14,6 +14,7 @@ import {
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
 import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -56,8 +57,15 @@ function ConditionalActionsDropdown() {
   const organization = useCurrentOrganization();
   const selectedAssets = useAtomValue(selectedBulkItemsAtom);
   const [searchParams] = useSearchParams();
-  /** Active / Archived / All view dimension (issue #382). */
-  const archivedFilter = searchParams.get("archived") ?? "active";
+  /**
+   * Active / Archived / All view dimension (issue #382). Honoured only for
+   * members who can archive, as the list itself is; anyone else is looking at
+   * the Active view whatever the URL says.
+   */
+  const canArchiveAssets = useCanArchiveAssets();
+  const archivedFilter = canArchiveAssets
+    ? searchParams.get("archived") ?? "active"
+    : "active";
   const roles = useOrganizationRoles();
 
   const allSelected = isSelectingAllItems(selectedAssets);
