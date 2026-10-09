@@ -65,6 +65,15 @@ vi.mock("~/modules/reports/helpers.server", () => ({
   monthlyBookingTrendsReport: vi.fn(),
 }));
 
+// why: the workspace's plan is its owner's tier, read from the database. These
+// cases are about the file, so the workspace is on a plan with reports; the
+// plan gate itself is covered in reports-plan-gate.test.ts
+vi.mock("~/modules/tier/service.server", () => ({
+  getOrganizationTierLimit: vi.fn(() =>
+    Promise.resolve({ canUseReports: true })
+  ),
+}));
+
 // why: format prefs are resolved from the database for the acting user
 vi.mock("~/utils/date-format.server", () => ({
   resolveUserFormatPrefsById: vi.fn(() =>
