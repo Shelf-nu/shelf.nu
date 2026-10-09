@@ -49,6 +49,13 @@ function redactSensitiveSearchParams(href: string | undefined) {
   }
 }
 
+/**
+ * Receives an in-app feedback submission (issue, idea or error report):
+ * validates it, stores the optional screenshot, emails the full report to
+ * support and a copy of what was sent to the submitter.
+ *
+ * @returns `{ success: true }`, or the validation or server error
+ */
 export async function action({ context, request }: ActionFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;

@@ -104,7 +104,12 @@ export const sendFeedbackCopyEmail = async ({
   }
 };
 
-/** Plain-text rendering of the copy (mirrors the HTML version) */
+/**
+ * Plain-text rendering of the copy (mirrors the HTML version).
+ *
+ * @param props - The submitter's own content
+ * @returns The text body handed to `sendEmail`
+ */
 export const feedbackCopyEmailText = ({
   firstName,
   type,
@@ -139,6 +144,12 @@ const messageBoxStyle = {
   backgroundColor: "#FFFFFF",
 } as const;
 
+/**
+ * React Email layout of the copy: greeting, type badge, message, optional
+ * screenshot link, the line about replies, and the closing.
+ *
+ * @param props - The submitter's own content
+ */
 function FeedbackCopyEmailTemplate({
   firstName,
   type,
@@ -225,5 +236,11 @@ function FeedbackCopyEmailTemplate({
   );
 }
 
+/**
+ * Renders the copy to HTML.
+ *
+ * @param props - The submitter's own content
+ * @returns The HTML body handed to `sendEmail`
+ */
 export const feedbackCopyEmailHtml = (props: FeedbackCopyContent) =>
   render(<FeedbackCopyEmailTemplate {...props} />);
