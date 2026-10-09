@@ -440,12 +440,19 @@ export default function LocationAssets() {
               </When>
             </>
           }
-          customEmptyStateContent={{
-            title: "There are currently no assets at the location",
-            text: "Add assets in this location",
-            newButtonRoute: "manage-assets",
-            newButtonContent: "Add asset",
-          }}
+          customEmptyStateContent={
+            userRoleCanManageAssets
+              ? {
+                  title: "There are currently no assets at the location",
+                  text: "Add assets in this location",
+                  newButtonRoute: "manage-assets",
+                  newButtonContent: "Add asset",
+                }
+              : {
+                  title: "There are currently no assets at the location",
+                  text: "Assets placed at this location will appear here.",
+                }
+          }
         />
       </div>
     </>

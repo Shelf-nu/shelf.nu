@@ -147,12 +147,19 @@ export default function LocationsIndexPage() {
         />
         <List
           bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
-          customEmptyStateContent={{
-            title: "No locations yet",
-            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
-            newButtonRoute: "/locations/new",
-            newButtonContent: "Create your first location",
-          }}
+          customEmptyStateContent={
+            canCreateLocation
+              ? {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+                  newButtonRoute: "/locations/new",
+                  newButtonContent: "Create your first location",
+                }
+              : {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Locations added to this workspace will appear here.",
+                }
+          }
           ItemComponent={ListItemContent}
           headerChildren={
             <>
