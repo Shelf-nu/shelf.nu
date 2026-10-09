@@ -36,6 +36,7 @@ import {
 } from "./availability-label";
 import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
+import { ArchivedBadge } from "../assets/archived-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -345,13 +346,19 @@ export default function ListAssetContent({
               */}
               <div className="flex flex-wrap items-center gap-2">
                 {isFinished && wasCheckedOut ? (
-                  <ReturnedBadge />
+                  <>
+                    <ReturnedBadge />
+                    {/* The asset may have been archived after it came back;
+                        the row still says so (issue #382). */}
+                    {item.archivedAt ? <ArchivedBadge /> : null}
+                  </>
                 ) : (
                   <AssetStatusBadge
                     id={item.id}
                     status={contextStatus}
                     availableToBook={item.availableToBook}
                     asset={item}
+                    isArchived={!!item.archivedAt}
                     // For QT rows the resolved `contextStatus` already encodes
                     // the booking-context truth (AVAILABLE via
                     // `getBookingContextAssetStatus` for DRAFT/RESERVED, or

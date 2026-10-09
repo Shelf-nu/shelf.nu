@@ -416,6 +416,10 @@ async function resolveExportAssets({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     timeZone,
+    // The export reproduces the index view it was started from, Archived and
+    // All included (issue #382). Reaching it takes `asset: export`, which only
+    // ADMIN and OWNER hold — the same members who hold `asset: archive`.
+    honorArchivedView: true,
   });
 
   return { assets };

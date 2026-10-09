@@ -77,6 +77,9 @@ vi.mock("~/database/db.server", () => {
     asset: {
       findMany: dbMocks.assetFindMany,
       updateMany: dbMocks.assetUpdateMany,
+      // why: the archived-asset guard (issue #382) counts archived rows in the
+      // selection; none of these fixtures are archived.
+      count: vi.fn().mockResolvedValue(0),
     },
     assetKit: { findMany: dbMocks.assetKitFindMany },
     teamMember: { findFirst: dbMocks.teamMemberFindFirst },

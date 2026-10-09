@@ -311,6 +311,7 @@ export async function fetchAllAuditPdfRelatedData(
     const [assets, organization] = await Promise.all([
       assetIds.length > 0
         ? db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: audit receipt prints every asset in the audit, archived ones included
             where: {
               id: { in: assetIds },
               organizationId,

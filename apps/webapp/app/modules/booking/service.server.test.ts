@@ -28,6 +28,7 @@ import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { sendEmail } from "~/emails/mail.server";
 import * as activityEventService from "~/modules/activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   assertKitsCheckoutable,
   assertKitsCustodyAssignable,
@@ -127,6 +128,13 @@ afterAll(() => {
 
 // Mock dependencies
 // why: testing booking service business logic without executing actual database operations
+// why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
+// the guard's own behaviour is what these suites assert on.
+vitest.mock("~/modules/asset/archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
+}));
+
 vitest.mock("~/database/db.server", () => ({
   db: {
     // why: handles both callback-style and array-style $transaction
@@ -164,12 +172,18 @@ vitest.mock("~/database/db.server", () => ({
       // db.asset.findMany({ where:{ id:{ in }, organizationId }, select:{ id }}).
       // Echo the requested ids so the guard passes for happy-path tests; other
       // call sites (no id.in) still get [], and tests override per-case.
+      // A query for ARCHIVED rows (`archivedAt: { not: null }`, as
+      // duplicateBooking issues) answers "none archived" instead of echoing.
       findMany: vitest.fn().mockImplementation((args?: any) => {
+        if (args?.where?.archivedAt?.not === null) return Promise.resolve([]);
         const ids = args?.where?.id?.in;
         return Promise.resolve(
           Array.isArray(ids) ? ids.map((id: string) => ({ id })) : []
         );
       }),
+      // why: addScannedAssetsToBookingWithinTx counts archived scanned assets
+      // (issue #382 guard). Default 0 = none archived, so happy-path scans pass.
+      count: vitest.fn().mockResolvedValue(0),
       // why: the windowed QT availability guard (`getAssetAvailability` →
       // `computeAvailableQuantity`, kept REAL by the consumption-log
       // partial-mock below) reads `Asset.quantity` via
@@ -3528,6 +3542,28 @@ describe("buildKitSlicesForBooking", () => {
     expect(slices).toHaveLength(2);
   });
 
+  it("reads only active members, so a kit with an archived member still books (issue #382)", async () => {
+    // why: the membership read is the only query; its WHERE is the contract.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
+
+    await buildKitSlicesForBooking({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+    });
+
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          kitId: { in: ["kit-1"] },
+          organizationId: "org-1",
+          asset: { archivedAt: null },
+        },
+      })
+    );
+  });
+
   it("excludes memberships already represented on the booking", async () => {
     expect.assertions(1);
 
@@ -3568,7 +3604,11 @@ describe("buildKitSlicesForBooking", () => {
 
     expect(db.assetKit.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { kitId: { in: ["kit-1", "kit-2"] }, organizationId: "org-1" },
+        where: {
+          kitId: { in: ["kit-1", "kit-2"] },
+          organizationId: "org-1",
+          asset: { archivedAt: null },
+        },
       })
     );
   });
@@ -7963,6 +8003,17 @@ describe("duplicateBooking", () => {
 
   beforeEach(() => {
     vitest.clearAllMocks();
+    // why: duplicateBooking asks which copied assets are archived (issue #382).
+    // clearAllMocks keeps implementations, so a fixture an earlier describe
+    // left on `asset.findMany` would answer that as "all archived". None are.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockImplementation(((args?: { where?: { id?: { in?: string[] } } }) =>
+        Promise.resolve(
+          (args?.where as { archivedAt?: unknown } | undefined)?.archivedAt
+            ? []
+            : (args?.where?.id?.in ?? []).map((id) => ({ id }))
+        )) as never);
   });
 
   it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
@@ -7995,6 +8046,72 @@ describe("duplicateBooking", () => {
       expect(db.booking.create).not.toHaveBeenCalled();
     }
   );
+
+  it("drops an asset archived since the source booking, keeps the rest (issue #382)", async () => {
+    // Archiving is allowed once a booking is finished, so a source booking can
+    // hold an asset that is now out of service. The copy must not bring it
+    // back into a booking that can be reserved and checked out.
+    const slice = (assetId: string, id: string) => ({
+      asset: { id: assetId, assetKits: [] },
+      assetId,
+      quantity: 1,
+      id,
+      checkedOutAt: null,
+      checkedInAt: null,
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.findFirstOrThrow.mockResolvedValue({
+      ...mockBookingData,
+      bookingAssets: [
+        slice("asset-active", "ba-1"),
+        slice("asset-archived", "ba-2"),
+      ],
+      tags: [],
+    });
+    //@ts-expect-error missing vitest type
+    db.booking.create.mockResolvedValue({
+      ...mockBookingData,
+      id: "booking-2",
+    });
+    // why: the archived lookup inside the transaction finds the second asset.
+    vitest
+      .mocked(db.asset.findMany)
+      .mockImplementation(((args?: { where?: { archivedAt?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt ? [{ id: "asset-archived" }] : []
+        )) as never);
+
+    const result = await duplicateBooking({
+      bookingId: "booking-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      from: DUPLICATE_FROM,
+      to: DUPLICATE_TO,
+      request: new Request("https://example.com"),
+      access: accessFor([OrganizationRoles.ADMIN]),
+    });
+
+    // The caller is told, so the user hears what was left out.
+    expect(result.droppedArchivedCount).toBe(1);
+
+    const created = vitest.mocked(db.booking.create).mock.calls[0][0] as {
+      data: { bookingAssets: { create: { assetId: string }[] } };
+    };
+    expect(created.data.bookingAssets.create.map((s) => s.assetId)).toEqual([
+      "asset-active",
+    ]);
+    // Locked first, so an archive cannot land between the read and the insert.
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["asset-active", "asset-archived"],
+      "org-1"
+    );
+    // No BOOKING_ASSETS_ADDED for the dropped asset.
+    const added = vitest
+      .mocked(activityEventService.recordEvents)
+      .mock.calls.flatMap(([events]) => events as { assetId?: string }[]);
+    expect(added.map((e) => e.assetId)).toEqual(["asset-active"]);
+  });
 
   it("should duplicate booking using the caller-provided from/to dates", async () => {
     expect.assertions(4);
@@ -8062,7 +8179,7 @@ describe("duplicateBooking", () => {
         }),
       })
     );
-    expect(result).toEqual(duplicatedBooking);
+    expect(result).toEqual({ ...duplicatedBooking, droppedArchivedCount: 0 });
 
     // Lifecycle event for the duplicated booking — same recordEvent
     // contract as createBooking.
@@ -15276,6 +15393,40 @@ describe("addScannedAssetsToBooking", () => {
     }
   );
 
+  it("refuses an archived scanned asset, locking the rows before the check", async () => {
+    // Pickers hide archived assets, but the scanner takes raw ids (issue #382).
+    // why: the archived guard counts archived rows among the scanned ids; one
+    // here. Once, so the default "none archived" answers every later test.
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(1);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: ["asset-1"],
+        kitIds: [],
+        bookingId: "booking-1",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/scanned assets are archived/),
+    });
+
+    // The row lock comes BEFORE the read, or an archive can commit between the
+    // check and the insert and leave an archived asset in the booking.
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      db,
+      ["asset-1"],
+      "org-1"
+    );
+    expect(
+      vitest.mocked(lockAssetsForArchiveGuard).mock.invocationCallOrder[0]
+    ).toBeLessThan(vitest.mocked(db.asset.count).mock.invocationCallOrder[0]);
+    // Refused before any write.
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("guards every loose scan against kit membership, with no kit exempt", async () => {
     // A client that sends a scanned kit's members as plain asset ids, with no
     // kit slices, would book them loose and split the kit. Members of a kit
@@ -16001,6 +16152,22 @@ describe("getAvailableAssetsIdsForBooking", () => {
     await expect(
       getAvailableAssetsIdsForBooking(["asset-1", "asset-2"], "org-1")
     ).resolves.toEqual(["asset-1", "asset-2"]);
+  });
+
+  it("refuses a selection with an archived asset instead of booking the rest (issue #382)", async () => {
+    // An asset archived after the page loaded must not vanish from the
+    // selection while the others book with a success message.
+    // why: the archived guard counts archived rows among the submitted ids;
+    // one here. Once, so the default "none archived" answers later tests.
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(1);
+
+    await expect(
+      getAvailableAssetsIdsForBooking(
+        ["asset-active", "asset-archived"],
+        "org-1"
+      )
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+    expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 
   it("returns a QUANTITY_TRACKED kit member — its free pool stays directly bookable", async () => {

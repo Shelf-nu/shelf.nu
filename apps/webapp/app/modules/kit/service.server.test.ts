@@ -34,6 +34,7 @@ import {
   getPaginatedAndFilterableKits,
 } from "./service.server";
 import { recordEvents } from "../activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "../asset/archive-lock.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createNote, createNotes } from "../note/service.server";
@@ -44,6 +45,13 @@ import { getQr } from "../qr/service.server";
 
 // Mock dependencies
 // why: testing kit service logic without executing actual database operations
+// why: lockAssetsForArchiveGuard runs a raw SELECT ... FOR UPDATE that a
+// mocked tx cannot execute. Stub the lock itself, NOT the archived guard —
+// the guard's own behaviour is what these suites assert on.
+vitest.mock("~/modules/asset/archive-lock.server", () => ({
+  lockAssetsForArchiveGuard: vitest.fn(),
+}));
+
 vitest.mock("~/database/db.server", () => ({
   db: {
     $transaction: vitest.fn().mockImplementation((callback) => callback(db)),
@@ -71,6 +79,9 @@ vitest.mock("~/database/db.server", () => ({
       findMany: vitest.fn().mockResolvedValue([]),
       update: vitest.fn().mockResolvedValue({}),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
+      // why: updateKitAssets now calls assertAssetsAreNotArchived (issue #382),
+      // which counts archived assets. Default 0 = none archived.
+      count: vitest.fn().mockResolvedValue(0),
     },
     assetKit: {
       create: vitest.fn().mockResolvedValue({}),
@@ -4740,6 +4751,42 @@ describe("updateKitLocation - cascade to member assets", () => {
     });
   }
 
+  it("leaves an archived member where it is (issue #382)", async () => {
+    mockKitWithAssets([
+      {
+        quantity: 1,
+        asset: {
+          id: "asset-archived",
+          title: "Archived member",
+          type: AssetType.INDIVIDUAL,
+          quantity: null,
+          unitOfMeasure: null,
+          assetLocations: [{ location: { id: "loc-old", name: "Old Loc" } }],
+        },
+      },
+    ]);
+    //@ts-expect-error missing vitest type
+    db.assetKit.findMany.mockResolvedValue([]);
+
+    const { updateKitLocation } = await import("./service.server");
+
+    await updateKitLocation({
+      id: "kit-1",
+      organizationId: "org-1",
+      currentLocationId: "loc-old",
+      newLocationId: "loc-new",
+      userId: "user-1",
+    });
+
+    // The cascade only reads members that are not archived, so an archived
+    // one is never re-placed, noted or reported as moved.
+    expect(db.assetKit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ asset: { archivedAt: null } }),
+      })
+    );
+  });
+
   it("moves an INDIVIDUAL member that already has a location", async () => {
     expect.assertions(3);
 
@@ -6688,6 +6735,34 @@ describe("kit detach flows — helper wiring", () => {
 });
 
 describe("bulkAssignKitCustody — handled validation (SHELF-WEBAPP-226)", () => {
+  it("reads only the kits' members that are not archived (issue #382)", async () => {
+    // An archived member is out of service: no custody, no status change, no
+    // note, no event. Filtering at the read keeps every later step honest.
+    // why: an unavailable kit stops the call right after the read.
+    (db.kit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "kit-1", name: "Kit 1", status: "IN_CUSTODY", assetKits: [] },
+    ]);
+
+    await bulkAssignKitCustody({
+      allowedTeamMemberIds: "all" as const,
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      custodianId: "tm-1",
+      custodianName: "Bob",
+      userId: "user-1",
+    }).catch(() => null);
+
+    expect(db.kit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetKits: expect.objectContaining({
+            where: { asset: { archivedAt: null } },
+          }),
+        }),
+      })
+    );
+  });
+
   it("rejects an unavailable kit as a handled 400, not a captured 500", async () => {
     // why: the availability guard reads freshly-queried kit status; return an
     // IN_CUSTODY (not AVAILABLE) kit so the unavailable-kits guard fires.
@@ -6892,7 +6967,14 @@ describe("updateKitAssets - kit-booking propagation scope", () => {
     //@ts-expect-error missing vitest type
     db.kit.findUniqueOrThrow.mockResolvedValue(mockKit);
     //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue(mockAssetsForKit);
+    db.asset.findMany.mockImplementation(
+      // why: the propagation asks which new members were archived since the
+      // membership transaction (issue #382); none here.
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null ? [] : mockAssetsForKit
+        )
+    );
     // The AssetKit row the pivot insert just created for the new member.
     //@ts-expect-error missing vitest type
     db.assetKit.findMany.mockResolvedValue([
@@ -7166,6 +7248,11 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
        */
       extraBookings?: Array<{ id: string; status: BookingStatus }>;
       /**
+       * New members archived after the membership transaction and before the
+       * booking propagation (issue #382).
+       */
+      archivedSince?: string[];
+      /**
        * The kit's pre-existing slices, overriding the single slice implied by
        * `kitSlicesWereCheckedOut`. Lets a case model a kit that only half
        * left, or one whose members have since come back.
@@ -7247,9 +7334,11 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
 
     // why: the service re-reads the submitted asset ids to diff them against
     // current membership. Returning both the sitting member and the newcomer
-    // is what makes `newlyAddedAssets` exactly `["newcomer"]`.
-    //@ts-expect-error missing vitest type
-    db.asset.findMany.mockResolvedValue([
+    // is what makes `newlyAddedAssets` exactly `["newcomer"]`. The propagation
+    // also asks which new members were archived since (issue #382): none, by
+    // default — `archivedSince` lets a case say otherwise.
+    const archivedSince = options.archivedSince ?? [];
+    const members = [
       {
         id: "sitting-member",
         title: "Sitting member",
@@ -7272,7 +7361,16 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
         bookingAssets: [],
         assetLocations: [],
       },
-    ]);
+    ];
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockImplementation(
+      (args?: { where?: { archivedAt?: { not?: null } } }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null
+            ? archivedSince.map((id) => ({ id }))
+            : members
+        )
+    );
 
     // why: the propagation block reads back the AssetKit row the membership
     // write just created, to populate `assetKitId` / `sourceKitId` on the new
@@ -7454,6 +7552,29 @@ describe("updateKitAssets - CHECKED_OUT stamp is booking-derived, not Kit.status
     expect(db.bookingAsset.createMany).not.toHaveBeenCalled();
     // `recordEvents` still carries this call's membership events, so assert on
     // the propagation action specifically.
+    expect(propagatedAddedEvents()).toEqual([]);
+  });
+
+  it("skips a new member archived before it reaches the kit's bookings (issue #382)", async () => {
+    // The membership transaction checked the newcomer, but it has committed,
+    // and an archive can land before the propagation writes BookingAsset rows.
+    arrange(BookingStatus.DRAFT, KitStatus.AVAILABLE, false, {
+      archivedSince: ["newcomer"],
+    });
+
+    await act();
+
+    expect(lockAssetsForArchiveGuard).toHaveBeenCalledWith(
+      expect.anything(),
+      ["newcomer"],
+      "org-1"
+    );
+    const written = vitest
+      .mocked(db.bookingAsset.createMany)
+      .mock.calls.flatMap(
+        ([args]) => (args as { data: { assetId: string }[] }).data
+      );
+    expect(written.map((row) => row.assetId)).not.toContain("newcomer");
     expect(propagatedAddedEvents()).toEqual([]);
   });
 
@@ -8155,5 +8276,112 @@ describe("getPaginatedAndFilterableKits: booking kit picker availability", () =>
     const where = await runPicker();
 
     expect(JSON.stringify(where)).not.toContain("notIn");
+  });
+});
+
+describe("updateKitAssets — archived assets (issue #382)", () => {
+  /** A kit member as `updateKitAssets` reads it back through `asset.findMany`. */
+  const member = (id: string, inKit: boolean) => ({
+    id,
+    title: id,
+    type: AssetType.INDIVIDUAL,
+    quantity: null,
+    unitOfMeasure: null,
+    assetKits: inKit ? [{ kitId: "kit-1", quantity: 1 }] : [],
+    custody: null,
+    assetLocations: [],
+  });
+
+  /** The kit `updateKitAssets` loads, holding `memberIds`. */
+  const kitHolding = (memberIds: string[]) => ({
+    id: "kit-1",
+    name: "Rack Kit",
+    location: null,
+    locationId: null,
+    custody: null,
+    assetKits: memberIds.map((id) => ({
+      kitId: "kit-1",
+      quantity: 1,
+      asset: {
+        id,
+        title: id,
+        type: AssetType.INDIVIDUAL,
+        unitOfMeasure: null,
+        assetKits: [{ kitId: "kit-1" }],
+        bookingAssets: [],
+      },
+    })),
+  });
+
+  /** The archived guard's count call, recognised by its predicate. */
+  const archivedGuardCalls = () =>
+    vitest
+      .mocked(db.asset.count)
+      .mock.calls.filter(
+        ([args]) =>
+          (args as { where?: { archivedAt?: unknown } })?.where?.archivedAt !==
+          undefined
+      );
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("refuses to add an archived asset with a 400 and writes no membership", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(kitHolding([]));
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([member("asset-archived", false)]);
+    // why: the archived guard counts archived rows among the assets being
+    // added; one here. Consumed by this call, so nothing leaks.
+    //@ts-expect-error missing vitest type
+    db.asset.count.mockResolvedValueOnce(1);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    await expect(
+      updateKitAssets({
+        kitId: "kit-1",
+        assetIds: ["asset-archived"],
+        userId: "user-1",
+        organizationId: "org-1",
+        request: new Request("http://test.com"),
+      })
+    ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+    expect(archivedGuardCalls()[0]?.[0]).toMatchObject({
+      where: { id: { in: ["asset-archived"] } },
+    });
+    expect(db.assetKit.create).not.toHaveBeenCalled();
+    expect(db.assetKit.createMany).not.toHaveBeenCalled();
+  });
+
+  it("does not let a kept archived member lock the kit against other edits", async () => {
+    // The picker submits the kit's whole membership. `switch-a` is archived
+    // and kept; `switch-b` is being removed. Judging the submitted ids would
+    // refuse this edit for as long as the kit holds an archived member.
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue(
+      kitHolding(["switch-a", "switch-b"])
+    );
+    //@ts-expect-error missing vitest type
+    db.asset.findMany.mockResolvedValue([member("switch-a", true)]);
+
+    const { updateKitAssets } = await import("./service.server");
+
+    const outcome = await updateKitAssets({
+      kitId: "kit-1",
+      assetIds: ["switch-a"],
+      userId: "user-1",
+      organizationId: "org-1",
+      request: new Request("http://test.com"),
+    }).then(
+      () => null,
+      (cause: unknown) => cause
+    );
+
+    expect(outcome).not.toMatchObject({ title: "Asset is archived" });
+    // Nothing is added or re-quantified, so there is nothing to check.
+    expect(archivedGuardCalls()).toHaveLength(0);
   });
 });

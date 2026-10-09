@@ -528,3 +528,26 @@ describe("createAssetsFromBackupImport shared relations", () => {
     });
   });
 });
+
+describe("createAssetsFromBackupImport archived state (issue #382)", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+    locationFindMany.mockResolvedValue([]);
+    assetCreate.mockImplementation(({ data }) =>
+      Promise.resolve({ id: `asset-${data.title}` })
+    );
+  });
+
+  it("restores an archived asset as archived and an active one as active", async () => {
+    await restore([
+      row({ title: "Old drill", archivedAt: "2026-09-01T10:00:00.000Z" }),
+      row({ title: "Tripod", archivedAt: "" }),
+    ]);
+
+    const data = assetDataByTitle();
+    expect(data["Old drill"].archivedAt).toEqual(
+      new Date("2026-09-01T10:00:00.000Z")
+    );
+    expect(data.Tripod.archivedAt).toBeNull();
+  });
+});

@@ -54,7 +54,11 @@ export function AssetIndexFilters({
     return (
       <Filters
         slots={{
-          "left-of-search": <StatusFilter statusItems={AssetStatus} />,
+          "left-of-search": (
+            <div className="flex items-center gap-2">
+              <StatusFilter statusItems={AssetStatus} />
+            </div>
+          ),
           "right-of-search": (
             <div className="flex items-center gap-2">
               <SortBy
@@ -184,7 +188,11 @@ function AdvancedAssetIndexFilters() {
     <Filters
       slots={{
         "left-of-search": <AdvancedFilteringAndSorting />,
-        "right-of-search": <AvailabilityViewToggle modeIsSimple={false} />,
+        "right-of-search": (
+          <div className="flex items-center gap-2">
+            <AvailabilityViewToggle modeIsSimple={false} />
+          </div>
+        ),
       }}
       searchClassName="leading-5"
     >

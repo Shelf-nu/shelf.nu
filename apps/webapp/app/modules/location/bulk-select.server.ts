@@ -18,17 +18,27 @@ type WithSearchParams = { currentSearchParams?: string | null };
 /**
  * Resolves asset IDs for bulk location operations.
  * Handles ALL_SELECTED_KEY expansion using asset filters + the
- * `AssetLocation` pivot (Phase 4b) to scope to a single location.
+ * `AssetLocation` pivot to scope to a single location.
+ *
+ * "Select all" must mean the rows the list showed, so the expansion follows the
+ * list's Active / Archived / All view the same way its loader does.
  */
 export async function resolveLocationAssetIds({
   ids,
   organizationId,
   locationId,
   currentSearchParams,
+  honorArchivedView,
 }: {
   ids: string[];
   organizationId: string;
   locationId: string;
+  /**
+   * Apply the `?archived=` view from `currentSearchParams`. Pass
+   * `canViewArchivedAssets(access)`, the grant the list's loader uses; without
+   * it the expansion covers active assets only.
+   */
+  honorArchivedView: boolean;
 } & WithSearchParams): Promise<string[]> {
   if (!ids.includes(ALL_SELECTED_KEY)) {
     return ids;
@@ -40,6 +50,7 @@ export async function resolveLocationAssetIds({
     // Location writes are ADMIN/OWNER-only, so the custodian filter
     // here can never come from a restricted viewer.
     allowedTeamMemberIds: "all",
+    honorArchivedView,
   });
 
   const allAssets = await db.asset.findMany({

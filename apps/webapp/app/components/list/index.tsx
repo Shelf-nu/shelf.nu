@@ -76,6 +76,16 @@ export type ListProps = {
   customPagination?: ReactElement;
   /** Any extra content to the right in Header */
   headerExtraContent?: ReactNode;
+  /**
+   * Replaces the plain title text, for a title that is itself a control.
+   *
+   * For controls that change WHICH SET the list is showing (the asset lists'
+   * Active / Archived / All menu): the title and the count under it describe
+   * that set, so the switch belongs on the title. It also stays on screen when
+   * the chosen set is empty, so a member is never left in an empty view with
+   * no way back.
+   */
+  titleContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 
@@ -116,6 +126,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     title,
     ItemComponent,
     headerChildren,
+    titleContent,
     hideFirstHeaderColumn = false,
     navigate,
     className,
@@ -154,10 +165,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       )}
     >
       {!hasItems ? (
-        <EmptyState
-          className={emptyStateClassName}
-          customContent={customEmptyStateContent}
-        />
+        <>
+          {titleContent ? (
+            <div className="border-b p-4 pb-2 text-left text-text-sm">
+              {titleContent}
+            </div>
+          ) : null}
+          <EmptyState
+            className={emptyStateClassName}
+            customContent={customEmptyStateContent}
+          />
+        </>
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
@@ -167,7 +185,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               "flex justify-between border-b md:items-center "
             )}
           >
-            <div>
+            <div className="flex items-center gap-3">
               <ListTitle
                 title={title}
                 disableSelectAllItems={disableSelectAllItems}
@@ -175,6 +193,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
                 items={items}
                 countLabel={countLabel}
                 countLabelIsTotal={countLabelIsTotal}
+                titleContent={titleContent}
               />
             </div>
             <div className="flex items-center justify-end gap-2">

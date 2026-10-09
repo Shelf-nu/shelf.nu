@@ -20,15 +20,21 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
 import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
 import {
+  archiveAsset,
   assertAssetDeleteConfirmed,
   deleteAsset,
   deleteOtherImages,
   getAsset,
   relinkAssetQrCode,
+  unarchiveAsset,
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
@@ -57,6 +63,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -274,6 +281,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       z.object({
         intent: z.enum([
           "delete",
+          "archive",
+          "reinstate",
           "relink-qr-code",
           "set-reminder",
           "add-barcode",
@@ -292,6 +301,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       delete: {
         entity: PermissionEntity.asset,
         action: PermissionAction.delete,
+      },
+      // Reinstating is the inverse of archiving, so one grant covers both.
+      archive: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
+      },
+      reinstate: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
       },
       "relink-qr-code": {
         entity: PermissionEntity.asset,
@@ -312,6 +330,16 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       request,
       ...intent2Permission[intent],
     });
+
+    // Archived assets are frozen (issue #382): only delete + reinstate are
+    // allowed. Block the other mutating intents server-side.
+    if (
+      intent === "relink-qr-code" ||
+      intent === "set-reminder" ||
+      intent === "add-barcode"
+    ) {
+      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+    }
 
     switch (intent) {
       case "delete": {
@@ -347,6 +375,40 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return redirect("/assets");
+      }
+
+      case "archive": {
+        await archiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+          // Set by the "Archive anyway" prompt after the shortfall warning.
+          confirmModelShortfall:
+            formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
+        });
+
+        sendNotification({
+          title: "Asset archived",
+          message:
+            "The asset is hidden from your lists and can't be booked. You can reinstate it any time.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "reinstate": {
+        await unarchiveAsset({ id, organizationId, actorUserId: userId });
+
+        sendNotification({
+          title: "Asset reinstated",
+          message: "The asset is active again and available to book.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       case "relink-qr-code": {
@@ -487,7 +549,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return data(error(reason), { status: reason.status });
+    // The model-reservation warning is a question, not a failure: the Actions
+    // menu turns it into an "Archive anyway" prompt, so no error toast.
+    const isShortfallWarning = isModelShortfallMessage(reason.message);
+    return data(error(reason, !isShortfallWarning), { status: reason.status });
   }
 }
 
@@ -559,6 +624,7 @@ export default function AssetDetailsPage() {
               status={asset.status}
               availableToBook={asset.availableToBook}
               asset={asset}
+              isArchived={!!asset.archivedAt}
             />
           </div>
         }

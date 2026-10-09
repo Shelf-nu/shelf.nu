@@ -453,6 +453,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * SECURITY (cross-org IDOR): scope to the caller's organizationId.
        */
       db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a booking that already holds an archived asset must still show it (with its badge)
         where: {
           id: { in: allBookingAssetIds },
           organizationId,
@@ -1891,6 +1892,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Post-pivot, asset → booking lookup goes via the `BookingAsset` pivot.
         const checkedOutAssetIdsBeforeCheckin = (
           await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must cover every asset already out on the booking, archived ones included
             where: {
               bookingAssets: { some: { bookingId: id } },
               organizationId,
@@ -1982,6 +1984,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // Get the asset data for proper note generation
         const asset = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing an archived asset from a booking stays allowed and its note needs the title
           where: { id: assetId, organizationId },
           select: { id: true, title: true },
         });
@@ -2236,6 +2239,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * asset — `standaloneAssetIds` carries that provenance separately.
          */
         const assets = await db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: bulk removal from a booking may include archived assets, which stays allowed
           where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
         });
