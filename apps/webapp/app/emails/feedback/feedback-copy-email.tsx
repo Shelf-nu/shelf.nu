@@ -1,9 +1,10 @@
 /**
  * Feedback copy email
  *
- * Sent to the person who submitted the in-app feedback form: the type they
- * picked, their message and the screenshot link, if any. Replies go to
- * SUPPORT_EMAIL, so answering the copy reaches the team that reads feedback.
+ * Sent to the person who submitted the in-app feedback form: a thank-you
+ * with the type they picked, their message and the screenshot link, if any.
+ * Replies go to SUPPORT_EMAIL, so anything they add reaches support. The copy
+ * invites a reply; it never promises an answer.
  *
  * It shows only what the submitter wrote or attached. The auto-captured
  * context (page, browser, viewport, app version, ids, error details) belongs
@@ -52,9 +53,10 @@ const TYPE_LABELS: Record<FeedbackCopyEmailProps["type"], string> = {
  * to the user.
  *
  * Sends nothing when the submitter has no address, or when SUPPORT_EMAIL is
- * not configured: the copy promises that a reply reaches the team, and
- * without that address it would not. The copy goes out through `sendEmail`
- * like every other email, so soft-deleted addresses are dropped there.
+ * not configured: the copy invites a reply, and without that address the
+ * reply would go to the sender address instead. The copy goes out through
+ * `sendEmail` like every other email, so soft-deleted addresses are dropped
+ * there.
  */
 export const sendFeedbackCopyEmail = async ({
   firstName,
@@ -80,7 +82,7 @@ export const sendFeedbackCopyEmail = async ({
     const sanitized = message.replace(/[\r\n\t]+/g, " ").trim();
     const subjectPreview =
       sanitized.length > 50 ? `${sanitized.slice(0, 50)}...` : sanitized;
-    const subject = `We received your feedback: ${subjectPreview}`;
+    const subject = `Thanks for your feedback: ${subjectPreview}`;
 
     const html = await feedbackCopyEmailHtml(content);
     const text = feedbackCopyEmailText(content);
@@ -117,14 +119,14 @@ export const feedbackCopyEmailText = ({
   screenshotUrl,
 }: FeedbackCopyContent) => `Hey${firstName ? ` ${firstName}` : ""},
 
-Thanks for your feedback. Here is a copy of what you sent.
+Thanks for taking the time to send us feedback. Here is a copy of what you sent.
 
 Type: ${TYPE_LABELS[type]}
 
 Message:
 ${message}
 ${screenshotUrl ? `\nScreenshot: ${screenshotUrl}\n` : ""}
-Our team reads every message and replies by email. To add anything, just reply to this email.
+We appreciate you helping us improve Shelf. If you want to add anything, reply to this email.
 
 The Shelf Team
 `;
@@ -161,7 +163,7 @@ function FeedbackCopyEmailTemplate({
   return (
     <Html>
       <Head>
-        <title>We received your feedback</title>
+        <title>Thanks for your feedback</title>
       </Head>
 
       <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
@@ -173,7 +175,8 @@ function FeedbackCopyEmailTemplate({
           </Text>
 
           <Text style={{ ...styles.p }}>
-            Thanks for your feedback. Here is a copy of what you sent.
+            Thanks for taking the time to send us feedback. Here is a copy of
+            what you sent.
           </Text>
 
           <div style={infoBoxStyle}>
@@ -225,8 +228,8 @@ function FeedbackCopyEmailTemplate({
           ) : null}
 
           <Text style={{ marginTop: "24px", ...styles.p }}>
-            Our team reads every message and replies by email. To add anything,
-            just reply to this email.
+            We appreciate you helping us improve Shelf. If you want to add
+            anything, reply to this email.
           </Text>
 
           <Text style={{ marginTop: "24px", ...styles.p }}>The Shelf Team</Text>

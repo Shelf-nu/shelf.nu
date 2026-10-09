@@ -130,7 +130,7 @@ describe("sendFeedbackCopyEmail", () => {
     expect(message.to).toBe("jane@example.com");
     expect(message.replyTo).toBe("help@assets.example.org");
     expect(message.subject).toBe(
-      "We received your feedback: The asset list shows the wrong creation time"
+      "Thanks for your feedback: The asset list shows the wrong creation time"
     );
   });
 
@@ -141,9 +141,7 @@ describe("sendFeedbackCopyEmail", () => {
     expect(text).toContain("Type: Issue");
     expect(text).toContain(SUBMISSION.message);
     expect(text).toContain(`Screenshot: ${SUBMISSION.screenshotUrl}`);
-    expect(text).toContain(
-      "Our team reads every message and replies by email."
-    );
+    expect(text).toContain("If you want to add anything, reply to this email.");
     expect(html).toContain(SUBMISSION.message);
     expect(html).toContain(`href="${SUBMISSION.screenshotUrl}"`);
   });
@@ -183,7 +181,7 @@ describe("sendFeedbackCopyEmail", () => {
   );
 
   it("sends no copy when SUPPORT_EMAIL is not configured", async () => {
-    // Without it a reply would have nowhere to go, and the copy says it does
+    // Without it a reply would go to the sender address, not to support
     INSTANCE.supportEmail = undefined;
 
     await sendFeedbackCopyEmail(SUBMISSION);
