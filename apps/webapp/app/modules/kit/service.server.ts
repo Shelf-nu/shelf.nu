@@ -42,11 +42,16 @@ import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   ShelfError,
   throwIfAssetQuantityOverAllocation,
   VALIDATION_ERROR,
@@ -3167,6 +3172,35 @@ async function performKitDeletion({
   );
 }
 
+/**
+ * Refuses a single kit delete unless the user typed its name, as the delete
+ * dialog asks. A kit that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The kit to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertKitDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.kit
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((kit) => kit?.name ?? null),
+    label,
+  });
+}
+
 export async function deleteKit({
   id,
   organizationId,
@@ -3847,11 +3881,17 @@ export async function bulkDeleteKits({
   organizationId,
   userId,
   currentSearchParams,
+  confirmation,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * kits this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
@@ -3916,6 +3956,15 @@ export async function bulkDeleteKits({
       },
     });
 
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: kitIds,
+      confirmation,
+      matchedCount: kitRows.length,
+      noun: { one: "kit", many: "kits" },
+      label,
+    });
+
     // Flatten pivot rows into the in-memory `assets` shape that
     // `performKitDeletion` consumes. Main's PR #2535 added per-asset
     // ASSET_KIT_CHANGED emission for the cascade unkit inside
@@ -3938,6 +3987,9 @@ export async function bulkDeleteKits({
       userId,
     });
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting kits.",

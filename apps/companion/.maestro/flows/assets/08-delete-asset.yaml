@@ -1,0 +1,93 @@
+appId: com.shelf.companion.carlos
+name: "Assets - Delete asset with a typed name"
+tags:
+  - assets
+  - delete
+  - actions
+
+---
+# Verifies the asset delete asks for the asset's title before it runs.
+# Creates a disposable asset, checks Delete stays disabled for a wrong name,
+# types the title in a different case (accepted, same rule as the webapp) and
+# deletes. Then asserts it is gone against a FRESH fetch. Self-cleaning.
+#
+# Requires create + delete permission (admin/owner).
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn:
+    text: "Not Now"
+    optional: true
+- extendedWaitUntil:
+    visible: "Settings"
+    timeout: 15000
+
+# Create a disposable asset.
+- tapOn:
+    text: "Assets"
+    index: 1
+- extendedWaitUntil:
+    visible: "Create new asset"
+    timeout: 15000
+- tapOn: "Create new asset"
+- extendedWaitUntil:
+    visible: "Title, required"
+    timeout: 15000
+- tapOn: "Title, required"
+- inputText: "QA Delete Asset"
+- tapOn: "Create asset"
+- extendedWaitUntil:
+    visible: "View Asset"
+    timeout: 20000
+- tapOn: "View Asset"
+- extendedWaitUntil:
+    visible: "More actions"
+    timeout: 20000
+
+# Open the delete and check the typed confirmation.
+- tapOn: "More actions"
+- tapOn:
+    text: "Delete Asset"
+- extendedWaitUntil:
+    visible:
+      id: "delete-confirmation-input"
+    timeout: 10000
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: false
+- tapOn:
+    id: "delete-confirmation-input"
+- inputText: "QA Delete"
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: false
+- eraseText: 20
+- inputText: "qa delete asset"
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: true
+- takeScreenshot: delete-asset-typed
+- tapOn:
+    id: "confirm-delete-button"
+- extendedWaitUntil:
+    visible: ".*has been deleted.*"
+    timeout: 20000
+- tapOn: "OK"
+
+# Verify gone against a fresh fetch.
+- launchApp
+- tapOn:
+    text: "http://localhost:8081"
+    optional: true
+- extendedWaitUntil:
+    visible: "Home"
+    timeout: 90000
+- tapOn:
+    text: "Assets"
+    index: 1
+- tapOn: "Search assets"
+- inputText: "QA Delete Asset"
+- extendedWaitUntil:
+    notVisible: "QA Delete Asset.*"
+    timeout: 15000
+- takeScreenshot: delete-asset-verified

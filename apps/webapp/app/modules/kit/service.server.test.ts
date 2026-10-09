@@ -947,6 +947,7 @@ describe("bulkDeleteKits", () => {
 
     await bulkDeleteKits({
       kitIds: ["kit-1", "kit-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
     });
@@ -1009,6 +1010,7 @@ describe("bulkDeleteKits", () => {
 
     await bulkDeleteKits({
       kitIds: ["kit-A", "kit-B"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-actor",
     });
@@ -1096,6 +1098,7 @@ describe("bulkDeleteKits", () => {
 
     await bulkDeleteKits({
       kitIds: ["kit-1", "kit-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
     });
@@ -1148,6 +1151,7 @@ describe("bulkDeleteKits", () => {
 
     await bulkDeleteKits({
       kitIds: ["kit-1"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
     });

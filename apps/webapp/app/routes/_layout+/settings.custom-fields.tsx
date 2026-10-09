@@ -1,3 +1,4 @@
+import { deleteConfirmationMatches } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
@@ -66,8 +67,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     const customField = await getCustomField({ id, organizationId });
 
-    // Case-insensitive comparison
-    if (customField.name.toLowerCase() !== confirmation.toLowerCase()) {
+    // The shared typed-confirmation rule, the same one the dialog applies.
+    if (!deleteConfirmationMatches(confirmation, customField.name)) {
       throw new ShelfError({
         cause: null,
         message:

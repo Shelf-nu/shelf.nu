@@ -34,7 +34,11 @@ beforeEach(() => {
 
 describe("bulkDeleteNRMs", () => {
   it("does not widen a select-all delete to every TeamMember in the org", async () => {
-    await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
+    await bulkDeleteNRMs({
+      nrmIds: [ALL_SELECTED_KEY],
+      organizationId: ORG,
+      confirmation: "0",
+    });
 
     // The regression: `{ organizationId }` alone would have soft-deleted the
     // rows backing registered users, which this index never lists.
@@ -48,6 +52,7 @@ describe("bulkDeleteNRMs", () => {
       nrmIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       search: "john",
+      confirmation: "0",
     });
 
     const { where } = dbMocks.findMany.mock.calls[0][0];
@@ -58,7 +63,11 @@ describe("bulkDeleteNRMs", () => {
   });
 
   it("refuses to act on explicitly-passed ids that are outside the NRM scope", async () => {
-    await bulkDeleteNRMs({ nrmIds: ["a", "b"], organizationId: ORG });
+    await bulkDeleteNRMs({
+      nrmIds: ["a", "b"],
+      organizationId: ORG,
+      confirmation: "2",
+    });
 
     expect(dbMocks.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -75,7 +84,11 @@ describe("bulkDeleteNRMs", () => {
       { id: "b", _count: { custodies: 0, kitCustodies: 0 } },
     ]);
 
-    await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
+    await bulkDeleteNRMs({
+      nrmIds: [ALL_SELECTED_KEY],
+      organizationId: ORG,
+      confirmation: "2",
+    });
 
     expect(dbMocks.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -92,7 +105,11 @@ describe("bulkDeleteNRMs", () => {
       { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
     ]);
 
-    await bulkDeleteNRMs({ nrmIds: [ALL_SELECTED_KEY], organizationId: ORG });
+    await bulkDeleteNRMs({
+      nrmIds: [ALL_SELECTED_KEY],
+      organizationId: ORG,
+      confirmation: "1",
+    });
 
     // The read and the write are two round trips. A row that stops being an
     // NRM in between — gains a custody, accepts an invite, is deleted by
@@ -117,7 +134,7 @@ describe("bulkDeleteNRMs", () => {
     ]);
 
     await expect(
-      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG, confirmation: "1" })
     ).rejects.toThrow(/custody/i);
     expect(dbMocks.updateMany).not.toHaveBeenCalled();
   });
@@ -132,7 +149,7 @@ describe("bulkDeleteNRMs", () => {
     // Without a status the wrapper inherits 500 and Sentry captures it, over a
     // user being told to check in their assets first.
     await expect(
-      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG, confirmation: "1" })
     ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
   });
 
@@ -144,8 +161,27 @@ describe("bulkDeleteNRMs", () => {
     ]);
 
     await expect(
-      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG })
+      bulkDeleteNRMs({ nrmIds: ["a"], organizationId: ORG, confirmation: "1" })
     ).rejects.toThrow(/custody/i);
+    expect(dbMocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a select-all without the typed count, writing nothing", async () => {
+    dbMocks.findMany.mockResolvedValue([
+      { id: "a", _count: { custodies: 0, kitCustodies: 0 } },
+      { id: "b", _count: { custodies: 0, kitCustodies: 0 } },
+    ]);
+
+    await expect(
+      bulkDeleteNRMs({
+        nrmIds: [ALL_SELECTED_KEY],
+        organizationId: ORG,
+        confirmation: undefined,
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: { expectedConfirmation: 2 },
+    });
     expect(dbMocks.updateMany).not.toHaveBeenCalled();
   });
 });

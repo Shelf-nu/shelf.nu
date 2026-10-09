@@ -20,6 +20,7 @@ import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
+  assertCategoryDeleteConfirmed,
   deleteCategory,
   getCategories,
 } from "~/modules/category/service.server";
@@ -29,6 +30,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -118,15 +120,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // A category in use needs its name typed, as the dialog asks; an unused
+    // one deletes with one click.
+    await assertCategoryDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteCategory({ id, organizationId });
 

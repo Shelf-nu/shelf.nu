@@ -1,5 +1,16 @@
+/**
+ * Delete Booking Dialog
+ *
+ * Permanent delete of one booking, from the booking page's actions menu. The
+ * user types the booking's name before Delete is enabled (see
+ * {@link TypeToConfirm}). The copy is shared with the companion's delete sheet
+ * through `@shelf/labels`.
+ *
+ * @see {@link file://../../routes/_layout+/bookings.$bookingId.overview.tsx} - Action handler
+ */
+import { useId } from "react";
 import type { Booking } from "@prisma/client";
-import { useNavigation } from "react-router";
+import { DELETE_CONSEQUENCE_LABELS } from "@shelf/labels";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -12,7 +23,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { isFormProcessing } from "~/utils/form";
+import {
+  TypeToConfirm,
+  useTypeToConfirm,
+} from "~/components/shared/type-to-confirm";
+import { useDisabled } from "~/hooks/use-disabled";
 import { tw } from "~/utils/tw";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
@@ -24,10 +39,18 @@ export const DeleteBooking = ({
     name: Booking["name"];
   };
 }) => {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
+  const confirm = useTypeToConfirm(booking.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
+
   return (
-    <AlertDialog>
+    <AlertDialog
+      onOpenChange={(open) => {
+        // Each open starts empty, so an earlier attempt never arms the button.
+        if (!open) confirm.reset();
+      }}
+    >
       <AlertDialogTrigger asChild>
         <Button
           type="button"
@@ -49,10 +72,17 @@ export const DeleteBooking = ({
           </div>
           <AlertDialogTitle>Delete {booking.name}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete this Booking? This action cannot be
-            undone. All assets associated with this booking will be released.
+            {DELETE_CONSEQUENCE_LABELS.BOOKING}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        <TypeToConfirm
+          form={formId}
+          expected={booking.name}
+          value={confirm.value}
+          onChange={confirm.setValue}
+          disabled={disabled}
+        />
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
@@ -61,7 +91,7 @@ export const DeleteBooking = ({
               </Button>
             </AlertDialogCancel>
 
-            <Form method="delete">
+            <Form id={formId} method="delete">
               <Button
                 className={tw(
                   "border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
@@ -70,9 +100,9 @@ export const DeleteBooking = ({
                 data-test-id="confirmDeleteBookingButton"
                 name="intent"
                 value="delete"
-                disabled={disabled}
+                disabled={disabled || !confirm.isConfirmed}
               >
-                Delete
+                {disabled ? "Deleting..." : "Delete"}
               </Button>
             </Form>
           </div>

@@ -57,7 +57,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { bookingIds } = parseData(formData, BulkDeleteBookingSchema);
+        const { bookingIds, confirmation } = parseData(
+          formData,
+          BulkDeleteBookingSchema
+        );
 
         await bulkDeleteBookings({
           bookingIds,
@@ -66,6 +69,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           access,
           hints: getClientHint(request),
           currentSearchParams,
+          confirmation,
         });
 
         sendNotification({

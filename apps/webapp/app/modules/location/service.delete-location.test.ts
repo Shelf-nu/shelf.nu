@@ -213,6 +213,7 @@ describe("bulkDeleteLocations", () => {
 
     await bulkDeleteLocations({
       locationIds: ["loc-1", "loc-2", "loc-3"],
+      confirmation: "3",
       organizationId: "org-1",
     });
 
@@ -256,7 +257,11 @@ describe("bulkDeleteLocations", () => {
     );
 
     await expect(
-      bulkDeleteLocations({ locationIds: ["loc-1"], organizationId: "org-1" })
+      bulkDeleteLocations({
+        locationIds: ["loc-1"],
+        organizationId: "org-1",
+        confirmation: "1",
+      })
     ).resolves.toBeUndefined();
 
     // The storage request has started and is still pending.
@@ -275,6 +280,7 @@ describe("bulkDeleteLocations", () => {
     await bulkDeleteLocations({
       locationIds: [ALL_SELECTED_KEY],
       organizationId: "org-1",
+      confirmation: "1200",
     });
 
     expect(dbMocks.location.findMany).toHaveBeenCalledWith(
@@ -306,6 +312,7 @@ describe("bulkDeleteLocations", () => {
       bulkDeleteLocations({
         locationIds: [ALL_SELECTED_KEY],
         organizationId: "org-1",
+        confirmation: "600",
       })
     ).resolves.toBeUndefined();
 
@@ -327,13 +334,68 @@ describe("bulkDeleteLocations", () => {
     dbMocks.location.deleteMany.mockRejectedValue(new Error("db down"));
 
     await expect(
-      bulkDeleteLocations({ locationIds: ["loc-1"], organizationId: "org-1" })
+      bulkDeleteLocations({
+        locationIds: ["loc-1"],
+        organizationId: "org-1",
+        confirmation: "1",
+      })
     ).rejects.toMatchObject({
       message: "Something went wrong while bulk deleting locations.",
     });
 
     // Give any background cleanup a chance to start before asserting.
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(removePublicFilesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkDeleteLocations: select all", () => {
+  it("deletes only the locations the list shows for its search", async () => {
+    dbMocks.location.findMany.mockResolvedValue([makeLocation("loc-1")]);
+
+    await bulkDeleteLocations({
+      locationIds: [ALL_SELECTED_KEY],
+      organizationId: "org-1",
+      currentSearchParams: "s=warehouse&page=2",
+      confirmation: "1",
+    });
+
+    // The same predicate the locations index uses (name, description, address).
+    expect(dbMocks.location.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId: "org-1",
+          OR: [
+            { name: { contains: "warehouse", mode: "insensitive" } },
+            { description: { contains: "warehouse", mode: "insensitive" } },
+            { address: { contains: "warehouse", mode: "insensitive" } },
+          ],
+        },
+      })
+    );
+    expect(dbMocks.location.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["loc-1"] } } })
+    );
+  });
+
+  it("refuses a typed count that is not what the search matches, deleting nothing", async () => {
+    dbMocks.location.findMany.mockResolvedValue([
+      makeLocation("loc-1"),
+      makeLocation("loc-2"),
+    ]);
+
+    await expect(
+      bulkDeleteLocations({
+        locationIds: [ALL_SELECTED_KEY],
+        organizationId: "org-1",
+        currentSearchParams: "s=warehouse",
+        confirmation: "1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: { expectedConfirmation: 2 },
+    });
+    expect(dbMocks.location.deleteMany).not.toHaveBeenCalled();
     expect(removePublicFilesMock).not.toHaveBeenCalled();
   });
 });

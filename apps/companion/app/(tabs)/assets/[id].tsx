@@ -1,4 +1,7 @@
-import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_QTY_STATUS_LABELS,
+  DELETE_CONSEQUENCE_LABELS,
+} from "@shelf/labels";
 import { useMemo, useState } from "react";
 import {
   View,
@@ -59,6 +62,7 @@ import {
 } from "@/lib/custody-source-options";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
+import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -293,6 +297,8 @@ export default function AssetDetailScreen() {
   // QUANTITY_TRACKED assets edit their location spread in the placements
   // editor; INDIVIDUAL assets keep the picker + confirm-alert flow.
   const [showPlacementsSheet, setShowPlacementsSheet] = useState(false);
+  // The typed-name delete confirmation (see ConfirmDeleteSheet).
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
 
   /**
    * Current placement rows for the placements card + editor seed. Prefers
@@ -430,27 +436,23 @@ export default function AssetDetailScreen() {
 
   // ── Delete Asset ──────────────────────────────────
 
+  // A permanent delete asks for the asset's name to be typed first, the same
+  // rule as the webapp's delete dialog.
   const handleDeleteAsset = () => {
     if (!asset) return;
-    Alert.alert(
-      "Delete Asset",
-      `Are you sure you want to permanently delete "${asset.title}"? This action cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: performDeleteAsset,
-        },
-      ]
-    );
+    setShowDeleteSheet(true);
   };
 
-  const performDeleteAsset = async () => {
+  const performDeleteAsset = async (confirmation: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
-    const { error: err } = await api.deleteAsset(currentOrg.id, asset.id);
+    const { error: err } = await api.deleteAsset(
+      currentOrg.id,
+      asset.id,
+      confirmation
+    );
     setIsActionLoading(false);
+    setShowDeleteSheet(false);
     if (err) {
       Alert.alert("Error", err);
     } else {
@@ -1189,6 +1191,19 @@ export default function AssetDetailScreen() {
             onSelect={handleLocationSelect}
             onClose={() => setShowLocationPicker(false)}
           />
+          {asset && (
+            <ConfirmDeleteSheet
+              visible={showDeleteSheet}
+              title="Delete asset"
+              message={DELETE_CONSEQUENCE_LABELS.ASSET}
+              expected={asset.title}
+              isDeleting={isActionLoading}
+              onConfirm={(confirmation) =>
+                void performDeleteAsset(confirmation)
+              }
+              onClose={() => setShowDeleteSheet(false)}
+            />
+          )}
           {/* Quantity steps — mounted only for QUANTITY_TRACKED assets so
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
