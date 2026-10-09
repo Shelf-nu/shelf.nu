@@ -58,7 +58,8 @@ import type {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -91,7 +92,7 @@ export const handle = {
  * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
  *   when the caller lacks `reports: read`
  */
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+async function loadReport({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -314,6 +315,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: reportData.report.description,
     },
   });
+}
+
+/**
+ * Loads the report page. Every failure, including a refused permission or an
+ * unknown report, becomes a response carrying its own status, so a member
+ * without report access sees a 403 page rather than a server error.
+ */
+export async function loader(args: LoaderFunctionArgs) {
+  try {
+    return await loadReport(args);
+  } catch (cause) {
+    const reason = makeShelfError(cause, {
+      userId: args.context.getSession().userId,
+    });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportPage() {
