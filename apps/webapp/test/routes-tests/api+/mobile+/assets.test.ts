@@ -814,22 +814,25 @@ describe("GET /api/mobile/assets — list scope", () => {
     return findManyMock.mock.calls[0]![0]!.where;
   }
 
-  it("lists only bookable assets to SELF_SERVICE, as the web index does", async () => {
-    expect(await whereFor("SELF_SERVICE")).toMatchObject({
-      availableToBook: true,
-    });
-  });
-
-  it("still lists every asset SELF_SERVICE holds on the custody tab", async () => {
-    expect(
-      await whereFor("SELF_SERVICE", "?myCustody=true")
-    ).not.toHaveProperty("availableToBook");
-  });
-
-  it.each(["BASE", "ADMIN"] as const)(
-    "does not narrow the list for %s",
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "lists only bookable assets to %s, as the web index does",
     async (role) => {
-      expect(await whereFor(role)).not.toHaveProperty("availableToBook");
+      expect(await whereFor(role)).toMatchObject({
+        availableToBook: true,
+      });
     }
   );
+
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "still lists every asset %s holds on the custody tab",
+    async (role) => {
+      expect(await whereFor(role, "?myCustody=true")).not.toHaveProperty(
+        "availableToBook"
+      );
+    }
+  );
+
+  it("does not narrow the list for ADMIN", async () => {
+    expect(await whereFor("ADMIN")).not.toHaveProperty("availableToBook");
+  });
 });

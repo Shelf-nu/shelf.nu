@@ -8,6 +8,7 @@
  *
  * @see {@link file://./../../../modules/asset/service.server.ts} refreshExpiredAssetImages
  */
+import type { Prisma } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { db } from "~/database/db.server";
 import {
@@ -59,6 +60,19 @@ export async function loader({ request }: LoaderFunctionArgs) {
       organizationId
     );
 
+    // The asset KPI, the status breakdown and the newest-assets list describe
+    // the same assets the caller's Assets tab lists: active assets only, and
+    // for a role whose `assets.listScope` is "bookable", only those available
+    // for bookings. The custody count ignores the list scope, like the
+    // custody tab.
+    const assetListWhere: Prisma.AssetWhereInput = {
+      organizationId,
+      archivedAt: null,
+      ...(access.policy.assets.listScope === "bookable" && {
+        availableToBook: true,
+      }),
+    };
+
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
     // check, so without a restriction here any member could read every booking
@@ -102,7 +116,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       activeAudits,
     ] = await Promise.all([
       // KPI: Total assets (active only — archived excluded, issue #382)
-      db.asset.count({ where: { organizationId, archivedAt: null } }),
+      db.asset.count({ where: assetListWhere }),
 
       // KPI: Categories
       db.category.count({ where: { organizationId } }),
@@ -118,7 +132,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       // Assets by status (active inventory only — archived excluded)
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId, archivedAt: null },
+        where: assetListWhere,
         _count: { id: true },
       }),
 
@@ -142,7 +156,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
       // 5 newest assets (exclude archived — issue #382)
       db.asset.findMany({
-        where: { organizationId, archivedAt: null },
+        where: assetListWhere,
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
