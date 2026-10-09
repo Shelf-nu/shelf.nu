@@ -68,11 +68,17 @@ const ConditionalActionsDropdown = ({
         </PopoverTrigger>
 
         {/* using custom trigger on mobile which only opens popover not toggles menu to avoid conflicts with overlay*/}
+        {/* `disabled` must be threaded here too: this trigger is a sibling of
+            the desktop one, not a copy of it, so without it a state that
+            disables booking (archived asset, or one marked unavailable) still
+            opened the menu on phones. */}
         <Button
           type="button"
           variant="primary"
+          disabled={disabledTrigger}
           className="asset-actions sm:hidden"
           onClick={() => {
+            if (disabledTrigger) return;
             setOpen(true);
           }}
           icon="bookings"

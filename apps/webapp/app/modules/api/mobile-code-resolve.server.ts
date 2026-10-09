@@ -261,6 +261,7 @@ export async function resolveMobileScannedCode({
   if (sequentialId) {
     const organizationId = await requireOrganizationAccess(request, user.id);
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned SAM id must still resolve to an archived asset, which the app shows with a badge
       where: { organizationId, sequentialId },
       select: MOBILE_ASSET_SELECT,
     });
@@ -365,6 +366,7 @@ export async function resolveMobileScannedCode({
   // Use ternaries so Prisma's result type flows to the shape helpers.
   const asset = qr.assetId
     ? await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned QR must still resolve to an archived asset, which the app shows with a badge
         where: { id: qr.assetId, organizationId: qr.organizationId },
         select: MOBILE_ASSET_SELECT,
       })

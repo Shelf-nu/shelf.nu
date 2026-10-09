@@ -133,6 +133,7 @@ export async function getAssetsForLocationContext({
 
   // Fetch all assets at the specified location(s)
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an audit started from a location covers everything placed there; audits keep archived assets and badge them
     where: {
       organizationId,
       assetLocations: { some: { locationId: { in: locationIds } } },
@@ -164,6 +165,7 @@ export async function getAssetsForKitContext({
 }): Promise<string[]> {
   // Fetch all assets assigned to the kit
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an audit started from a kit covers every member, archived ones included (shown with a badge)
     where: {
       organizationId,
       assetKits: { some: { kitId } },
@@ -195,6 +197,7 @@ export async function getAssetsForUserContext({
 }): Promise<string[]> {
   // Fetch all assets where the user is the current custodian
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: an audit started from a user covers everything in their custody; audits keep archived assets and badge them
     where: {
       organizationId,
       custody: {

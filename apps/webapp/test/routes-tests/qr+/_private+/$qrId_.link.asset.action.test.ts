@@ -75,6 +75,9 @@ vi.mock("~/database/db.server", () => ({
       // asset first (`assertAssetsBelongToOrg`) — the happy path reaches it.
       findMany: vi.fn().mockResolvedValue([{ id: "asset-1" }]),
       update: vi.fn().mockResolvedValue({}),
+      // why: the relink refuses an archived asset (issue #382) by counting
+      // archived rows; this asset is not archived.
+      count: vi.fn().mockResolvedValue(0),
     },
     qr: { update: vi.fn().mockResolvedValue({}) },
     note: { create: vi.fn().mockResolvedValue({}) },

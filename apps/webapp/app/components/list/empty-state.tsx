@@ -1,7 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
-import { useLoaderData } from "react-router";
+import { useLoaderData, useLocation } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { NON_FILTER_PARAMS } from "~/utils/filter-params";
 import { tw } from "~/utils/tw";
@@ -22,6 +23,10 @@ export interface CustomEmptyState {
   };
 }
 
+/** Paths of the asset lists that offer the Active / Archived / All menu. */
+const ARCHIVED_VIEW_LIST_PATH =
+  /^\/(assets|kits\/[^/]+\/assets|locations\/[^/]+\/assets)\/?$/;
+
 export const EmptyState = ({
   className,
   customContent,
@@ -32,7 +37,7 @@ export const EmptyState = ({
     modelName: modelNameData,
     hasActiveFilters,
   } = useLoaderData<SearchableIndexResponse>();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const singular = modelName?.singular || modelNameData.singular;
   const plural = modelName?.plural || modelNameData.plural;
 
@@ -42,10 +47,39 @@ export const EmptyState = ({
   const hasSearch = !!search;
   const isFiltered = hasSearch || !!hasActiveFilters;
 
+  /**
+   * "Did not match any assets in the database" can be untrue on a list that
+   * hides archived assets: an archived asset IS in the database, just outside
+   * the Active view. Say where it went instead.
+   *
+   * Limited to the lists that offer the Active / Archived / All menu (the asset
+   * index, a kit's assets, a location's assets; pickers never offer archived
+   * assets) and to the Active view, the only one that hides something.
+   */
+  const { pathname } = useLocation();
+  const offersArchivedView = ARCHIVED_VIEW_LIST_PATH.test(pathname);
+  const archivedParam = searchParams.get("archived");
+  const viewHidesArchived =
+    archivedParam !== "archived" && archivedParam !== "all";
+  const searchMayBeHidingArchived =
+    plural === "assets" && offersArchivedView && viewHidesArchived;
+
+  /**
+   * Only members who can archive get the view menu (see `useCanArchiveAssets`),
+   * so only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
+   * their role does not render would be worse than the original wording, so
+   * they get the same fact plus the action actually open to them.
+   */
+  const canArchiveAssets = useCanArchiveAssets();
+
   const filteredTexts = hasSearch
     ? {
         title: `No ${plural} found`,
-        p: `Your search for "${search}" did not match any ${plural} in the database.`,
+        p: !searchMayBeHidingArchived
+          ? `Your search for "${search}" did not match any ${plural} in the database.`
+          : canArchiveAssets
+          ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Pick Archived from the menu on the list title.`
+          : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }
     : {
         title: `No ${plural} found`,

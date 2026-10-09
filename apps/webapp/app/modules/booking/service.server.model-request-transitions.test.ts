@@ -77,6 +77,9 @@ vitest.mock("~/database/db.server", () => ({
         .mockImplementation((args: { where?: { id?: { in?: string[] } } }) =>
           Promise.resolve((args?.where?.id?.in ?? []).map((id) => ({ id })))
         ),
+      // why: reserve and checkout refuse archived assets (issue #382) with a
+      // count; none of these fixtures are archived.
+      count: vitest.fn().mockResolvedValue(0),
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
     },
     // why: kit attribution resolves memberships through the pivot. No fixture

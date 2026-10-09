@@ -47,6 +47,7 @@ import {
   wrapLinkForNote,
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   getFileUploadPath,
   MAX_PUBLIC_FILES_PER_REMOVE,
@@ -68,10 +69,12 @@ import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 import { getPrimaryLocation } from "../asset/utils";
 import {
+  applyArchivedFilter,
   getAssetsWhereInput,
   getLocationUpdateNoteContent,
   getKitLocationUpdateNoteContent,
 } from "../asset/utils.server";
+import type { ArchivedFilter } from "../asset/utils.server";
 import { getKitsWhereInput } from "../kit/utils.server";
 import { createSystemLocationNote as createSystemLocationActivityNote } from "../location-note/service.server";
 import { createNote } from "../note/service.server";
@@ -103,6 +106,7 @@ async function assertAssetsInOrganization({
   if (ids.length === 0) return;
 
   const authorizedCount = await db.asset.count({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership guard; must count archived assets too
     where: { id: { in: ids }, organizationId },
   });
 
@@ -174,6 +178,12 @@ export async function getLocation(
     request?: Request;
     include?: Prisma.LocationInclude;
     teamMemberIds?: string[] | null;
+    /**
+     * Which of the location's assets to list by archive state. Pages that
+     * offer the view menu resolve it with `resolveArchivedViewForMember`;
+     * everything else lists them all.
+     */
+    archivedFilter?: ArchivedFilter;
   }
 ) {
   const {
@@ -188,6 +198,7 @@ export async function getLocation(
     orderDirection,
     include,
     teamMemberIds,
+    archivedFilter = "all",
   } = params;
 
   try {
@@ -198,8 +209,15 @@ export async function getLocation(
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Build where object for querying related assets */
-    const assetsWhere: Prisma.AssetWhereInput = {};
+    /**
+     * Where clause for the location's assets. The list and the count below
+     * share it, so the count always describes the rows the view shows.
+     * Archived assets that the view includes render with an "Archived" badge.
+     */
+    const assetsWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      {},
+      archivedFilter
+    );
 
     if (search) {
       assetsWhere.title = {
@@ -301,6 +319,11 @@ export async function getLocation(
       ...assetsWhere,
     };
 
+    const assetsCountWhere: Prisma.AssetWhereInput = applyArchivedFilter(
+      { assetLocations: { some: { locationId: id } } },
+      archivedFilter
+    );
+
     const [location, totalAssetsWithinLocation, assets] = await Promise.all([
       /** Get the items */
       db.location.findFirstOrThrow({
@@ -317,9 +340,8 @@ export async function getLocation(
 
       /** Count them */
       db.asset.count({
-        where: {
-          assetLocations: { some: { locationId: id } },
-        },
+        // Follows the archived view so the count matches the list it heads.
+        where: assetsCountWhere,
       }),
 
       /**
@@ -2129,6 +2151,14 @@ export async function updateLocationAssets({
       (id) => !existingAssetIds.has(id)
     );
 
+    // Archived assets are frozen (issue #382): none can be moved INTO this
+    // location. Ones already placed here stay listed (the location page shows
+    // them with a badge), and removing them stays allowed.
+    await assertAssetsAreNotArchived({
+      assetIds: actuallyNewAssetIds,
+      organizationId,
+    });
+
     /**
      * Qty-edit set: assets already at this location whose submitted
      * quantity differs from the existing pivot row. The picker pre-fills
@@ -2158,6 +2188,7 @@ export async function updateLocationAssets({
      */
     const modifiedAssets = await db.asset
       .findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: before-state read for assets moved in or out; archived assets can still be removed from a location
         where: {
           id: {
             in: [

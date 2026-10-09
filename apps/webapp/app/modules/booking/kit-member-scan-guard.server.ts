@@ -61,6 +61,7 @@ export async function assertScannedUnitsAreNotKitMembers({
 
   const exempt = new Set(exemptKitIds);
   const kitMembers = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: guard read by id; must see every scanned unit, archived or not
     where: {
       id: { in: looseAssetIds },
       organizationId,
