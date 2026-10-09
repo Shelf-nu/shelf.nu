@@ -16,7 +16,7 @@ blocker a stable `id`, and pin the set:
 ```ts
 // ✅ uses/custody-blockers.tsx: a pure function of the scanned rows
 export function buildAssignCustodyBlockers({ items, removeAssetsFromList, removeItemsFromList })
-  : { blockerConfigs: BlockerConfig[]; onResolveAll: () => void }
+  : { blockerConfigs: BlockerConfig[] }
 
 // uses/custody-blockers.test.tsx
 const EXPECTED_ASSIGN_IDS = ["qty-nothing-free", "assets-checked-out", ...];
@@ -26,6 +26,10 @@ expect(built.blockerConfigs.map((b) => b.id)).toEqual(EXPECTED_ASSIGN_IDS);
 That manifest assertion is the point: adding a blocker without a case fails the
 suite instead of shipping untested. Each id then needs a row in that state
 raising it, and a healthy row not raising it.
+
+"Resolve all" is derived by `createBlockers` from the blockers it shows, so it
+can never remove a row the operator was not warned about. Never hand-write a
+resolve-all list.
 
 ❌ Deriving `blockerConfigs` inline in the drawer, or adding a blocker with no
 `id` and no case. Neither can be asserted on.

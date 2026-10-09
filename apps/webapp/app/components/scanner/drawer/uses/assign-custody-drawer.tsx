@@ -108,7 +108,7 @@ export default function AssignCustodyDrawer({
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
-  const { blockerConfigs, onResolveAll } = buildAssignCustodyBlockers({
+  const { blockerConfigs } = buildAssignCustodyBlockers({
     items,
     removeAssetsFromList,
     removeItemsFromList,
@@ -118,7 +118,6 @@ export default function AssignCustodyDrawer({
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   // Render item row
@@ -353,7 +352,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className="relative z-50 my-8 ">
+          <div className="relative z-50 mb-3 mt-2">
             <h5 className="mb-1">Assign custody to:</h5>
             <DynamicSelect
               defaultValue={
@@ -401,7 +400,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className={tw("mb-4 flex gap-3", assignsSelfOnly && "-mt-4")}>
+          <div className="mb-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"

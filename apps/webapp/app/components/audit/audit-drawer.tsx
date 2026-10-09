@@ -21,13 +21,19 @@ import {
   type AuditSessionInfo,
   type ScanListItems,
 } from "~/atoms/qr-scanner";
-import { renderAuditItems } from "~/components/audit/audit-item-row";
+import { buildAuditBlockers } from "~/components/audit/audit-blockers";
+import {
+  getPendingAuditAssets,
+  renderAuditPendingRows,
+  renderAuditScannedRows,
+} from "~/components/audit/audit-item-row";
 import CompleteAuditDialog from "~/components/audit/complete-audit-dialog";
 import {
   createBlockers,
   type BlockerConfig,
 } from "~/components/scanner/drawer/blockers-factory";
 import ConfigurableDrawer from "~/components/scanner/drawer/configurable-drawer";
+import { ScanItemGroup } from "~/components/scanner/drawer/scan-item-group";
 import { Button } from "~/components/shared/button";
 import { Progress } from "~/components/shared/progress";
 import { Spinner } from "~/components/shared/spinner";
@@ -457,8 +463,12 @@ export default function AuditDrawer({
   ]);
 
   const { Blockers, hasBlockers } = useMemo(() => {
-    // No base blockers - unexpected assets are allowed and tracked
-    const baseBlockers: BlockerConfig[] = [];
+    // Unexpected assets are findings and never block; kits and codes that
+    // resolved to nothing do (see `buildAuditBlockers`).
+    const baseBlockers: BlockerConfig[] = buildAuditBlockers({
+      items,
+      removeItems: removeItemsFromList,
+    }).blockerConfigs;
 
     const additionalBlockers = getAdditionalBlockers
       ? getAdditionalBlockers({
@@ -472,9 +482,6 @@ export default function AuditDrawer({
     const allBlockers = [...baseBlockers, ...additionalBlockers];
     const [hasActiveBlockers, BlockersComponent] = createBlockers({
       blockerConfigs: allBlockers,
-      onResolveAll: () => {
-        // No automatic cleanup of unexpected assets
-      },
     });
     return {
       Blockers: BlockersComponent,
@@ -519,12 +526,13 @@ export default function AuditDrawer({
   );
 
   /**
-   * Custom renderer that shows scanned items at the top, followed by pending
-   * assets. Delegates to the shared {@link renderAuditItems} helper so the
-   * keyed rows remain the direct children of `<AnimatePresence>`.
+   * Renders the list as two foldable groups, the same as the booking scan
+   * drawers: "Scanned this session" (each row keeps its Expected / Unexpected
+   * badge; reopens on a new scan) and "Pending" (expected assets not scanned
+   * yet). A group with nothing in it is not rendered.
    */
-  const customRenderAllItems = (): ReactNode =>
-    renderAuditItems({
+  const renderGroups = (): ReactNode => {
+    const rowArgs = {
       items,
       expectedAssets,
       scannedAssetIds,
@@ -534,7 +542,33 @@ export default function AuditDrawer({
       expectedAssetIds,
       auditAssetMeta,
       showLocation,
-    });
+    };
+    const scannedCount = Object.keys(items).length;
+    const pendingCount = getPendingAuditAssets({
+      expectedAssets,
+      scannedAssetIds,
+    }).length;
+
+    return (
+      <>
+        {scannedCount > 0 ? (
+          <ScanItemGroup
+            label="Scanned this session"
+            count={scannedCount}
+            tone="active"
+            openWhenCountGrows
+          >
+            {renderAuditScannedRows(rowArgs)}
+          </ScanItemGroup>
+        ) : null}
+        {pendingCount > 0 ? (
+          <ScanItemGroup label="Pending" count={pendingCount} tone="muted">
+            {renderAuditPendingRows(rowArgs)}
+          </ScanItemGroup>
+        ) : null}
+      </>
+    );
+  };
 
   // Completing with nothing scanned is legal — it marks every expected asset
   // missing. The CompleteAuditDialog this drawer submits through states that
@@ -549,7 +583,7 @@ export default function AuditDrawer({
       onClearItems={clearList}
       title={auditTitle}
       isLoading={isLoading}
-      customRenderAllItems={customRenderAllItems}
+      renderGroups={renderGroups}
       Blockers={Blockers}
       disableSubmit={shouldDisableSubmit}
       defaultExpanded={defaultExpanded}
