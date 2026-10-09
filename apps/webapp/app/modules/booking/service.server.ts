@@ -65,6 +65,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
+  getAssetAvailabilityBatch,
 } from "~/modules/asset/availability.server";
 import {
   reconcileManualPlacementsForStockDecrease,
@@ -9793,6 +9794,19 @@ export async function partialCheckoutBooking({
           });
         }
 
+        /**
+         * What each pool has on the shelf before this session: its stock less
+         * the units custody, kits and every booking (this one included) hold
+         * out. Read under the row locks above and before any write below, so
+         * the free-stock check after attribution measures this session's
+         * departures against the shelf as it found it. `physicalAvailable` is
+         * window-independent, so no window is passed.
+         */
+        const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
+          qtyDispositionAssetIds,
+          { organizationId, window: null, db: tx }
+        );
+
         // ONE batched committed-remaining read (booking total − Σ prior PBC
         // sessions) for every qty asset. This value is CONSTANT across the
         // disposition loop below: it reads only prior/committed sessions (this
@@ -10342,6 +10356,57 @@ export async function partialCheckoutBooking({
             quantity: sessionQuantities[index] ?? 1,
           })),
         });
+
+        /**
+         * A pool's units are held by one thing at a time: custody, a kit or a
+         * booking. The caps above only bound a claim by what this booking
+         * still owes, so this checks the units leaving standalone slices
+         * against the pool's free stock. Kit-driven slices draw on their
+         * kit's allocation, which the free figure already sets aside.
+         *
+         * Only units physically held count here, not other bookings'
+         * reservations: a booking already out outranks a reservation (see
+         * {@link outranksReservations}). The Check out button's in-tx guard,
+         * which a batch covering the whole booking reaches through the
+         * delegate above, also counts reservations overlapping its window.
+         */
+        const standaloneUnitsByAsset = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          if (ba.assetKitId != null) continue;
+          if (assetTypeById.get(ba.asset.id) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          const units = unitsBySliceId.get(ba.id) ?? 0;
+          if (units <= 0) continue;
+          standaloneUnitsByAsset.set(
+            ba.asset.id,
+            (standaloneUnitsByAsset.get(ba.asset.id) ?? 0) + units
+          );
+        }
+        const freeStockShortfalls: string[] = [];
+        for (const [assetId, units] of standaloneUnitsByAsset) {
+          const free =
+            availabilityBeforeByAsset.get(assetId)?.physicalAvailable ?? 0;
+          if (units > free) {
+            freeStockShortfalls.push(
+              `"${
+                titleByAssetId.get(assetId) ?? ""
+              }": requested ${units}, only ${Math.max(0, free)} free right now`
+            );
+          }
+        }
+        if (freeStockShortfalls.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
+              "\n"
+            )}\nThe rest are in custody, in kits or out on bookings. Release custody or check units in, then try again.`,
+            additionalData: { bookingId: id, organizationId },
+          });
+        }
 
         /**
          * Record where each pool slice's units leave from, before the counter
