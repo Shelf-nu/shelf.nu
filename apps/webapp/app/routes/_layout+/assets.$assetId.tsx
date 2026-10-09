@@ -25,7 +25,6 @@ import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
 import {
   deleteAsset,
-  deleteOtherImages,
   getAsset,
   relinkAssetQrCode,
 } from "~/modules/asset/service.server";
@@ -313,24 +312,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "delete": {
-        const { mainImageUrl } = parseData(
-          formData,
-          z.object({ mainImageUrl: z.string().optional() })
-        );
-
         // Name the actor, or the activity event records the deletion as
-        // "System" — the mobile delete route already passes it, so the same
-        // action read differently depending on where it was performed.
+        // "System". `deleteAsset` also removes the stored image files.
         await deleteAsset({ organizationId, id, actorUserId: userId });
-
-        if (mainImageUrl) {
-          // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)
-          await deleteOtherImages({
-            userId,
-            assetId: id,
-            data: { path: `main-image-${id}.jpg` },
-          });
-        }
 
         sendNotification({
           title: "Asset deleted",
