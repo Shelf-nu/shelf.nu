@@ -161,7 +161,11 @@ const ConditionalActionsDropdown = () => {
    * read-only with one consistent reason, while Reinstate stays enabled.
    */
   const archivedActionDisabled: { reason: string } | false = isArchived
-    ? { reason: "This asset is archived. Reinstate it to make changes." }
+    ? {
+        reason: canArchiveAsset
+          ? "This asset is archived. Reinstate it to make changes."
+          : "This asset is archived. Ask an admin to reinstate it.",
+      }
     : false;
 
   function handleMenuClose() {

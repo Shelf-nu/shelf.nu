@@ -25,6 +25,7 @@ import { Button } from "~/components/shared/button";
 import { Card } from "~/components/shared/card";
 import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   deleteLocation,
   getLocation,
@@ -53,6 +54,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 const paramsSchema = z.object({ locationId: z.string() });
@@ -202,11 +204,19 @@ export default function LocationPage() {
   const matches = useMatches();
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
+  const roles = useOrganizationRoles();
+  // The Activity tab is the location's notes, a separate grant from reading it.
+  const canReadActivity = userHasPermission({
+    roles,
+    entity: PermissionEntity.locationNote,
+    action: PermissionAction.read,
+  });
+
   const items = [
     { to: "overview", content: "Overview" },
     { to: "assets", content: "Assets" },
     { to: "kits", content: "Kits" },
-    { to: "activity", content: "Activity" },
+    ...(canReadActivity ? [{ to: "activity", content: "Activity" }] : []),
   ];
 
   /**

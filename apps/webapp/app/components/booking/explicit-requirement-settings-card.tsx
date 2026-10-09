@@ -1,8 +1,8 @@
 /**
  * Explicit Requirement Settings Card
  *
- * Owner-only card on Settings > Bookings with one switch per restricted role
- * (Admins, Self Service users). A switch that is on means that role must move a
+ * Owner-only card on Settings > Bookings with one switch per restricted
+ * group (Admins and Managers, Self Service users). A switch that is on means that role must move a
  * booking's assets through the explicit flow (scan or select them) instead of
  * the one-click action. The check-in and check-out cards share this layout and
  * differ only in their fields, copy and action intent.
@@ -108,7 +108,7 @@ export function ExplicitRequirementSettingsCard({
             // Both cards sit on one page and label their switches by role
             // alone, so the description (which names the role AND the
             // direction) is what tells a screen reader user the check-in
-            // "Admins" switch from the check-out one.
+            // "Admins and Managers" switch from the check-out one.
             const descriptionId = `${switchId}-description`;
 
             return (

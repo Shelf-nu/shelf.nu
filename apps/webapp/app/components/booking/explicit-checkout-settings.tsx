@@ -8,8 +8,9 @@
  * only "Scan to check out", and the one-click check-out is refused on the
  * server (web and mobile). Scanning or selecting the assets stays available.
  * The workspace owner is never restricted, and Base users hold no check-out
- * permission, so the card names only Admins and Self Service users. All of its
- * words come from `@shelf/labels`, which the phone reads too.
+ * permission, so the card has two switches: Admins and Managers, and Self
+ * Service users. All of its words come from `@shelf/labels`, which the phone
+ * reads too.
  *
  * @see {@link file://./explicit-requirement-settings-card.tsx} - shared layout
  * @see {@link file://./../../routes/_layout+/settings.bookings.tsx} - the

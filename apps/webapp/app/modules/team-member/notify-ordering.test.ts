@@ -64,7 +64,7 @@ describe("getTeamMembersForNotify ordering", () => {
     await getTeamMembersForNotify({ organizationId: "org-1" });
     const where = dbMocks.teamMember.findMany.mock.calls.at(-1)?.[0]?.where;
     expect(where.user.userOrganizations.some.roles).toEqual({
-      hasSome: ["OWNER", "ADMIN"],
+      hasSome: ["OWNER", "ADMIN", "MANAGER"],
     });
   });
 });

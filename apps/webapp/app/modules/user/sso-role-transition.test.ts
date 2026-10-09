@@ -143,6 +143,7 @@ const org = {
   userId: OWNER,
   ssoDetails: {
     adminGroupId: "g-admin",
+    managerGroupId: "g-manager",
     selfServiceGroupId: "g-ss",
     baseUserGroupId: "g-base",
   },
@@ -302,6 +303,62 @@ describe("SSO role transition: the same transfers as a manual change", () => {
     );
     expect(dbMocks.booking).not.toHaveBeenCalled();
     expect(dbMocks.roleChangeLogCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("SSO role transition: into and out of Manager", () => {
+  it("SELF_SERVICE mapped to MANAGER is promoted with nothing transferred", async () => {
+    await login(["SELF_SERVICE"], ["g-manager"]);
+
+    expect(dbMocks.membershipUpdate).toHaveBeenCalledWith({
+      where: { userId_organizationId: { userId: USER, organizationId: ORG } },
+      data: { roles: { set: ["MANAGER"] } },
+    });
+    expect(dbMocks.booking).not.toHaveBeenCalled();
+    expect(dbMocks.asset).not.toHaveBeenCalled();
+    expect(dbMocks.roleChangeLogCreate).toHaveBeenCalledTimes(1);
+    expect(dbMocks.roleChangeLogCreate).toHaveBeenCalledWith({
+      data: {
+        userId: USER,
+        changedById: USER,
+        source: "SSO",
+        organizationId: ORG,
+        previousRole: "SELF_SERVICE",
+        newRole: "MANAGER",
+      },
+    });
+  });
+
+  it("MANAGER mapped to SELF_SERVICE hands bookings made for others and ownership columns to the owner", async () => {
+    await login(["MANAGER"], ["g-ss"]);
+
+    expect(dbMocks.membershipUpdate).toHaveBeenCalledWith({
+      where: { userId_organizationId: { userId: USER, organizationId: ORG } },
+      data: { roles: { set: ["SELF_SERVICE"] } },
+    });
+    // Ownership tier drops from 2 to 1: the ownership columns move.
+    expect(dbMocks.asset).toHaveBeenCalledWith({
+      where: { userId: USER, organizationId: ORG },
+      data: { userId: OWNER },
+    });
+    // Booking write reach drops from all to own: bookings made for a
+    // registered colleague move to the owner.
+    const rows = bookingRows();
+    for (const [call] of dbMocks.booking.mock.calls)
+      applyUpdateMany(rows, call);
+    expect(rows.find((r) => r.id === "for-registered")?.creatorId).toBe(OWNER);
+    expect(rows.find((r) => r.id === "own")?.creatorId).toBe(USER);
+    expect(dbMocks.roleChangeLogCreate).toHaveBeenCalledTimes(1);
+    expect(dbMocks.roleChangeLogCreate).toHaveBeenCalledWith({
+      data: {
+        userId: USER,
+        changedById: USER,
+        source: "SSO",
+        organizationId: ORG,
+        previousRole: "MANAGER",
+        newRole: "SELF_SERVICE",
+      },
+    });
   });
 });
 

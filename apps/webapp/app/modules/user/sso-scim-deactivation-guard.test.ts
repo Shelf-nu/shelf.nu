@@ -136,6 +136,7 @@ function domainOrg() {
     id: ORG_ID,
     ssoDetails: {
       adminGroupId: "g-admin",
+      managerGroupId: null,
       baseUserGroupId: null,
       selfServiceGroupId: null,
     },

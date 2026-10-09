@@ -102,15 +102,15 @@ export const AUDIT_STATUS_LABELS = Object.freeze({
 // to explain (the web's "Not assigned" tooltip). They live together so the
 // three can never say different things about who is allowed to scan.
 //
-// All three name BOTH roles because the server allows both: requireAuditAssignee
-// returns early for any caller that is not BASE/SELF_SERVICE, so ADMIN and OWNER
-// are exactly the set who may scan an unassigned audit.
+// All three name every role that sees all audits (`audits.scope === "all"` in
+// the role policy), because requireAuditAssignee lets exactly those roles scan
+// an audit nobody is assigned to: owners, admins and managers.
 // Pinned by the AUDIT_UNASSIGNED_LABELS tests in the webapp.
 export const AUDIT_UNASSIGNED_LABELS = Object.freeze({
-  SHORT: "Unassigned · admins and owners can scan",
-  A11Y: "unassigned, admins and owners can scan",
+  SHORT: "Unassigned · owners, admins and managers can scan",
+  A11Y: "unassigned, owners, admins and managers can scan",
   DETAIL:
-    "Workspace admins and owners can perform this audit because it has no specific assignee.",
+    "Workspace owners, admins and managers can perform this audit because it has no specific assignee.",
 });
 
 // Per-asset audit status (AuditAssetStatus in the Prisma schema).
@@ -437,12 +437,13 @@ export const EXPLICIT_REQUIREMENT_LABELS = Object.freeze({
 });
 
 /**
- * The two roles the explicit requirement can be switched on for, named as the
- * settings cards show them. OWNER and BASE are absent on purpose: see the
+ * The two switches the explicit requirement can be turned on with, named as
+ * the settings cards show them. The ADMIN switch also covers Managers, whose
+ * policy reads the same setting. OWNER and BASE are absent on purpose: see the
  * exemption sentence in {@link EXPLICIT_REQUIREMENT_LABELS}.
  */
 export const EXPLICIT_REQUIREMENT_ROLE_LABELS = Object.freeze({
-  ADMIN: "Admins",
+  ADMIN: "Admins and Managers",
   SELF_SERVICE: "Self Service users",
 });
 
@@ -451,7 +452,7 @@ export const EXPLICIT_REQUIREMENT_ROLE_LABELS = Object.freeze({
  *
  * @param {"CHECKIN"|"CHECKOUT"} direction - which card the switch sits on
  * @param {"ADMIN"|"SELF_SERVICE"} role - the role the switch covers
- * @returns {string} e.g. "Removes the one-click check-in for Admins. They check
+ * @returns {string} e.g. "Removes the one-click check-in for Admins and Managers. They check
  *   items in by scanning them or by selecting them from the list."
  */
 export function explicitRequirementSwitchDescription(direction, role) {

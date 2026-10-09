@@ -113,17 +113,25 @@ export default function LocationsIndexPage() {
       action: PermissionAction.create,
     });
 
+  const canCreateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
+
   return (
     <>
       <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new location`}
-          data-test-id="createNewLocation"
-        >
-          New location
-        </Button>
+        {canCreateLocation ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new location`}
+            data-test-id="createNewLocation"
+          >
+            New location
+          </Button>
+        ) : null}
       </Header>
       <ListContentWrapper>
         <Filters
@@ -139,12 +147,19 @@ export default function LocationsIndexPage() {
         />
         <List
           bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
-          customEmptyStateContent={{
-            title: "No locations yet",
-            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
-            newButtonRoute: "/locations/new",
-            newButtonContent: "Create your first location",
-          }}
+          customEmptyStateContent={
+            canCreateLocation
+              ? {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+                  newButtonRoute: "/locations/new",
+                  newButtonContent: "Create your first location",
+                }
+              : {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Locations added to this workspace will appear here.",
+                }
+          }
           ItemComponent={ListItemContent}
           headerChildren={
             <>

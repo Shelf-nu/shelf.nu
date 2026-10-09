@@ -5,7 +5,8 @@
  * Shelf `OrganizationRoles` value, using the group ids configured on `SsoDetails`.
  * These tests lock the robustness needed for real-world IdPs (esp. Shibboleth):
  * comma-separated multi-value fields, whitespace trimming, and case-insensitive
- * matching — while preserving ADMIN > SELF_SERVICE > BASE precedence.
+ * matching, while preserving ADMIN > MANAGER > SELF_SERVICE > BASE
+ * precedence.
  *
  * Also covers `requirePermission`'s `access` field: the `RoleAccess` object
  * folds the membership's policy with the workspace's visibility toggles, so
@@ -64,7 +65,7 @@ vi.mock(
 // organization; no Sentry client exists under `pnpm test:run`.
 vi.mock("@sentry/react-router", () => ({ setUser: vi.fn(), setTag: vi.fn() }));
 
-/** Builds a minimal SsoDetails; only the three group-id fields are read by the resolver. */
+/** Builds a minimal SsoDetails; only the group-id fields are read by the resolver. */
 function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
   return {
     id: "sso-1",
@@ -72,6 +73,7 @@ function makeSso(overrides: Partial<SsoDetails>): SsoDetails {
     baseUserGroupId: null,
     selfServiceGroupId: null,
     adminGroupId: null,
+    managerGroupId: null,
     requireSsoLogin: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -90,6 +92,7 @@ describe("SSO group columns", () => {
     expect(
       hasSsoGroupMappings({
         adminGroupId: null,
+        managerGroupId: null,
         selfServiceGroupId: null,
         baseUserGroupId: null,
       })
@@ -97,10 +100,63 @@ describe("SSO group columns", () => {
     expect(
       hasSsoGroupMappings({
         adminGroupId: null,
+        managerGroupId: null,
         selfServiceGroupId: "g",
         baseUserGroupId: null,
       })
     ).toBe(true);
+  });
+
+  it("counts a workspace that maps only the Manager group as mapped", () => {
+    expect(
+      hasSsoGroupMappings({
+        adminGroupId: null,
+        managerGroupId: "manager-group",
+        selfServiceGroupId: null,
+        baseUserGroupId: null,
+      })
+    ).toBe(true);
+  });
+});
+
+describe("getRoleFromGroupId with a Manager group", () => {
+  const sso = makeSso({
+    adminGroupId: "admin-group",
+    managerGroupId: "manager-group",
+    selfServiceGroupId: "ss-group",
+    baseUserGroupId: "base-group",
+  });
+
+  it("assigns Manager to a member of its group", () => {
+    expect(getRoleFromGroupId(sso, ["manager-group"])).toBe(
+      OrganizationRoles.MANAGER
+    );
+  });
+
+  it("ranks it above Self service and Base", () => {
+    expect(getRoleFromGroupId(sso, ["ss-group", "manager-group"])).toBe(
+      OrganizationRoles.MANAGER
+    );
+    expect(getRoleFromGroupId(sso, ["base-group", "manager-group"])).toBe(
+      OrganizationRoles.MANAGER
+    );
+  });
+
+  it("ranks it below Administrator", () => {
+    expect(getRoleFromGroupId(sso, ["manager-group", "admin-group"])).toBe(
+      OrganizationRoles.ADMIN
+    );
+  });
+
+  it("gives the higher role when one group is mapped to two fields", () => {
+    const shared = makeSso({
+      ...sso,
+      managerGroupId: "shared",
+      selfServiceGroupId: "shared",
+    });
+    expect(getRoleFromGroupId(shared, ["shared"])).toBe(
+      OrganizationRoles.MANAGER
+    );
   });
 });
 

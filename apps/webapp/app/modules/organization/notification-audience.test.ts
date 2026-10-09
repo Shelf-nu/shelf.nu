@@ -39,9 +39,13 @@ describe("getOrganizationNotificationAudience", () => {
     ]);
   });
 
-  it.each(["orgBookingBroadcasts", "inventoryAlerts"] as const)(
-    "the %s audience is the roles whose policy grants it (OWNER and ADMIN today)",
-    async (audience) => {
+  it.each([
+    // The Manager receives booking broadcasts but not low-stock alerts.
+    ["orgBookingBroadcasts", ["OWNER", "ADMIN", "MANAGER"]],
+    ["inventoryAlerts", ["OWNER", "ADMIN"]],
+  ] as const)(
+    "the %s audience is the roles whose policy grants it (%j)",
+    async (audience, roles) => {
       const users = await getOrganizationNotificationAudience({
         organizationId: "org-1",
         audience,
@@ -51,7 +55,7 @@ describe("getOrganizationNotificationAudience", () => {
         expect.objectContaining({
           where: {
             organizationId: "org-1",
-            roles: { hasSome: ["OWNER", "ADMIN"] },
+            roles: { hasSome: [...roles] },
           },
         })
       );

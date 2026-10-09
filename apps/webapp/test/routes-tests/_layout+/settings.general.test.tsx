@@ -691,3 +691,56 @@ describe("settings.general SSO settings refusals", () => {
     expect(response.init?.status).toBe(400);
   });
 });
+
+describe("settings.general SSO settings write", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  it("writes every group mapping, the Manager group included", async () => {
+    const ssoOrganization = { ...baseOrganization(), enabledSso: true };
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: ssoOrganization,
+      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
+      organizations: [ssoOrganization],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+
+    const body = new URLSearchParams({
+      intent: "sso",
+      id: "org-1",
+      adminGroupId: "grp-admin",
+      managerGroupId: "grp-manager",
+      selfServiceGroupId: "grp-self-service",
+      baseUserGroupId: "grp-base",
+    });
+
+    await action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    );
+
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "org-1",
+        ssoDetails: {
+          adminGroupId: "grp-admin",
+          managerGroupId: "grp-manager",
+          selfServiceGroupId: "grp-self-service",
+          baseUserGroupId: "grp-base",
+        },
+      })
+    );
+  });
+});

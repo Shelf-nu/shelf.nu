@@ -198,9 +198,9 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
       });
     }
 
-    /** If the user is already signed in, we jus redirect them to assets index and set */
+    /** A signed-in user goes to their role's landing page in the invited workspace */
     if (context.isAuthenticated) {
-      return redirect(safeRedirect(`/assets`), {
+      return redirect(safeRedirect("/"), {
         headers: [
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)

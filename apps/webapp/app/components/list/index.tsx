@@ -5,6 +5,12 @@ import { useLoaderData } from "react-router";
 import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import BulkListItemCheckbox from "./bulk-actions/bulk-list-item-checkbox";
 import { EmptyState } from "./empty-state";
@@ -149,6 +155,13 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
   const hasItems = totalIncomingItems > 0;
 
   const { modeIsAdvanced } = useAssetIndexViewState();
+  const roles = useOrganizationRoles();
+  // Export selection downloads through a route gated on asset export.
+  const canExportAssets = userHasPermission({
+    roles,
+    entity: PermissionEntity.asset,
+    action: PermissionAction.export,
+  });
   // The export button ships ASSET rows. The model view lists models, so it
   // has nothing to export and no selectable rows to export from.
   const { isModelView } = useAssetIndexView();
@@ -198,7 +211,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
             </div>
             <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
-              <When truthy={modeIsAdvanced && !isModelView}>
+              <When truthy={modeIsAdvanced && !isModelView && canExportAssets}>
                 <ExportAssetsButton />
               </When>
               <When truthy={!!bulkActions}>{bulkActions}</When>

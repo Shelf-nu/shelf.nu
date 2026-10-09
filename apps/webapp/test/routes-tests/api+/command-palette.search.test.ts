@@ -118,7 +118,7 @@ describe("command-palette search", () => {
   it("a restricted-custody caller's team-member search still applies the text search", async () => {
     // why: no current role holds teamMember:read without custody.seeAll, so
     // this crafts the access shape by hand to exercise the combination the
-    // next role to gain that pairing (Custody Manager) will produce.
+    // next role to gain that pairing (Manager) will produce.
     const context = permissionContext({ roles: ["ADMIN"] });
     vi.mocked(requirePermission).mockResolvedValueOnce({
       ...context,

@@ -6,6 +6,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -93,12 +94,14 @@ function ConditionalDropdown() {
   const [searchParams] = useSearchParams();
   /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
   const canArchiveAssets = useCanArchiveAssets();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
   /**
    * The view the list actually shows. The server honours `?archived=` only
-   * for members who can archive; anyone else sees the Active view whatever
-   * the URL says, so their menu must not act as if it were the Archived one.
+   * for members who may see archived assets; anyone else sees the Active view
+   * whatever the URL says, so their menu must not act as if it were the
+   * Archived one.
    */
-  const viewParam = canArchiveAssets ? searchParams.get("archived") : null;
+  const viewParam = canViewArchivedAssets ? searchParams.get("archived") : null;
   // In the Archived view the selection is archived assets, which are frozen:
   // every bulk action is disabled except Reinstate (the calm "archived =
   // read-only except reinstate" rule, issue #382).
@@ -116,10 +119,13 @@ function ConditionalDropdown() {
     : allSelected
     ? viewParam === "all"
     : selectedAssets.some((asset) => !!asset.archivedAt);
+  // Only members holding `asset: archive` can reinstate, so anyone else who
+  // sees the Archived view (a Manager) is pointed at who can.
   const archivedBulkDisabled: { reason: string } | false = selectionIsArchived
     ? {
-        reason:
-          "Archived assets are read-only. Reinstate them to make changes.",
+        reason: canArchiveAssets
+          ? "Archived assets are read-only. Reinstate them to make changes."
+          : "Archived assets are read-only. Ask an admin to reinstate them.",
       }
     : false;
 
@@ -193,24 +199,6 @@ function ConditionalDropdown() {
           action: PermissionAction.update,
         })}
       >
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.create,
-          })}
-        >
-          <BulkStartAuditDialog />
-        </When>
-        <When
-          truthy={userHasPermission({
-            roles,
-            entity: PermissionEntity.audit,
-            action: PermissionAction.update,
-          })}
-        >
-          <BulkAddToAuditDialog />
-        </When>
         <BulkLocationUpdateDialog />
         <BulkAssignTagsDialog />
         <BulkRemoveTagsDialog />
@@ -227,6 +215,27 @@ function ConditionalDropdown() {
       <When truthy={canArchiveAssets}>
         <BulkArchiveDialog type="archive" />
         <BulkArchiveDialog type="reinstate" />
+      </When>
+
+      {/* Audit dialogs follow the audit grants alone: a Manager runs audits
+          without editing assets. */}
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.create,
+        })}
+      >
+        <BulkStartAuditDialog />
+      </When>
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.audit,
+          action: PermissionAction.update,
+        })}
+      >
+        <BulkAddToAuditDialog />
       </When>
 
       <BulkDownloadQrDialog

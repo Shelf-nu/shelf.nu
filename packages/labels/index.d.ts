@@ -69,9 +69,9 @@ export declare const AUDIT_STATUS_LABELS: {
  * explanatory tooltip. Kept together so they can never disagree.
  */
 export declare const AUDIT_UNASSIGNED_LABELS: {
-  readonly SHORT: "Unassigned · admins and owners can scan";
-  readonly A11Y: "unassigned, admins and owners can scan";
-  readonly DETAIL: "Workspace admins and owners can perform this audit because it has no specific assignee.";
+  readonly SHORT: "Unassigned · owners, admins and managers can scan";
+  readonly A11Y: "unassigned, owners, admins and managers can scan";
+  readonly DETAIL: "Workspace owners, admins and managers can perform this audit because it has no specific assignee.";
 };
 
 /**
@@ -293,7 +293,7 @@ export type ExplicitRequirementDirection =
 
 /** The two roles a switch can cover, named as the settings cards show them. */
 export declare const EXPLICIT_REQUIREMENT_ROLE_LABELS: {
-  readonly ADMIN: "Admins";
+  readonly ADMIN: "Admins and Managers";
   readonly SELF_SERVICE: "Self Service users";
 };
 
@@ -303,7 +303,7 @@ export type ExplicitRequirementRole =
 
 /**
  * Describes what one switch on an explicit-requirement card does for its role,
- * e.g. "Removes the one-click check-in for Admins. They check items in by
+ * e.g. "Removes the one-click check-in for Admins and Managers. They check items in by
  * scanning them or by selecting them from the list."
  *
  * @param direction - which card the switch sits on

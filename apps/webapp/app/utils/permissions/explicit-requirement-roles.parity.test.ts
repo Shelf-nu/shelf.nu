@@ -27,26 +27,49 @@ import {
 import { ROLE_POLICIES } from "./role-access";
 
 describe("explicit requirement copy matches the role policy", () => {
-  it("offers a switch for exactly the roles the policy lets a switch cover", () => {
-    const covered = Object.entries(ROLE_POLICIES)
-      .filter(([, policy]) => policy.bookings.explicitScanSetting !== "none")
+  /** The policy setting each labelled switch writes to. */
+  const SETTING_OF_SWITCH = {
+    ADMIN: "admin",
+    SELF_SERVICE: "selfService",
+  } as const;
+
+  /** The roles whose policy reads the given switch setting. */
+  const rolesReading = (setting: string) =>
+    Object.entries(ROLE_POLICIES)
+      .filter(([, policy]) => policy.bookings.explicitScanSetting === setting)
       .map(([role]) => role)
       .sort();
 
-    expect(covered).toEqual(
-      Object.keys(EXPLICIT_REQUIREMENT_ROLE_LABELS).sort()
+  it("offers a switch for exactly the settings the policy reads", () => {
+    const readSettings = [
+      ...new Set(
+        Object.values(ROLE_POLICIES)
+          .map((policy) => policy.bookings.explicitScanSetting)
+          .filter((setting) => setting !== "none")
+      ),
+    ].sort();
+
+    expect(readSettings).toEqual(Object.values(SETTING_OF_SWITCH).sort());
+    expect(Object.keys(EXPLICIT_REQUIREMENT_ROLE_LABELS).sort()).toEqual(
+      Object.keys(SETTING_OF_SWITCH).sort()
     );
   });
 
-  it("wires each labelled switch to the setting its role reads", () => {
-    // The cards bind the "Admins" switch to `requireExplicit*ForAdmin` and the
-    // "Self Service users" switch to `requireExplicit*ForSelfService`.
-    expect(
-      ROLE_POLICIES[OrganizationRoles.ADMIN].bookings.explicitScanSetting
-    ).toBe("admin");
-    expect(
-      ROLE_POLICIES[OrganizationRoles.SELF_SERVICE].bookings.explicitScanSetting
-    ).toBe("selfService");
+  it("names every role a switch covers in that switch's label", () => {
+    // The cards bind the "admin" switch to `requireExplicit*ForAdmin` and the
+    // "selfService" switch to `requireExplicit*ForSelfService`. A role added to
+    // a setting must be named on its switch, or the card under-describes it.
+    expect(rolesReading("admin")).toEqual([
+      OrganizationRoles.ADMIN,
+      OrganizationRoles.MANAGER,
+    ]);
+    expect(EXPLICIT_REQUIREMENT_ROLE_LABELS.ADMIN).toBe("Admins and Managers");
+    expect(rolesReading("selfService")).toEqual([
+      OrganizationRoles.SELF_SERVICE,
+    ]);
+    expect(EXPLICIT_REQUIREMENT_ROLE_LABELS.SELF_SERVICE).toBe(
+      "Self Service users"
+    );
   });
 
   it("says the workspace owner is never restricted, which holds while the owner can check in and out", () => {

@@ -361,12 +361,19 @@ export default function LocationKits() {
               </When>
             </>
           }
-          customEmptyStateContent={{
-            title: "You haven't added any kits yet.",
-            text: "What are you waiting for? Add your first kit now!",
-            newButtonRoute: "manage-kits",
-            newButtonContent: "Add kit",
-          }}
+          customEmptyStateContent={
+            userRoleCanManageKits
+              ? {
+                  title: "You haven't added any kits yet.",
+                  text: "What are you waiting for? Add your first kit now!",
+                  newButtonRoute: "manage-kits",
+                  newButtonContent: "Add kit",
+                }
+              : {
+                  title: "There are currently no kits at the location",
+                  text: "Kits placed at this location will appear here.",
+                }
+          }
         />
       </div>
     </>

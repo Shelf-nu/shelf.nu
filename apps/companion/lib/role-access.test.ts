@@ -89,16 +89,46 @@ describe("accessForOrganization", () => {
     assert.equal(access.bookings.writeAll, true);
   });
 
-  test("only OWNER and ADMIN see every audit", () => {
+  test("OWNER, ADMIN and MANAGER see every audit", () => {
     const seeAll = (roles: string[]) => accessOf(roles).audits.seeAll;
     assert.deepEqual(
-      [["OWNER"], ["ADMIN"], ["SELF_SERVICE"], ["BASE"]].map(seeAll),
-      [true, true, false, false]
+      [["OWNER"], ["ADMIN"], ["MANAGER"], ["SELF_SERVICE"], ["BASE"]].map(
+        seeAll
+      ),
+      [true, true, true, false, false]
     );
   });
 
+  test("MANAGER holds the administrator's booking, custody and audit reach", () => {
+    const manager = accessOf(["MANAGER"]);
+    const admin = accessOf(["ADMIN"]);
+    assert.equal(manager.role, "MANAGER");
+    assert.equal(manager.bookings.seeAll, admin.bookings.seeAll);
+    assert.equal(manager.bookings.writeAll, admin.bookings.writeAll);
+    assert.equal(manager.custody.assign, admin.custody.assign);
+    assert.equal(manager.audits.seeAll, admin.audits.seeAll);
+    assert.equal(manager.bookings.writeAll, true);
+    assert.equal(manager.custody.assign, "anyone");
+  });
+
+  test("a mixed membership resolves to its highest role, in either order", () => {
+    for (const roles of [
+      ["SELF_SERVICE", "MANAGER"],
+      ["MANAGER", "SELF_SERVICE"],
+      ["BASE", "MANAGER"],
+    ]) {
+      assert.equal(accessOf(roles).role, "MANAGER", roles.join("+"));
+    }
+    for (const roles of [
+      ["MANAGER", "ADMIN"],
+      ["ADMIN", "MANAGER"],
+    ]) {
+      assert.equal(accessOf(roles).role, "ADMIN", roles.join("+"));
+    }
+  });
+
   test("a role this build does not know denies every gate (old build + new role)", () => {
-    const org = meOrganization({ roles: ["CUSTODY_MANAGER"] });
+    const org = meOrganization({ roles: ["FUTURE_ROLE"] });
     const access = accessForOrganization(org);
     assert.equal(access.role, "BASE");
     assert.equal(access.custody.assign, "none");
@@ -121,10 +151,12 @@ describe("accessForOrganization", () => {
 });
 
 describe("own-booking writes", () => {
-  test("a membership that holds OWNER or ADMIN writes every booking", () => {
+  test("a membership that holds OWNER, ADMIN or MANAGER writes every booking", () => {
     for (const roles of [
       ["OWNER"],
       ["ADMIN"],
+      ["MANAGER"],
+      ["SELF_SERVICE", "MANAGER"],
       ["SELF_SERVICE", "ADMIN"],
       ["BASE", "OWNER"],
     ]) {
@@ -144,8 +176,14 @@ describe("custody for yourself only", () => {
     assert.equal(accessOf(["SELF_SERVICE"]).custody.assign, "self");
   });
 
-  test("SELF_SERVICE alongside OWNER or ADMIN assigns to anyone", () => {
+  test("MANAGER assigns custody to anyone", () => {
+    assert.equal(accessOf(["MANAGER"]).custody.assign, "anyone");
+  });
+
+  test("SELF_SERVICE alongside OWNER, ADMIN or MANAGER assigns to anyone", () => {
     for (const roles of [
+      ["MANAGER", "SELF_SERVICE"],
+      ["SELF_SERVICE", "MANAGER"],
       ["OWNER", "SELF_SERVICE"],
       ["ADMIN", "SELF_SERVICE"],
       ["SELF_SERVICE", "OWNER"],
@@ -186,6 +224,31 @@ describe("booking item rules", () => {
         assert.equal(mayRemove(roles, status), true, label);
       }
     }
+  });
+
+  test("MANAGER manages items in every status the same as ADMIN", () => {
+    for (const status of [
+      "DRAFT",
+      "RESERVED",
+      "ONGOING",
+      "OVERDUE",
+      "COMPLETE",
+      "ARCHIVED",
+      "CANCELLED",
+    ]) {
+      assert.equal(
+        mayAdd(["MANAGER"], status),
+        mayAdd(["ADMIN"], status),
+        `add ${status}`
+      );
+      assert.equal(
+        mayRemove(["MANAGER"], status),
+        mayRemove(["ADMIN"], status),
+        `remove ${status}`
+      );
+    }
+    assert.equal(mayAdd(["MANAGER"], "RESERVED"), true);
+    assert.equal(mayRemove(["MANAGER"], "OVERDUE"), true);
   });
 
   test("BASE still manages items on its DRAFT bookings", () => {
@@ -243,14 +306,17 @@ describe("mayWriteBookingItems", () => {
   });
 
   test("a role that writes every booking may change anyone's", () => {
-    assert.equal(
-      mayWriteBookingItems({
-        access: accessOf(["ADMIN"]),
-        userId: "user-1",
-        ...colleagues,
-      }),
-      true
-    );
+    for (const roles of [["ADMIN"], ["MANAGER"]]) {
+      assert.equal(
+        mayWriteBookingItems({
+          access: accessOf(roles),
+          userId: "user-1",
+          ...colleagues,
+        }),
+        true,
+        roles.join("+")
+      );
+    }
   });
 
   test("an unknown signed-in user or custodian denies a scoped role", () => {
@@ -322,15 +388,18 @@ describe("mayRemoveBookingItemsAsCustodian", () => {
   });
 
   test("a role that writes every booking may remove from anyone's", () => {
-    assert.equal(
-      mayRemoveBookingItemsAsCustodian({
-        access: accessOf(["ADMIN"]),
-        userId: "user-1",
-        custodianUserId: "user-2",
-        custodianTeamMemberUserId: undefined,
-      }),
-      true
-    );
+    for (const roles of [["ADMIN"], ["MANAGER"]]) {
+      assert.equal(
+        mayRemoveBookingItemsAsCustodian({
+          access: accessOf(roles),
+          userId: "user-1",
+          custodianUserId: "user-2",
+          custodianTeamMemberUserId: undefined,
+        }),
+        true,
+        roles.join("+")
+      );
+    }
   });
 });
 
@@ -376,14 +445,17 @@ describe("mayReleaseAssetCustody", () => {
     );
   });
 
-  test("an administrator releases anyone's custody", () => {
-    assert.equal(
-      mayReleaseAssetCustody({
-        access: accessOf(["ADMIN"]),
-        userId: "user-1",
-        custodianUserId: "user-2",
-      }),
-      true
-    );
+  test("an administrator or manager releases anyone's custody", () => {
+    for (const roles of [["ADMIN"], ["MANAGER"]]) {
+      assert.equal(
+        mayReleaseAssetCustody({
+          access: accessOf(roles),
+          userId: "user-1",
+          custodianUserId: "user-2",
+        }),
+        true,
+        roles.join("+")
+      );
+    }
   });
 });

@@ -59,12 +59,17 @@ describe("ChangeRoleDialog role options", () => {
   });
 
   it("does not offer Administrator to an administrator", () => {
-    expect(offeredRoles()).toEqual(["Self service", "Base"]);
+    expect(offeredRoles()).toEqual(["Manager", "Self service", "Base"]);
   });
 
   it("offers Administrator to the workspace owner", () => {
     viewer.ownsWorkspace = true;
 
-    expect(offeredRoles()).toEqual(["Administrator", "Self service", "Base"]);
+    expect(offeredRoles()).toEqual([
+      "Administrator",
+      "Manager",
+      "Self service",
+      "Base",
+    ]);
   });
 });

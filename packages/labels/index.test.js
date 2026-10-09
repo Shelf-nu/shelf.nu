@@ -282,7 +282,7 @@ test("a switch description names its role and both explicit ways", () => {
   const admin = explicitRequirementSwitchDescription("CHECKIN", "ADMIN");
   assert.equal(
     admin,
-    "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+    "Removes the one-click check-in for Admins and Managers. They check items in by scanning them or by selecting them from the list."
   );
   const selfService = explicitRequirementSwitchDescription(
     "CHECKOUT",

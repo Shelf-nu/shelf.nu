@@ -23,6 +23,8 @@ import {
 } from "~/modules/reports/registry";
 import type { ReportDefinition } from "~/modules/reports/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -34,7 +36,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: appendToMetaTitle(data?.header?.title || "Reports") },
 ];
 
-export async function loader({ context, request }: LoaderFunctionArgs) {
+async function loadReportsIndex({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -59,6 +61,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     reportsByCategory,
     categories: REPORT_CATEGORIES,
   });
+}
+
+/**
+ * Loads the reports index page. Every failure, including a refused permission or an
+ * unknown report, becomes a response carrying its own status, so a member
+ * without report access sees a 403 page rather than a server error.
+ */
+export async function loader(args: LoaderFunctionArgs) {
+  try {
+    return await loadReportsIndex(args);
+  } catch (cause) {
+    const reason = makeShelfError(cause, {
+      userId: args.context.getSession().userId,
+    });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportsIndex() {

@@ -15,6 +15,7 @@ import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { isFormProcessing } from "~/utils/form";
+import { AUDIT_ANY_PERFORMER_SENTENCE } from "~/utils/permissions/role-audience";
 import AuditTeamMemberSelector from "./audit-team-member-selector";
 
 /**
@@ -272,7 +273,7 @@ export function StartAuditFromContextDialog({
                   Select assignee (optional).
                 </p>
                 <p className="border-b p-3 ">
-                  Admins can perform any audit. Choosing assignees also lets
+                  {AUDIT_ANY_PERFORMER_SENTENCE} Choosing assignees also lets
                   those people perform it, including several at different times.
                 </p>
                 <AuditTeamMemberSelector />
