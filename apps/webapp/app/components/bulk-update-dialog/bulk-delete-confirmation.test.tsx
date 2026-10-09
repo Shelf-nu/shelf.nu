@@ -11,7 +11,7 @@
  */
 import type React from "react";
 import type { PropsWithChildren } from "react";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
 import { createRoutesStub } from "react-router";
@@ -82,8 +82,12 @@ const DIALOGS: {
 
 /**
  * Renders a bulk dialog under a router (for its loader data) and a jotai
- * store, then opens it with the given selection. The atoms reset on mount, so
- * they are seeded after the first render.
+ * store, then opens it with the given selection.
+ *
+ * The dialog and selection atoms reset themselves when first subscribed, and
+ * the subscription happens in an effect that can run after the route has
+ * painted. Seeding once can therefore be undone by that reset, so the seed is
+ * repeated until the dialog is actually on screen.
  */
 async function renderOpen(
   { Dialog, type }: (typeof DIALOGS)[number],
@@ -103,14 +107,15 @@ async function renderOpen(
     },
   ]);
   render(<Stub initialEntries={["/"]} />);
-  // Wait for the loader before seeding: the dialog subscribes on mount.
   await screen.findByText("route rendered");
-  await act(async () => {
-    store.set(bulkDialogAtom, (prev) => ({ ...prev, [type]: true }));
-    store.set(selectedBulkItemsAtom, selection);
-    await Promise.resolve();
+  await waitFor(() => {
+    act(() => {
+      store.set(bulkDialogAtom, (prev) => ({ ...prev, [type]: true }));
+      store.set(selectedBulkItemsAtom, selection);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
-  return screen.findByRole("dialog");
+  return screen.getByRole("dialog");
 }
 
 const THREE_ROWS = [{ id: "r1" }, { id: "r2" }, { id: "r3" }] as ListItemData[];
