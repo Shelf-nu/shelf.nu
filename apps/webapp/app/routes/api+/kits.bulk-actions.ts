@@ -4,7 +4,6 @@ import { BulkAssignKitCustodySchema } from "~/components/kits/bulk-assign-custod
 import { BulkDeleteKitsSchema } from "~/components/kits/bulk-delete-dialog";
 import { KitBulkLocationUpdateSchema } from "~/components/kits/bulk-location-update-dialog";
 import { BulkReleaseKitCustodySchema } from "~/components/kits/bulk-release-custody-dialog";
-import { db } from "~/database/db.server";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import {
   bulkAssignKitCustody,
