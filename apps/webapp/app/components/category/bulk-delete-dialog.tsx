@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/categories";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteCategorySchema = z.object({
@@ -24,7 +27,15 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedCategories)
     ? totalItems
     : selectedCategories.length;
-  const noun = totalSelected === 1 ? "category" : "categories";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "category" : "categories";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun}. Assets and kits in them are left without a category, and a custom field limited to these categories only will show on every asset. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
@@ -32,8 +43,14 @@ export default function BulkDeleteDialog() {
       type="trash"
       arrayFieldId="categoryIds"
       actionUrl="/api/categories/bulk-actions"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun}. Assets and kits in them are left without a category, and a custom field limited to these categories only will show on every asset. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
     >
       {({
         fetcherError,

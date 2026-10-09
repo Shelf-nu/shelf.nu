@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteKitsSchema = z.object({
@@ -24,14 +27,28 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedKits)
     ? totalItems
     : selectedKits.length;
-  const noun = totalSelected === 1 ? "kit" : "kits";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "kit" : "kits";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun}. Their assets stay in your workspace and keep their location, but leave the draft and reserved bookings the kits were on. Kit custody is released and kit QR codes are unlinked. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="trash"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun}. Their assets stay in your workspace and keep their location, but leave the draft and reserved bookings the kits were on. Kit custody is released and kit QR codes are unlinked. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
       actionUrl="/api/kits/bulk-actions"
       arrayFieldId="kitIds"
     >

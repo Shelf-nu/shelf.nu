@@ -189,3 +189,25 @@ describe("a select all the server counts differently", () => {
     expect(deleteButton).toBeEnabled();
   });
 });
+
+describe.each(DIALOGS)(
+  "the $name dialog after the server counts differently",
+  (entry) => {
+    it("retitles and redescribes itself with the server's number", async () => {
+      hoisted.fetcherData = {
+        error: {
+          message: "Nothing was deleted.",
+          additionalData: { expectedConfirmation: 45 },
+        },
+      };
+      const dialog = await renderOpen(entry, [
+        { id: ALL_SELECTED_KEY } as ListItemData,
+      ]);
+      const heading = within(dialog).getByRole("heading", { level: 4 });
+
+      expect(heading).toHaveTextContent(/^Delete 45 /);
+      expect(heading).not.toHaveTextContent(String(TOTAL_ITEMS));
+      expect(heading.nextElementSibling).toHaveTextContent(/deletes 45 /);
+    });
+  }
+);

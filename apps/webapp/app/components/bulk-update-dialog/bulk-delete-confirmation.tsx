@@ -18,6 +18,25 @@ import { EXPECTED_CONFIRMATION_KEY } from "~/utils/delete-confirmation";
 import { Button } from "../shared/button";
 import { TypeToConfirm, useTypeToConfirm } from "../shared/type-to-confirm";
 
+/**
+ * How many items a bulk delete dialog is about to remove: the server's count
+ * after a refused "select all" (see `assertBulkDeleteConfirmed`), otherwise
+ * the count the dialog opened with. The title, description and field all read
+ * it, so none of them keeps showing a number the server has corrected.
+ *
+ * @param selectedCount - The count the dialog opened with
+ * @param fetcherErrorAdditionalData - The last refusal's `additionalData`
+ * @returns The number the user must confirm
+ */
+export function bulkDeleteCount(
+  selectedCount: number,
+  fetcherErrorAdditionalData?: Record<string, unknown>
+): number {
+  const serverExpected =
+    fetcherErrorAdditionalData?.[EXPECTED_CONFIRMATION_KEY];
+  return typeof serverExpected === "number" ? serverExpected : selectedCount;
+}
+
 type BulkDeleteConfirmationProps = {
   /** How many items the dialog says are selected. */
   count: number;
@@ -43,9 +62,7 @@ export function BulkDeleteConfirmation({
   fetcherErrorAdditionalData,
   onCancel,
 }: BulkDeleteConfirmationProps) {
-  const serverExpected =
-    fetcherErrorAdditionalData?.[EXPECTED_CONFIRMATION_KEY];
-  const expected = typeof serverExpected === "number" ? serverExpected : count;
+  const expected = bulkDeleteCount(count, fetcherErrorAdditionalData);
   const { value, setValue, isConfirmed } = useTypeToConfirm(expected);
 
   return (

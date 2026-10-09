@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteBookingSchema = z.object({
@@ -24,7 +27,15 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedBookings)
     ? totalItems
     : selectedBookings.length;
-  const noun = totalSelected === 1 ? "booking" : "bookings";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "booking" : "bookings";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun} with their notes, model reservations and check-in and check-out history. Assets on an ongoing or overdue booking become available. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
@@ -32,8 +43,14 @@ export default function BulkDeleteDialog() {
       type="trash"
       arrayFieldId="bookingIds"
       actionUrl="/api/bookings/bulk-actions"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun} with their notes, model reservations and check-in and check-out history. Assets on an ongoing or overdue booking become available. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
     >
       {({
         fetcherError,

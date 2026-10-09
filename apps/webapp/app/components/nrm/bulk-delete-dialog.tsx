@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/settings.team.nrm";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteNRMSchema = z.object({
@@ -30,8 +33,16 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedNRMs)
     ? totalItems
     : selectedNRMs.length;
-  const noun =
-    totalSelected === 1 ? "non-registered member" : "non-registered members";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun =
+      count === 1 ? "non-registered member" : "non-registered members";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This deletes ${count} ${noun}. Their past bookings and activity are kept. A member who holds custody of an asset or kit cannot be deleted. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
@@ -39,8 +50,14 @@ export default function BulkDeleteDialog() {
       type="trash"
       arrayFieldId="nrmIds"
       actionUrl="/api/nrm/bulk-actions"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This deletes ${totalSelected} ${noun}. Their past bookings and activity are kept. A member who holds custody of an asset or kit cannot be deleted. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
     >
       {({
         fetcherError,

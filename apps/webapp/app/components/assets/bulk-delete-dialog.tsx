@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteAssetsSchema = z.object({
@@ -23,14 +26,28 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedAssets)
     ? totalItems
     : selectedAssets.length;
-  const noun = totalSelected === 1 ? "asset" : "assets";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "asset" : "assets";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun} with their notes, custody, reminders and custom field values, and removes them from every booking, kit and audit. Their QR codes are unlinked. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
       ref={zo.ref}
       type="trash"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun} with their notes, custody, reminders and custom field values, and removes them from every booking, kit and audit. Their QR codes are unlinked. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
       actionUrl="."
       arrayFieldId="assetIds"
     >

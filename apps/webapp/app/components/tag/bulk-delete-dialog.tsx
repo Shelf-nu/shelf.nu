@@ -5,7 +5,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/tags";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 export const BulkDeleteTagsSchema = z.object({
@@ -24,7 +27,15 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedTags)
     ? totalItems
     : selectedTags.length;
-  const noun = totalSelected === 1 ? "tag" : "tags";
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "tag" : "tags";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} ${noun} and removes them from every asset and booking that has them. The assets and bookings are kept. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
@@ -32,8 +43,14 @@ export default function BulkDeleteDialog() {
       type="trash"
       arrayFieldId="tagIds"
       actionUrl="/api/tags/bulk-actions"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun} and removes them from every asset and booking that has them. The assets and bookings are kept. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
     >
       {({
         fetcherError,

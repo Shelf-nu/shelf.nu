@@ -21,7 +21,10 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { AuditsIndexLoaderData } from "~/routes/_layout+/audits._index";
 import { isSelectingAllItems } from "~/utils/list";
-import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
+import {
+  BulkDeleteConfirmation,
+  bulkDeleteCount,
+} from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
 
 /**
@@ -45,9 +48,17 @@ export default function BulkDeleteAuditsDialog() {
   const totalSelected = isSelectingAllItems(selectedAudits)
     ? totalItems
     : selectedAudits.length;
-  const noun = totalSelected === 1 ? "audit" : "audits";
 
   const zo = useZorm("BulkDeleteAudits", BulkDeleteAuditsSchema);
+
+  /** The dialog's words for `count` items, re-read after a refused count. */
+  const describe = (count: number) => {
+    const noun = count === 1 ? "audit" : "audits";
+    return {
+      title: `Delete ${count} ${noun}`,
+      description: `This permanently deletes ${count} archived ${noun} with all their scans, notes and images. This cannot be undone.`,
+    };
+  };
 
   return (
     <BulkUpdateDialogContent
@@ -55,8 +66,14 @@ export default function BulkDeleteAuditsDialog() {
       type="delete-audit"
       arrayFieldId="auditIds"
       actionUrl="/api/audits/bulk-actions"
-      title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} archived ${noun} with all their scans, notes and images. This cannot be undone.`}
+      title={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .title
+      }
+      description={({ fetcherErrorAdditionalData }) =>
+        describe(bulkDeleteCount(totalSelected, fetcherErrorAdditionalData))
+          .description
+      }
     >
       {({
         disabled,
