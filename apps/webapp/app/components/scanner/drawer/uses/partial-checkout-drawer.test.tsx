@@ -125,6 +125,8 @@ type ScannedAssetFixture = {
   /** Booked qty for the slice. Only meaningful for QUANTITY_TRACKED. */
   bookedQuantity?: number;
   unitOfMeasure?: string | null;
+  /** Live asset status on the booking row and the scan (default: AVAILABLE). */
+  status?: AssetStatus;
 };
 
 /**
@@ -159,7 +161,8 @@ function makeLoaderData(
     asset: {
       id: a.id,
       title: a.title,
-      status: overrides.statusByAssetId?.[a.id] ?? AssetStatus.AVAILABLE,
+      status:
+        overrides.statusByAssetId?.[a.id] ?? a.status ?? AssetStatus.AVAILABLE,
       kitId: null,
       type: a.kind,
       unitOfMeasure: a.unitOfMeasure ?? null,
@@ -197,7 +200,7 @@ function scannedAsset(asset: ScannedAssetFixture) {
     data: {
       id: asset.id,
       title: asset.title,
-      status: AssetStatus.AVAILABLE,
+      status: asset.status ?? AssetStatus.AVAILABLE,
       type: asset.kind,
       unitOfMeasure: asset.unitOfMeasure ?? null,
       assetKits: [],
@@ -637,6 +640,71 @@ describe("PartialCheckoutDrawer", () => {
     expect(
       screen.queryByLabelText(/check out quantity/i)
     ).not.toBeInTheDocument();
+  });
+
+  /**
+   * A pool reads IN_CUSTODY while ANY of its units is held. The server
+   * exempts it from the custody refusal and caps it by its units left on this
+   * booking, so the scanned row must stay usable: quantity input, no
+   * "In custody" badge, no blocker, and the asset in the submission.
+   */
+  it("lets a quantity-tracked pool with some units in custody go out", () => {
+    const sandbag: ScannedAssetFixture = {
+      id: "sandbag-id",
+      title: "Sandbag",
+      kind: "QUANTITY_TRACKED",
+      bookedQuantity: 1,
+      unitOfMeasure: "pcs",
+      status: AssetStatus.IN_CUSTODY,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 1 },
+      })
+    );
+
+    const store = seedStore({ "qr-sandbag": scannedAsset(sandbag) });
+    renderDrawer(store);
+
+    expect(screen.getByText("Sandbag")).toBeInTheDocument();
+    expect(screen.queryByText("In custody")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/release custody first/i)
+    ).not.toBeInTheDocument();
+
+    const input = screen.getByLabelText(
+      /check out quantity/i
+    ) as HTMLInputElement;
+    expect(input.value).toBe("1");
+    expect(Number(input.max)).toBe(1);
+
+    // The footer form renders outside the drawer's container.
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="assetIds[0]"]')
+        ?.value
+    ).toBe("sandbag-id");
+    expect(
+      screen.getByRole("button", { name: "Check out assets" })
+    ).not.toBeDisabled();
+  });
+
+  it("still blocks an individual asset in custody", () => {
+    const camera: ScannedAssetFixture = {
+      id: "camera-id",
+      title: "Camera body",
+      kind: "INDIVIDUAL",
+      status: AssetStatus.IN_CUSTODY,
+    };
+    useLoaderDataMock.mockReturnValue(makeLoaderData([camera]));
+
+    const store = seedStore({ "qr-camera": scannedAsset(camera) });
+    renderDrawer(store);
+
+    expect(screen.getByText("In custody")).toBeInTheDocument();
+    expect(screen.getByText(/release custody first/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Check out assets" })
+    ).toBeDisabled();
   });
 
   /* ---- pending-items-list contract (mirrors check-in tests) ----- */

@@ -16,6 +16,7 @@
 import { AssetStatus } from "@prisma/client";
 import type { AssetType } from "@prisma/client";
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
   KitFromQr,
@@ -176,10 +177,17 @@ export function buildPartialCheckoutBlockers({
     alreadyCheckedOutAssets
   );
 
+  // Whole-asset statement, so INDIVIDUAL only. A quantity-tracked pool reads
+  // IN_CUSTODY while a single unit is held and the rest is free stock, and
+  // `partialCheckoutBooking` exempts it the same way: what a pool may send out
+  // is its units left on this booking, which `assets-already-checked-out`
+  // judges instead.
   const assetsInCustody = assets
     .filter(
       (asset) =>
-        bookingAssetIds.has(asset.id) && asset.status === AssetStatus.IN_CUSTODY
+        bookingAssetIds.has(asset.id) &&
+        !isQuantityTracked(asset) &&
+        asset.status === AssetStatus.IN_CUSTODY
     )
     .map((a) => a.id);
   const qrIdsOfAssetsInCustody = qrIdsFor(items, "asset", assetsInCustody);

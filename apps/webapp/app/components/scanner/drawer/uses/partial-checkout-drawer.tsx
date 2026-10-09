@@ -30,6 +30,7 @@ import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Progress } from "~/components/shared/progress";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   countRemainingCheckoutAssets,
   isAssetCheckoutEligible,
@@ -870,8 +871,13 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     alreadyCheckedOut
   );
 
-  // Check if asset is currently in custody (must be released before check-out)
-  const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
+  // A whole asset in custody must be released before it can go out. A
+  // quantity-tracked pool reads IN_CUSTODY while some units are held, and its
+  // other units can still go out on this booking, so it keeps its quantity
+  // input and no "In custody" badge. Same scope as the `assets-in-custody`
+  // blocker.
+  const isInCustody =
+    !isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY;
 
   // Post-pivot: kit membership lives on `asset.assetKits[]`. Take the first
   // pivot row's kitId for the customer-facing 1-asset-1-kit semantics here.
