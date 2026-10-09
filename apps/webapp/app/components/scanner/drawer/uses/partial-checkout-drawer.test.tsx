@@ -782,6 +782,46 @@ describe("PartialCheckoutDrawer", () => {
       ).not.toBeInTheDocument();
     });
 
+    it("posts the quantity typed for the slice a row names, not the asset's first slice", () => {
+      // One pool on two slices: 2 units on `ba-a`, 3 on `ba-b`. The operator
+      // checks out `ba-b` without scanning, so the row names its slice.
+      const loaderData = makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 5 },
+      });
+      const [slice] = loaderData.booking.bookingAssets;
+      loaderData.booking.bookingAssets = [
+        { ...slice, id: "ba-a", quantity: 2 },
+        { ...slice, id: "ba-b", quantity: 3 },
+      ];
+      useLoaderDataMock.mockReturnValue(loaderData);
+      renderDrawer(
+        seedStore({
+          [`${QUICK_CHECKOUT_QR_PREFIX}ba-b`]: {
+            type: "asset",
+            codeType: "qr",
+            data: {
+              id: "sandbag-id",
+              bookingAssetId: "ba-b",
+              title: "Sandbag",
+              type: "QUANTITY_TRACKED",
+            },
+          },
+        })
+      );
+
+      const input = screen.getByLabelText(
+        /check out quantity/i
+      ) as HTMLInputElement;
+      // The row edits `ba-b`: its own 3 units, not `ba-a`'s 2.
+      expect(Number(input.max)).toBe(3);
+
+      fireEvent.change(input, { target: { value: "1" } });
+
+      expect(postedCheckouts()).toEqual([
+        { assetId: "sandbag-id", bookingAssetId: "ba-b", quantity: 1 },
+      ]);
+    });
+
     it("posts nothing for a pool whose quantity is cleared", () => {
       useLoaderDataMock.mockReturnValue(
         makeLoaderData([sandbag], {

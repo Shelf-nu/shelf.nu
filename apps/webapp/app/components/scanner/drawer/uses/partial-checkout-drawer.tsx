@@ -1087,15 +1087,21 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // The BookingAsset slice this scanned QT asset checks out from: the same
   // one the drawer activates for the submission, so the quantity typed here
-  // is the one sent. INDIVIDUAL assets and assets not in the booking get
-  // `null`.
+  // is the one sent. A row that names its slice ("Check out without
+  // scanning") edits that slice while it still has units; a QR scan names
+  // none and takes `resolveScannedQtySliceId`'s pick. INDIVIDUAL assets and
+  // assets not in the booking get `null`.
   const bookingAssetId =
     asset.type === AssetType.QUANTITY_TRACKED
-      ? resolveScannedQtySliceId(
-          asset.id,
-          booking.bookingAssets,
-          qtyByBookingAssetId
-        )
+      ? scannedBookingAssetId
+        ? qtyByBookingAssetId[scannedBookingAssetId]
+          ? scannedBookingAssetId
+          : null
+        : resolveScannedQtySliceId(
+            asset.id,
+            booking.bookingAssets,
+            qtyByBookingAssetId
+          )
       : null;
 
   const qtyInfo = bookingAssetId
