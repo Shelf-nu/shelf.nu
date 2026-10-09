@@ -62,7 +62,7 @@ import {
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -334,8 +334,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationAssets() {
   const roles = useOrganizationRoles();
-  const canArchiveAssets = useCanArchiveAssets();
-  const archivedView = useArchivedView(canArchiveAssets);
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  const archivedView = useArchivedView(canViewArchivedAssets);
   const { location } = useLoaderData<typeof loader>();
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -455,7 +455,9 @@ export default function LocationAssets() {
             </>
           }
           titleContent={
-            canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+            canViewArchivedAssets ? (
+              <ArchivedViewMenu plural="assets" />
+            ) : undefined
           }
           customEmptyStateContent={
             archivedView === "archived"

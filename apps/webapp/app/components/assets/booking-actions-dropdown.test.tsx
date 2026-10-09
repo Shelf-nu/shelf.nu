@@ -32,6 +32,13 @@ vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => ({ id: "org-1", type: "TEAM" }),
 }));
 
+// why: `useCanArchiveAssets` reads the member's roles off the _layout route
+// loader, which is not mounted here. It only picks the archived tooltip's
+// wording, which these tests do not exercise.
+vi.mock("~/hooks/use-can-archive-assets", () => ({
+  useCanArchiveAssets: () => true,
+}));
+
 /**
  * Captured `links` from the last render, so assertions can read the
  * `disabled` decision for each booking action.

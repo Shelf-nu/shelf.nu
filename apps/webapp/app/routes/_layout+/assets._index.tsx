@@ -17,7 +17,7 @@ import { db } from "~/database/db.server";
 
 import { useSearchParams } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   advancedModeLoader,
@@ -383,7 +383,7 @@ export default function AssetIndexPage() {
   const { canImportAssets } = useLoaderData<typeof loader>();
   const { modeIsAdvanced } = useAssetIndexViewState();
   const emptyStateContent = useAssetsEmptyState();
-  const canArchiveAssets = useCanArchiveAssets();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
 
   return (
     <div className="relative">
@@ -404,7 +404,9 @@ export default function AssetIndexPage() {
       <AssetsList
         customEmptyStateContent={emptyStateContent}
         titleContent={
-          canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+          canViewArchivedAssets ? (
+            <ArchivedViewMenu plural="assets" />
+          ) : undefined
         }
       />
     </div>

@@ -33,7 +33,6 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
-  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
@@ -571,20 +570,16 @@ export async function simpleModeLoader({
 /**
  * Whether a member may open the Archived and All views (issue #382).
  *
- * The same grant that archives and reinstates, so the views follow the
- * actions: a member who cannot act on an archived asset is not handed a list
- * of them by editing the URL. Everyone else gets active assets, whatever
+ * Read from the role policy (`assets.seeArchived`), not from `asset: archive`:
+ * a Manager sees archived assets so it can tell why one is out of service, but
+ * cannot archive or reinstate. Everyone else gets active assets, whatever
  * `?archived=` says.
  *
  * @param access - The member's resolved access, from `requirePermission`
- * @returns `true` when the member holds `asset: archive`
+ * @returns `true` when the member's role may see archived assets
  */
 export function canViewArchivedAssets(access: RoleAccess): boolean {
-  return roleHasPermission({
-    roles: [access.role],
-    entity: PermissionEntity.asset,
-    action: PermissionAction.archive,
-  });
+  return access.policy.assets.seeArchived;
 }
 
 /**

@@ -66,6 +66,11 @@ type RolePolicyShape = {
   assets: {
     /** The asset list shows every asset, or only those available to book. */
     listScope: "all" | "bookable";
+    /**
+     * May open the Archived and All views of an asset list. Seeing is not
+     * acting: archiving and reinstating stay on the `asset: archive` grant.
+     */
+    seeArchived: boolean;
   };
   custody: {
     /** Whose custody the role may see. */
@@ -153,7 +158,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: true,
       documentsForOthers: true,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: true },
     custody: { see: "all", assign: "anyone" },
     audits: { scope: "all", manageOthers: true },
     notifications: {
@@ -194,7 +199,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: true,
       documentsForOthers: true,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: true },
     custody: { see: "all", assign: "anyone" },
     audits: { scope: "all", manageOthers: true },
     notifications: {
@@ -240,7 +245,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: true,
       documentsForOthers: true,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: true },
     custody: { see: "all", assign: "anyone" },
     audits: { scope: "all", manageOthers: true },
     notifications: {
@@ -283,7 +288,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "bookable" },
+    assets: { listScope: "bookable", seeArchived: false },
     custody: { see: "own-unless-workspace-allows", assign: "self" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {
@@ -324,7 +329,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: false },
     custody: { see: "own-unless-workspace-allows", assign: "none" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {

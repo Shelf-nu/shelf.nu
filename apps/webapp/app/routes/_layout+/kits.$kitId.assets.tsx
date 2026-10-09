@@ -29,7 +29,7 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { resolveArchivedViewForMember } from "~/modules/asset/data.server";
@@ -191,8 +191,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function KitAssets() {
   const roles = useOrganizationRoles();
-  const canArchiveAssets = useCanArchiveAssets();
-  const archivedView = useArchivedView(canArchiveAssets);
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  const archivedView = useArchivedView(canViewArchivedAssets);
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -242,7 +242,9 @@ export default function KitAssets() {
         <List
           ItemComponent={ListContent}
           titleContent={
-            canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+            canViewArchivedAssets ? (
+              <ArchivedViewMenu plural="assets" />
+            ) : undefined
           }
           customEmptyStateContent={
             archivedView === "archived"

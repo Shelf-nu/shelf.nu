@@ -124,6 +124,33 @@ describe("ROLE_POLICIES", () => {
     });
   });
 
+  // Seeing archived assets and archiving them are separate questions: the
+  // Manager sees why an asset is out of service but cannot take one out or
+  // put it back.
+  test("the Manager sees archived assets but cannot archive them", () => {
+    const seesArchived = Object.fromEntries(
+      ORGANIZATION_ROLES.map((role) => [
+        role,
+        ROLE_POLICIES[role].assets.seeArchived,
+      ])
+    );
+    assert.deepEqual(seesArchived, {
+      OWNER: true,
+      ADMIN: true,
+      MANAGER: true,
+      SELF_SERVICE: false,
+      BASE: false,
+    });
+    assert.equal(
+      roleHasPermission({
+        roles: ["MANAGER"],
+        entity: "asset",
+        action: "archive",
+      }),
+      false
+    );
+  });
+
   // A member's Bookings tab lists every booking of the member being viewed
   // with no visibility filter, so opening profiles must imply seeing every
   // booking. A role that breaks this would leak bookings through that tab.
