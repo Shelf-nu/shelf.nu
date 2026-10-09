@@ -42,6 +42,12 @@ vi.mock("react-router", async () => {
   return { ...actual, useNavigation: () => ({ state: "idle" }) };
 });
 
+// why: the menu reads the Active/Archived/All view from the URL to freeze an
+// archived selection (issue #382); the real hook needs a router. Active view.
+vi.mock("~/hooks/search-params", () => ({
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
+}));
+
 // why: `useHydrated` is false on the first render, which renders a placeholder
 // button instead of the menu.
 vi.mock("remix-utils/use-hydrated", () => ({ useHydrated: () => true }));
@@ -88,6 +94,7 @@ vi.mock("../bulk-update-dialog/bulk-update-dialog", () => ({
 // why: every dialog brings its own form, loader and atom chain, renders
 // outside the menu, and is not under test.
 vi.mock("./bulk-add-to-audit-dialog", () => ({ default: () => null }));
+vi.mock("./bulk-archive-dialog", () => ({ default: () => null }));
 vi.mock("./bulk-add-to-kit-dialog", () => ({ default: () => null }));
 vi.mock("./bulk-asset-model-remove-dialog", () => ({ default: () => null }));
 vi.mock("./bulk-asset-model-update-dialog", () => ({ default: () => null }));

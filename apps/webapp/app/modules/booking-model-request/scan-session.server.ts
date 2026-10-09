@@ -97,6 +97,7 @@ export async function deriveBookingScanSession({
   const assetModelIdByAssetId = new Map<string, string | null>();
   if (alreadyIncludedAssetIds.length > 0) {
     const rows = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: model lookup for assets already on the booking, archived ones included
       where: { id: { in: alreadyIncludedAssetIds }, organizationId },
       select: { id: true, assetModelId: true },
     });

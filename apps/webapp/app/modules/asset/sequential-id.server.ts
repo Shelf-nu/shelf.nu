@@ -200,6 +200,7 @@ export async function organizationHasSequentialIds(
 ): Promise<boolean> {
   try {
     const count = await db.asset.count({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: archived assets keep their SAM id, so they count toward whether the org has sequential ids
       where: {
         organizationId,
         sequentialId: { not: null },
@@ -228,6 +229,7 @@ export async function getAssetsWithoutSequentialIdCount(
 ): Promise<number> {
   try {
     return await db.asset.count({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: ID backfill must cover archived assets too, or they stay without a SAM id
       where: {
         organizationId,
         sequentialId: null,

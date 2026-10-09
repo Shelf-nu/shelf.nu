@@ -210,8 +210,10 @@ describe("location service activity logging", () => {
     dbMocks.kit.findMany.mockResolvedValue([]);
     // why: assertion helpers count submitted IDs; default to "all authorized"
     // so happy-path tests don't have to wire it up explicitly
+    // The archived guard (issue #382) counts ARCHIVED rows among the ids —
+    // none here — so a query naming `archivedAt` answers 0, not the echo.
     dbMocks.asset.count.mockImplementation(({ where }: any) =>
-      Promise.resolve(where?.id?.in?.length ?? 0)
+      Promise.resolve(where?.archivedAt ? 0 : where?.id?.in?.length ?? 0)
     );
     dbMocks.kit.count.mockImplementation(({ where }: any) =>
       Promise.resolve(where?.id?.in?.length ?? 0)
@@ -306,6 +308,29 @@ describe("location service activity logging", () => {
           content: expect.stringContaining("Camera"),
         })
       );
+    });
+  });
+
+  describe("updateLocationAssets archived guard (issue #382)", () => {
+    it("refuses to move an archived asset into the location", async () => {
+      // why: the org check counts both ids (in the org); the archived check
+      // then finds one of them archived.
+      dbMocks.asset.count.mockImplementation(({ where }: any) =>
+        Promise.resolve(where?.archivedAt ? 1 : where?.id?.in?.length ?? 0)
+      );
+
+      await expect(
+        updateLocationAssets({
+          assetIds: ["asset-active", "asset-archived"],
+          organizationId: "org-1",
+          locationId: "loc-1",
+          userId: "user-1",
+          request: new Request("https://example.com"),
+          removedAssetIds: [],
+        })
+      ).rejects.toMatchObject({ title: "Asset is archived", status: 400 });
+
+      expect(dbMocks.location.update).not.toHaveBeenCalled();
     });
   });
 

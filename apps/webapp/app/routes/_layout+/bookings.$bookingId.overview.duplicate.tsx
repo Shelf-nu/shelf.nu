@@ -200,7 +200,16 @@ export async function action({ request, context, params }: ActionFunctionArgs) {
       title: "Booking duplicated",
       senderId: userId,
       icon: { name: "success", variant: "success" },
-      message: `Booking "${newBooking.name}" has been duplicated.`,
+      message:
+        newBooking.droppedArchivedCount > 0
+          ? `Booking "${newBooking.name}" has been duplicated. ${
+              newBooking.droppedArchivedCount
+            } archived ${
+              newBooking.droppedArchivedCount === 1
+                ? "asset was"
+                : "assets were"
+            } left out.`
+          : `Booking "${newBooking.name}" has been duplicated.`,
     });
 
     return redirect(`/bookings/${newBooking.id}`);

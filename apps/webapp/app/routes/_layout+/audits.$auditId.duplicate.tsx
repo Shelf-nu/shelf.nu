@@ -113,6 +113,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
       originalAssetCount === 0
         ? 0
         : await db.asset.count({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: mirrors duplicateAuditSession's validateExistingAssetIds, which keeps archived assets; the dialog count must match what the action copies
             where: {
               id: { in: audit.assets.map((a) => a.assetId) },
               organizationId,

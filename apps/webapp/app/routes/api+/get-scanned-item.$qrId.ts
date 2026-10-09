@@ -225,6 +225,7 @@ export async function loader({ request, params, context }: LoaderFunctionArgs) {
 
     if (sequentialId) {
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a scanned physical label must still resolve an archived asset
         where: {
           organizationId,
           sequentialId,

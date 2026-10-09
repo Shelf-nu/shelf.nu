@@ -29,6 +29,7 @@ import type { Filter } from "~/components/assets/assets-index/advanced-filters/s
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { CUSTODY_AGG_JOIN, generateWhereClause } from "../asset/query.server";
+import type { ArchivedFilter } from "../asset/types";
 
 /** Sort keys the model view offers. Deliberately separate from the asset
  * index's `sortBy`, whose keys name asset columns a model row does not have. */
@@ -266,6 +267,10 @@ export type GetAssetModelRollupArgs = {
    * list's own scoping, so a role that sees a narrowed list does not also see
    * counts computed over the wider set. */
   availableToBookOnly?: boolean;
+  /** The index's Active / Archived / All view (issue #382), so a model's
+   * counts describe the same assets the list beside it shows. Defaults to
+   * `"active"`, matching every other asset list. */
+  archivedFilter?: ArchivedFilter;
   sortBy?: AssetModelRollupSortKey;
   sortDirection?: "asc" | "desc";
 };
@@ -285,6 +290,7 @@ export async function getAssetModelRollup({
   page,
   perPage,
   availableToBookOnly = false,
+  archivedFilter = "active",
   sortBy = "name",
   sortDirection = "asc",
 }: GetAssetModelRollupArgs): Promise<{
@@ -304,7 +310,9 @@ export async function getAssetModelRollup({
     filters,
     undefined,
     availableToBookOnly,
-    timeZone
+    timeZone,
+    false,
+    archivedFilter
   );
 
   // Checked against the tuple, not a nullish-coalesce on the lookup: an

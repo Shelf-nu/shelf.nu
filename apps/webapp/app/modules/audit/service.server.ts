@@ -380,6 +380,7 @@ export async function createAuditSession(
   }
 
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence check for audit scope; audits may include archived assets (e.g. created from a kit)
     where: {
       id: { in: uniqueAssetIds },
       organizationId,
@@ -1242,6 +1243,9 @@ export async function getAssetsForAuditSession({
       select: {
         id: true,
         title: true,
+        // Surfaced so the audit row can flag an archived asset with the
+        // "Archived" badge (issue #382).
+        archivedAt: true,
         mainImage: true,
         thumbnailImage: true,
         // Model cover image for assets with no image of their own
@@ -1418,7 +1422,7 @@ export async function recordAuditScan(
         },
       }),
       db.asset.findUnique({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.; why: a scanned label must resolve to its asset even when archived; audits badge archived assets
         where: { id: assetId },
         select: { id: true, title: true, organizationId: true },
       }),
@@ -4445,6 +4449,7 @@ async function validateExistingAssetIds(
   if (assetIds.length === 0) return [];
 
   const existingAssets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: duplicating an audit keeps the original scope, which may hold archived assets; only deleted/foreign ids are dropped
     where: {
       id: { in: assetIds },
       organizationId,

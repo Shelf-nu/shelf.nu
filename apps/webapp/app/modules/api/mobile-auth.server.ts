@@ -835,6 +835,7 @@ export async function getMobileAssetForViewer({
   const asset = await db.asset.findUnique({
     // why: inline-scope to org so cross-org probes read nothing — matches
     // the pattern used by every other mobile route.
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id refresh of the asset the caller just acted on; the detail view still shows archived assets
     where: { id: assetId, organizationId },
     // MOBILE_ASSET_SELECT's custody select already carries `custodian.userId`
     // (own-row detection; web parity) and `kitCustodyId` (releasableQuantity).

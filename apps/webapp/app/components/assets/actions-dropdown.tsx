@@ -6,14 +6,25 @@ import {
   PopoverTrigger,
 } from "@radix-ui/react-popover";
 import { kitMemberCustodyBlockedReason } from "@shelf/labels";
-import { AlarmClockIcon, ArrowUpDownIcon } from "lucide-react";
-import { useLoaderData } from "react-router";
+import {
+  AlarmClockIcon,
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ArrowUpDownIcon,
+} from "lucide-react";
+import { useFetcher, useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { ChevronRight } from "~/components/icons/library";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useDisabled } from "~/hooks/use-disabled";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
 import {
   getPrimaryKit,
   isIndividualKitMember,
@@ -36,6 +47,15 @@ import SetOrEditReminderDialog from "../asset-reminder/set-or-edit-reminder-dial
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
 import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../shared/modal";
 import When from "../when/when";
 
 // react-doctor:no-giant-component — deferred for follow-up refactor
@@ -74,6 +94,8 @@ const ConditionalActionsDropdown = () => {
     entity: PermissionEntity.assetReminders,
     action: PermissionAction.create,
   });
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAsset = useCanArchiveAssets();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
@@ -97,6 +119,50 @@ const ConditionalActionsDropdown = () => {
     assetKitMembership && isIndividualKitMember(asset)
       ? kitMemberCustodyBlockedReason(assetKitMembership.name)
       : null;
+
+  // Archive / reinstate. Fetcher-driven (posts to the asset detail action).
+  const archiveFetcher = useFetcher<{ error?: { message?: string } | null }>();
+  const isArchiveSubmitting = useDisabled(archiveFetcher);
+  const isArchived = Boolean(asset.archivedAt);
+
+  /**
+   * Archiving would leave a model reservation short (issue #382). The server
+   * refuses the first attempt with a warning instead of an error toast; this
+   * turns it into an "Archive anyway" prompt. A warning the user cancelled
+   * stays dismissed until the next attempt returns a fresh one.
+   */
+  const shortfallWarning =
+    archiveFetcher.state === "idle" &&
+    isModelShortfallMessage(archiveFetcher.data?.error?.message)
+      ? archiveFetcher.data?.error?.message ?? null
+      : null;
+  const [dismissedWarning, setDismissedWarning] = useState<string | null>(null);
+  const isShortfallPromptOpen =
+    shortfallWarning !== null && shortfallWarning !== dismissedWarning;
+  /**
+   * Why archiving is blocked for this asset, if at all. Mirrors the server
+   * guard in `archiveAsset` so the UI explains the disabled state up-front.
+   * Reinstating has no such gate (an archived asset is always AVAILABLE).
+   */
+  const archiveDisabledReason: { reason: string } | false = isQtyTracked
+    ? { reason: "Quantity-tracked assets can't be archived yet." }
+    : assetIsCheckedOut || assetCanBeReleased
+    ? {
+        reason:
+          "Check the asset in and release any custody before archiving it.",
+      }
+    : assetIsPartOfUnavailableKit
+    ? { reason: "This asset is part of a kit that's currently in use." }
+    : false;
+
+  /**
+   * An archived asset is frozen: every action is disabled except Reinstate.
+   * Thread this into each action's `disabled` so the whole menu reads as
+   * read-only with one consistent reason, while Reinstate stays enabled.
+   */
+  const archivedActionDisabled: { reason: string } | false = isArchived
+    ? { reason: "This asset is archived. Reinstate it to make changes." }
+    : false;
 
   function handleMenuClose() {
     setOpen(false);
@@ -221,6 +287,7 @@ const ConditionalActionsDropdown = () => {
                       width="full"
                       onClick={handleMenuClose}
                       disabled={
+                        archivedActionDisabled ||
                         custodyActionDisabled ||
                         assetIsPartOfUnavailableKit ||
                         disableReleaseForSelfService
@@ -239,6 +306,7 @@ const ConditionalActionsDropdown = () => {
                       width="full"
                       onClick={handleMenuClose}
                       disabled={
+                        archivedActionDisabled ||
                         custodyActionDisabled ||
                         (assignCustodyKitReason
                           ? { reason: assignCustodyKitReason }
@@ -280,7 +348,9 @@ const ConditionalActionsDropdown = () => {
                     width="full"
                     onClick={handleMenuClose}
                     disabled={
-                      assetIsCheckedOut
+                      archivedActionDisabled
+                        ? archivedActionDisabled
+                        : assetIsCheckedOut
                         ? true
                         : assetIsPartOfKit
                         ? {
@@ -307,6 +377,7 @@ const ConditionalActionsDropdown = () => {
                   <UpdateGpsCoordinatesForm
                     // Closes the dropdown when the button is clicked
                     callback={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   />
                 </div>
                 <div className="border-b px-0 py-1 md:p-0">
@@ -316,6 +387,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
                       setIsRelinkQrDialogOpen(true);
@@ -338,6 +410,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                     onClick={() => {
                       handleMenuClose();
                       setIsSetReminderDialogOpen(true);
@@ -359,6 +432,7 @@ const ConditionalActionsDropdown = () => {
                     variant="link"
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="pen" /> Edit
@@ -373,12 +447,54 @@ const ConditionalActionsDropdown = () => {
                     className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
                     width="full"
                     onClick={handleMenuClose}
+                    disabled={archivedActionDisabled}
                   >
                     <span className="flex items-center gap-2">
                       <Icon icon="duplicate" /> Duplicate
                     </span>
                   </Button>
                 </div>
+                <When truthy={canArchiveAsset}>
+                  <div className="border-b px-0 py-1 md:p-0">
+                    <Button
+                      type="button"
+                      variant="link"
+                      data-test-id={
+                        isArchived
+                          ? "reinstateAssetButton"
+                          : "archiveAssetButton"
+                      }
+                      className="justify-start px-4 py-3 text-gray-700 hover:bg-slate-100 hover:text-gray-700"
+                      width="full"
+                      disabled={
+                        isArchived
+                          ? isArchiveSubmitting
+                          : archiveDisabledReason || isArchiveSubmitting
+                      }
+                      onClick={() => {
+                        // Submit imperatively so closing the popover (which
+                        // unmounts this subtree) can't cancel an in-flight form
+                        // submit. The fetcher request is dispatched first, then
+                        // the menu closes. `void` — fire-and-forget; the fetcher
+                        // tracks its own state.
+                        void archiveFetcher.submit(
+                          { intent: isArchived ? "reinstate" : "archive" },
+                          { method: "post", action: `/assets/${asset.id}` }
+                        );
+                        handleMenuClose();
+                      }}
+                    >
+                      <span className="flex items-center gap-2">
+                        {isArchived ? (
+                          <ArchiveRestoreIcon className="size-5" />
+                        ) : (
+                          <ArchiveIcon className="size-5" />
+                        )}
+                        {isArchived ? "Reinstate" : "Archive"}
+                      </span>
+                    </Button>
+                  </div>
+                </When>
                 <div
                   className="px-0 py-1 md:p-0"
                   aria-disabled={
@@ -396,6 +512,8 @@ const ConditionalActionsDropdown = () => {
                         className="justify-start rounded-sm px-4 py-3 text-sm font-semibold text-gray-700 data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-slate-100 hover:text-gray-700"
                         width="full"
                         disabled={
+                          // Archived assets can still be permanently deleted
+                          // (along with Reinstate, the only allowed actions).
                           assetIsCheckedOut || assetIsPartOfUnavailableKit
                         }
                       >
@@ -436,6 +554,47 @@ const ConditionalActionsDropdown = () => {
         </PopoverPortal>
       </Popover>
 
+      <AlertDialog
+        open={isShortfallPromptOpen}
+        onOpenChange={(open) => {
+          if (!open) setDismissedWarning(shortfallWarning);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Model reservations affected</AlertDialogTitle>
+            <AlertDialogDescription>{shortfallWarning}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <div className="flex justify-center gap-2">
+              <AlertDialogCancel asChild>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={isArchiveSubmitting}
+                >
+                  Cancel
+                </Button>
+              </AlertDialogCancel>
+              <Button
+                type="button"
+                disabled={isArchiveSubmitting}
+                onClick={() => {
+                  void archiveFetcher.submit(
+                    {
+                      intent: "archive",
+                      [CONFIRM_MODEL_SHORTFALL_FIELD]: "true",
+                    },
+                    { method: "post", action: `/assets/${asset.id}` }
+                  );
+                }}
+              >
+                Archive anyway
+              </Button>
+            </div>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <When truthy={isRelinkQrDialogOpen}>
         <RelinkQrCodeDialog
           key={asset.qrCodes[0]?.id || asset.id}

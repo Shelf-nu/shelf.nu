@@ -113,10 +113,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
       // `aggregate({_sum: { valuation }})` would only sum the per-unit price; QT assets with
       // quantity > 1 would silently underreport. `$queryRaw` lets us express the multiplication.
+      // Archived assets are excluded from both halves (issue #382) — the dashboard
+      // reflects active inventory, mirroring the default-hide on the asset index.
       Promise.all([
         db.asset
           .aggregate({
-            where: { organizationId },
+            where: { organizationId, archivedAt: null },
             _count: { _all: true },
           })
           .catch((cause) => {
@@ -139,6 +141,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
             SELECT COALESCE(SUM(COALESCE(value, 0) * COALESCE(quantity, 1)), 0) AS total
             FROM "Asset"
             WHERE "organizationId" = ${organizationId}
+              AND "archivedAt" IS NULL
           `
           )
           .catch((cause) => {
@@ -156,17 +159,20 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // 1a. Count of assets with known valuation
       db.asset.count({
-        where: { organizationId, valuation: { not: null } },
+        where: { organizationId, valuation: { not: null }, archivedAt: null },
       }),
 
       // 1b. Assets grouped by status
       db.asset.groupBy({
         by: ["status"],
-        where: { organizationId },
+        where: { organizationId, archivedAt: null },
         _count: { _all: true },
       }),
 
       // 1c. Monthly asset creation counts (last 12 months)
+      // Archived assets count here (issue #382): the chart says when assets
+      // were added, so archiving one must not rewrite a past month. Its last
+      // point can sit above the active-assets KPI beside it, by design.
       db.$queryRaw<{ month_start: Date; assets_created: number }[]>`
         SELECT date_trunc('month', "createdAt") AS month_start,
                COUNT(*)::int AS assets_created
@@ -178,7 +184,11 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // 1c. Baseline count (assets before the 12-month window)
       db.asset.count({
-        where: { organizationId, createdAt: { lt: twelveMonthsAgo } },
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: growth history counts every asset ever added, archived included, so past months stay fixed
+        where: {
+          organizationId,
+          createdAt: { lt: twelveMonthsAgo },
+        },
       }),
 
       // 1d. Team members with direct custody counts
@@ -269,10 +279,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 1e. Newest 5 assets
+      // 1e. Newest 5 assets (exclude archived — issue #382)
       db.asset
         .findMany({
-          where: { organizationId },
+          where: { organizationId, archivedAt: null },
           orderBy: { createdAt: "desc" },
           take: 5,
           include: {
@@ -316,44 +326,40 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       }),
 
       // Location distribution (top 5)
-      // Counts pivot rows (one per asset placed at this location). Aggregating
-      // the pivot once and then resolving five names beats a correlated count
-      // per location, and `groupBy` only returns locations that have rows — the
-      // `> 0` filter the previous shape needed is implicit.
-      db.assetLocation
-        .groupBy({
-          by: ["locationId"],
-          where: { organizationId },
-          _count: { locationId: true },
-          orderBy: { _count: { locationId: "desc" } },
-          take: 5,
-        })
-        .then(async (groups) => {
-          if (groups.length === 0) return [];
-
-          const locations = await db.location.findMany({
-            where: {
-              id: { in: groups.map((g) => g.locationId) },
-              organizationId,
-            },
-            select: { id: true, name: true },
-          });
-          const nameById = new Map(locations.map((l) => [l.id, l.name]));
-
-          return groups.flatMap((g) => {
-            const locationName = nameById.get(g.locationId);
-            // Location deleted between the two queries — drop the row rather
-            // than render a nameless bar. The single-query shape could not
-            // produce this case, so it has no prior behaviour to preserve.
-            if (!locationName) return [];
-
-            return [
-              {
-                locationId: g.locationId,
-                locationName,
-                assetCount: g._count.locationId,
-              },
-            ];
+      //
+      // Raw SQL because neither Prisma shape can express what this widget
+      // needs. `location._count.assetLocations` cannot exclude archived assets
+      // (issue #382) and Prisma cannot order by a FILTERED relation count; a
+      // groupBy on the pivot fixes both but counts ROWS, and the pivot is not
+      // one row per (asset, location) — its partial uniques allow one manual
+      // placement (assetKitId IS NULL) alongside kit-driven rows at the same
+      // location, so an asset in a kit could be counted twice. COUNT(DISTINCT)
+      // is the only form that gets the number and the ranking right together.
+      db
+        .$queryRaw<
+          { locationId: string; locationName: string; assetCount: number }[]
+        >(
+          Prisma.sql`
+            SELECT al."locationId"                     AS "locationId",
+                   l.name                              AS "locationName",
+                   COUNT(DISTINCT al."assetId")::int   AS "assetCount"
+            FROM "AssetLocation" al
+            JOIN "Location" l ON l.id = al."locationId"
+            JOIN "Asset" a ON a.id = al."assetId"
+            WHERE al."organizationId" = ${organizationId}
+              AND a."archivedAt" IS NULL
+            GROUP BY al."locationId", l.name
+            HAVING COUNT(DISTINCT al."assetId") > 0
+            ORDER BY COUNT(DISTINCT al."assetId") DESC
+            LIMIT 5
+          `
+        )
+        .catch((cause) => {
+          throw new ShelfError({
+            cause,
+            message: "Failed to load location distribution",
+            additionalData: { userId, organizationId },
+            label: "Dashboard",
           });
         }),
 

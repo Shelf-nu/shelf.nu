@@ -136,6 +136,11 @@ export interface CreateAssetFromBackupImportPayload
   }[];
   /** Manual placements, by location name. Absent when the asset had none. */
   assetLocations?: BackupPlacement[];
+  /**
+   * When the asset was archived (issue #382), or empty/absent for an active
+   * one. Restored as-is, so an archived asset does not come back active.
+   */
+  archivedAt?: string | null;
   /** Only in a backup written before placements existed: the asset's one
    * location. See `placementsForRestore`. */
   location?:
@@ -220,6 +225,7 @@ export type AdvancedIndexAsset = Pick<
   | "minQuantity"
   | "consumptionType"
   | "availableToBook"
+  | "archivedAt"
 > & {
   qrId: string; // QR code will always be available
   assetModelId?: string | null;
@@ -304,3 +310,12 @@ export interface CustomFieldSorting {
   alias: string;
   fieldType?: CustomFieldType;
 }
+
+/**
+ * The "active vs archived" view dimension for asset lists. This is orthogonal
+ * to the per-status (AVAILABLE/IN_CUSTODY/CHECKED_OUT) filter — see issue #382.
+ * - `active`   → only non-archived assets (the default everywhere).
+ * - `archived` → only archived assets (the "Archived" view).
+ * - `all`      → both.
+ */
+export type ArchivedFilter = "active" | "archived" | "all";

@@ -221,6 +221,9 @@ export const BOOKINGS_LIST_ASSETS_INCLUDE = {
           custody: true,
           availableToBook: true,
           status: true,
+          // Drives the calm "Archived" signal in the assets sidebar
+          // (issue #382) — the sidebar's BookingWithAssets type requires it.
+          archivedAt: true,
           mainImage: true,
           thumbnailImage: true,
           // Model cover image for assets with no image of their own
@@ -300,6 +303,9 @@ export const BOOKING_WITH_ASSETS_INCLUDE = {
           unitOfMeasure: true,
           availableToBook: true,
           status: true,
+          // Archived assets keep showing in bookings they're already part of,
+          // flagged with the "Archived" badge (issue #382).
+          archivedAt: true,
           valuation: true,
           // `Asset.quantity` is the workspace stock pool — surfaced for QT
           // availability/headroom math, NOT for booking-value totals.
