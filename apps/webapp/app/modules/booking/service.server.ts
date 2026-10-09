@@ -66,6 +66,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
+  getAssetAvailabilityBatch,
 } from "~/modules/asset/availability.server";
 import {
   reconcileManualPlacementsForStockDecrease,
@@ -3083,13 +3084,18 @@ async function checkoutBookingWritesWithinTx(
     for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
       await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
-      const { bookable } = await getAssetAvailability({
+      const { bookable, physicalAvailable } = await getAssetAvailability({
         assetId,
         organizationId,
         window: { from, to },
         excludeBookingId: bookingId,
         db: tx,
       });
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon.
+      const available = Math.min(bookable, physicalAvailable);
 
       // Sum the requested STANDALONE units for this asset on this booking.
       // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
@@ -3100,15 +3106,15 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > bookable) {
+      if (requested > available) {
         const title =
           qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
             .title ?? "";
         insufficientQtyWarnings.push(
           `"${title}": requested ${requested}, only ${Math.max(
             0,
-            bookable
-          )} available in this window`
+            available
+          )} available ${available < bookable ? "right now" : "in this window"}`
         );
       }
     }
@@ -9857,6 +9863,28 @@ export async function partialCheckoutBooking({
           });
         }
 
+        /**
+         * Each pool's availability before this session, read under the row
+         * locks above and before any write below, so the free-stock check
+         * after attribution measures this session's departures against the
+         * pool as it found it. `physicalAvailable` (stock less what custody,
+         * kits and every booking hold out) ignores the window; `bookable`
+         * also sets aside other bookings' reservations over this booking's
+         * window, the figure the Check out button's guard reads.
+         */
+        const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
+          qtyDispositionAssetIds,
+          {
+            organizationId,
+            window:
+              bookingFound.from && bookingFound.to
+                ? { from: bookingFound.from, to: bookingFound.to }
+                : null,
+            excludeBookingId: id,
+            db: tx,
+          }
+        );
+
         // ONE batched committed-remaining read (booking total − Σ prior PBC
         // sessions) for every qty asset. This value is CONSTANT across the
         // disposition loop below: it reads only prior/committed sessions (this
@@ -10407,6 +10435,63 @@ export async function partialCheckoutBooking({
             quantity: sessionQuantities[index] ?? 1,
           })),
         });
+
+        /**
+         * A pool's units are held by one thing at a time: custody, a kit or a
+         * booking. The caps above only bound a claim by what this booking
+         * still owes, so this checks the units leaving standalone slices
+         * against the pool's free stock. Kit-driven slices draw on their
+         * kit's allocation, which the free figure already sets aside.
+         *
+         * A booking already out outranks a reservation (see
+         * {@link outranksReservations}), so for it only units physically held
+         * count. A reserved booking does not yet, so other bookings'
+         * reservations over its window count too: the same `bookable` limit
+         * the Check out button's in-tx guard applies to a batch covering the
+         * whole booking, which reaches it through the delegate above.
+         */
+        const standaloneUnitsByAsset = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          if (ba.assetKitId != null) continue;
+          if (assetTypeById.get(ba.asset.id) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          const units = unitsBySliceId.get(ba.id) ?? 0;
+          if (units <= 0) continue;
+          standaloneUnitsByAsset.set(
+            ba.asset.id,
+            (standaloneUnitsByAsset.get(ba.asset.id) ?? 0) + units
+          );
+        }
+        const freeStockShortfalls: string[] = [];
+        for (const [assetId, units] of standaloneUnitsByAsset) {
+          const availability = availabilityBeforeByAsset.get(assetId);
+          const physicalFree = availability?.physicalAvailable ?? 0;
+          const free = inFlight
+            ? physicalFree
+            : Math.min(physicalFree, availability?.bookable ?? 0);
+          if (units > free) {
+            freeStockShortfalls.push(
+              `"${
+                titleByAssetId.get(assetId) ?? ""
+              }": requested ${units}, only ${Math.max(0, free)} available ${
+                inFlight ? "right now" : "in this window"
+              }`
+            );
+          }
+        }
+        if (freeStockShortfalls.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
+              "\n"
+            )}\nThe rest are in custody, in kits, or out on or reserved for other bookings. Release custody, check units in or adjust quantities, then try again.`,
+            additionalData: { bookingId: id, organizationId },
+          });
+        }
 
         /**
          * Record where each pool slice's units leave from, before the counter

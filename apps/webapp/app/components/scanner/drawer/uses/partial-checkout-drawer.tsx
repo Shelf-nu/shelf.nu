@@ -30,6 +30,7 @@ import { Button } from "~/components/shared/button";
 import { InfoTooltip } from "~/components/shared/info-tooltip";
 import { Progress } from "~/components/shared/progress";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import {
   countRemainingCheckoutAssets,
   isAssetCheckoutEligible,
@@ -204,6 +205,32 @@ function useCheckoutDispositionContext(): CheckoutDispositionContextValue {
 function parseCheckoutQty(state: CheckoutQtyState | undefined): number {
   const n = Number(state?.quantity ?? "");
   return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * The booking slice a scanned QUANTITY_TRACKED asset checks out from.
+ *
+ * A QR scan names the asset, not a slice, so the drawer picks one: the first
+ * of the asset's slices (by id) that still has units to claim. The row's
+ * quantity input edits this slice and the submission claims it, so both must
+ * resolve through here or the number the operator typed is not the one sent.
+ *
+ * @param assetId - The scanned asset
+ * @param bookingAssets - This booking's slices
+ * @param qtyByBookingAssetId - Slices with units left to check out
+ * @returns The slice id, or `null` when none of the asset's slices has units left
+ */
+export function resolveScannedQtySliceId(
+  assetId: string,
+  bookingAssets: { id: string; asset: { id: string } }[],
+  qtyByBookingAssetId: Record<string, CheckoutQtyInfo>
+): string | null {
+  return (
+    bookingAssets
+      .filter((ba) => ba.asset.id === assetId)
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .find((ba) => qtyByBookingAssetId[ba.id])?.id ?? null
+  );
 }
 
 /**
@@ -467,13 +494,15 @@ export default function PartialCheckoutDrawer({
   // of check-in's `bookingAssetIdForScannedItem`:
   //   - Synthetic quick-checkout key (`qty-checkout:<bookingAssetId>`)
   //     resolves to that exact slice.
-  //   - Real qty-tracked scans carry `data.bookingAssetId` (set when the
-  //     scanner attributes the scan to a slice) — use it directly.
+  //   - A qty-tracked scan carrying `data.bookingAssetId` names its slice.
+  //   - A qty-tracked QR scan names only the asset, so it activates the
+  //     slice its row's quantity input edits (`resolveScannedQtySliceId`).
+  //     That puts the typed quantity in the payload and takes the slice
+  //     off the pending list.
   //   - Kit scans activate every kit-driven qty slice on this booking
   //     whose own `kitId` matches the scanned kit, matched against the
   //     loader's `expectedAssets` (the authoritative slice ↔ kit link).
-  //   - Real INDIVIDUAL or qty scans without `bookingAssetId` are
-  //     irrelevant to qty-slice activation (no input to render).
+  //   - INDIVIDUAL scans have no quantity input and activate nothing.
   const activeQtySliceIds = useMemo(() => {
     const out = new Set<string>();
     const activate = (bookingAssetId: string | undefined) => {
@@ -489,10 +518,21 @@ export default function PartialCheckoutDrawer({
           activate(qrId.slice(QUICK_CHECKOUT_QR_PREFIX.length));
           continue;
         }
-        const baId = (
-          item.data as { bookingAssetId?: string | null } | null | undefined
-        )?.bookingAssetId;
-        if (baId) activate(baId);
+        const data = item.data as
+          | { id?: string; type?: string; bookingAssetId?: string | null }
+          | null
+          | undefined;
+        if (data?.bookingAssetId) {
+          activate(data.bookingAssetId);
+        } else if (data?.id && data.type === AssetType.QUANTITY_TRACKED) {
+          activate(
+            resolveScannedQtySliceId(
+              data.id,
+              booking.bookingAssets,
+              qtyByBookingAssetId
+            ) ?? undefined
+          );
+        }
         continue;
       }
       if (item.type === "kit" && item.data) {
@@ -506,7 +546,7 @@ export default function PartialCheckoutDrawer({
       }
     }
     return [...out];
-  }, [items, qtyByBookingAssetId, expectedAssets]);
+  }, [items, qtyByBookingAssetId, expectedAssets, booking.bookingAssets]);
 
   /**
    * Slices the operator checked "without scanning": their entry sits under a
@@ -560,6 +600,29 @@ export default function PartialCheckoutDrawer({
     qtyByBookingAssetId,
   ]);
 
+  /**
+   * Pools the operator cleared or set to 0 on every slice they opened. To the
+   * server a pool's bare asset id means "every remaining unit", so these stay
+   * on the list but are left out of the submission.
+   */
+  const zeroedQtyAssetIds = useMemo(() => {
+    const claimed = new Set(checkoutsPayload.map((c) => c.assetId));
+    const assetIdBySliceId = new Map(
+      booking.bookingAssets.map((ba) => [ba.id, ba.asset.id])
+    );
+    const zeroed = new Set<string>();
+    for (const sliceId of activeQtySliceIds) {
+      const assetId = assetIdBySliceId.get(sliceId);
+      if (assetId && !claimed.has(assetId)) zeroed.add(assetId);
+    }
+    return zeroed;
+  }, [activeQtySliceIds, booking.bookingAssets, checkoutsPayload]);
+
+  /** What the form submits: the scanned assets less the zeroed pools. */
+  const submittedAssetIds = assetIdsForCheckout.filter(
+    (assetId) => !zeroedQtyAssetIds.has(assetId)
+  );
+
   // Assets in this booking still available to check out (asset-scoped, so it
   // matches the asset-counted numerator regardless of the kits-as-unit setting).
   // Uses the same shared eligibility rule as the filter above, so the
@@ -581,7 +644,7 @@ export default function PartialCheckoutDrawer({
   // `partialCheckoutBooking` ignores the date choice, so prompting again on
   // subsequent scans would be a confusing no-op.
   const isEarlyCheckout = Boolean(
-    assetIdsForCheckout.length > 0 &&
+    submittedAssetIds.length > 0 &&
       shouldPromptEarlyCheckout(booking.status, booking.from)
   );
 
@@ -793,7 +856,7 @@ export default function PartialCheckoutDrawer({
         onClearItems={clearList}
         form={
           <CustomForm
-            assetIdsForCheckout={assetIdsForCheckout}
+            assetIdsForCheckout={submittedAssetIds}
             selectedBookingAssetIds={selectedBookingAssetIds}
             checkoutsPayload={checkoutsPayload}
             isEarlyCheckout={isEarlyCheckout}
@@ -870,8 +933,13 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
     alreadyCheckedOut
   );
 
-  // Check if asset is currently in custody (must be released before check-out)
-  const isInCustody = asset.status === AssetStatus.IN_CUSTODY;
+  // A whole asset in custody must be released before it can go out. A
+  // quantity-tracked pool reads IN_CUSTODY while some units are held, and its
+  // other units can still go out on this booking, so it keeps its quantity
+  // input and no "In custody" badge. Same scope as the `assets-in-custody`
+  // blocker.
+  const isInCustody =
+    !isQuantityTracked(asset) && asset.status === AssetStatus.IN_CUSTODY;
 
   // Post-pivot: kit membership lives on `asset.assetKits[]`. Take the first
   // pivot row's kitId for the customer-facing 1-asset-1-kit semantics here.
@@ -1017,20 +1085,23 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   const { qtyByBookingAssetId } = useCheckoutDispositionContext();
 
-  // Resolve the BookingAsset slice this scanned QT asset targets. The
-  // drawer's `qtyByBookingAssetId` only contains slices that still have
-  // units to claim (after the greedy allocation against the loader's
-  // asset-level remaining map), so picking the first matching key for
-  // this asset also picks the first slice with `remaining > 0`. The
-  // slice order matches the allocator's stable `id` sort so the qty
-  // input lines up with the units the allocator reserved for that
-  // slice. INDIVIDUAL assets and assets not in the booking get `null`.
+  // The BookingAsset slice this scanned QT asset checks out from: the same
+  // one the drawer activates for the submission, so the quantity typed here
+  // is the one sent. A row that names its slice ("Check out without
+  // scanning") edits that slice while it still has units; a QR scan names
+  // none and takes `resolveScannedQtySliceId`'s pick. INDIVIDUAL assets and
+  // assets not in the booking get `null`.
   const bookingAssetId =
     asset.type === AssetType.QUANTITY_TRACKED
-      ? booking.bookingAssets
-          .filter((ba) => ba.asset.id === asset.id)
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .find((ba) => qtyByBookingAssetId[ba.id])?.id ?? null
+      ? scannedBookingAssetId
+        ? qtyByBookingAssetId[scannedBookingAssetId]
+          ? scannedBookingAssetId
+          : null
+        : resolveScannedQtySliceId(
+            asset.id,
+            booking.bookingAssets,
+            qtyByBookingAssetId
+          )
       : null;
 
   const qtyInfo = bookingAssetId

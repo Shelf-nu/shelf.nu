@@ -5679,6 +5679,60 @@ describe("checkoutBooking", () => {
         })
       );
     });
+
+    it("(e) refuses an early check-out of units another booking still has out, though its window ends before this one starts", async () => {
+      expect.assertions(2);
+
+      // This booking starts in 30 days and is checked out today. Another
+      // booking, ongoing until tomorrow, has 4 of the 10 units out. Its window
+      // never meets this one, so `bookable` over this window is all 10, but
+      // only 6 are on the shelf to hand over now.
+      const thisBooking = {
+        ...mockBookingData,
+        status: BookingStatus.RESERVED,
+        bookingAssets: [qtyBookingAssetRow(CAMERA_ID, "Camera", 7, "ba-cam")],
+      };
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(thisBooking);
+      // No units in kits (case (d) leaves 6 behind).
+      (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue(
+        { _sum: { quantity: 0 } }
+      );
+      mockReservedRows([]);
+      // why: the checked-out read (ONGOING/OVERDUE slices) is the other branch
+      // of the shared `bookingAsset.findMany` router above; route it to the
+      // other booking's slice, sent out in full, while reservations stay empty.
+      const reservedRouter = (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).getMockImplementation() as ((args?: unknown) => unknown) | undefined;
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        const statuses: string[] = args?.where?.booking?.status?.in ?? [];
+        if (
+          !statuses.includes(BookingStatus.RESERVED) &&
+          args?.where?.assetId === CAMERA_ID
+        ) {
+          return Promise.resolve([
+            {
+              id: "ba-other",
+              quantity: 4,
+              assetKitId: null,
+              bookingId: "ongoing-booking",
+              checkedOutAt: new Date(),
+              checkedOutQuantity: 4,
+            },
+          ]);
+        }
+        return reservedRouter?.(args);
+      });
+
+      await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
+        '"Camera": requested 7, only 6 available right now'
+      );
+      expect(db.booking.update).not.toHaveBeenCalled();
+    });
   });
 });
 

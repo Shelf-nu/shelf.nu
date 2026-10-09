@@ -125,6 +125,8 @@ type ScannedAssetFixture = {
   /** Booked qty for the slice. Only meaningful for QUANTITY_TRACKED. */
   bookedQuantity?: number;
   unitOfMeasure?: string | null;
+  /** Live asset status on the booking row and the scan (default: AVAILABLE). */
+  status?: AssetStatus;
 };
 
 /**
@@ -159,7 +161,8 @@ function makeLoaderData(
     asset: {
       id: a.id,
       title: a.title,
-      status: overrides.statusByAssetId?.[a.id] ?? AssetStatus.AVAILABLE,
+      status:
+        overrides.statusByAssetId?.[a.id] ?? a.status ?? AssetStatus.AVAILABLE,
       kitId: null,
       type: a.kind,
       unitOfMeasure: a.unitOfMeasure ?? null,
@@ -197,7 +200,7 @@ function scannedAsset(asset: ScannedAssetFixture) {
     data: {
       id: asset.id,
       title: asset.title,
-      status: AssetStatus.AVAILABLE,
+      status: asset.status ?? AssetStatus.AVAILABLE,
       type: asset.kind,
       unitOfMeasure: asset.unitOfMeasure ?? null,
       assetKits: [],
@@ -637,6 +640,207 @@ describe("PartialCheckoutDrawer", () => {
     expect(
       screen.queryByLabelText(/check out quantity/i)
     ).not.toBeInTheDocument();
+  });
+
+  /**
+   * A pool reads IN_CUSTODY while ANY of its units is held. The server
+   * exempts it from the custody refusal and caps it by its units left on this
+   * booking, so the scanned row must stay usable: quantity input, no
+   * "In custody" badge, no blocker, and the asset in the submission.
+   */
+  it("lets a quantity-tracked pool with some units in custody go out", () => {
+    const sandbag: ScannedAssetFixture = {
+      id: "sandbag-id",
+      title: "Sandbag",
+      kind: "QUANTITY_TRACKED",
+      bookedQuantity: 1,
+      unitOfMeasure: "pcs",
+      status: AssetStatus.IN_CUSTODY,
+    };
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 1 },
+      })
+    );
+
+    const store = seedStore({ "qr-sandbag": scannedAsset(sandbag) });
+    renderDrawer(store);
+
+    expect(screen.getByText("Sandbag")).toBeInTheDocument();
+    expect(screen.queryByText("In custody")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/release custody first/i)
+    ).not.toBeInTheDocument();
+
+    const input = screen.getByLabelText(
+      /check out quantity/i
+    ) as HTMLInputElement;
+    expect(input.value).toBe("1");
+    expect(Number(input.max)).toBe(1);
+
+    // The footer form renders outside the drawer's container.
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="assetIds[0]"]')
+        ?.value
+    ).toBe("sandbag-id");
+    expect(
+      screen.getByRole("button", { name: "Check out assets" })
+    ).not.toBeDisabled();
+  });
+
+  it("still blocks an individual asset in custody", () => {
+    const camera: ScannedAssetFixture = {
+      id: "camera-id",
+      title: "Camera body",
+      kind: "INDIVIDUAL",
+      status: AssetStatus.IN_CUSTODY,
+    };
+    useLoaderDataMock.mockReturnValue(makeLoaderData([camera]));
+
+    const store = seedStore({ "qr-camera": scannedAsset(camera) });
+    renderDrawer(store);
+
+    expect(screen.getByText("In custody")).toBeInTheDocument();
+    expect(screen.getByText(/release custody first/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Check out assets" })
+    ).toBeDisabled();
+  });
+
+  /* ---- a scanned pool's quantity ----------------------------------- */
+
+  /**
+   * A QR scan names the asset, not a slice. Unless the drawer ties the scan
+   * to the slice its quantity input edits, the form posts only the asset id
+   * and the server checks out every remaining unit, whatever was typed.
+   */
+  describe("a scanned pool's quantity", () => {
+    const sandbag: ScannedAssetFixture = {
+      id: "sandbag-id",
+      title: "Sandbag",
+      kind: "QUANTITY_TRACKED",
+      bookedQuantity: 3,
+      unitOfMeasure: "pcs",
+    };
+
+    /** The `checkouts` payload the footer form posts, parsed. */
+    function postedCheckouts() {
+      const field = document.querySelector<HTMLInputElement>(
+        'input[name="checkouts"]'
+      );
+      return field ? JSON.parse(field.value) : null;
+    }
+
+    /** Asset ids the footer form posts. */
+    function postedAssetIds() {
+      return [
+        ...document.querySelectorAll<HTMLInputElement>(
+          'input[name^="assetIds["]'
+        ),
+      ].map((field) => field.value);
+    }
+
+    it("posts the quantity typed on the scanned row, for its slice", () => {
+      useLoaderDataMock.mockReturnValue(
+        makeLoaderData([sandbag], {
+          remainingToCheckOutByAsset: { "sandbag-id": 3 },
+        })
+      );
+      renderDrawer(seedStore({ "qr-sandbag": scannedAsset(sandbag) }));
+
+      // Untouched, the row posts its default: every remaining unit.
+      expect(postedCheckouts()).toEqual([
+        { assetId: "sandbag-id", bookingAssetId: "ba-sandbag-id", quantity: 3 },
+      ]);
+
+      fireEvent.change(screen.getByLabelText(/check out quantity/i), {
+        target: { value: "1" },
+      });
+
+      expect(postedCheckouts()).toEqual([
+        { assetId: "sandbag-id", bookingAssetId: "ba-sandbag-id", quantity: 1 },
+      ]);
+    });
+
+    it("takes the scanned pool off the pending list", () => {
+      const expected = [
+        qtyExpected({
+          id: "sandbag-id",
+          bookingAssetId: "ba-sandbag-id",
+          title: "Sandbag",
+          booked: 3,
+          remaining: 3,
+        }),
+      ];
+      useLoaderDataMock.mockReturnValue(makeLoaderDataFromExpected(expected));
+      renderDrawer(
+        seedStore({ "qr-sandbag": scannedAsset(sandbag) }, expected)
+      );
+
+      expect(
+        screen.queryByRole("button", { name: /check out without scanning/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it("posts the quantity typed for the slice a row names, not the asset's first slice", () => {
+      // One pool on two slices: 2 units on `ba-a`, 3 on `ba-b`. The operator
+      // checks out `ba-b` without scanning, so the row names its slice.
+      const loaderData = makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 5 },
+      });
+      const [slice] = loaderData.booking.bookingAssets;
+      loaderData.booking.bookingAssets = [
+        { ...slice, id: "ba-a", quantity: 2 },
+        { ...slice, id: "ba-b", quantity: 3 },
+      ];
+      useLoaderDataMock.mockReturnValue(loaderData);
+      renderDrawer(
+        seedStore({
+          [`${QUICK_CHECKOUT_QR_PREFIX}ba-b`]: {
+            type: "asset",
+            codeType: "qr",
+            data: {
+              id: "sandbag-id",
+              bookingAssetId: "ba-b",
+              title: "Sandbag",
+              type: "QUANTITY_TRACKED",
+            },
+          },
+        })
+      );
+
+      const input = screen.getByLabelText(
+        /check out quantity/i
+      ) as HTMLInputElement;
+      // The row edits `ba-b`: its own 3 units, not `ba-a`'s 2.
+      expect(Number(input.max)).toBe(3);
+
+      fireEvent.change(input, { target: { value: "1" } });
+
+      expect(postedCheckouts()).toEqual([
+        { assetId: "sandbag-id", bookingAssetId: "ba-b", quantity: 1 },
+      ]);
+    });
+
+    it("posts nothing for a pool whose quantity is cleared", () => {
+      useLoaderDataMock.mockReturnValue(
+        makeLoaderData([sandbag], {
+          remainingToCheckOutByAsset: { "sandbag-id": 3 },
+        })
+      );
+      renderDrawer(seedStore({ "qr-sandbag": scannedAsset(sandbag) }));
+
+      fireEvent.change(screen.getByLabelText(/check out quantity/i), {
+        target: { value: "" },
+      });
+
+      // A bare asset id would read as "every remaining unit" on the server.
+      expect(postedAssetIds()).toEqual([]);
+      expect(postedCheckouts()).toBeNull();
+      expect(
+        screen.getByRole("button", { name: "Check out assets" })
+      ).toBeDisabled();
+    });
   });
 
   /* ---- pending-items-list contract (mirrors check-in tests) ----- */

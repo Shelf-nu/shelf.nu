@@ -173,6 +173,22 @@ describe("buildPartialCheckoutBlockers", () => {
     expect(activeIds(built)).toEqual(["assets-in-custody"]);
   });
 
+  it("assets-in-custody: a quantity-tracked pool with some units held does not block", () => {
+    // 14 units, 6 held by two people: the pool reads IN_CUSTODY, and the one
+    // unit this booking reserved is still free to go out.
+    const built = build(
+      {
+        qr1: assetItem({
+          id: "a1",
+          type: "QUANTITY_TRACKED",
+          status: "IN_CUSTODY",
+        } as never),
+      },
+      { remainingByAssetId: { a1: 1 } }
+    );
+    expect(activeIds(built)).toEqual([]);
+  });
+
   it("kits-already-checked-out: every booked member is already out", () => {
     const built = build(
       { qr1: kitItem("k1", { members: [{ id: "m1" }] }) },
