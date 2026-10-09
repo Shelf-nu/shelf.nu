@@ -1,8 +1,10 @@
 /**
  * Delete Confirmation (server guard)
  *
- * The server half of the typed confirmation on bulk deletes. See
- * {@link assertBulkDeleteConfirmed}.
+ * The server half of the typed confirmation: {@link assertBulkDeleteConfirmed}
+ * for bulk deletes and {@link assertDeleteConfirmed} for single ones. The web
+ * routes call them before deleting, so a request that skipped the dialog, or a
+ * tab opened before the dialog asked for a name, is refused.
  *
  * @see {@link file://../components/bulk-update-dialog/bulk-delete-confirmation.tsx}
  */
@@ -73,6 +75,41 @@ export function assertBulkDeleteConfirmed({
         ? `Nothing was deleted. Your selection matches ${expected} ${name}, not ${typed}. Type ${expected} to delete them.`
         : `Nothing was deleted. Type the number of selected ${noun.many} (${expected}) to confirm.`,
     additionalData: { [EXPECTED_CONFIRMATION_KEY]: expected, selectAll },
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Refuses a single delete whose typed confirmation is not the item's name.
+ *
+ * Called by the web delete routes with the item's current name (an account's
+ * email for the admin user delete). The mobile delete endpoints do not call
+ * it: installed phone apps that predate the typed sheet post no confirmation.
+ *
+ * @param params.confirmation - What the user typed, from the `confirmation` field
+ * @param params.expected - The item's current name, as the dialog showed it
+ * @param params.label - The calling route's error label
+ * @throws {ShelfError} 400 when the confirmation is missing or does not match
+ */
+export function assertDeleteConfirmed({
+  confirmation,
+  expected,
+  label,
+}: {
+  confirmation: string | null | undefined;
+  expected: string;
+  label: ErrorLabel;
+}) {
+  if (deleteConfirmationMatches(confirmation, expected)) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    title: "Nothing was deleted",
+    message: `Nothing was deleted. Type "${expected}" to confirm.`,
     label,
     status: 400,
     shouldBeCaptured: false,

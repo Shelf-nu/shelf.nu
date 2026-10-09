@@ -19,6 +19,7 @@ import { Filters } from "~/components/list/filters";
 import { Badge } from "~/components/shared/badge";
 import { Button } from "~/components/shared/button";
 import { Th, Td } from "~/components/table";
+import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   deleteCategory,
@@ -30,6 +31,8 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -119,15 +122,41 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // A category in use needs its name typed, as the dialog asks; an unused
+    // one deletes with one click.
+    const toDelete = await db.category.findFirst({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        _count: {
+          select: {
+            assets: true,
+            kits: true,
+            customFields: true,
+            assetModelDefaults: true,
+          },
+        },
+      },
+    });
+    if (toDelete && Object.values(toDelete._count).some((n) => n > 0)) {
+      assertDeleteConfirmed({
+        confirmation,
+        expected: toDelete.name,
+        label: "Category",
+      });
+    }
 
     await deleteCategory({ id, organizationId });
 

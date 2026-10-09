@@ -152,6 +152,21 @@ const SURFACES: Surface[] = [
   },
 ];
 
+/**
+ * Whether `field` is submitted by the form `button` submits: it sits inside
+ * that form, or its `form` attribute names the form's id (the HTML rule; the
+ * single-delete dialogs keep the field outside the form around the button).
+ *
+ * why: compares by structure, because under happy-dom `input.form` and
+ * `form.contains(input)` disagree with `input.closest("form")`.
+ */
+function postsWith(field: HTMLElement, button: HTMLElement) {
+  const form = button.closest("form");
+  if (!form) return false;
+  const owner = field.getAttribute("form");
+  return owner ? owner === form.id : field.closest("form") === form;
+}
+
 /** Opens the dialog when it has a trigger, and returns the dialog element. */
 async function openDialog(surface: Surface) {
   const user = userEvent.setup();
@@ -176,6 +191,9 @@ describe.each(SURFACES)("typed confirm on the $name delete", (surface) => {
       `To confirm, type ${surface.expected} below.`
     );
     expect(confirm).toBeDisabled();
+    // The typed value is posted with the delete, for the server to check.
+    expect(postsWith(field, confirm)).toBe(true);
+    expect(field).toHaveAttribute("name", "confirmation");
 
     await user.type(field, surface.expected.slice(0, -1));
     expect(confirm).toBeDisabled();

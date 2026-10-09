@@ -10,7 +10,7 @@
  * @see {@link file://../../routes/_layout+/assets.$assetId.tsx} - Action handler
  */
 import type { ReactElement } from "react";
-import { cloneElement, forwardRef } from "react";
+import { cloneElement, forwardRef, useId } from "react";
 import type { Asset } from "@prisma/client";
 import { DELETE_CONSEQUENCE_LABELS } from "@shelf/labels";
 import { Button } from "~/components/shared/button";
@@ -46,6 +46,8 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
   function ({ asset, trigger }, ref) {
     const disabled = useDisabled();
     const confirm = useTypeToConfirm(asset.title);
+    // The field sits outside the form that submits; this links the two.
+    const formId = useId();
 
     return (
       <AlertDialog
@@ -73,6 +75,7 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
           </AlertDialogHeader>
 
           <TypeToConfirm
+            form={formId}
             expected={asset.title}
             value={confirm.value}
             onChange={confirm.setValue}
@@ -87,7 +90,7 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
                 </Button>
               </AlertDialogCancel>
 
-              <Form method="delete" action={`/assets/${asset.id}`}>
+              <Form id={formId} method="delete" action={`/assets/${asset.id}`}>
                 {asset.mainImage && (
                   <input
                     type="hidden"

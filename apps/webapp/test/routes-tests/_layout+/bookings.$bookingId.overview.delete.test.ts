@@ -66,9 +66,14 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn().mockResolvedValue("org=org-1"),
 }));
 
-// why: no database in tests; the paths under test read it only through the
+const findBookingMock = vi.hoisted(() => vi.fn());
+
+// why: no database in tests; the delete intent reads only the booking's name
+// directly (for the typed confirmation), everything else goes through the
 // mocked services above
-vi.mock("~/database/db.server", () => ({ db: {} }));
+vi.mock("~/database/db.server", () => ({
+  db: { booking: { findFirst: findBookingMock } },
+}));
 
 import { action } from "~/routes/_layout+/bookings.$bookingId.overview";
 
@@ -113,19 +118,25 @@ function post(body: Record<string, string>) {
   } as never) as unknown as Promise<Response>;
 }
 
-/** POSTs the `delete` intent as `roles` against a booking in `status`. */
+/**
+ * POSTs the `delete` intent as `roles` against a booking in `status`, with the
+ * booking's name typed as the dialog asks unless `confirmation` says otherwise.
+ */
 function postDelete({
   roles,
   status,
   creatorId = CALLER,
   custodianUserId = null,
+  confirmation = "B",
 }: {
   roles: OrganizationRoles[];
   status: string;
   creatorId?: string;
   custodianUserId?: string | null;
+  confirmation?: string;
 }) {
   actAs(roles);
+  findBookingMock.mockResolvedValue({ name: "B" });
   getBookingMock.mockResolvedValue({
     id: "booking-1",
     status,
@@ -138,7 +149,7 @@ function postDelete({
     bookingAssets: [],
   });
 
-  return post({ intent: "delete" });
+  return post({ intent: "delete", confirmation });
 }
 
 describe("booking page delete intent", () => {
@@ -173,6 +184,25 @@ describe("booking page delete intent", () => {
     });
     expect(response.status).toBe(403);
     expect(deleteBookingMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a delete posted without the booking's name", async () => {
+    const response = await postDelete({
+      roles: [OrganizationRoles.ADMIN],
+      status: "DRAFT",
+      confirmation: "",
+    });
+    expect(response.status).toBe(400);
+    expect(deleteBookingMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts the name in another case", async () => {
+    await postDelete({
+      roles: [OrganizationRoles.ADMIN],
+      status: "DRAFT",
+      confirmation: " b ",
+    });
+    expect(deleteBookingMock).toHaveBeenCalledTimes(1);
   });
 
   it("lets ADMIN delete someone else's ONGOING booking", async () => {

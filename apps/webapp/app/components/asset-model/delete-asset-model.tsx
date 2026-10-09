@@ -9,6 +9,7 @@
  * @see {@link file://../../routes/_layout+/settings.asset-models.tsx} - Action handler
  */
 import type { ReactNode } from "react";
+import { useId } from "react";
 import type { AssetModel } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { Button } from "~/components/shared/button";
@@ -42,6 +43,8 @@ export const DeleteAssetModel = ({
   const fetcher = useFetcher();
   const disabled = useDisabled(fetcher);
   const confirm = useTypeToConfirm(assetModel.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
 
   const defaultTrigger = (
     <Button
@@ -85,6 +88,7 @@ export const DeleteAssetModel = ({
         </AlertDialogHeader>
 
         <TypeToConfirm
+          form={formId}
           expected={assetModel.name}
           value={confirm.value}
           onChange={confirm.setValue}
@@ -97,7 +101,11 @@ export const DeleteAssetModel = ({
               Cancel
             </Button>
           </AlertDialogCancel>
-          <fetcher.Form method="delete" action="/settings/asset-models">
+          <fetcher.Form
+            id={formId}
+            method="delete"
+            action="/settings/asset-models"
+          >
             <input type="hidden" name="id" value={assetModel.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"

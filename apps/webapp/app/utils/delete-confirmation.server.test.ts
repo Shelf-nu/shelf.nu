@@ -9,7 +9,10 @@
  * @see {@link file://./delete-confirmation.server.ts}
  */
 import { describe, expect, it } from "vitest";
-import { assertBulkDeleteConfirmed } from "./delete-confirmation.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmed,
+} from "./delete-confirmation.server";
 import { ShelfError } from "./error";
 import { ALL_SELECTED_KEY } from "./list";
 
@@ -149,5 +152,35 @@ describe("assertBulkDeleteConfirmed: select all", () => {
         matchedCount: 80,
       })
     ).toMatchObject({ status: 400 });
+  });
+});
+
+describe("assertDeleteConfirmed", () => {
+  it("lets the delete through when the name is typed, in any case", () => {
+    expect(() =>
+      assertDeleteConfirmed({
+        confirmation: "  demo   CAMERA ",
+        expected: "Demo Camera",
+        label: "Assets",
+      })
+    ).not.toThrow();
+  });
+
+  it("refuses a missing or different name, saying what to type", () => {
+    for (const confirmation of [undefined, "", "Demo"]) {
+      expect(() =>
+        assertDeleteConfirmed({
+          confirmation,
+          expected: "Demo Camera",
+          label: "Assets",
+        })
+      ).toThrow(
+        expect.objectContaining({
+          status: 400,
+          shouldBeCaptured: false,
+          message: 'Nothing was deleted. Type "Demo Camera" to confirm.',
+        })
+      );
+    }
   });
 });

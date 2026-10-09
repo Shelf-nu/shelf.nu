@@ -8,6 +8,7 @@
  * @see {@link file://../../routes/_layout+/locations.$locationId.tsx} - Action handler
  */
 import type { ReactNode } from "react";
+import { useId } from "react";
 import type { Location } from "@prisma/client";
 import { Button } from "~/components/shared/button";
 
@@ -41,6 +42,8 @@ type DeleteLocationProps = {
 export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
   const disabled = useDisabled();
   const confirm = useTypeToConfirm(location.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
 
   return (
     <AlertDialog
@@ -87,6 +90,7 @@ export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
         </AlertDialogHeader>
 
         <TypeToConfirm
+          form={formId}
           expected={location.name}
           value={confirm.value}
           onChange={confirm.setValue}
@@ -101,7 +105,11 @@ export const DeleteLocation = ({ location, trigger }: DeleteLocationProps) => {
               </Button>
             </AlertDialogCancel>
 
-            <Form method="delete" action={`/locations/${location.id}`}>
+            <Form
+              id={formId}
+              method="delete"
+              action={`/locations/${location.id}`}
+            >
               <Button
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 type="submit"

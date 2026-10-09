@@ -39,6 +39,8 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
@@ -47,6 +49,7 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
+  parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
@@ -168,6 +171,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.location,
       action: PermissionAction.delete,
     });
+
+    // The dialog asks for the location's name; refuse a request that skipped it.
+    const { confirmation } = parseData(
+      await request.formData(),
+      DeleteConfirmationSchema
+    );
+    const toDelete = await db.location.findFirst({
+      where: { id, organizationId },
+      select: { name: true },
+    });
+    if (toDelete) {
+      assertDeleteConfirmed({
+        confirmation,
+        expected: toDelete.name,
+        label: "Location",
+      });
+    }
 
     await deleteLocation({ id, organizationId });
 

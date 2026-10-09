@@ -46,6 +46,8 @@ import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -313,10 +315,25 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "delete": {
-        const { mainImageUrl } = parseData(
+        const { mainImageUrl, confirmation } = parseData(
           formData,
-          z.object({ mainImageUrl: z.string().optional() })
+          z
+            .object({ mainImageUrl: z.string().optional() })
+            .merge(DeleteConfirmationSchema)
         );
+
+        // The dialog asks for the asset's title; refuse a request that skipped it.
+        const toDelete = await db.asset.findFirst({
+          where: { id, organizationId },
+          select: { title: true },
+        });
+        if (toDelete) {
+          assertDeleteConfirmed({
+            confirmation,
+            expected: toDelete.title,
+            label: "Assets",
+          });
+        }
 
         // Name the actor, or the activity event records the deletion as
         // "System" — the mobile delete route already passes it, so the same

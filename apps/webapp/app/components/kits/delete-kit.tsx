@@ -8,7 +8,7 @@
  * @see {@link file://../../routes/_layout+/kits.$kitId.tsx} - Action handler
  */
 import type { ReactElement } from "react";
-import { cloneElement } from "react";
+import { cloneElement, useId } from "react";
 import type { Kit } from "@prisma/client";
 import {
   TypeToConfirm,
@@ -37,6 +37,8 @@ type DeleteKitProps = {
 export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
   const disabled = useDisabled();
   const confirm = useTypeToConfirm(kit.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
 
   return (
     <AlertDialog
@@ -78,6 +80,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
         </AlertDialogHeader>
 
         <TypeToConfirm
+          form={formId}
           expected={kit.name}
           value={confirm.value}
           onChange={confirm.setValue}
@@ -91,7 +94,7 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
               </Button>
             </AlertDialogCancel>
 
-            <Form method="delete" action={`/kits/${kit.id}`}>
+            <Form id={formId} method="delete" action={`/kits/${kit.id}`}>
               {kit.image && (
                 <input type="hidden" value={kit.image} name="image" />
               )}

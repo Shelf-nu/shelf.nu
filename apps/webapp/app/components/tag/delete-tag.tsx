@@ -9,6 +9,7 @@
  * @see {@link file://../../routes/_layout+/tags.tsx} - Action handler
  */
 import type { ReactNode } from "react";
+import { useId } from "react";
 import type { Tag } from "@prisma/client";
 import { Button } from "~/components/shared/button";
 
@@ -59,6 +60,8 @@ export const DeleteTag = ({
 }) => {
   const disabled = useDisabled();
   const confirm = useTypeToConfirm(tag.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
   const usage = tag._count ? describeTagUsage(tag._count) : null;
   // Without counts the dialog cannot tell, so it asks, as for one in use.
   const needsTypedConfirm = !tag._count || usage !== null;
@@ -101,6 +104,7 @@ export const DeleteTag = ({
 
         {needsTypedConfirm ? (
           <TypeToConfirm
+            form={formId}
             expected={tag.name}
             value={confirm.value}
             onChange={confirm.setValue}
@@ -114,7 +118,7 @@ export const DeleteTag = ({
               Cancel
             </Button>
           </AlertDialogCancel>
-          <Form method="delete" action="/tags">
+          <Form id={formId} method="delete" action="/tags">
             <input type="hidden" name="id" value={tag.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"

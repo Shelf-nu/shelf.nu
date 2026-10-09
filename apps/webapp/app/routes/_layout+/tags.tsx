@@ -21,6 +21,7 @@ import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
 import type { TagUsage } from "~/components/tag/delete-tag";
 import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
+import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
 import { deleteTag, getTags } from "~/modules/tag/service.server";
@@ -30,6 +31,8 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -123,15 +126,34 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // A tag on any asset or booking needs its name typed, as the dialog asks;
+    // an unused one deletes with one click.
+    const toDelete = await db.tag.findFirst({
+      where: { id, organizationId },
+      select: {
+        name: true,
+        _count: { select: { assets: true, bookings: true } },
+      },
+    });
+    if (toDelete && Object.values(toDelete._count).some((n) => n > 0)) {
+      assertDeleteConfirmed({
+        confirmation,
+        expected: toDelete.name,
+        label: "Tag",
+      });
+    }
 
     await deleteTag({ id, organizationId });
 

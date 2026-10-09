@@ -37,7 +37,9 @@ export default function AssetModelBulkDeleteDialog() {
       arrayFieldId="assetModelIds"
       actionUrl="/settings/asset-models"
       title={`Delete ${totalSelected} ${noun}`}
-      description={`This permanently deletes ${totalSelected} ${noun}. Their assets are kept but lose the model, and every booking reservation made by model is removed. This cannot be undone.`}
+      description={`This permanently deletes ${totalSelected} ${noun}. Their assets are kept but lose the model, and every booking reservation made by ${
+        totalSelected === 1 ? "this model" : "these models"
+      } is removed. This cannot be undone.`}
     >
       {({
         fetcherError,

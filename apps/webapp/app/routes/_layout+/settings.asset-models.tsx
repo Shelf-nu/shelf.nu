@@ -14,11 +14,14 @@ import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
 import { BulkDeleteAssetModelSchema } from "~/components/asset-model/bulk-delete-dialog";
 import { ErrorContent } from "~/components/errors";
+import { db } from "~/database/db.server";
 import {
   bulkDeleteAssetModels,
   deleteAssetModel,
 } from "~/modules/asset-model/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
+import { assertDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -94,15 +97,30 @@ export async function action({ context, request }: ActionFunctionArgs) {
     }
 
     /** Default: single asset model delete */
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       formData,
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // The dialog asks for the model's name; refuse a request that skipped it.
+    const toDelete = await db.assetModel.findFirst({
+      where: { id, organizationId },
+      select: { name: true },
+    });
+    if (toDelete) {
+      assertDeleteConfirmed({
+        confirmation,
+        expected: toDelete.name,
+        label: "Asset Model",
+      });
+    }
 
     await deleteAssetModel({ id, organizationId, userId });
 

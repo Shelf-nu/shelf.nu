@@ -10,6 +10,7 @@
  * @see {@link file://../../routes/_layout+/categories.tsx} - Action handler
  */
 import type { ReactNode } from "react";
+import { useId } from "react";
 import type { Category } from "@prisma/client";
 import { Button } from "~/components/shared/button";
 
@@ -69,6 +70,8 @@ export const DeleteCategory = ({
 }) => {
   const disabled = useDisabled();
   const confirm = useTypeToConfirm(category.name);
+  // The field sits outside the form that submits; this links the two.
+  const formId = useId();
   const usage = category._count ? describeCategoryUsage(category._count) : null;
   // Without counts the dialog cannot tell, so it asks, as for one in use.
   const needsTypedConfirm = !category._count || usage !== null;
@@ -115,6 +118,7 @@ export const DeleteCategory = ({
 
         {needsTypedConfirm ? (
           <TypeToConfirm
+            form={formId}
             expected={category.name}
             value={confirm.value}
             onChange={confirm.setValue}
@@ -128,7 +132,7 @@ export const DeleteCategory = ({
               Cancel
             </Button>
           </AlertDialogCancel>
-          <Form method="delete" action="/categories">
+          <Form id={formId} method="delete" action="/categories">
             <input type="hidden" name="id" value={category.id} />
             <Button
               className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
