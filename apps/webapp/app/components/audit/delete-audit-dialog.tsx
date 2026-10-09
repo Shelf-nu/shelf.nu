@@ -2,9 +2,9 @@
  * @file Delete Audit Dialog
  *
  * Confirmation dialog for permanently deleting an archived audit session.
- * Requires the user to type the audit name (case-insensitive) before the
- * Delete button becomes enabled — the same destructive-confirm pattern used
- * by the custom-field delete flow.
+ * Requires the user to type the audit name before the Delete button becomes
+ * enabled, through the shared {@link TypeToConfirm} field every permanent
+ * delete uses. The server repeats the check with the same rule.
  *
  * The "archive-first" contract is enforced at the service and route layer;
  * this dialog is only rendered by the actions dropdown when the audit is in
@@ -13,11 +13,10 @@
  *
  * @see {@link file://./actions-dropdown.tsx} - Triggers this dialog
  * @see {@link file://../../routes/_layout+/audits.$auditId.tsx} - Action handler
- * @see {@link file://../custom-fields/delete-dialog.tsx} - Pattern reference
+ * @see {@link file://../shared/type-to-confirm.tsx} - Shared field
  */
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useFetcher } from "react-router";
-import Input from "~/components/forms/input";
 import { TrashIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import {
@@ -29,6 +28,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "~/components/shared/modal";
+import {
+  TypeToConfirm,
+  useTypeToConfirm,
+} from "~/components/shared/type-to-confirm";
 import { useDisabled } from "~/hooks/use-disabled";
 
 /** Props for the {@link DeleteAuditDialog} component. */
@@ -44,8 +47,8 @@ type DeleteAuditDialogProps = {
 /**
  * Destructive confirmation dialog for deleting an archived audit.
  *
- * Disables the Delete button until the user types the audit name
- * (case-insensitive, trimmed). Submission uses a scoped fetcher so the
+ * Disables the Delete button until the user types the audit name (the
+ * shared rule: case-insensitive, trimmed). Submission uses a scoped fetcher so the
  * server response does not collide with other forms on the audit detail
  * page. On success the server redirects — no client close required.
  */
@@ -56,23 +59,16 @@ export function DeleteAuditDialog({
 }: DeleteAuditDialogProps) {
   const fetcher = useFetcher({ key: "delete-audit" });
   const disabled = useDisabled(fetcher);
-  const [confirmation, setConfirmation] = useState("");
-
-  // Must mirror the service-side normalization (see deleteAuditSession).
-  // Without NFC, a macOS user typing a composed character (e.g. "é" via
-  // option-e + e) can have the button stay disabled even though the
-  // server would accept the confirmation.
-  const normalize = (s: string): string =>
-    s.trim().normalize("NFC").toLowerCase();
-  const confirmationMatches = normalize(confirmation) === normalize(auditName);
+  const confirm = useTypeToConfirm(auditName);
+  const { reset } = confirm;
 
   // Reset the input whenever the dialog closes so the next open starts fresh
   // (users shouldn't see their previous attempt lingering in the field).
   useEffect(() => {
     if (!open) {
-      setConfirmation("");
+      reset();
     }
-  }, [open]);
+  }, [open, reset]);
 
   const fetcherError =
     fetcher.data && "error" in fetcher.data && fetcher.data.error
@@ -96,18 +92,12 @@ export function DeleteAuditDialog({
         <fetcher.Form method="post" className="mt-4 space-y-2">
           <input type="hidden" name="intent" value="delete-audit" />
 
-          <p className="text-sm text-gray-600">
-            To confirm, type the audit name below.
-          </p>
-          <Input
-            label="Confirmation"
-            name="confirmation"
-            value={confirmation}
-            onChange={(event) => setConfirmation(event.target.value)}
-            autoComplete="off"
-            required
+          <TypeToConfirm
+            expected={auditName}
+            value={confirm.value}
+            onChange={confirm.setValue}
+            disabled={disabled}
           />
-          <p className="text-sm text-gray-500">Expected input: {auditName}</p>
           {fetcherError ? (
             <p className="text-sm text-error-500">{fetcherError}</p>
           ) : null}
@@ -122,7 +112,7 @@ export function DeleteAuditDialog({
               <Button
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
                 type="submit"
-                disabled={disabled || !confirmationMatches}
+                disabled={disabled || !confirm.isConfirmed}
               >
                 {disabled ? "Deleting..." : "Delete"}
               </Button>

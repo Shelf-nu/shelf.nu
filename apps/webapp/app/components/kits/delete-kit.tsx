@@ -1,8 +1,20 @@
+/**
+ * Delete Kit Dialog
+ *
+ * Permanent delete of one kit, from the kit page's actions menu and the kits
+ * index row actions. The user types the kit's name before Delete is enabled
+ * (see {@link TypeToConfirm}).
+ *
+ * @see {@link file://../../routes/_layout+/kits.$kitId.tsx} - Action handler
+ */
 import type { ReactElement } from "react";
 import { cloneElement } from "react";
 import type { Kit } from "@prisma/client";
-import { useNavigation } from "react-router";
-import { isFormProcessing } from "~/utils/form";
+import {
+  TypeToConfirm,
+  useTypeToConfirm,
+} from "~/components/shared/type-to-confirm";
+import { useDisabled } from "~/hooks/use-disabled";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 import { Button } from "../shared/button";
@@ -23,11 +35,16 @@ type DeleteKitProps = {
 };
 
 export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
-  const navigation = useNavigation();
-  const disabled = isFormProcessing(navigation.state);
+  const disabled = useDisabled();
+  const confirm = useTypeToConfirm(kit.name);
 
   return (
-    <AlertDialog>
+    <AlertDialog
+      onOpenChange={(open) => {
+        // Each open starts empty, so an earlier attempt never arms the button.
+        if (!open) confirm.reset();
+      }}
+    >
       <AlertDialogTrigger asChild>
         {trigger ? (
           cloneElement(trigger)
@@ -53,11 +70,19 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
           </div>
           <AlertDialogTitle>Delete {kit.name}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete this kit? This action cannot be
-            undone. Deleting a kit will not delete the assets. If the kit is
-            checked out, assets will be made available again.
+            This permanently deletes the kit. Its assets stay in your workspace
+            and keep their location, but leave the draft and reserved bookings
+            the kit was on. Custody of the kit is released and its QR code is
+            unlinked. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        <TypeToConfirm
+          expected={kit.name}
+          value={confirm.value}
+          onChange={confirm.setValue}
+          disabled={disabled}
+        />
         <AlertDialogFooter>
           <div className="flex justify-center gap-2">
             <AlertDialogCancel asChild>
@@ -74,9 +99,9 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
               <Button
                 type="submit"
                 className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-                disabled={disabled}
+                disabled={disabled || !confirm.isConfirmed}
               >
-                Delete
+                {disabled ? "Deleting..." : "Delete"}
               </Button>
             </Form>
           </div>

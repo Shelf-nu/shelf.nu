@@ -2,6 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
+import { BulkDeleteAssetsSchema } from "~/components/assets/bulk-delete-dialog";
 import {
   bulkDeleteAssets,
   getPaginatedAndFilterableAssets,
@@ -131,11 +132,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { assetIds, currentSearchParams } = parseData(
+        const { assetIds, confirmation, currentSearchParams } = parseData(
           formData,
-          z
-            .object({ assetIds: z.array(z.string()).min(1) })
-            .and(CurrentSearchParamsSchema)
+          BulkDeleteAssetsSchema.and(CurrentSearchParamsSchema)
         );
 
         await bulkDeleteAssets({
@@ -144,6 +143,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId,
           currentSearchParams,
           settings,
+          confirmation,
         });
 
         sendNotification({

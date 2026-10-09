@@ -1334,6 +1334,7 @@ describe("audit service", () => {
       it("deletes archived audits narrowed by ARCHIVED status on the write", async () => {
         const result = await bulkDeleteAudits({
           auditIds: ["a1", "a2"],
+          confirmation: "2",
           organizationId: "org-1",
           userId: "user-1",
         });
@@ -1364,6 +1365,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1"],
+            confirmation: "1",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1383,6 +1385,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1", "a2"],
+            confirmation: "2",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1408,6 +1411,7 @@ describe("audit service", () => {
               currentSearchParams: params,
               organizationId: "org-1",
               userId: "user-1",
+              confirmation: "2",
             })
           ).rejects.toMatchObject({
             status: 400,
@@ -1427,6 +1431,8 @@ describe("audit service", () => {
           currentSearchParams: "status=archived",
           organizationId: "org-1",
           userId: "user-1",
+          // The two archived audits the pre-read resolves to.
+          confirmation: "2",
         });
 
         const whereArg = mockDb.auditSession.findMany.mock.calls[0][0].where;
@@ -1437,6 +1443,36 @@ describe("audit service", () => {
         // PermissionAction.delete is ADMIN/OWNER-only, so assignments-based
         // scoping has no place here — guard against re-introduction.
         expect(whereArg.assignments).toBeUndefined();
+      });
+
+      it("refuses a select-all whose typed count is not what it resolves to", async () => {
+        await expect(
+          bulkDeleteAudits({
+            auditIds: [ALL_SELECTED_KEY],
+            currentSearchParams: "status=ARCHIVED",
+            organizationId: "org-1",
+            userId: "user-1",
+            confirmation: "1",
+          })
+        ).rejects.toMatchObject({
+          status: 400,
+          additionalData: { expectedConfirmation: 2 },
+        });
+
+        expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
+      });
+
+      it("refuses an explicit selection posted without the typed count", async () => {
+        await expect(
+          bulkDeleteAudits({
+            auditIds: ["a1", "a2"],
+            organizationId: "org-1",
+            userId: "user-1",
+            confirmation: undefined,
+          })
+        ).rejects.toMatchObject({ status: 400 });
+
+        expect(mockDb.auditSession.deleteMany).not.toHaveBeenCalled();
       });
 
       it("calls removePublicFile for every image AFTER the DB transaction commits", async () => {
@@ -1457,6 +1493,7 @@ describe("audit service", () => {
 
         await bulkDeleteAudits({
           auditIds: ["a1", "a2"],
+          confirmation: "2",
           organizationId: "org-1",
           userId: "user-1",
         });
@@ -1493,6 +1530,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1", "a2", "a3"],
+            confirmation: "3",
             organizationId: "org-1",
             userId: "user-1",
           })
@@ -1511,6 +1549,7 @@ describe("audit service", () => {
         await expect(
           bulkDeleteAudits({
             auditIds: ["a1"],
+            confirmation: "1",
             organizationId: "org-1",
             userId: "user-1",
           })

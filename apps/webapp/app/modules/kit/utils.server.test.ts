@@ -132,7 +132,15 @@ describe("getKitsWhereInput", () => {
       allowedTeamMemberIds: "all",
     });
 
-    expect(where.name).toEqual({ contains: "camera", mode: "insensitive" });
+    // Name or barcode value, the same predicate the kits index lists by.
+    expect(where.OR).toEqual([
+      { name: { contains: "camera", mode: "insensitive" } },
+      {
+        barcodes: {
+          some: { value: { contains: "camera", mode: "insensitive" } },
+        },
+      },
+    ]);
     expect(where.status).toBe("AVAILABLE");
   });
 });

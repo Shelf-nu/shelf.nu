@@ -6,10 +6,10 @@ tags:
   - actions
 
 ---
-# Verifies the booking-detail overflow "Delete booking" action. Creates a
-# disposable DRAFT booking and deletes it, then asserts it's gone against a
-# FRESH fetch (the list does not refetch after router.back(), so we relaunch
-# and search). Idempotent + self-cleaning.
+# Verifies the booking-detail overflow "Delete booking" action and its typed
+# name confirmation. Creates a disposable DRAFT booking and deletes it, then
+# asserts it's gone against a FRESH fetch (the list does not refetch after
+# router.back(), so we relaunch and search). Idempotent + self-cleaning.
 #
 # Requires GRANULAR WORKSPACE (TEAM) + team member "Dr. Sarah Mitchell".
 # Action steps verified live on-device 2026-06-23; preamble copied from 06.
@@ -63,7 +63,8 @@ tags:
     visible: "QA Delete Test"
     timeout: 20000
 
-# Delete from the DRAFT detail.
+# Delete from the DRAFT detail. The sheet asks for the booking's name first:
+# Delete stays disabled for a wrong name, then accepts it in any case.
 - tapOn: "More booking actions"
 - extendedWaitUntil:
     visible: "Delete booking"
@@ -71,10 +72,25 @@ tags:
 - tapOn:
     text: "^Delete booking$"
 - extendedWaitUntil:
-    visible: "Delete Booking"
+    visible:
+      id: "delete-confirmation-input"
     timeout: 10000
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: false
 - tapOn:
-    text: "^Delete$"
+    id: "delete-confirmation-input"
+- inputText: "QA Delete"
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: false
+- eraseText: 20
+- inputText: "qa delete test"
+- assertVisible:
+    id: "confirm-delete-button"
+    enabled: true
+- tapOn:
+    id: "confirm-delete-button"
 - extendedWaitUntil:
     visible: "Filter: Active.*"
     timeout: 20000

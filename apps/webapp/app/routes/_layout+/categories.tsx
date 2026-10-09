@@ -8,6 +8,7 @@ import { data, Link, Outlet } from "react-router";
 import { z } from "zod";
 import BulkActionsDropdown from "~/components/category/bulk-actions-dropdown";
 import CategoryQuickActions from "~/components/category/category-quick-actions";
+import type { CategoryUsage } from "~/components/category/delete-category";
 import { ErrorContent } from "~/components/errors";
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -199,9 +200,7 @@ const CategoryItem = ({
   item,
 }: {
   item: Pick<Category, "id" | "description" | "name" | "color"> & {
-    _count: {
-      assets: number;
-    };
+    _count: CategoryUsage;
   };
 }) => (
   <>

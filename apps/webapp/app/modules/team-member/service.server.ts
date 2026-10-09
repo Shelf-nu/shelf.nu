@@ -6,6 +6,7 @@ import { withBackgroundWriteSlot } from "~/utils/background-write-limiter.server
 import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
@@ -1135,10 +1136,16 @@ export async function bulkDeleteNRMs({
   nrmIds,
   organizationId,
   search,
+  confirmation,
 }: {
   nrmIds: TeamMember["id"][];
   organizationId: TeamMember["organizationId"];
   search?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * members this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     // Derived from the shared NRM scope. A bare `{ organizationId }` here would
@@ -1153,6 +1160,15 @@ export async function bulkDeleteNRMs({
         id: true,
         _count: { select: { custodies: true, kitCustodies: true } },
       },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: nrmIds,
+      confirmation,
+      matchedCount: teamMembers.length,
+      noun: { one: "non-registered member", many: "non-registered members" },
+      label,
     });
 
     /**

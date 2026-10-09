@@ -8,6 +8,7 @@ import type {
 import { data, useLoaderData } from "react-router";
 import { z } from "zod";
 import { AssetsList } from "~/components/assets/assets-index/assets-list";
+import { BulkDeleteAssetsSchema } from "~/components/assets/bulk-delete-dialog";
 import { ImportButton } from "~/components/assets/import-button";
 import { NewAssetDropdown } from "~/components/assets/new-asset-dropdown";
 import Header from "~/components/layout/header";
@@ -207,11 +208,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { assetIds, currentSearchParams } = parseData(
+        const { assetIds, confirmation, currentSearchParams } = parseData(
           formData,
-          z
-            .object({ assetIds: z.array(z.string()).min(1) })
-            .and(CurrentSearchParamsSchema)
+          BulkDeleteAssetsSchema.and(CurrentSearchParamsSchema)
         );
 
         // Acting user's timezone: when "select all" is active the deletion set
@@ -228,6 +227,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           userId,
           currentSearchParams,
           settings,
+          confirmation,
           timeZone,
         });
 

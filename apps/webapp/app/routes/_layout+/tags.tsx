@@ -18,6 +18,7 @@ import { GrayBadge } from "~/components/shared/gray-badge";
 import { Tag as TagBadge } from "~/components/shared/tag";
 import { Th, Td } from "~/components/table";
 import BulkActionsDropdown from "~/components/tag/bulk-actions-dropdown";
+import type { TagUsage } from "~/components/tag/delete-tag";
 import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -206,7 +207,9 @@ export default function CategoriesPage() {
 const TagItem = ({
   item,
 }: {
-  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color">;
+  item: Pick<Tag, "id" | "description" | "name" | "useFor" | "color"> & {
+    _count?: TagUsage;
+  };
 }) => (
   <>
     <Td className="w-1/4 text-left" title={`Tag: ${item.name}`}>

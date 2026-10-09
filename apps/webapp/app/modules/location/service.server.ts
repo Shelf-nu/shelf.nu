@@ -25,12 +25,14 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
   throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
@@ -1342,20 +1344,40 @@ export async function createLocationsIfNotExists({
 export async function bulkDeleteLocations({
   locationIds,
   organizationId,
+  currentSearchParams,
+  confirmation,
 }: {
   locationIds: Location["id"][];
   organizationId: Organization["id"];
+  /** The index's search params; a "select all" deletes only what they match. */
+  currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * locations this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
      * Read before the delete: the `Image` row ids and the storage URLs are
-     * gone once the location rows are deleted.
+     * gone once the location rows are deleted. A "select all" resolves through
+     * the index's own builder, so it removes exactly the locations the list
+     * shows for the active search.
      */
     const locations = await db.location.findMany({
       where: locationIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
+        ? getLocationsWhereInput({ organizationId, currentSearchParams })
         : { id: { in: locationIds }, organizationId },
       select: { id: true, imageId: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: locationIds,
+      confirmation,
+      matchedCount: locations.length,
+      noun: { one: "location", many: "locations" },
+      label,
     });
 
     await db.$transaction(async (tx) => {
@@ -1389,6 +1411,9 @@ export async function bulkDeleteLocations({
      */
     void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting locations.",

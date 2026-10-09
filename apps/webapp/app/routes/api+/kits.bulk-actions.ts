@@ -84,10 +84,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { kitIds } = parseData(formData, BulkDeleteKitsSchema);
+        const { kitIds, confirmation } = parseData(
+          formData,
+          BulkDeleteKitsSchema
+        );
 
         await bulkDeleteKits({
           kitIds,
+          confirmation,
           organizationId,
           userId,
           currentSearchParams,

@@ -534,7 +534,7 @@ export default function Area51UserPage() {
       <div>
         <div className="flex justify-between">
           <h1>User: {user?.email}</h1>
-          <DeleteUser />
+          <DeleteUser email={user.email} />
         </div>
         <div className="flex gap-4">
           <div className="w-[400px]">

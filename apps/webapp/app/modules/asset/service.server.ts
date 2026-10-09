@@ -137,6 +137,7 @@ import {
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
@@ -6402,6 +6403,7 @@ export async function bulkDeleteAssets({
   userId,
   currentSearchParams,
   settings,
+  confirmation,
   timeZone = "UTC",
 }: {
   assetIds: Asset["id"][];
@@ -6409,6 +6411,11 @@ export async function bulkDeleteAssets({
   userId: User["id"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * assets this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
   /**
    * Acting user's IANA timezone. Forwarded to the select-all id resolution so
    * built-in date-column filters truncate the day in the user's tz (avoids an
@@ -6441,6 +6448,15 @@ export async function bulkDeleteAssets({
         organizationId,
       },
       select: { id: true, mainImage: true, title: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: assetIds,
+      confirmation,
+      matchedCount: assets.length,
+      noun: { one: "asset", many: "assets" },
+      label,
     });
 
     try {
@@ -6499,6 +6515,9 @@ export async function bulkDeleteAssets({
       });
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message

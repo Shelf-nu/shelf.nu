@@ -1,5 +1,6 @@
 import {
   BOOKING_RESERVE_BLOCKED_LABELS,
+  DELETE_CONSEQUENCE_LABELS,
   EXPLICIT_REQUIREMENT_LABELS,
 } from "@shelf/labels";
 import { useState, useCallback, useMemo, useRef } from "react";
@@ -65,6 +66,7 @@ import { maybeAskForReview } from "@/lib/review-prompt";
 import { canOfferQuickCheckout } from "@/lib/booking-quick-actions";
 import { BOOKING_METHOD } from "@/lib/booking-method";
 import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
+import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { questionsForCheckouts } from "@/lib/custody-source-options";
 import {
   hasAssetsLeftToCheckOut,
@@ -169,6 +171,8 @@ export default function BookingDetailScreen() {
   });
   // Android overflow-menu visibility (iOS uses the native ActionSheetIOS).
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  // The typed-name delete confirmation (see ConfirmDeleteSheet).
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
 
   /**
    * The member's access; booking item rules below read
@@ -840,36 +844,28 @@ export default function BookingDetailScreen() {
     );
   };
 
+  // A permanent delete asks for the booking's name to be typed first, the
+  // same rule as the webapp's delete dialog.
   const handleDelete = () => {
     if (!booking || !currentOrg) return;
-    Alert.alert(
-      "Delete Booking",
-      `Permanently delete "${booking.name}"? This can't be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setIsActioning(true);
-            const { error: err } = await api.deleteBooking(
-              currentOrg.id,
-              booking.id
-            );
-            setIsActioning(false);
-            if (err) {
-              Alert.alert("Couldn't delete", err);
-              return;
-            }
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            // Mutation changed this booking — force the list to refetch.
-            markBookingsListDirty();
-            // The booking no longer exists — leave the detail screen.
-            router.back();
-          },
-        },
-      ]
-    );
+    setShowDeleteSheet(true);
+  };
+
+  const performDelete = async () => {
+    if (!booking || !currentOrg) return;
+    setIsActioning(true);
+    const { error: err } = await api.deleteBooking(currentOrg.id, booking.id);
+    setIsActioning(false);
+    setShowDeleteSheet(false);
+    if (err) {
+      Alert.alert("Couldn't delete", err);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // Mutation changed this booking: force the list to refetch.
+    markBookingsListDirty();
+    // The booking no longer exists: leave the detail screen.
+    router.back();
   };
 
   const handleDuplicate = () => {
@@ -2520,6 +2516,17 @@ export default function BookingDetailScreen() {
       {/* "Where do the units come from?": asked once, at check-out, for pools
           kept at two or more locations. Stays open until the server accepts.
           Closing it during a partial check-out reopens the quantity picker. */}
+      {booking && (
+        <ConfirmDeleteSheet
+          visible={showDeleteSheet}
+          title="Delete booking"
+          message={DELETE_CONSEQUENCE_LABELS.BOOKING}
+          expected={booking.name}
+          isDeleting={isActioning}
+          onConfirm={() => void performDelete()}
+          onClose={() => setShowDeleteSheet(false)}
+        />
+      )}
       <CheckoutSourceSheet
         visible={sourcePrompt != null}
         questions={sourcePrompt?.questions ?? []}

@@ -8,11 +8,13 @@ import type {
 import { TagUseFor } from "@prisma/client";
 import loadash from "lodash";
 import { db } from "~/database/db.server";
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
   ShelfError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
 } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { getCurrentSearchParams } from "~/utils/http.server";
@@ -88,6 +90,8 @@ export async function getTags(params: {
         take,
         where,
         orderBy: { updatedAt: "desc" },
+        // A tag in use needs the typed confirm before it is deleted.
+        include: { _count: { select: { assets: true, bookings: true } } },
       }),
 
       /** Count them */
@@ -305,43 +309,59 @@ export async function updateTag({
  * Deletes tags in bulk, either by explicit ids or across a filtered list.
  *
  * When `tagIds` carries the `ALL_SELECTED_KEY` sentinel the user picked "select
- * all" on a list they were looking at, so the delete must reproduce that list's
- * filters. Ignoring them deletes every tag in the workspace while the UI reports
- * the filtered count — permanent data loss the user was actively told would not
- * happen. `currentSearchParams` is what carries those filters over; the bulk
- * dialog has always submitted it.
+ * all" on a list they were looking at, so the delete reproduces that list's
+ * filters through {@link buildTagsWhereInput}, the builder the index uses.
+ * `currentSearchParams` carries those filters over. The ids are read first and
+ * the delete is scoped to them, so the count the user confirmed is the count
+ * removed.
  *
- * @param args - Ids (or the select-all sentinel), org scope, and the list's
- *   filters as a raw query string
+ * @param args - Ids (or the select-all sentinel), org scope, the list's
+ *   filters as a raw query string, and the typed confirmation
  * @returns Prisma's batch payload, whose `count` is the number actually deleted
- * @throws {ShelfError} If the delete fails
+ * @throws {ShelfError} 400 when the confirmation does not match, see
+ *   {@link assertBulkDeleteConfirmed}; 500 if the delete fails
  */
 export async function bulkDeleteTags({
   tagIds,
   organizationId,
   currentSearchParams,
+  confirmation,
 }: {
   tagIds: Tag["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
+  confirmation: string | null | undefined;
 }) {
   try {
-    if (!tagIds.includes(ALL_SELECTED_KEY)) {
-      return await db.tag.deleteMany({
-        where: { id: { in: tagIds }, organizationId },
-      });
-    }
-
     const searchParams = new URLSearchParams(currentSearchParams ?? "");
 
+    const tags = await db.tag.findMany({
+      where: tagIds.includes(ALL_SELECTED_KEY)
+        ? buildTagsWhereInput({
+            organizationId,
+            search: searchParams.get("s"),
+            useFor: searchParams.get("useFor"),
+          })
+        : { id: { in: tagIds }, organizationId },
+      select: { id: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: tagIds,
+      confirmation,
+      matchedCount: tags.length,
+      noun: { one: "tag", many: "tags" },
+      label,
+    });
+
     return await db.tag.deleteMany({
-      where: buildTagsWhereInput({
-        organizationId,
-        search: searchParams.get("s"),
-        useFor: searchParams.get("useFor"),
-      }),
+      where: { id: { in: tags.map((tag) => tag.id) }, organizationId },
     });
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting tags.",

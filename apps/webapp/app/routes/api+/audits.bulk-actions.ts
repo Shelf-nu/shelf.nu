@@ -82,13 +82,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
       }
 
       case "bulk-delete": {
-        const { auditIds } = parseData(formData, BulkDeleteAuditsSchema);
+        const { auditIds, confirmation } = parseData(
+          formData,
+          BulkDeleteAuditsSchema
+        );
 
         const { count } = await bulkDeleteAudits({
           auditIds,
           organizationId,
           userId,
           currentSearchParams,
+          confirmation,
         });
 
         const isSingle = count === 1;

@@ -1,11 +1,13 @@
 import type { Category, Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isNotFoundError,
   ShelfError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
 } from "~/utils/error";
 import { getRandomColor } from "~/utils/get-random-color";
 import { ALL_SELECTED_KEY } from "~/utils/list";
@@ -47,6 +49,37 @@ export async function createCategory({
   }
 }
 
+/**
+ * Builds the categories index where-clause for the active search.
+ *
+ * Shared by {@link getCategories}, which renders the list, and
+ * {@link bulkDeleteCategories}, which expands a "select all" over it. They must
+ * agree: the delete is permanent, so any difference removes categories the
+ * user never saw.
+ *
+ * @param params.organizationId - The caller's organization
+ * @param params.search - The list's search term (the `s` param)
+ * @returns A `Prisma.CategoryWhereInput` scoped to the org and search
+ */
+function getCategoriesWhereInput({
+  organizationId,
+  search,
+}: {
+  organizationId: Organization["id"];
+  search?: string | null;
+}): Prisma.CategoryWhereInput {
+  const where: Prisma.CategoryWhereInput = { organizationId };
+
+  if (search) {
+    where.name = {
+      contains: search,
+      mode: "insensitive",
+    };
+  }
+
+  return where;
+}
+
 export async function getCategories(params: {
   organizationId: Organization["id"];
   /** Page number. Starts at 1 */
@@ -61,16 +94,7 @@ export async function getCategories(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 ? perPage : 8; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the items belonging to current user */
-    const where: Prisma.CategoryWhereInput = { organizationId };
-
-    /** If the search string exists, add it to the where object */
-    if (search) {
-      where.name = {
-        contains: search,
-        mode: "insensitive",
-      };
-    }
+    const where = getCategoriesWhereInput({ organizationId, search });
 
     const [categories, totalCategories] = await Promise.all([
       /** Get the items */
@@ -80,8 +104,14 @@ export async function getCategories(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
+          // Everything a delete would change: in use means a typed confirm.
           _count: {
-            select: { assets: true },
+            select: {
+              assets: true,
+              kits: true,
+              customFields: true,
+              assetModelDefaults: true,
+            },
           },
         },
       }),
@@ -235,20 +265,64 @@ export async function updateCategory({
   }
 }
 
+/**
+ * Permanently deletes the selected categories. Assets and kits in them keep
+ * existing with no category.
+ *
+ * A "select all" resolves through {@link getCategoriesWhereInput}, so it
+ * removes exactly what the index shows for the active search. The ids are read
+ * first and the delete is scoped to them, so the count the user confirmed is
+ * the count removed.
+ *
+ * @param params.categoryIds - Selected ids, possibly with ALL_SELECTED_KEY
+ * @param params.organizationId - The caller's organization
+ * @param params.currentSearchParams - The index's search params at submit time
+ * @param params.confirmation - The number the user typed, see
+ *   {@link assertBulkDeleteConfirmed}
+ * @returns The Prisma batch result
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
 export async function bulkDeleteCategories({
   categoryIds,
   organizationId,
+  currentSearchParams,
+  confirmation,
 }: {
   categoryIds: Category["id"][];
   organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  confirmation: string | null | undefined;
 }) {
   try {
-    return await db.category.deleteMany({
+    const categories = await db.category.findMany({
       where: categoryIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
+        ? getCategoriesWhereInput({
+            organizationId,
+            search: new URLSearchParams(currentSearchParams ?? "").get("s"),
+          })
         : { id: { in: categoryIds }, organizationId },
+      select: { id: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: categoryIds,
+      confirmation,
+      matchedCount: categories.length,
+      noun: { one: "category", many: "categories" },
+      label,
+    });
+
+    return await db.category.deleteMany({
+      where: {
+        id: { in: categories.map((category) => category.id) },
+        organizationId,
+      },
     });
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting categories.",

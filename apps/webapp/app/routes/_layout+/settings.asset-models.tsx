@@ -67,7 +67,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const intent = formData.get("intent");
 
     if (intent === "bulk-delete") {
-      const { assetModelIds, currentSearchParams } = parseData(
+      const { assetModelIds, confirmation, currentSearchParams } = parseData(
         formData,
         BulkDeleteAssetModelSchema.extend({
           currentSearchParams: z.string().optional(),
@@ -80,6 +80,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         organizationId,
         currentSearchParams,
         userId,
+        confirmation,
       });
 
       sendNotification({

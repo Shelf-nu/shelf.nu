@@ -2145,6 +2145,7 @@ describe("bulkDeleteAssets — activity events", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1", "asset-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
       // settings is required by the function but only consumed by the
@@ -4929,6 +4930,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1", "asset-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant
@@ -4962,6 +4964,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: [],
+      confirmation: "0",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant
@@ -4980,6 +4983,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant

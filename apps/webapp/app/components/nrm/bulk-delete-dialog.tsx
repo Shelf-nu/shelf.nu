@@ -5,11 +5,13 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { type loader } from "~/routes/_layout+/settings.team.nrm";
 import { isSelectingAllItems } from "~/utils/list";
+import { BulkDeleteConfirmation } from "../bulk-update-dialog/bulk-delete-confirmation";
 import { BulkUpdateDialogContent } from "../bulk-update-dialog/bulk-update-dialog";
-import { Button } from "../shared/button";
 
 export const BulkDeleteNRMSchema = z.object({
   nrmIds: z.array(z.string()).min(1),
+  /** The typed count; checked by the server, see `assertBulkDeleteConfirmed`. */
+  confirmation: z.string().optional(),
   /**
    * The index's search params at submit time, emitted by
    * `BulkUpdateDialogContent`. Needed so a select-all delete stays scoped to
@@ -28,6 +30,8 @@ export default function BulkDeleteDialog() {
   const totalSelected = isSelectingAllItems(selectedNRMs)
     ? totalItems
     : selectedNRMs.length;
+  const noun =
+    totalSelected === 1 ? "non-registered member" : "non-registered members";
 
   return (
     <BulkUpdateDialogContent
@@ -35,37 +39,24 @@ export default function BulkDeleteDialog() {
       type="trash"
       arrayFieldId="nrmIds"
       actionUrl="/api/nrm/bulk-actions"
-      title={`Delete (${totalSelected}) non-registered members?`}
-      description={`Are your sure you want to delete all (${totalSelected}) non-registered members. This action cannot be undone.`}
+      title={`Delete ${totalSelected} ${noun}`}
+      description={`This deletes ${totalSelected} ${noun}. Their past bookings and activity are kept. A member who holds custody of an asset or kit cannot be deleted. This cannot be undone.`}
     >
-      {({ fetcherError, disabled, handleCloseDialog }) => (
+      {({
+        fetcherError,
+        fetcherErrorAdditionalData,
+        disabled,
+        handleCloseDialog,
+      }) => (
         <>
           <input type="hidden" value="bulk-delete" name="intent" />
-
-          {fetcherError ? (
-            <p className="text-sm text-error-500">{fetcherError}</p>
-          ) : null}
-
-          <div className="flex gap-3">
-            <Button
-              type="button"
-              variant="secondary"
-              width="full"
-              disabled={disabled}
-              onClick={handleCloseDialog}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              type="submit"
-              width="full"
-              disabled={disabled}
-              className="border-error-600 bg-error-600 hover:border-error-800 hover:bg-error-800"
-            >
-              Confirm
-            </Button>
-          </div>
+          <BulkDeleteConfirmation
+            count={totalSelected}
+            disabled={disabled}
+            fetcherError={fetcherError}
+            fetcherErrorAdditionalData={fetcherErrorAdditionalData}
+            onCancel={handleCloseDialog}
+          />
         </>
       )}
     </BulkUpdateDialogContent>

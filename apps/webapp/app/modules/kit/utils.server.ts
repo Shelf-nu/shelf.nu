@@ -48,11 +48,19 @@ export function getKitsWhereInput({
     allowedTeamMemberIds
   );
 
+  // Same predicate as the kits index (`getPaginatedAndFilterableKits`): a
+  // "select all" must act on exactly the kits the list shows, including those
+  // found by a barcode value.
   if (search) {
-    where.name = {
-      contains: search.toLowerCase().trim(),
-      mode: "insensitive",
-    };
+    const searchTerm = search.toLowerCase().trim();
+    where.OR = [
+      { name: { contains: searchTerm, mode: "insensitive" } },
+      {
+        barcodes: {
+          some: { value: { contains: searchTerm, mode: "insensitive" } },
+        },
+      },
+    ];
   }
 
   if (status) {

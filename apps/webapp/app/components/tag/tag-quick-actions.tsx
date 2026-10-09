@@ -10,12 +10,14 @@ import {
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
+import type { TagUsage } from "./delete-tag";
 import { DeleteTag } from "./delete-tag";
 
 type TagQuickActionsProps = {
   className?: string;
   style?: CSSProperties;
-  tag: Pick<Tag, "id" | "name">;
+  /** `_count` lets the delete dialog ask for a typed name only when in use. */
+  tag: Pick<Tag, "id" | "name"> & { _count?: TagUsage };
 };
 
 export default function TagQuickActions({
