@@ -47,6 +47,11 @@ vitest.mock("~/emails/feedback/feedback-email", () => ({
   sendFeedbackEmail: vitest.fn(),
 }));
 
+// why: external email sending
+vitest.mock("~/emails/feedback/feedback-copy-email", () => ({
+  sendFeedbackCopyEmail: vitest.fn(),
+}));
+
 vitest.mock("~/utils/error", () => ({
   makeShelfError: vitest.fn(),
 }));
@@ -55,6 +60,7 @@ import { parseFileFormData, getPublicFileURL } from "~/utils/storage.server";
 import { getUserByID } from "~/modules/user/service.server";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { sendFeedbackEmail } from "~/emails/feedback/feedback-email";
+import { sendFeedbackCopyEmail } from "~/emails/feedback/feedback-copy-email";
 
 const mockContext = {
   getSession: () => ({ userId: "user-1" }),
@@ -103,6 +109,7 @@ describe("/api/feedback", () => {
     });
 
     (sendFeedbackEmail as any).mockResolvedValue(undefined);
+    (sendFeedbackCopyEmail as any).mockResolvedValue(undefined);
     (getPublicFileURL as any).mockReturnValue(
       "https://storage.example.com/file.png"
     );
@@ -138,6 +145,62 @@ describe("/api/feedback", () => {
         appVersion: "test",
         errorContext: null,
       });
+
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith({
+        firstName: "Jane",
+        userEmail: "jane@example.com",
+        type: "issue",
+        message: "Something is broken in the app",
+        screenshotUrl: null,
+      });
+    });
+
+    it("should send the submitter a copy without the captured context", async () => {
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+        currentUrl: "https://app.shelf.nu/kits",
+        viewport: "1512x824 @2x",
+        traceId: "trace_789",
+        sentryEventId: "evt_abc",
+        errorStatus: "500",
+        errorTitle: "Kit error",
+        errorMessage: "Something went wrong while fetching the kit",
+      });
+      request.headers.set("user-agent", "Mozilla/5.0 (Macintosh)");
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      // Exact match: any extra key (page, browser, ids, error details)
+      // would fail it
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledOnce();
+      expect((sendFeedbackCopyEmail as any).mock.calls[0][0]).toStrictEqual({
+        firstName: "Jane",
+        userEmail: "jane@example.com",
+        type: "issue",
+        message: "Something is broken in the app",
+        screenshotUrl: null,
+      });
+    });
+
+    it("should greet the submitter by display name when set", async () => {
+      (getUserByID as any).mockResolvedValue({
+        firstName: "Jane",
+        lastName: "Doe",
+        displayName: "JD",
+        username: "janedoe",
+        email: "jane@example.com",
+      });
+      const request = createFeedbackRequest({
+        type: "issue",
+        message: "Something is broken in the app",
+      });
+
+      await action(createActionArgs({ request, context: mockContext }));
+
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ firstName: "JD" })
+      );
     });
 
     it("should resize screenshots to a readable size, not a thumbnail", async () => {
@@ -263,6 +326,8 @@ describe("/api/feedback", () => {
 
       // parseFileFormData should NOT be called when validation fails first
       expect(parseFileFormData).not.toHaveBeenCalled();
+      expect(sendFeedbackEmail).not.toHaveBeenCalled();
+      expect(sendFeedbackCopyEmail).not.toHaveBeenCalled();
     });
 
     it("should return error for non-POST requests", async () => {
@@ -303,6 +368,11 @@ describe("/api/feedback", () => {
       });
 
       expect(sendFeedbackEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          screenshotUrl: "https://storage.example.com/file.png",
+        })
+      );
+      expect(sendFeedbackCopyEmail).toHaveBeenCalledWith(
         expect.objectContaining({
           screenshotUrl: "https://storage.example.com/file.png",
         })
