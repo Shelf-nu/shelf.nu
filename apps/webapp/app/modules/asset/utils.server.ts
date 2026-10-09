@@ -634,13 +634,35 @@ export function applyCustodianAllowList(
     : kept;
 }
 
+/**
+ * Prisma `where` clause for "select all" and bulk actions, built from a
+ * serialized list query string.
+ *
+ * It mirrors the simple-mode list filters (search, status, category, tag,
+ * location, custodian), always scoped to the organization, so a bulk action
+ * acts on the rows the list showed.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  locationIdsOverride,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Location ids the clause matches, in place of the `location` values in
+   * `currentSearchParams`. Omitted, the URL's own values are matched exactly.
+   *
+   * For surfaces whose visible list widens the ticked locations (to include
+   * their child locations): pass the same resolved set the list used, so
+   * "select all" acts on exactly the rows the user was shown.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: string[];
   /**
    * Required, with no default, so every call site states an answer.
    *
@@ -661,7 +683,8 @@ export function getAssetsWhereInput({
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+  const { categoriesIds, tagsIds, search } = paramsValues;
+  const locationIds = locationIdsOverride ?? paramsValues.locationIds;
 
   const teamMemberIds = applyCustodianAllowList(
     paramsValues.teamMemberIds ?? [],
