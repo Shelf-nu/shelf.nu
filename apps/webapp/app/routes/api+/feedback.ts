@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { type ActionFunctionArgs, data } from "react-router";
+import { sendFeedbackCopyEmail } from "~/emails/feedback/feedback-copy-email";
 import { sendFeedbackEmail } from "~/emails/feedback/feedback-email";
 import { feedbackSchema } from "~/modules/feedback/schema";
 import { getSelectedOrganization } from "~/modules/organization/context.server";
@@ -9,6 +10,7 @@ import { dateTimeInUnix } from "~/utils/date-time-in-unix";
 import { makeShelfError } from "~/utils/error";
 import { assertIsPost, error, parseData, payload } from "~/utils/http.server";
 import { getPublicFileURL, parseFileFormData } from "~/utils/storage.server";
+import { resolveUserGreetingName } from "~/utils/user";
 
 /**
  * Screenshots are bounded on BOTH dimensions (fit "inside" preserves the
@@ -125,6 +127,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
       errorContext: Object.values(errorContext).some(Boolean)
         ? errorContext
         : null,
+    });
+
+    /* The submitter's own copy carries only what they wrote or attached;
+     * everything auto-captured above stays in the internal email */
+    await sendFeedbackCopyEmail({
+      firstName: resolveUserGreetingName(user),
+      userEmail: user.email,
+      type,
+      message,
+      screenshotUrl,
     });
 
     return data(payload({ success: true }));
