@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdvancedIndexAsset } from "~/modules/asset/types";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
+import { defaultFields } from "~/modules/asset-index-settings/helpers";
 import {
   buildImportReadyColumns,
   buildImportReadyCsvFromAssets,
@@ -488,6 +489,71 @@ describe("buildImportReadyCsvFromAssets (round-trip)", () => {
     });
     expect(csv.split("\r\n")).toHaveLength(2); // header + 1 row
     expect(csv.startsWith('"id"')).toBe(true);
+  });
+});
+
+describe("unit of measure column in the index settings", () => {
+  // The asset index has a "Unit of measure" column next to "Quantity". The
+  // Import-ready export does not follow index columns for these fields: it
+  // always writes quantity and unitOfMeasure as separate importer columns.
+  const QT_ASSET = makeAsset({
+    id: "asset-gloves",
+    title: "Gloves",
+    type: AssetType.QUANTITY_TRACKED,
+    quantity: 5,
+    minQuantity: 2,
+    unitOfMeasure: "pcs",
+    consumptionType: ConsumptionType.ONE_WAY,
+    assetModelName: null,
+  });
+
+  /** Index columns as saved before the unit column existed. */
+  const withoutUnitColumn: Column[] = defaultFields
+    .filter((col) => col.name !== "unitOfMeasure")
+    .map((col, position) => ({
+      ...col,
+      position,
+      visible: col.name === "quantity",
+    }));
+  const withUnitHidden: Column[] = defaultFields.map((col) => ({
+    ...col,
+    visible: col.name === "quantity",
+  }));
+  const withUnitVisible: Column[] = defaultFields.map((col) => ({
+    ...col,
+    visible: col.name === "quantity" || col.name === "unitOfMeasure",
+  }));
+
+  function exportWith(
+    settingsColumns: Column[],
+    columnScope: "visible" | "all"
+  ): string {
+    return buildImportReadyCsvFromAssets({
+      columnScope,
+      settingsColumns,
+      activeCustomFields: [],
+      barcodesEnabled: false,
+      assets: [QT_ASSET],
+    });
+  }
+
+  it.each(["visible", "all"] as const)(
+    "writes the same file in '%s' scope whatever the unit column's state",
+    (columnScope) => {
+      const before = exportWith(withoutUnitColumn, columnScope);
+
+      expect(exportWith(withUnitHidden, columnScope)).toBe(before);
+      expect(exportWith(withUnitVisible, columnScope)).toBe(before);
+    }
+  );
+
+  it("keeps quantity and unitOfMeasure as separate importer columns", () => {
+    expect(exportWith(withUnitVisible, "visible")).toBe(
+      [
+        '"id","title","type","quantity","minQuantity","unitOfMeasure","consumptionType"',
+        '"asset-gloves","Gloves","QUANTITY_TRACKED","5","2","pcs","ONE_WAY"',
+      ].join("\r\n")
+    );
   });
 });
 
