@@ -34,6 +34,10 @@ vi.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
+// Mutable so a test can unset the latest version; the getter below reads it
+// on every request.
+const latestVersion = vi.hoisted(() => ({ value: "1.6.0" }));
+
 // why: the route reads module-scope env exports; mocking the env module keeps
 // the assertions independent of the developer's local .env.
 vi.mock("~/utils/env", () => ({
@@ -41,6 +45,9 @@ vi.mock("~/utils/env", () => ({
   SUPABASE_ANON_PUBLIC: "anon-key-123",
   INSTANCE_NAME: "Acme University",
   MIN_COMPANION_VERSION: "1.4.0",
+  get LATEST_COMPANION_VERSION() {
+    return latestVersion.value;
+  },
 }));
 
 // why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
@@ -76,15 +83,28 @@ describe("GET /api/mobile/config", () => {
       supabaseAnonKey: "anon-key-123",
       mobileApiVersion: 1,
       minCompanionVersion: "1.4.0",
+      latestCompanionVersion: "1.6.0",
       ssoEnabled: true,
       passwordLoginEnabled: true,
     });
+  });
+
+  it("advertises no latest version when the env var is unset", async () => {
+    latestVersion.value = "";
+    try {
+      const body = (await invoke().json()) as Record<string, unknown>;
+      // null, not "": the app treats null as "no banner".
+      expect(body.latestCompanionVersion).toBeNull();
+    } finally {
+      latestVersion.value = "1.6.0";
+    }
   });
 
   it("exposes no keys beyond the documented contract", async () => {
     const response = await invoke();
     const body = (await response.json()) as Record<string, unknown>;
     expect(Object.keys(body).sort()).toEqual([
+      "latestCompanionVersion",
       "minCompanionVersion",
       "mobileApiVersion",
       "name",
