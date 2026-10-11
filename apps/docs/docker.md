@@ -6,7 +6,7 @@
 ## Prerequisites
 
 > [!IMPORTANT]
-> If you want to run shelf via docker, there are still some prerequisites you need to meet. Because our docker setup doesn't currently support self-hosting supabase, you need to complete the steps below. This means you have to take care of setting up your Supabase environment, running migrations against your database, and making sure Supabase is configured based on our requirements.
+> If you want to run shelf via docker, there are still some prerequisites you need to meet. Because our docker setup doesn't currently support self-hosting supabase, you need to complete the steps below. This means you have to take care of setting up your Supabase environment and making sure Supabase is configured based on our requirements. Database migrations are applied by the container on startup, unless you set `SKIP_MIGRATIONS=true` (see [Database migrations](#database-migrations)), in which case you run them yourself.
 
 1. [Local Development Guide](./local-development.md) - Setup your development environment
 2. [Supabase Setup Guide](./supabase-setup.md) - Configure your database and authentication
