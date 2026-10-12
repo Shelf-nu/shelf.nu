@@ -11125,10 +11125,9 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  * distinct kit-driven rows — the kit partial unique is on
  * `(bookingId, assetKitId)`, not `(bookingId, assetId)`.
  *
- * Centralizes the resolution previously inlined in the `manage-kits` route
- * action so `createBooking`, the kit-add route, and any future kit→booking flow
- * build slices the exact same, org-scoped way (per the repo's
- * code-abstraction rule).
+ * Every kit-to-booking flow (booking creation, manage-kits, the kit-add route,
+ * the mobile scan) builds its slices here, so they are all resolved the same
+ * org-scoped way and refuse the same kits.
  *
  * SECURITY (cross-org IDOR): `kitIds` originate from request/form input, so the
  * lookup is scoped by `organizationId`. `AssetKit` carries its own
@@ -11141,6 +11140,11 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  * @param params.existingAssetKitIds - Optional set of `AssetKit.id`s already
  *   represented on the target booking; matching memberships are skipped so
  *   re-adding a kit that's already (partly) present is idempotent per slice.
+ * @param params.kitIdsOnBooking - Optional kits already on the target booking.
+ *   They are not joining it, so they are never refused for having no active
+ *   member: they only contribute whatever new active memberships they have.
+ *   For callers that submit the booking's whole kit selection, not just the
+ *   kits being added.
  * @returns One slice spec per newly-added `AssetKit` membership of an active
  *   (not archived) asset
  * @throws {ShelfError} 400 naming any kit with no active asset, or if the
@@ -11150,10 +11154,12 @@ export async function buildKitSlicesForBooking({
   kitIds,
   organizationId,
   existingAssetKitIds,
+  kitIdsOnBooking,
 }: {
   kitIds: string[];
   organizationId: string;
   existingAssetKitIds?: Set<string>;
+  kitIdsOnBooking?: Set<string>;
 }): Promise<KitSliceSpec[]> {
   // Nothing to resolve: short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
@@ -11192,10 +11198,12 @@ export async function buildKitSlicesForBooking({
   // read that builds the slices: a separate check could pass a kit whose last
   // active member is archived before this read, and the kit would then drop
   // out unnoticed whenever another kit still produced slices. A kit id from
-  // another workspace resolves to no kit and refuses nothing.
+  // another workspace resolves to no kit and refuses nothing. A kit already
+  // on the booking is not joining it, so it is never refused here.
   const kitIdsWithActiveMembers = new Set(assetKits.map((ak) => ak.kitId));
   const kitIdsWithoutActiveMembers = kitIds.filter(
-    (kitId) => !kitIdsWithActiveMembers.has(kitId)
+    (kitId) =>
+      !kitIdsWithActiveMembers.has(kitId) && !kitIdsOnBooking?.has(kitId)
   );
   if (kitIdsWithoutActiveMembers.length > 0) {
     await assertKitsHaveActiveAssets(db, {
@@ -16714,18 +16722,43 @@ async function addScannedAssetsToBookingWithinTx(
     );
 
     if (archivedKitMemberIds.size > 0) {
+      // Each slice's kit is read from its `AssetKit` row, which
+      // `assertAssetKitsBelongToOrg` has proven in-org. The spec's `kitId` is
+      // client-supplied and may be blank or foreign, and grouping by it would
+      // let an emptied kit pass with no slices left to book.
+      const kitIdByAssetKitId = new Map<string, string>(
+        (
+          await tx.assetKit.findMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: every id was proven in-org by assertAssetKitsBelongToOrg above
+            where: {
+              id: {
+                in: [
+                  ...new Set(
+                    kitSlices.map((slice) => slice.assetKitId).filter(Boolean)
+                  ),
+                ],
+              },
+            },
+            select: { id: true, kitId: true },
+          })
+        ).map((ak: { id: string; kitId: string }) => [ak.id, ak.kitId])
+      );
+      const kitIdOf = (slice: ScannedKitSliceSpec) =>
+        kitIdByAssetKitId.get(slice.assetKitId);
+
       const activeKitSlices = kitSlices.filter(
         (slice) => !archivedKitMemberIds.has(slice.assetId)
       );
-      const kitIdsStillBooked = new Set(
-        activeKitSlices.map((slice) => slice.kitId)
-      );
+      const kitIdsStillBooked = new Set(activeKitSlices.map(kitIdOf));
       const emptiedKitIds = [
         ...new Set(
           kitSlices
             .filter((slice) => archivedKitMemberIds.has(slice.assetId))
-            .map((slice) => slice.kitId)
-            .filter((kitId) => kitId && !kitIdsStillBooked.has(kitId))
+            .map(kitIdOf)
+            .filter(
+              (kitId): kitId is string =>
+                Boolean(kitId) && !kitIdsStillBooked.has(kitId)
+            )
         ),
       ];
       if (emptiedKitIds.length > 0) {
@@ -17377,12 +17410,12 @@ async function addScannedAssetsToBookingWithinTx(
  * @param {string} params.bookingId - The ID of the booking to update.
  * @param {string} params.organizationId - The organization ID associated with the booking.
  * @param {string} params.userId - The ID of the user performing the action.
- * @returns An object carrying the updated `booking` (`{ id, name, status }`)
- *   alongside `addedAssetIds` and `claimedAssetIds`, widened from the plain
- *   booking this function used to return so a caller can tell a genuine add
- *   apart from a rescan that only answered a reservation, or from a scan that
- *   changed nothing at all, plus `archivedKitMembersLeftOut` (archived
- *   members of scanned kits that were left out).
+ * @returns The updated `booking` (`{ id, name, status }`), plus:
+ *   - `addedAssetIds` and `claimedAssetIds`, so a caller can tell a genuine
+ *     add apart from a rescan that only answered a reservation, or from a scan
+ *     that changed nothing at all;
+ *   - `archivedKitMembersLeftOut`, the number of archived members of scanned
+ *     kits that were not booked.
  */
 export async function addScannedAssetsToBooking({
   assetIds,

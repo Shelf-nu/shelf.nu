@@ -1875,7 +1875,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // Use custom configurations for partial check-in context
   const availabilityConfigs = [
-    assetLabelPresets.archived(!!asset.archivedAt),
+    assetLabelPresets.archivedReturning(!!asset.archivedAt),
     // Custom preset for redundant assets (highest priority - blocking issue)
     {
       condition: isRedundant && isInBooking,

@@ -162,7 +162,7 @@ export function AuditItemRow({
         const availabilityConfigs = [
           // An archived asset still counts in an audit (it is physically
           // somewhere); the badge says it is out of service.
-          assetLabelPresets.archived(
+          assetLabelPresets.archivedInAudit(
             isAsset && "archivedAt" in data && !!data.archivedAt
           ),
           {

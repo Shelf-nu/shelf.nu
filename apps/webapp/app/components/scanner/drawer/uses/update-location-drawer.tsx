@@ -8,6 +8,7 @@ import {
   removeScannedItemAtom,
   scannedItemsAtom,
   removeMultipleScannedItemsAtom,
+  removeScannedItemsByAssetIdAtom,
   scannedItemIdsAtom,
 } from "~/atoms/qr-scanner";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
@@ -45,6 +46,7 @@ import {
   DefaultLoadingState,
   TextLoader,
 } from "../generic-item-row";
+import { buildUpdateLocationBlockers } from "./location-scan-blockers";
 
 type LocationState = {
   status: "processing" | "success" | "error";
@@ -70,24 +72,13 @@ export default function UpdateLocationDrawer({
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  const { blockerConfigs } = buildUpdateLocationBlockers({
+    items,
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({

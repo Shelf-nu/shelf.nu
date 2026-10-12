@@ -26,7 +26,10 @@ import {
   TagUseFor,
 } from "@prisma/client";
 import { withPrismaRetry } from "@shelf/database";
-import { archivedAssetsRefusal } from "@shelf/labels";
+import {
+  archivedAssetsRefusal,
+  KIT_IN_USE_REINSTATE_REASON,
+} from "@shelf/labels";
 import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
@@ -3603,6 +3606,25 @@ export async function deleteAsset({
 }
 
 /**
+ * The note link naming who archived or reinstated, or "System" without one.
+ *
+ * Read once, before the archive or reinstate transaction opens, and handed to
+ * the note writers: `getUserByID` reads through the global client, so calling
+ * it inside the transaction would hold the transaction's connection idle while
+ * a second one answers.
+ *
+ * @param actorUserId - Who did it, when a user did
+ * @returns A Markdoc user link, or `**System**`
+ */
+async function resolveArchiveActorLink(actorUserId?: string): Promise<string> {
+  if (!actorUserId) return "**System**";
+  const actor = await getUserByID(actorUserId, {
+    select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+  });
+  return wrapUserLinkForNote({ ...actor, id: actor.id });
+}
+
+/**
  * The Activity-tab note for an archive or a reinstate, one per asset.
  *
  * The ASSET_ARCHIVED / ASSET_UNARCHIVED events feed reports; the note is what a
@@ -3612,7 +3634,8 @@ export async function deleteAsset({
  *
  * @param tx - The archive or reinstate transaction
  * @param args.assetIds - The assets this call actually changed
- * @param args.actorUserId - Who did it; the note reads "System" without one
+ * @param args.actorUserId - Who did it, stored as the note's author
+ * @param args.actorLink - That user's note link, from {@link resolveArchiveActorLink}
  * @param args.verb - "archived" or "reinstated"
  */
 async function writeArchiveStateNotes(
@@ -3626,23 +3649,16 @@ async function writeArchiveStateNotes(
   {
     assetIds,
     actorUserId,
+    actorLink,
     verb,
   }: {
     assetIds: string[];
     actorUserId?: string;
+    actorLink: string;
     verb: "archived" | "reinstated";
   }
 ): Promise<void> {
   if (assetIds.length === 0) return;
-
-  const actor = actorUserId
-    ? await getUserByID(actorUserId, {
-        select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
-      })
-    : null;
-  const actorLink = actor
-    ? wrapUserLinkForNote({ ...actor, id: actor.id })
-    : "**System**";
 
   await tx.note.createMany({
     data: assetIds.map((assetId) => ({
@@ -3798,7 +3814,7 @@ async function assertNoModelShortfallUnlessConfirmed({
  * @param tx - The archive transaction
  * @param args.shortfalls - Bookings left short (from the confirmed archive)
  * @param args.archivedTitles - Titles of the assets this call archived
- * @param args.actorUserId - Who archived; "System" without one
+ * @param args.actorLink - Who archived, from {@link resolveArchiveActorLink}
  * @param args.organizationId - The caller's workspace
  */
 async function noteModelShortfallsOnBookings(
@@ -3806,25 +3822,17 @@ async function noteModelShortfallsOnBookings(
   {
     shortfalls,
     archivedTitles,
-    actorUserId,
+    actorLink,
     organizationId,
   }: {
     shortfalls: ModelReservationShortfall[];
     archivedTitles: string[];
-    actorUserId?: string;
+    actorLink: string;
     organizationId: string;
   }
 ): Promise<void> {
   if (shortfalls.length === 0) return;
 
-  const actor = actorUserId
-    ? await getUserByID(actorUserId, {
-        select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
-      })
-    : null;
-  const actorLink = actor
-    ? wrapUserLinkForNote({ ...actor, id: actor.id })
-    : "**System**";
   const what =
     archivedTitles.length === 1
       ? `**${stripMarkdocDelimiters(archivedTitles[0])}**`
@@ -3942,6 +3950,7 @@ export async function archiveAsset({
     }
 
     const archivedAt = new Date();
+    const actorLink = await resolveArchiveActorLink(actorUserId);
 
     const draftBookings = await db.$transaction(async (tx) => {
       // Serialize against concurrent booking writes. The booking services take
@@ -3992,7 +4001,7 @@ export async function archiveAsset({
       await noteModelShortfallsOnBookings(tx, {
         shortfalls,
         archivedTitles: [asset.title],
-        actorUserId,
+        actorLink,
         organizationId,
       });
 
@@ -4012,6 +4021,7 @@ export async function archiveAsset({
       await writeArchiveStateNotes(tx, {
         assetIds: [id],
         actorUserId,
+        actorLink,
         verb: "archived",
       });
 
@@ -4036,19 +4046,6 @@ export async function archiveAsset({
 }
 
 /**
- * Reinstates (un-archives) a single asset, clearing `archivedAt`.
- *
- * Because archiving is only allowed from the AVAILABLE state, the asset's
- * `status` was never changed — so reinstating simply makes it visible,
- * bookable and custody-able again with no status restoration needed.
- *
- * @param args.id - The asset to reinstate.
- * @param args.organizationId - The caller's workspace (org-scopes the write).
- * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event and note are attributed to.
- * @returns The reinstated asset id and whether it is marked available to book.
- * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
- */
-/**
  * Reinstating is refused while the asset's kit is in use (issue #382).
  *
  * An archived kit member is left out when its kit goes into custody or out on
@@ -4061,10 +4058,19 @@ const NOT_IN_AN_IN_USE_KIT = {
   assetKits: { none: { kit: { status: { not: KitStatus.AVAILABLE } } } },
 } satisfies Prisma.AssetWhereInput;
 
-/** The message for a reinstate refused by {@link NOT_IN_AN_IN_USE_KIT}. */
-const KIT_IN_USE_REINSTATE_MESSAGE =
-  "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
-
+/**
+ * Reinstates (un-archives) a single asset, clearing `archivedAt`.
+ *
+ * Because archiving is only allowed from the AVAILABLE state, the asset's
+ * `status` is never changed, so reinstating simply makes it visible,
+ * bookable and custody-able again with no status restoration needed.
+ *
+ * @param args.id - The asset to reinstate.
+ * @param args.organizationId - The caller's workspace (org-scopes the write).
+ * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event and note are attributed to.
+ * @returns The reinstated asset id and whether it is marked available to book.
+ * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
+ */
 export async function unarchiveAsset({
   id,
   organizationId,
@@ -4115,12 +4121,14 @@ export async function unarchiveAsset({
       throw new ShelfError({
         cause: null,
         title: "Kit in use",
-        message: KIT_IN_USE_REINSTATE_MESSAGE,
+        message: KIT_IN_USE_REINSTATE_REASON,
         status: 400,
         label,
         shouldBeCaptured: false,
       });
     }
+
+    const actorLink = await resolveArchiveActorLink(actorUserId);
 
     await db.$transaction(async (tx) => {
       // The kit check above is a read; the WHERE re-asserts it, so a kit that
@@ -4162,6 +4170,7 @@ export async function unarchiveAsset({
       await writeArchiveStateNotes(tx, {
         assetIds: [id],
         actorUserId,
+        actorLink,
         verb: "reinstated",
       });
     });
@@ -4284,6 +4293,7 @@ export async function bulkArchiveAssets({
      * events and the counts describe rows that really changed.
      */
     let archivedIds: string[] = [];
+    const actorLink = await resolveArchiveActorLink(actorUserId);
 
     const draftBookings = await db.$transaction(async (tx) => {
       // Same lock the single-asset path and the booking services take, so a
@@ -4328,7 +4338,7 @@ export async function bulkArchiveAssets({
       await noteModelShortfallsOnBookings(tx, {
         shortfalls,
         archivedTitles: written.map((a) => a.title),
-        actorUserId,
+        actorLink,
         organizationId,
       });
 
@@ -4347,6 +4357,7 @@ export async function bulkArchiveAssets({
       await writeArchiveStateNotes(tx, {
         assetIds: archivedIds,
         actorUserId,
+        actorLink,
         verb: "archived",
       });
 
@@ -4447,6 +4458,7 @@ export async function bulkUnarchiveAssets({
      * one that starts later waits on the lock.
      */
     let unarchivedIds: string[] = [];
+    const actorLink = await resolveArchiveActorLink(actorUserId);
 
     await db.$transaction(async (tx) => {
       // Same lock the archive paths take, sorted inside the helper, so this
@@ -4491,6 +4503,7 @@ export async function bulkUnarchiveAssets({
       await writeArchiveStateNotes(tx, {
         assetIds: unarchivedIds,
         actorUserId,
+        actorLink,
         verb: "reinstated",
       });
     });

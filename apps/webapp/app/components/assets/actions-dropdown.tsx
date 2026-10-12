@@ -7,6 +7,7 @@ import {
 } from "@radix-ui/react-popover";
 import {
   archivedAssetBlockedReason,
+  KIT_IN_USE_REINSTATE_REASON,
   kitMemberCustodyBlockedReason,
 } from "@shelf/labels";
 import {
@@ -161,14 +162,11 @@ const ConditionalActionsDropdown = () => {
    * Reinstating is refused while the asset's kit is in custody or out on a
    * booking (`unarchiveAsset`): the kit took its hold without this member, so
    * it would come back as an active member its own kit does not account for.
-   * Said up-front, in the server's words, rather than after the click.
+   * Said up-front, with the server's refusal text, rather than after the click.
    */
   const reinstateDisabledReason: { reason: string } | false =
     isArchived && assetIsPartOfUnavailableKit
-      ? {
-          reason:
-            "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.",
-        }
+      ? { reason: KIT_IN_USE_REINSTATE_REASON }
       : false;
 
   /**

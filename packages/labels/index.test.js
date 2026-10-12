@@ -42,6 +42,7 @@ import {
   EXPLICIT_REQUIREMENT_ROLE_LABELS,
   explicitRequirementSwitchDescription,
   KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -368,6 +369,11 @@ test("an archived asset's disabled reason never offers a reinstate the reader la
     );
     assert.doesNotMatch(reason, /Reinstate it/);
   }
+  // A reinstate held up by an in-use kit names the way out.
+  assert.match(
+    KIT_IN_USE_REINSTATE_REASON,
+    /Release or check in the kit first/
+  );
 });
 
 test("the archived refusal names the assets and the way out for this reader", () => {

@@ -335,7 +335,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const showStateBadges = shouldShowStateBadges(asset, inCustody);
   // Use predefined presets to create label configurations with appropriate conditions for release custody
   const availabilityConfigs = [
-    assetLabelPresets.archived(!!asset.archivedAt),
+    assetLabelPresets.archivedReturning(!!asset.archivedAt),
     {
       condition: asset.status === AssetStatus.IN_CUSTODY,
       badgeText: `In custody of: ${getPrimaryCustody(asset.custody)?.custodian

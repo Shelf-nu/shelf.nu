@@ -3,10 +3,9 @@
  *
  * A blocker is the row's answer to "why can this not go", and a missing one is
  * not a missing warning: a scanned row the drawer cannot act on is submitted
- * anyway, skipped by the service, and reported as a success. Three of those
- * shipped before these lists were pulled out of the drawers, because a drawer
- * component is impractical to mount in a test (its import graph reaches canvas)
- * and nothing else could see the list.
+ * anyway, skipped by the service, and reported as a success. A drawer component
+ * is impractical to mount in a test (its import graph reaches canvas), so
+ * nothing would see a list derived inside it.
  *
  * So the derivation lives here, as a pure function of the scanned items, and
  * every blocker carries a stable `id` that a test can assert on. Adding a
@@ -27,20 +26,24 @@ import {
   sourceCappedMax,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { isQuantityTracked } from "~/modules/asset/utils";
-import type {
-  AssetFromQr,
-  KitFromQr,
-} from "~/routes/api+/get-scanned-item.$qrId";
 import type { BlockerConfig } from "../blockers-factory";
+import {
+  archivedAssetIdsOf,
+  archivedAssetsBlocker,
+  assetsOf,
+  errorQrIdsOf,
+  invalidCodesBlocker,
+  kitIdsWithOnlyArchivedAssetsOf,
+  kitsOf,
+  kitsOnlyArchivedBlocker,
+  qrIdsForKitIds,
+} from "./scan-blocker-helpers";
+import type { ScanBlockerRemovers, ScanBlockers } from "./scan-blocker-helpers";
 
 /** What a drawer hands in so a resolved blocker can drop its rows. */
-export type CustodyBlockerArgs = {
+export type CustodyBlockerArgs = ScanBlockerRemovers & {
   /** The scanned rows, keyed by the code that resolved them. */
   items: ScanListItems;
-  /** Drops rows by ASSET id. */
-  removeAssetsFromList: (assetIds: string[]) => void;
-  /** Drops rows by the CODE that scanned them, which is how kits are keyed. */
-  removeItemsFromList: (qrIds: string[]) => void;
 };
 
 /** The assign drawer also needs the "From location" picks of its rows. */
@@ -53,62 +56,7 @@ export type AssignCustodyBlockerArgs = CustodyBlockerArgs & {
  * A built list. "Resolve all" is derived from it by `createBlockers` (every
  * shown blocker's `onResolve`), so the builder does not supply one.
  */
-export type CustodyBlockers = {
-  blockerConfigs: BlockerConfig[];
-};
-
-/** Scanned rows that resolved to an asset. */
-function assetsOf(items: ScanListItems): AssetFromQr[] {
-  return Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-}
-
-/** Scanned rows that resolved to a kit. */
-function kitsOf(items: ScanListItems): KitFromQr[] {
-  return Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "kit")
-    .map((item) => item?.data as KitFromQr);
-}
-
-/** Codes that failed to resolve to anything. */
-function errorQrIdsOf(items: ScanListItems): string[] {
-  return Object.entries(items)
-    .filter(([, item]) => !!item?.error)
-    .map(([qrId]) => qrId);
-}
-
-/**
- * Kits are removed by the CODE that scanned them, not by kit id, because the
- * scanned-items map is keyed by code.
- */
-function qrIdsForKitIds(items: ScanListItems, kitIds: string[]): string[] {
-  return Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitIds.includes((item.data as KitFromQr)?.id);
-    })
-    .map(([qrId]) => qrId);
-}
-
-/** The invalid-code blocker, identical on both drawers. */
-function invalidCodesBlocker(
-  errorQrIds: string[],
-  removeItemsFromList: (qrIds: string[]) => void
-): BlockerConfig {
-  return {
-    id: "invalid-codes",
-    condition: errorQrIds.length > 0,
-    count: errorQrIds.length,
-    message: (count: number) => (
-      <>
-        <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-        {count > 1 ? "are" : "is"} invalid.
-      </>
-    ),
-    onResolve: () => removeItemsFromList(errorQrIds),
-  };
-}
+export type CustodyBlockers = ScanBlockers;
 
 /**
  * Blockers for the assign-custody drawer.
@@ -185,28 +133,12 @@ export function buildAssignCustodyBlockers({
     )
     .map((asset) => asset.id);
 
-  /**
-   * Archived assets are read-only (issue #382). They read AVAILABLE, so no
-   * status blocker catches them, and the server refuses the whole batch over
-   * one of them.
-   */
-  const archivedAssets = assets
-    .filter((asset) => !!asset && !!asset.archivedAt)
-    .map((asset) => asset.id);
+  const archivedAssets = archivedAssetIdsOf(assets);
 
-  /**
-   * Kits whose members are all archived: kit custody leaves archived members
-   * out, so there is nothing to hand over and the server refuses the kit.
-   */
+  /** Kit custody leaves archived members out, so these hold nothing to hand over. */
   const qrIdsOfKitsOnlyArchived = qrIdsForKitIds(
     items,
-    kits
-      .filter(
-        (kit) =>
-          kit.assetKits.length > 0 &&
-          kit.assetKits.every((ak) => !!ak.asset.archivedAt)
-      )
-      .map((kit) => kit.id)
+    kitIdsWithOnlyArchivedAssetsOf(kits)
   );
 
   const qrIdsOfKitsInCustody = qrIdsForKitIds(
@@ -335,32 +267,16 @@ export function buildAssignCustodyBlockers({
       description: "Note: Checked out kits cannot be assigned custody.",
       onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
     },
-    {
-      id: "assets-archived",
-      condition: archivedAssets.length > 0,
-      count: archivedAssets.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          archived.
-        </>
-      ),
-      description: "Archived assets can't be assigned custody.",
-      onResolve: () => removeAssetsFromList(archivedAssets),
-    },
-    {
-      id: "kits-only-archived",
-      condition: qrIdsOfKitsOnlyArchived.length > 0,
-      count: qrIdsOfKitsOnlyArchived.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s hold" : " holds"}`}</strong>{" "}
-          only archived assets.
-        </>
-      ),
-      description: "There is nothing in them to put into custody.",
-      onResolve: () => removeItemsFromList(qrIdsOfKitsOnlyArchived),
-    },
+    archivedAssetsBlocker(
+      archivedAssets,
+      removeAssetsFromList,
+      "Archived assets can't be assigned custody."
+    ),
+    kitsOnlyArchivedBlocker(
+      qrIdsOfKitsOnlyArchived,
+      removeItemsFromList,
+      "There is nothing in them to put into custody."
+    ),
     invalidCodesBlocker(errorQrIds, removeItemsFromList),
   ];
 

@@ -293,6 +293,13 @@ export function kitMembersCustodyRefusal(members) {
 export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
   "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
+// Why "Reinstate" is refused for an archived asset whose kit is in custody or
+// checked out. The kit took its hold without this member, so reinstating it
+// would leave an active member the kit does not account for. Shown by the
+// server refusal and by the disabled Reinstate action alike.
+export const KIT_IN_USE_REINSTATE_REASON =
+  "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
 // Archived assets (`Asset.archivedAt`) are out of service: the only changes
 // allowed are reinstate and permanent delete. Reinstating needs the asset
 // `archive` permission (admins and owners), so every sentence below that says

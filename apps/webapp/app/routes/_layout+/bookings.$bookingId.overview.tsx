@@ -417,6 +417,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       rawAssets,
       bookingFlags,
       rawKits,
+      modelShortfalls,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -602,6 +603,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           _count: { select: { assetKits: true } },
         },
       }),
+
+      /**
+       * Model reservations this booking's dates can no longer fill, e.g. after
+       * an admin archived a unit with "Archive anyway". Measured only while
+       * units can still be assigned; a finished booking's leftovers are history.
+       */
+      canAssignModelUnits(booking.status)
+        ? findModelRequestShortfallsForBooking({
+            booking: {
+              id: booking.id,
+              from: booking.from,
+              to: booking.to,
+              modelRequests: booking.modelRequests ?? [],
+            },
+            organizationId,
+          })
+        : [],
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -1206,23 +1224,6 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ? await getCheckoutSourceQuestions({
           organizationId,
           bookingId: booking.id,
-        })
-      : [];
-
-    /**
-     * Model reservations this booking's dates can no longer fill, e.g. after
-     * an admin archived a unit with "Archive anyway". Measured only while
-     * units can still be assigned; a finished booking's leftovers are history.
-     */
-    const modelShortfalls = canAssignModelUnits(booking.status)
-      ? await findModelRequestShortfallsForBooking({
-          booking: {
-            id: booking.id,
-            from: booking.from,
-            to: booking.to,
-            modelRequests: booking.modelRequests ?? [],
-          },
-          organizationId,
         })
       : [];
 

@@ -3,6 +3,7 @@ import { archivedAssetBlockedReason } from "@shelf/labels";
 import { CopyIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
 import {
@@ -31,6 +32,7 @@ export default function AssetQuickActions({
   asset,
 }: AssetQuickActionsProps) {
   const roles = useOrganizationRoles();
+  const canArchiveAssets = useCanArchiveAssets();
   /**
    * Archived assets are read-only (issue #382): Edit and Duplicate are greyed
    * with the reason, matching the asset's own Actions menu. The edit page and
@@ -38,13 +40,7 @@ export default function AssetQuickActions({
    */
   const archivedDisabled = asset.archivedAt
     ? {
-        reason: archivedAssetBlockedReason({
-          canReinstate: userHasPermission({
-            roles,
-            entity: PermissionEntity.asset,
-            action: PermissionAction.archive,
-          }),
-        }),
+        reason: archivedAssetBlockedReason({ canReinstate: canArchiveAssets }),
       }
     : false;
 

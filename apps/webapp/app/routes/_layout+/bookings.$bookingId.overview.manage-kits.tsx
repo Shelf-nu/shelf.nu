@@ -5,10 +5,7 @@ import {
   KitStatus,
   type Prisma,
 } from "@prisma/client";
-import {
-  archivedAssetsLeftOut,
-  kitsWithoutActiveAssetsRefusal,
-} from "@shelf/labels";
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -64,8 +61,9 @@ import { LOCATION_WITH_HIERARCHY } from "~/modules/asset/fields";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
-import type { KitSliceSpec } from "~/modules/booking/service.server";
 import {
+  buildKitSlicesForBooking,
+  countArchivedKitMembers,
   getBooking,
   getDetailedPartialCheckinData,
   getKitIdsByBookingSlices,
@@ -483,17 +481,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         name: true,
         status: true,
         assetKits: {
-          // `id` + `quantity` so the kit-driven BookingAsset rows created
-          // below get the matching `AssetKit.id` recorded on `assetKitId`
-          // and inherit the kit's slice quantity for QUANTITY_TRACKED
-          // assets (otherwise rows would default to qty=1, leaving the
-          // kit's "10 boxes of Pencils" looking like 1 box in the booking).
-          // `title` + `type` + `unitOfMeasure` feed the per-asset Note
-          // emission after `updateBookingAssets` so qty-tracked rows
-          // render "added 50 boxes of {asset} via {kit} to {booking}".
+          // `id` tells which memberships are already on the booking and
+          // matches each new slice back to its asset for the per-asset note.
+          // `status` feeds the checked-out guard. `title` + `type` +
+          // `unitOfMeasure` feed the per-asset Note emission after
+          // `updateBookingAssets` so qty-tracked rows render "added 50 boxes
+          // of {asset} via {kit} to {booking}".
           select: {
             id: true,
-            quantity: true,
             asset: {
               select: {
                 id: true,
@@ -501,9 +496,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
                 type: true,
                 unitOfMeasure: true,
                 status: true,
-                // Archived members are left out of the booking (issue #382),
-                // like every other kit-add path.
-                archivedAt: true,
               },
             },
           },
@@ -511,92 +503,53 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       },
     });
 
-    // Existing kit-driven AssetKit ids in this booking — we use these to
-    // detect "this kit is already added" rather than "this asset is
-    // already added" (which was the old, wrong test before BookingAsset
-    // grew multi-row support). A qty-tracked asset can now be in a
-    // booking as standalone AND kit-driven simultaneously; the standalone
-    // entry must NOT block the kit-driven row from being created.
+    // Kit-driven AssetKit ids already on this booking. "Is this kit already
+    // added" is answered per membership, never per asset: a qty-tracked
+    // asset can be on a booking standalone AND kit-driven at once, and the
+    // standalone row must not block the kit-driven one.
     const existingAssetKitIds = new Set(
       booking.bookingAssets
         .map((ba) => ba.assetKitId)
         .filter((v): v is string => v != null)
     );
 
-    /**
-     * Kits joining the booking now (none of their memberships on it yet). One
-     * with no active member would add nothing, so it is refused by name; the
-     * archived members of the rest are left out and counted for the toast.
-     */
-    const kitsJoining = selectedKits.filter(
-      (kit) => !kit.assetKits.some((ak) => existingAssetKitIds.has(ak.id))
+    // Kits with a membership already on the booking are not joining it. The
+    // submitted selection includes them, so they are passed on to be exempt
+    // from the "no active assets" refusal; they only top up new memberships.
+    const kitIdsOnBooking = new Set(
+      selectedKits
+        .filter((kit) =>
+          kit.assetKits.some((ak) => existingAssetKitIds.has(ak.id))
+        )
+        .map((kit) => kit.id)
     );
-    const kitsWithoutActiveAssets = kitsJoining.filter(
-      (kit) => !kit.assetKits.some((ak) => !ak.asset.archivedAt)
-    );
-    if (kitsWithoutActiveAssets.length > 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Kit has no active assets",
-        message: kitsWithoutActiveAssetsRefusal({
-          kits: kitsWithoutActiveAssets.map((kit) => ({
-            name: kit.name,
-            hasArchivedAssets: kit.assetKits.length > 0,
-          })),
-          action: "booking",
-        }),
-        additionalData: {
-          bookingId,
-          kitIdsWithoutActiveAssets: kitsWithoutActiveAssets.map((k) => k.id),
-        },
-        label: "Booking",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
-    const archivedMembersLeftOut = kitsJoining.reduce(
-      (count, kit) =>
-        count + kit.assetKits.filter((ak) => ak.asset.archivedAt).length,
-      0
-    );
+    const kitIdsJoining = selectedKits
+      .map((kit) => kit.id)
+      .filter((kitId) => !kitIdsOnBooking.has(kitId));
 
-    // Build the kit-driven slice specs — one element per `AssetKit`
-    // membership we'd want to insert. Skip slices whose AssetKit is
-    // already represented in the booking — the user already added that
-    // kit.
-    //
-    // The SAME asset appearing in multiple selected kits produces
-    // MULTIPLE slice specs (one per AssetKit), each a distinct row in
-    // the kit-driven bucket (partial unique is on `assetKitId`, not
-    // `assetId`). This is what fixes the multi-kit-per-asset drop: a
-    // qty-tracked asset in two kits added to one booking now yields two
-    // kit-driven `BookingAsset` rows.
-    const kitSlices: KitSliceSpec[] = [];
-    for (const kit of selectedKits) {
-      for (const ak of kit.assetKits) {
-        if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
-        if (ak.asset.archivedAt) continue; // archived members stay out
-        kitSlices.push({
-          assetId: ak.asset.id,
-          assetKitId: ak.id,
-          // Durable provenance — persisted to `BookingAsset.sourceKitId`, which
-          // outlives the `AssetKit` row `assetKitId` points at.
-          kitId: kit.id,
-          quantity: ak.quantity,
-        });
-      }
-    }
+    // One kit-driven slice per new `AssetKit` membership of an active asset,
+    // org-scoped, skipping memberships already on the booking. A joining kit
+    // with no active member is refused by name. The SAME asset in several
+    // selected kits yields one slice per membership, so a qty-tracked asset in
+    // two kits becomes two kit-driven rows (the partial unique is on
+    // `assetKitId`, not `assetId`).
+    const [kitSlices, archivedMembersLeftOut] = await Promise.all([
+      buildKitSlicesForBooking({
+        kitIds: selectedKits.map((kit) => kit.id),
+        organizationId,
+        existingAssetKitIds,
+        kitIdsOnBooking,
+      }),
+      // Archived members of the joining kits stay out; the toast says so.
+      countArchivedKitMembers({ kitIds: kitIdsJoining, organizationId }),
+    ]);
     const newAssetIds = Array.from(new Set(kitSlices.map((s) => s.assetId)));
 
-    // Only validate kits that are actually adding NEW slices to the
-    // booking (i.e. at least one of the kit's AssetKits isn't already
-    // represented). Kits whose AssetKits are all already present in the
-    // booking are no-ops here.
+    // Only kits contributing a new slice are validated and attributed below.
+    // A kit whose active memberships are all on the booking already is a no-op.
+    const kitIdsAddingSlices = new Set(kitSlices.map((slice) => slice.kitId));
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assetKits.some(
-        // An archived member is never added, so it does not make a kit new.
-        (ak) => !ak.asset.archivedAt && !existingAssetKitIds.has(ak.id)
-      )
+      kitIdsAddingSlices.has(kit.id)
     );
 
     // Get partial check-in details to determine actual availability using context-aware status

@@ -196,12 +196,11 @@ export async function assertAssetsBelongToOrg(
  *
  * The refusal names the archived assets (`archivedAssetsRefusal` in
  * `@shelf/labels`) and carries them in `additionalData` as
- * `archivedAssetIds` / `archivedAssetTitles` (same order, the input's order),
- * so a scanner batch can mark exactly those rows. The way out it offers
- * depends on `fix` and on whether the reader may reinstate: pass
- * `canReinstate` when the caller knows, or `actorUserId` to look it up. With
- * neither, the wording tells the reader to ask an admin, which is true for
- * every role.
+ * `archivedAssetIds` / `archivedAssetTitles` (same order, the input's order).
+ * The way out it offers depends on `fix` and on whether the reader may
+ * reinstate: pass `canReinstate` when the caller knows, or `actorUserId` to
+ * look it up. With neither, the wording tells the reader to ask an admin, which
+ * is true for every role.
  *
  * @param params.assetIds - Asset IDs sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID

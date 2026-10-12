@@ -1180,15 +1180,16 @@ export type BookingModelShortfall = {
 /**
  * The booking's own model reservations that its dates can no longer fill.
  *
- * A reservation is measured when the booking leaves DRAFT. The pool can shrink
- * after that, for example when an admin archives a unit with "Archive anyway"
- * (issue #382), and nothing on the booking said so until check-out was
- * refused. This measures every outstanding reservation now, the same way
- * {@link findModelReservationsShortAfterArchive} does, so the booking page can
- * warn its owner.
+ * A reservation is measured when the booking leaves DRAFT, but the pool can
+ * shrink afterwards (an admin archiving a unit with "Archive anyway", for
+ * example). This re-measures every outstanding reservation against the pool as
+ * it is now, the same way {@link findModelReservationsShortAfterArchive} does,
+ * so the booking page can warn its owner before check-out refuses it.
  *
  * Read-only and lock-free, for a page loader: the numbers are a warning, and
- * the reserve and check-out guards still measure under their own locks.
+ * the reserve and check-out guards still measure under their own locks. The
+ * reservations are measured concurrently, which is safe because the reads go
+ * through the global client, not an interactive transaction.
  *
  * @param args.booking - The booking, with its dates and outstanding reservations
  * @param args.organizationId - The caller's workspace
@@ -1212,38 +1213,44 @@ export async function findModelRequestShortfallsForBooking({
   };
   organizationId: string;
 }): Promise<BookingModelShortfall[]> {
-  const shortfalls: BookingModelShortfall[] = [];
-
-  for (const request of booking.modelRequests) {
-    if (request.fulfilledAt) continue;
+  const outstandingRequests = booking.modelRequests.flatMap((request) => {
+    if (request.fulfilledAt) return [];
     const outstanding = request.quantity - request.fulfilledQuantity;
-    if (outstanding <= 0) continue;
+    return outstanding > 0 ? [{ request, outstanding }] : [];
+  });
 
-    const fit = await measureModelPoolFit({
-      bookingId: booking.id,
-      assetModelId: request.assetModelId,
-      organizationId,
-      from: booking.from,
-      to: booking.to,
+  const measured = await Promise.all(
+    outstandingRequests.map(async ({ request, outstanding }) => ({
+      request,
       outstanding,
-      tx: db,
-    });
-    if (fit.fits) continue;
+      fit: await measureModelPoolFit({
+        bookingId: booking.id,
+        assetModelId: request.assetModelId,
+        organizationId,
+        from: booking.from,
+        to: booking.to,
+        outstanding,
+        tx: db,
+      }),
+    }))
+  );
 
+  return measured.flatMap(({ request, outstanding, fit }) => {
+    if (fit.fits) return [];
     const available = Math.max(
       0,
       fit.availability.available - fit.namedNotInCustody
     );
-    shortfalls.push({
-      assetModelId: request.assetModelId,
-      modelName: request.assetModel.name,
-      outstanding,
-      available,
-      short: outstanding - available,
-    });
-  }
-
-  return shortfalls;
+    return [
+      {
+        assetModelId: request.assetModelId,
+        modelName: request.assetModel.name,
+        outstanding,
+        available,
+        short: outstanding - available,
+      },
+    ];
+  });
 }
 
 /**

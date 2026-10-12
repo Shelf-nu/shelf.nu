@@ -222,6 +222,12 @@ export declare function kitMembersCustodyRefusal(
 export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
 /**
+ * Why "Reinstate" is refused for an archived asset whose kit is in custody or
+ * checked out. Shared by the server refusal and the disabled menu action.
+ */
+export declare const KIT_IN_USE_REINSTATE_REASON: "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
+/**
  * The reason an action on an archived asset is disabled. A reader who cannot
  * reinstate (no asset `archive` permission) is told to ask an admin.
  *

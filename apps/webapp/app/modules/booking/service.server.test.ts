@@ -49,7 +49,6 @@ import {
   removeDestroyedUnitsFromKits,
 } from "~/modules/kit/service.server";
 import * as noteService from "~/modules/note/service.server";
-import { readArchivedRefusalDetails } from "~/utils/archived-refusal";
 import { ShelfError } from "~/utils/error";
 import { ALL_SELECTED_KEY } from "~/utils/list";
 import { wrapBookingStatusForNote } from "~/utils/markdoc-wrappers";
@@ -3657,6 +3656,25 @@ describe("buildKitSlicesForBooking", () => {
     });
 
     expect(slices).toHaveLength(2);
+    expect(db.kit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("never refuses a kit already on the booking, even with no active member left", async () => {
+    // why: the membership read finds an active member for kit-2 only; kit-1,
+    // already on the booking, has none.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-2", assetId: "asset-2", quantity: 1, kitId: "kit-2" },
+    ]);
+
+    const slices = await buildKitSlicesForBooking({
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+      kitIdsOnBooking: new Set(["kit-1"]),
+    });
+
+    expect(slices).toEqual([
+      { assetId: "asset-2", assetKitId: "ak-2", kitId: "kit-2", quantity: 1 },
+    ]);
     expect(db.kit.findMany).not.toHaveBeenCalled();
   });
 
@@ -16371,6 +16389,48 @@ describe("addScannedAssetsToBooking", () => {
     expect(db.booking.update).not.toHaveBeenCalled();
   });
 
+  it("refuses an all-archived kit whose slices carry no kitId", async () => {
+    // The spec's kitId is client-supplied; the kit is resolved from the
+    // AssetKit row, so a blank one cannot slip an emptied kit through.
+    //@ts-expect-error missing vitest type
+    db.booking.findFirst.mockResolvedValue(null);
+    const assets = restoreMockImplementationAfterTest(db.asset.findMany);
+    assets.fn.mockImplementation(
+      (args?: {
+        where?: { id?: { in?: string[] }; archivedAt?: { not?: null } };
+      }) =>
+        Promise.resolve(
+          args?.where?.archivedAt?.not === null
+            ? [{ id: "member-archived" }]
+            : (args?.where?.id?.in ?? []).map((id) => ({ id }))
+        )
+    );
+    stubArchivedKitMemberScan();
+    const kits = restoreMockImplementationAfterTest(db.kit.findMany);
+    // why: the refusal reads the emptied kit's name.
+    kits.fn.mockResolvedValue([{ id: "kit-1", name: "Shoot Kit" }]);
+
+    await expect(
+      addScannedAssetsToBooking({
+        assetIds: [],
+        kitIds: [],
+        bookingId: "booking-scan",
+        organizationId: "org-1",
+        userId: "user-1",
+        access: accessFor([OrganizationRoles.ADMIN]),
+        kitSlices: [
+          { assetId: "member-archived", assetKitId: "ak-2", kitId: "" },
+        ],
+      })
+    ).rejects.toMatchObject({ status: 400 });
+    expect(db.kit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["kit-1"] }, organizationId: "org-1" },
+      })
+    );
+    expect(db.booking.update).not.toHaveBeenCalled();
+  });
+
   it("drops a kit slice already on the booking instead of re-inserting it", async () => {
     // Re-scanning a kit the booking already holds resends the same
     // `kitSlices` spec for its members. The `create` below is a plain insert
@@ -16560,8 +16620,8 @@ describe("getAvailableAssetsIdsForBooking", () => {
     ).catch((e) => e);
 
     expect(err).toMatchObject({ title: "Asset is archived", status: 400 });
-    // The service wraps the refusal; the ids stay reachable down the chain.
-    expect(readArchivedRefusalDetails(err)?.archivedAssetIds).toEqual([
+    // The service wraps the refusal; the ids stay on the wrapped cause.
+    expect(err.cause?.additionalData?.archivedAssetIds).toEqual([
       "asset-archived",
     ]);
     // Refused before the selection itself is read.

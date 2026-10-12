@@ -28,6 +28,7 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
+import { buildAddToLocationBlockers } from "./location-scan-blockers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsOrKitsToLocationSchema = z.object({
@@ -82,11 +83,6 @@ export default function AddAssetsKitsToLocationDrawer({
   // Get asset IDs efficiently using the atom
   const { assetIds } = useAtomValue(scannedItemIdsAtom);
 
-  // Filter and prepare data for component rendering
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
   const kits = Object.values(items)
     .filter((item) => !!item && item.type === "kit")
     .map((item) => item?.data as KitFromQr);
@@ -108,70 +104,19 @@ export default function AddAssetsKitsToLocationDrawer({
     )
   );
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers — the loader includes `asset` on each pivot row;
-  // re-narrow here because Prisma + useLoaderData<typeof loader> lose
-  // the precise include shape through `getLocation`'s widened
-  // `LocationInclude` arg.
+  // The loader includes `asset` on each pivot row; re-narrowed here because
+  // `useLoaderData` loses the precise include shape through `getLocation`'s
+  // widened `LocationInclude` arg.
   const pivotRows = location.assetLocations as Array<{
     asset: { id: string };
   }>;
-  const assetsAlreadyAddedIds = assets
-    .filter((asset) => !!asset)
-    .filter((asset) => pivotRows.some((al) => al?.asset?.id === asset.id))
-    .map((a) => !!a && a.id);
-
-  // Kit blockers
-  const kitsAlreadyAddedIds = kits
-    .filter((kit) => !!kit)
-    .filter((kit) => location.kits.some((k) => k?.id === kit.id))
-    .map((k) => !!k && k.id);
-
-  const qrIdsOfAlreadyAddedKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitsAlreadyAddedIds.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: assetsAlreadyAddedIds.length > 0,
-      count: assetsAlreadyAddedIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already added to this location.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
-    },
-    {
-      condition: kitsAlreadyAddedIds.length > 0,
-      count: kitsAlreadyAddedIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already added to this location.
-        </>
-      ),
-      onResolve: () => removeItemsFromList([...qrIdsOfAlreadyAddedKits]),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  const { blockerConfigs } = buildAddToLocationBlockers({
+    items,
+    locationAssetIds: new Set(pivotRows.map((al) => al.asset.id)),
+    locationKitIds: new Set(location.kits.map((k) => k.id)),
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
