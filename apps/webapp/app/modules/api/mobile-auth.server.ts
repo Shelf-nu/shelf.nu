@@ -543,8 +543,12 @@ export const MOBILE_KIT_SELECT = {
   _count: KIT_ACTIVE_MEMBER_COUNT,
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
-  // blocker — both mirror the web scanner drawers.
+  // blocker, both mirroring the web scanner drawers. Archived members are left
+  // out, as the count above leaves them out: the server books, hands over and
+  // moves a kit with its active members only, so an archived member must not
+  // block the kit on the phone either.
   assetKits: {
+    where: KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where,
     select: {
       asset: { select: { id: true, status: true, availableToBook: true } },
     },

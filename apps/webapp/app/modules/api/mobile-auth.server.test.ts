@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   getMobileAssetForViewer,
   MOBILE_ASSET_SELECT,
+  MOBILE_KIT_SELECT,
   requireMobileAuth,
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
@@ -12,6 +13,7 @@ import {
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
 import { recordMobileActivity } from "./mobile-usage.server";
@@ -132,6 +134,16 @@ function custodyRow(
     custodian: { id, name, userId: opts.userId ?? null },
   };
 }
+
+describe("MOBILE_KIT_SELECT", () => {
+  it("sends the same members it counts: archived ones are left out of both", () => {
+    // The phone derives the kit's blockers from these members. An archived
+    // member the server would not book must not refuse the kit on the phone.
+    const activeOnly = { asset: { archivedAt: null } };
+    expect(MOBILE_KIT_SELECT.assetKits.where).toEqual(activeOnly);
+    expect(KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where).toEqual(activeOnly);
+  });
+});
 
 describe("shapeMobileAssetResponse", () => {
   it("returns null for kit, kitId, location, and custody when all pivots are empty", () => {

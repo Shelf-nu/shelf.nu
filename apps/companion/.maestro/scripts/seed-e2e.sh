@@ -130,6 +130,8 @@ case "$cmd" in
       join \"Qr\" q on q.\"assetId\"=a.id
       where a.\"organizationId\"='${ORG_ID}'
         and a.\"assetModelId\" is null
+        and a.\"archivedAt\" is null
+        and a.id not in (${ARCH_ASSET_IDS_SQL})
       order by a.\"createdAt\" desc limit 3;")
     if [ "${#ELIGIBLE[@]}" -lt 3 ]; then
       echo "✗ Need 3 model-free assets with a QR in '${WORKSPACE}' (2 model units + 1 outsider); found ${#ELIGIBLE[@]}." >&2
