@@ -875,6 +875,23 @@ export async function getCustomerOpenInvoices(customerId: string) {
 }
 
 /**
+ * Whether a subscription in this status still grants its plan.
+ *
+ * Active and trialing subscriptions do, and so does a `past_due` one: a failed
+ * renewal is a grace period, not a lapse (see `validateSubscriptionIsActive`).
+ * Page-load access and the webhook's plan changes both read this, so the two
+ * always agree on which subscriptions count.
+ *
+ * @param status - The subscription's Stripe status
+ * @returns `true` for `active`, `trialing` and `past_due`
+ */
+export function subscriptionStatusGrantsPlan(
+  status: Stripe.Subscription.Status
+): boolean {
+  return status === "active" || status === "trialing" || status === "past_due";
+}
+
+/**
  * Downgrades a user to Free when their Stripe customer holds no subscription
  * that still grants access.
  *
@@ -898,11 +915,8 @@ export async function validateSubscriptionIsActive({
 }) {
   if (user.skipSubscriptionCheck) return;
 
-  const hasAccess = customer?.subscriptions?.data.some(
-    (sub) =>
-      sub.status === "active" ||
-      sub.status === "trialing" ||
-      sub.status === "past_due"
+  const hasAccess = customer?.subscriptions?.data.some((sub) =>
+    subscriptionStatusGrantsPlan(sub.status)
   );
 
   if (!hasAccess && user.tierId !== "free") {

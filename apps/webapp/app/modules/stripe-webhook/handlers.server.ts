@@ -27,6 +27,7 @@ import {
   getInvoiceNotificationData,
   getStripeCustomer,
   stripe,
+  subscriptionStatusGrantsPlan,
   type CustomerWithSubscriptions,
 } from "~/utils/stripe.server";
 
@@ -133,65 +134,93 @@ async function disableAddonsOnOverdueSubscription({
 }
 
 /**
- * Switches off the add-ons an update removed from a tier subscription.
+ * Looks up the products an update removed from a subscription.
  *
- * Stripe lists the pre-update line items in `previous_attributes.items`. An
- * add-on item that was there and is gone now has been dropped from the
- * subscription, which for the workspace is the same as cancelling it, unless
- * another live subscription of the customer still carries the add-on.
+ * Stripe lists the pre-update line items in `previous_attributes.items`. A
+ * product listed there that the subscription no longer carries was dropped or
+ * swapped for another product. Each one is looked up once and serves both the
+ * add-on and the plan side of the update.
+ *
+ * Product metadata is read the same way as in `getDataFromStripeEvent`, so an
+ * archived product still says which add-on or plan it was. A product Stripe no
+ * longer knows cannot be an add-on or plan this app tracks and is left out;
+ * any other lookup failure is rethrown so Stripe retries the webhook instead
+ * of the change being lost.
  *
  * @param args.event - The `customer.subscription.updated` event
  * @param args.subscription - The subscription as it is after the update
- * @param args.hasAuditAddon - Whether the subscription still carries an Audits item
- * @param args.hasBarcodeAddon - Whether the subscription still carries a Barcodes item
+ * @returns The removed products, empty when the update kept every product
  */
-async function disableAddonsRemovedFromSubscription({
+async function getProductsRemovedFromSubscription({
   event,
   subscription,
-  hasAuditAddon,
-  hasBarcodeAddon,
 }: {
   event: Stripe.Event;
   subscription: Stripe.Subscription;
-  hasAuditAddon: boolean;
-  hasBarcodeAddon: boolean;
-}) {
-  const organizationId = subscription.metadata?.organizationId;
-  if (!organizationId) return;
-
+}): Promise<Stripe.Product[]> {
   const previousItems = (
     event.data.previous_attributes as
       | { items?: { data?: Stripe.SubscriptionItem[] } }
       | undefined
   )?.items?.data;
-  if (!previousItems?.length) return;
+  if (!previousItems?.length) return [];
 
   const productIdOf = (item: Stripe.SubscriptionItem) =>
     typeof item.price?.product === "string"
       ? item.price.product
       : item.price?.product?.id;
   const currentProductIds = new Set(subscription.items.data.map(productIdOf));
-
-  const removed: { auditsEnabled?: false; barcodesEnabled?: false } = {};
+  const removedProductIds = new Set<string>();
   for (const item of previousItems) {
     const productId = productIdOf(item);
-    if (!productId || currentProductIds.has(productId)) continue;
+    if (productId && !currentProductIds.has(productId)) {
+      removedProductIds.add(productId);
+    }
+  }
 
-    // Same metadata reading as `getDataFromStripeEvent`: an archived add-on
-    // product is still an add-on for the purpose of taking it away. A product
-    // Stripe no longer knows cannot be an add-on this app tracks, so that item
-    // is skipped; any other failure is rethrown so Stripe retries the webhook
-    // instead of the removal being lost.
-    let product: Stripe.Product;
+  const removedProducts: Stripe.Product[] = [];
+  for (const productId of removedProductIds) {
     try {
-      product = await stripe.products.retrieve(productId);
+      removedProducts.push(await stripe.products.retrieve(productId));
     } catch (cause) {
       const isUnknownProduct =
         cause instanceof Stripe.errors.StripeInvalidRequestError &&
         (cause.code === "resource_missing" || cause.statusCode === 404);
       if (!isUnknownProduct) throw cause;
-      continue;
     }
+  }
+  return removedProducts;
+}
+
+/**
+ * Switches off the add-ons an update removed from a tier subscription.
+ *
+ * An add-on product the update removed has been dropped from the
+ * subscription, which for the workspace is the same as cancelling it, unless
+ * another live subscription of the customer still carries the add-on.
+ *
+ * @param args.subscription - The subscription as it is after the update
+ * @param args.removedProducts - The products the update removed, from
+ *   `getProductsRemovedFromSubscription`
+ * @param args.hasAuditAddon - Whether the subscription still carries an Audits item
+ * @param args.hasBarcodeAddon - Whether the subscription still carries a Barcodes item
+ */
+async function disableAddonsRemovedFromSubscription({
+  subscription,
+  removedProducts,
+  hasAuditAddon,
+  hasBarcodeAddon,
+}: {
+  subscription: Stripe.Subscription;
+  removedProducts: Stripe.Product[];
+  hasAuditAddon: boolean;
+  hasBarcodeAddon: boolean;
+}) {
+  const organizationId = subscription.metadata?.organizationId;
+  if (!organizationId) return;
+
+  const removed: { auditsEnabled?: false; barcodesEnabled?: false } = {};
+  for (const product of removedProducts) {
     if (product.metadata?.product_type !== "addon") continue;
     const addonType = product.metadata.addon_type;
     if (addonType !== "audits" && addonType !== "barcodes") continue;
@@ -230,87 +259,52 @@ async function disableAddonsRemovedFromSubscription({
   });
 }
 
-/** Subscription statuses that still grant the plan on their tier item. */
-const PLAN_GRANTING_STATUSES: Stripe.Subscription.Status[] = [
-  "active",
-  "trialing",
-  "past_due",
-];
-
 /**
  * Lowers the user's tier when an update moved the subscription to a cheaper
  * plan, for instance Team to Plus in the billing portal.
  *
  * The upgrade branch of `handleSubscriptionUpdated` only ever raises the tier;
- * this is the only path that lowers it on an update, so the plan a customer
- * uses follows the plan they pay for in both directions.
+ * this is the only path that lowers it on an update.
  *
- * Stripe lists the pre-update line items in `previous_attributes.items`. The
- * tier is lowered only when all of these hold, so a tier set by hand is never
- * touched by an unrelated update:
- * - the subscription still grants a plan (active, trialing or past due);
- * - its previous tier item was higher than its tier item now;
- * - the user is on exactly that previous tier, so it was this subscription
- *   that put them there (a Custom or hand-set tier is left alone);
- * - no live subscription of the customer carries that tier or a higher one,
- *   as Stripe holds them now. That includes this subscription: a late or
- *   retried event for a switch the customer has since reversed changes
- *   nothing, because the event's snapshot is not what Stripe holds today.
+ * The update moved the plan down when a plan product it removed is higher than
+ * the plan the subscription carries now. The tier is lowered only when all of
+ * these hold, so a tier set by hand is never touched by an unrelated update:
+ * - the subscription still grants a plan (`subscriptionStatusGrantsPlan`);
+ * - the user is on exactly the removed plan's tier, so it was this
+ *   subscription that put them there (a Custom or hand-set tier is left alone);
+ * - no live subscription of the customer grants that tier or a higher one.
  *
- * @param args.event - The `customer.subscription.updated` event
+ * The new tier is the highest plan the customer's live subscriptions grant as
+ * Stripe holds them now, this one included, and Free when none does. It is
+ * never read from the event: a late or retried event describes the
+ * subscription as it was, and the customer may since have switched back,
+ * switched again or cancelled.
+ *
  * @param args.subscription - The subscription as it is after the update
+ * @param args.removedProducts - The products the update removed, from
+ *   `getProductsRemovedFromSubscription`
  * @param args.tierId - The tier the subscription carries after the update
  * @param args.user - The user the customer belongs to
  * @param args.customerId - The Stripe customer of the subscription
  */
 async function applyPlanDowngrade({
-  event,
   subscription,
+  removedProducts,
   tierId,
   user,
   customerId,
 }: {
-  event: Stripe.Event;
   subscription: Stripe.Subscription;
+  removedProducts: Stripe.Product[];
   tierId: string | undefined;
   user: WebhookUser;
   customerId: string;
 }) {
   if (!tierId || !(tierId in TierId)) return;
-  if (!PLAN_GRANTING_STATUSES.includes(subscription.status)) return;
-
-  const previousItems = (
-    event.data.previous_attributes as
-      | { items?: { data?: Stripe.SubscriptionItem[] } }
-      | undefined
-  )?.items?.data;
-  if (!previousItems?.length) return;
-
-  const productIdOf = (item: Stripe.SubscriptionItem) =>
-    typeof item.price?.product === "string"
-      ? item.price.product
-      : item.price?.product?.id;
-  const currentProductIds = new Set(subscription.items.data.map(productIdOf));
+  if (!subscriptionStatusGrantsPlan(subscription.status)) return;
 
   let previousTierId: TierId | undefined;
-  for (const item of previousItems) {
-    const productId = productIdOf(item);
-    // A product still on the subscription carries the tier it carries now.
-    if (!productId || currentProductIds.has(productId)) continue;
-
-    // Same reading as `disableAddonsRemovedFromSubscription`: a product Stripe
-    // no longer knows cannot be a tier this app tracks; any other failure is
-    // rethrown so Stripe retries the webhook.
-    let product: Stripe.Product;
-    try {
-      product = await stripe.products.retrieve(productId);
-    } catch (cause) {
-      const isUnknownProduct =
-        cause instanceof Stripe.errors.StripeInvalidRequestError &&
-        (cause.code === "resource_missing" || cause.statusCode === 404);
-      if (!isUnknownProduct) throw cause;
-      continue;
-    }
+  for (const product of removedProducts) {
     if (product.metadata?.product_type === "addon") continue;
     const shelfTier = product.metadata?.shelf_tier;
     if (!shelfTier || !(shelfTier in TierId)) continue;
@@ -323,40 +317,37 @@ async function applyPlanDowngrade({
   if (!isHigherTier(previousTierId, tierId as TierId)) return;
   if (user.tierId !== previousTierId) return;
 
-  // Read every subscription as Stripe holds it now, this one included. A
-  // second subscription can still pay for the higher plan (one Team
-  // subscription per workspace, for instance), and this one may already be
-  // back on it when the event arrives late or is retried.
+  // A second subscription can still pay for the higher plan (one Team
+  // subscription per workspace, for instance).
   const liveSubscriptions =
     await getCustomerSubscriptionsWithProducts(customerId);
-  const higherPlanStillPaid = liveSubscriptions.some(
-    (sub) =>
-      PLAN_GRANTING_STATUSES.includes(sub.status) &&
-      sub.items.data.some((item) => {
-        const product = item.price?.product;
-        if (typeof product !== "object" || product === null) return false;
-        if (product.deleted) return false;
-        const otherTier = product.metadata?.shelf_tier;
-        return (
-          !!otherTier &&
-          otherTier in TierId &&
-          isHigherOrEqualTier(otherTier as TierId, previousTierId)
-        );
-      })
-  );
-  if (higherPlanStillPaid) return;
+  let liveTierId: TierId = TierId.free;
+  for (const sub of liveSubscriptions) {
+    if (!subscriptionStatusGrantsPlan(sub.status)) continue;
+    for (const item of sub.items.data) {
+      const product = item.price?.product;
+      if (typeof product !== "object" || product === null) continue;
+      if (product.deleted) continue;
+      const shelfTier = product.metadata?.shelf_tier;
+      if (!shelfTier || !(shelfTier in TierId)) continue;
+      if (isHigherTier(shelfTier as TierId, liveTierId)) {
+        liveTierId = shelfTier as TierId;
+      }
+    }
+  }
+  if (!isHigherTier(previousTierId, liveTierId)) return;
 
   await db.user
     .update({
       where: { customerId },
-      data: { tierId: tierId as TierId },
+      data: { tierId: liveTierId },
       select: { id: true },
     })
     .catch((cause) => {
       throw new ShelfError({
         cause,
         message: "Failed to apply plan downgrade",
-        additionalData: { customerId, tierId, previousTierId },
+        additionalData: { customerId, tierId: liveTierId, previousTierId },
         label: "Stripe webhook",
         status: 500,
       });
@@ -741,15 +732,19 @@ export async function handleSubscriptionUpdated(
     hasAuditAddon,
     hasBarcodeAddon,
   });
-  await disableAddonsRemovedFromSubscription({
+  const removedProducts = await getProductsRemovedFromSubscription({
     event,
     subscription,
+  });
+  await disableAddonsRemovedFromSubscription({
+    subscription,
+    removedProducts,
     hasAuditAddon,
     hasBarcodeAddon,
   });
   await applyPlanDowngrade({
-    event,
     subscription,
+    removedProducts,
     tierId,
     user,
     customerId,

@@ -619,6 +619,48 @@ describe("handleSubscriptionUpdated", () => {
       expect(mockUserUpdate).not.toHaveBeenCalled();
     });
 
+    it("lowers to Free when a late Team to Plus event finds the subscription cancelled since", async () => {
+      // The customer holds no live subscription any more (the default list).
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith({
+        where: { customerId: "cus_1" },
+        data: { tierId: TierId.free },
+        select: { id: true },
+      });
+    });
+
+    it("looks the removed plan product up once when the subscription is linked to a workspace", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(PLUS_PRODUCT)
+      );
+
+      await handleSubscriptionUpdated(
+        buildEvent(
+          "customer.subscription.updated",
+          buildSubscription({ productIds: [PLUS_PRODUCT] }),
+          {
+            items: {
+              data: buildSubscription({ productIds: [TEAM_PRODUCT] }).items
+                .data,
+            },
+          }
+        ),
+        user
+      );
+
+      // The parser resolves the plan now, then the add-on and plan checks
+      // share one lookup of the plan that was removed.
+      expect(productLookups()).toEqual([PLUS_PRODUCT, TEAM_PRODUCT]);
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_1 } })
+      );
+    });
+
     it("leaves a Custom plan alone when its subscription moves down", async () => {
       await handleSubscriptionUpdated(teamToPlusEvent(), {
         ...user,
