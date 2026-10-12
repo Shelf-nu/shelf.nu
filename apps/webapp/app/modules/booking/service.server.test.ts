@@ -5505,6 +5505,42 @@ describe("checkoutBooking", () => {
       mockReservedRows([]);
     });
 
+    /**
+     * Answers the two reads `readFullCheckoutDepartures` makes of THIS
+     * booking's own slices, which the routers above leave empty: the slices
+     * leaving whole (`OR` on the markers) and the slices an earlier scan
+     * already stamped (`checkedOutAt: { not: null }`). Every other call falls
+     * through to the router installed before it.
+     */
+    function mockThisBookingSlices({
+      departing = [],
+      stamped = [],
+    }: {
+      departing?: Array<{ id: string; assetId: string; quantity: number }>;
+      stamped?: Array<{ id: string; assetId: string; quantity: number }>;
+    }) {
+      const fallback = (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).getMockImplementation() as ((args?: unknown) => unknown) | undefined;
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        if (args?.where?.bookingId === mockBookingData.id) {
+          if (args.where.OR) {
+            return Promise.resolve(
+              departing.map((s) => ({ ...s, assetKitId: null }))
+            );
+          }
+          if (args.where.checkedOutAt) {
+            return Promise.resolve(
+              stamped.map((s) => ({ ...s, assetKitId: null }))
+            );
+          }
+        }
+        return fallback?.(args);
+      });
+    }
+
     it("(a) passes checkout when the other reservation does NOT overlap this booking's window (previously wrongly blocked by the global guard)", async () => {
       expect.assertions(1);
 
@@ -5727,11 +5763,75 @@ describe("checkoutBooking", () => {
         }
         return reservedRouter?.(args);
       });
+      mockThisBookingSlices({
+        departing: [{ id: "ba-cam", assetId: CAMERA_ID, quantity: 7 }],
+      });
 
       await expect(checkoutBooking(mockCheckoutParams)).rejects.toThrow(
         '"Camera": requested 7, only 6 available right now'
       );
       expect(db.booking.update).not.toHaveBeenCalled();
+    });
+
+    it("(f) sends out the rest of a pool this booking already has partly out, measuring the shelf against only those units", async () => {
+      expect.assertions(1);
+
+      // 10 booked, 4 sent out by an earlier scan session, nothing else holds
+      // the pool. The shelf has 6, and 6 are what leave now: the 4 already
+      // out are not handed over again.
+      const thisBooking = {
+        ...mockBookingData,
+        status: BookingStatus.ONGOING,
+        bookingAssets: [qtyBookingAssetRow(CAMERA_ID, "Camera", 10, "ba-cam")],
+      };
+      (
+        db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue(thisBooking);
+      (db.assetKit.aggregate as ReturnType<typeof vitest.fn>).mockResolvedValue(
+        { _sum: { quantity: 0 } }
+      );
+      // why: the checked-out read (ONGOING/OVERDUE slices) sees this booking's
+      // own slice with its 4 units out, which is what takes them off the shelf.
+      const reservedRouter = (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).getMockImplementation() as ((args?: unknown) => unknown) | undefined;
+      (
+        db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+      ).mockImplementation((args?: any) => {
+        const statuses: string[] = args?.where?.booking?.status?.in ?? [];
+        if (
+          !statuses.includes(BookingStatus.RESERVED) &&
+          args?.where?.assetId === CAMERA_ID
+        ) {
+          return Promise.resolve([
+            {
+              id: "ba-cam",
+              quantity: 10,
+              assetKitId: null,
+              bookingId: mockBookingData.id,
+              checkedOutAt: new Date(),
+              checkedOutQuantity: 4,
+            },
+          ]);
+        }
+        return reservedRouter?.(args);
+      });
+      mockThisBookingSlices({
+        stamped: [{ id: "ba-cam", assetId: CAMERA_ID, quantity: 10 }],
+      });
+      // why: the earlier scan session that sent the 4 units out.
+      (
+        db.partialBookingCheckout.findMany as ReturnType<typeof vitest.fn>
+      ).mockResolvedValue([
+        {
+          bookingId: mockBookingData.id,
+          assetIds: [CAMERA_ID],
+          quantities: [4],
+          bookingAssetIds: ["ba-cam"],
+        },
+      ]);
+
+      await expect(checkoutBooking(mockCheckoutParams)).resolves.toBeDefined();
     });
   });
 });

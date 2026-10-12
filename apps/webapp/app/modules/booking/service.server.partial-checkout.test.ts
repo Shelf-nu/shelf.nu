@@ -2948,28 +2948,6 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
       },
     };
 
-    beforeEach(() => {
-      // why: a full checkout of this booking re-checks the asset's
-      // availability, which reads kit and stock totals the shared mock does
-      // not model. Nothing is in a kit and all 50 units are free.
-      Object.assign(db.assetKit, {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      });
-      Object.assign(db.consumptionLog, {
-        groupBy: vitest.fn().mockResolvedValue([]),
-      });
-      Object.assign(db.custody, {
-        aggregate: vitest.fn().mockResolvedValue({ _sum: { quantity: 0 } }),
-      });
-      Object.assign(db.asset, {
-        findUniqueOrThrow: vitest.fn().mockResolvedValue({
-          id: "asset-qty-1",
-          quantity: 100,
-          type: AssetType.QUANTITY_TRACKED,
-        }),
-      });
-    });
-
     it("counts it and records its session when this booking checks it out in full", async () => {
       (
         db.booking.findUniqueOrThrow as ReturnType<typeof vitest.fn>
@@ -3138,9 +3116,7 @@ describe("partialCheckoutBooking - quantity-tracked dispositions", () => {
 
       await expect(
         partialCheckoutBooking({ ...baseParams, assetIds: ["asset-qty-1"] })
-      ).rejects.toThrow(
-        /"Pens": requested 50, only 0 available in this window/
-      );
+      ).rejects.toThrow(/"Pens": requested 50, only 0 available right now/);
     });
 
     it("sends out a claim that fits the free stock exactly", async () => {

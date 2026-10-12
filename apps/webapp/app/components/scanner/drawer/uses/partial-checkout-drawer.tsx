@@ -210,10 +210,13 @@ function parseCheckoutQty(state: CheckoutQtyState | undefined): number {
 /**
  * The booking slice a scanned QUANTITY_TRACKED asset checks out from.
  *
- * A QR scan names the asset, not a slice, so the drawer picks one: the first
- * of the asset's slices (by id) that still has units to claim. The row's
- * quantity input edits this slice and the submission claims it, so both must
- * resolve through here or the number the operator typed is not the one sent.
+ * A QR scan names the asset, not a slice, so the drawer picks one of the
+ * asset's slices that still has units to claim, by id. A standalone slice
+ * comes first: a bare asset scan is a free-pool claim, and a kit-driven
+ * slice's units go out with its kit's scan. A kit-driven slice is picked only
+ * when no standalone slice has units left. The row's quantity input edits
+ * this slice and the submission claims it, so both must resolve through here
+ * or the number the operator typed is not the one sent.
  *
  * @param assetId - The scanned asset
  * @param bookingAssets - This booking's slices
@@ -222,14 +225,18 @@ function parseCheckoutQty(state: CheckoutQtyState | undefined): number {
  */
 export function resolveScannedQtySliceId(
   assetId: string,
-  bookingAssets: { id: string; asset: { id: string } }[],
+  bookingAssets: {
+    id: string;
+    assetKitId: string | null;
+    asset: { id: string };
+  }[],
   qtyByBookingAssetId: Record<string, CheckoutQtyInfo>
 ): string | null {
+  const claimable = bookingAssets
+    .filter((ba) => ba.asset.id === assetId && qtyByBookingAssetId[ba.id])
+    .sort((a, b) => a.id.localeCompare(b.id));
   return (
-    bookingAssets
-      .filter((ba) => ba.asset.id === assetId)
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .find((ba) => qtyByBookingAssetId[ba.id])?.id ?? null
+    (claimable.find((ba) => ba.assetKitId == null) ?? claimable[0])?.id ?? null
   );
 }
 
@@ -868,8 +875,7 @@ export default function PartialCheckoutDrawer({
         title={
           <div className="text-right">
             <span className="flex items-center justify-end gap-1 text-gray-600">
-              {assetIdsForCheckout.length}/{remainingBookedAssets} Assets
-              scanned
+              {submittedAssetIds.length}/{remainingBookedAssets} Assets scanned
               <InfoTooltip
                 iconClassName="size-4"
                 content={<p>All assets inside kits are counted individually</p>}
@@ -879,7 +885,7 @@ export default function PartialCheckoutDrawer({
               <Progress
                 value={
                   remainingBookedAssets > 0
-                    ? (assetIdsForCheckout.length / remainingBookedAssets) * 100
+                    ? (submittedAssetIds.length / remainingBookedAssets) * 100
                     : 0
                 }
               />

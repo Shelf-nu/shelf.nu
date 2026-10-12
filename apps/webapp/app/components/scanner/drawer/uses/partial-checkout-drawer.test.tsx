@@ -157,6 +157,7 @@ function makeLoaderData(
   const bookingAssets = assets.map((a) => ({
     id: `ba-${a.id}`,
     assetId: a.id,
+    assetKitId: null as string | null,
     quantity: a.kind === "QUANTITY_TRACKED" ? a.bookedQuantity ?? 1 : 1,
     asset: {
       id: a.id,
@@ -822,6 +823,30 @@ describe("PartialCheckoutDrawer", () => {
       ]);
     });
 
+    it("claims a scanned pool's standalone slice before a kit-driven one", () => {
+      // One pool on two slices: `ba-a` (sorts first) is the kit's, `ba-b` is
+      // loose. A bare QR scan is a free-pool claim, so it edits `ba-b`; the
+      // kit's units go out when the kit is scanned.
+      const loaderData = makeLoaderData([sandbag], {
+        remainingToCheckOutByAsset: { "sandbag-id": 5 },
+      });
+      const [slice] = loaderData.booking.bookingAssets;
+      loaderData.booking.bookingAssets = [
+        { ...slice, id: "ba-a", quantity: 2, assetKitId: "ak-1" },
+        { ...slice, id: "ba-b", quantity: 3, assetKitId: null },
+      ];
+      useLoaderDataMock.mockReturnValue(loaderData);
+      renderDrawer(seedStore({ "qr-sandbag": scannedAsset(sandbag) }));
+
+      const input = screen.getByLabelText(
+        /check out quantity/i
+      ) as HTMLInputElement;
+      expect(Number(input.max)).toBe(3);
+      expect(postedCheckouts()).toEqual([
+        { assetId: "sandbag-id", bookingAssetId: "ba-b", quantity: 3 },
+      ]);
+    });
+
     it("posts nothing for a pool whose quantity is cleared", () => {
       useLoaderDataMock.mockReturnValue(
         makeLoaderData([sandbag], {
@@ -837,6 +862,8 @@ describe("PartialCheckoutDrawer", () => {
       // A bare asset id would read as "every remaining unit" on the server.
       expect(postedAssetIds()).toEqual([]);
       expect(postedCheckouts()).toBeNull();
+      // Nothing of it goes out, so it does not count towards the progress.
+      expect(screen.getByText(/0\/1 Assets/)).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: "Check out assets" })
       ).toBeDisabled();

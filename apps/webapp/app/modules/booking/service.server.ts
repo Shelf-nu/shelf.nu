@@ -2827,8 +2827,18 @@ async function readFullCheckoutDepartures(
   tx: any,
   bookingId: Booking["id"]
 ): Promise<{
-  departingSlices: Array<{ id: string; quantity: number }>;
-  checkoutTopUps: Array<{ id: string; assetId: string; residue: number }>;
+  departingSlices: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    quantity: number;
+  }>;
+  checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    residue: number;
+  }>;
 }> {
   /**
    * A quantity-tracked slice partially dispatched by progressive scans before
@@ -2857,6 +2867,7 @@ async function readFullCheckoutDepartures(
   const checkoutTopUps: Array<{
     id: string;
     assetId: string;
+    assetKitId: string | null;
     residue: number;
   }> = [];
   if (preStampedQtySlices.length > 0) {
@@ -2895,6 +2906,7 @@ async function readFullCheckoutDepartures(
           checkoutTopUps.push({
             id: s.id,
             assetId: s.assetId,
+            assetKitId: s.assetKitId,
             residue: s.quantity - units,
           });
         }
@@ -2926,7 +2938,7 @@ async function readFullCheckoutDepartures(
         { checkedOutAt: { not: null }, checkedInAt: { not: null } },
       ],
     },
-    select: { id: true, quantity: true },
+    select: { id: true, assetId: true, assetKitId: true, quantity: true },
   });
 
   return { departingSlices, checkoutTopUps };
@@ -3058,6 +3070,14 @@ async function checkoutBookingWritesWithinTx(
     await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
   }
 
+  // What this call sends out, read before any write below: the guard measures
+  // these units against the shelf, and the stamps further down make departing
+  // slices indistinguishable from ones an earlier batch sent out.
+  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
+    tx,
+    bookingId
+  );
+
   /**
    * Validate quantity availability for QUANTITY_TRACKED assets.
    * Between when a booking was created and checkout, other
@@ -3087,6 +3107,26 @@ async function checkoutBookingWritesWithinTx(
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
+    /**
+     * Standalone units of each pool that physically leave in this call: whole
+     * departing slices plus the residue of slices an earlier scan sent out
+     * only partly. Units this booking already has out are off the shelf, and
+     * `physicalAvailable` has subtracted them, so they are not charged again.
+     * Kit-driven slices draw on their kit's allocation, as in `requested`.
+     */
+    const leavingNowByAsset = new Map<string, number>();
+    const addLeaving = (assetId: string, units: number) =>
+      leavingNowByAsset.set(
+        assetId,
+        (leavingNowByAsset.get(assetId) ?? 0) + units
+      );
+    for (const slice of departingSlices) {
+      if (slice.assetKitId == null) addLeaving(slice.assetId, slice.quantity);
+    }
+    for (const topUp of checkoutTopUps) {
+      if (topUp.assetKitId == null) addLeaving(topUp.assetId, topUp.residue);
+    }
+
     // Sorted so concurrent transactions acquire these row locks in the same
     // global order — prevents deadlocks with `reserveBooking` /
     // `updateBookingAssets`, which lock the same assets sorted too.
@@ -3100,12 +3140,6 @@ async function checkoutBookingWritesWithinTx(
         excludeBookingId: bookingId,
         db: tx,
       });
-      // The units leave now, so they must also be on the shelf now. `bookable`
-      // is windowed by this booking's planned dates and leaves out units
-      // another booking still has out when it ends before this one starts,
-      // which an early check-out hands over too soon.
-      const available = Math.min(bookable, physicalAvailable);
-
       // Sum the requested STANDALONE units for this asset on this booking.
       // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
       // slices (kit-driven units are covered by `inKits`, already reserved out
@@ -3115,15 +3149,29 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > available) {
-        const title =
-          qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
-            .title ?? "";
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon. The shelf is measured
+      // against what leaves in this call, the window against the booking's
+      // whole standalone quantity.
+      const leavingNow = leavingNowByAsset.get(assetId) ?? 0;
+      const title =
+        qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
+          .title ?? "";
+      if (leavingNow > physicalAvailable) {
+        insufficientQtyWarnings.push(
+          `"${title}": requested ${leavingNow}, only ${Math.max(
+            0,
+            physicalAvailable
+          )} available right now`
+        );
+      } else if (requested > bookable) {
         insufficientQtyWarnings.push(
           `"${title}": requested ${requested}, only ${Math.max(
             0,
-            available
-          )} available ${available < bookable ? "right now" : "in this window"}`
+            bookable
+          )} available in this window`
         );
       }
     }
@@ -3178,13 +3226,6 @@ async function checkoutBookingWritesWithinTx(
     },
     data: { status: AssetStatus.CHECKED_OUT },
   });
-
-  // What this call sends out, read before the stamps below make departing
-  // slices indistinguishable from ones an earlier batch sent out.
-  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
-    tx,
-    bookingId
-  );
 
   /**
    * Record where each pool slice's units leave from, before the counters
@@ -10480,11 +10521,13 @@ export async function partialCheckoutBooking({
             ? physicalFree
             : Math.min(physicalFree, availability?.bookable ?? 0);
           if (units > free) {
+            // Name the limit that binds: the shelf, or other bookings'
+            // reservations over this booking's window.
             freeStockShortfalls.push(
               `"${
                 titleByAssetId.get(assetId) ?? ""
               }": requested ${units}, only ${Math.max(0, free)} available ${
-                inFlight ? "right now" : "in this window"
+                free === physicalFree ? "right now" : "in this window"
               }`
             );
           }
