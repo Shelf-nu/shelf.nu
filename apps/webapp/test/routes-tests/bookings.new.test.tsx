@@ -54,6 +54,8 @@ vi.mock("~/utils/roles.server", () => ({
 // why: testing booking creation validation without executing actual booking service operations
 vi.mock("~/modules/booking/service.server", () => ({
   buildKitSlicesForBooking: vi.fn().mockResolvedValue([]),
+  // why: archived kit members left out, for the toast; none by default.
+  countArchivedKitMembers: vi.fn().mockResolvedValue(0),
   createBooking: vi.fn().mockResolvedValue({
     id: "booking-123",
     from: new Date("2024-01-01T10:00:00Z"),

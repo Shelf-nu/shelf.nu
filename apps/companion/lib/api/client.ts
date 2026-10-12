@@ -8,6 +8,9 @@ import { isSessionServerMismatched } from "../server/contract";
 import { reportServerMismatch } from "../sentry";
 import { CLIENT_USER_AGENT } from "./user-agent";
 import { chainAbort } from "../latest-request";
+import { extractErrorDetails, type ApiErrorDetails } from "./error-details";
+
+export type { ApiErrorDetails };
 
 /**
  * Base URL of the Shelf server the app is currently connected to.
@@ -210,47 +213,6 @@ async function resolveRequestTarget(): Promise<
  * idempotent calls keep the default retry behaviour.
  */
 export type ApiFetchOptions = RequestInit & { retry?: boolean };
-
-/**
- * Structured error payload from the mobile API's `{ error: { … } }` envelope.
- * `message` mirrors the flat `error` string consumers already display.
- * `reason` is an additive machine-readable discriminator some endpoints emit
- * (today: `"unclaimed"` on the QR RESOLVE routes only — the link route claims
- * unclaimed codes inline and no longer emits it), with `qrId` echoing
- * the scanned code id whenever `reason` is present. Branch on `reason`, never
- * on `message` text — messages are human copy and can change; the reason
- * field is the wire contract.
- */
-export type ApiErrorDetails = {
-  message: string;
-  reason?: string;
-  qrId?: string;
-};
-
-/**
- * Extracts the structured error payload from a parsed non-OK response body.
- *
- * @param json - The parsed response body (unknown: may be an HTML error page
- *   coerced to null, an empty body, or a proxy's own JSON).
- * @returns The typed error payload, or `null` when the body doesn't match the
- *   mobile API's `{ error: { message } }` envelope.
- */
-function extractErrorDetails(json: unknown): ApiErrorDetails | null {
-  if (typeof json !== "object" || json === null) return null;
-  const err = (json as { error?: unknown }).error;
-  if (typeof err !== "object" || err === null) return null;
-  const { message, reason, qrId } = err as {
-    message?: unknown;
-    reason?: unknown;
-    qrId?: unknown;
-  };
-  if (typeof message !== "string") return null;
-  return {
-    message,
-    ...(typeof reason === "string" ? { reason } : {}),
-    ...(typeof qrId === "string" ? { qrId } : {}),
-  };
-}
 
 /**
  * Makes an authenticated API call to the Shelf webapp.

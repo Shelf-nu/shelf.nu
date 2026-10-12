@@ -96,6 +96,13 @@ vi.mock("~/database/db.server", () => {
   return { db };
 });
 
+// why: the archived pre-check (its own suite: mobile-archived.server.test.ts)
+// reads assets through the fake db, which ignores the archived filter. None of
+// these fixtures are archived, so it reports nothing.
+vi.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vi.fn().mockResolvedValue(null),
+}));
+
 // why: web authorization is its own concern; these tests start from an
 // authorized admin.
 vi.mock("~/utils/roles.server", () => ({

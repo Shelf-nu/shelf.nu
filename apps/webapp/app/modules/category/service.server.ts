@@ -107,8 +107,11 @@ export async function getCategories(params: {
         where,
         orderBy: { updatedAt: "desc" },
         include: {
+          // Archived assets are out of service and left out, like every
+          // inventory count. The delete dialog reads `getCategoryUsage`,
+          // which counts them, because deleting a category changes them too.
           _count: {
-            select: { assets: true },
+            select: { assets: { where: { archivedAt: null } } },
           },
         },
       }),

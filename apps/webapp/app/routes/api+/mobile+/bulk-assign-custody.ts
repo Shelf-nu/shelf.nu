@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -14,6 +15,7 @@ import { bulkCheckOutAssets } from "~/modules/asset/service.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import {
   assertAssignableQuantities,
+  assertMayAssignCustodyTo,
   assignQuantities,
   QUANTITY_CUSTODIAN_SELECT,
   splitQuantityAssetIds,
@@ -125,8 +127,15 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     });
 
-    // Every per-unit assignment is checked before anything is written,
-    // including the "assign only to yourself" rule (`access.custody.assign`).
+    // The "assign only to yourself" rule (`access.custody.assign`) comes
+    // first: it applies to the whole request, whatever is in the list.
+    assertMayAssignCustodyTo({
+      custodian: teamMember,
+      custodyAssign: access.custody.assign,
+      userId: user.id,
+    });
+
+    // Every per-unit assignment is checked before anything is written.
     await assertAssignableQuantities({
       quantityAssetIds,
       quantities,
@@ -135,6 +144,18 @@ export async function action({ request }: ActionFunctionArgs) {
       custodyAssign: access.custody.assign,
       userId: user.id,
     });
+
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts). It runs after every other
+    // check: an archived row is the last reason to refuse, so removing it
+    // leaves a request that goes through.
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
 
     /**
      * The whole-asset call runs before the per-unit writes: it validates and
