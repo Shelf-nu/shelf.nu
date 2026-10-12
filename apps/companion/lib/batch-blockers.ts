@@ -24,13 +24,16 @@
  * Extraction target: a pure `packages/*` scanner module (none yet).
  *
  * Rules by action:
+ * - every action: archived assets, first and alone. An archived asset is
+ *   read-only and cannot be booked, so it raises no other blocker: the one
+ *   thing to do with it is take it out of the list.
  * - assign custody: quantity rows with no free units; INDIVIDUAL assets
  *   already in custody, checked out, or part of a kit; kits already in
  *   custody, checked out, or holding assets in custody.
  * - release custody: quantity rows held only through a kit, held by nobody,
  *   or held by more than one person; INDIVIDUAL assets not in custody or part
  *   of a kit; kits not in custody.
- * - update location: no eligibility blockers.
+ * - update location: archived assets only.
  * - add to booking / fulfil: assets already in this booking, part of a kit
  *   (add only: fulfil matches concrete units, so kit membership is no blocker
  *   there), not available to book, or checked out (only when the booking is
@@ -67,6 +70,11 @@ export type BlockableItem = {
   hasAssetsInCustody?: boolean;
   /** Assets only: false when the asset is marked unavailable to book. */
   availableToBook?: boolean;
+  /**
+   * Assets only: true when the asset is archived (read-only, cannot be booked).
+   * Absent from servers that predate archiving, and then read as active.
+   */
+  archived?: boolean;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
   /**
@@ -92,6 +100,7 @@ export type BookingBlockerContext = {
 
 /** Every blocker id, across all actions. */
 type BlockerKey =
+  | "asset-archived"
   | "qty-nothing-free"
   | "qty-held-via-kit"
   | "qty-nothing-held"
@@ -164,13 +173,25 @@ function candidatesFor(
   items: BlockableItem[],
   bookingCtx?: BookingBlockerContext
 ): BlockerCandidate[] {
-  const assets = items.filter((i) => i.type === "asset");
-  const wholeAssets = items.filter(isWholeAsset);
-  const quantityRows = items.filter(isQuantityRow);
-  const kits = items.filter((i) => i.type === "kit");
+  // Archived rows raise only their own blocker, so every other rule reads the
+  // rows that are still in service.
+  const archived = items.filter((i) => i.type === "asset" && i.archived);
+  const live = items.filter((i) => !archived.includes(i));
+  const assets = live.filter((i) => i.type === "asset");
+  const wholeAssets = live.filter(isWholeAsset);
+  const quantityRows = live.filter(isQuantityRow);
+  const kits = live.filter((i) => i.type === "kit");
+
+  /** The archived blocker, worded for what this action cannot do. */
+  const archivedCandidate = (tail: string): BlockerCandidate => ({
+    key: "asset-archived",
+    affected: archived,
+    message: (n) => `${countNoun(n, "asset")} archived${tail}`,
+  });
 
   if (action === "assign_custody") {
     return [
+      archivedCandidate(" and can't be put in custody."),
       {
         key: "qty-nothing-free",
         affected: quantityRows.filter(
@@ -236,6 +257,7 @@ function candidatesFor(
     // The three quantity blockers split "cannot release" by cause because
     // the advice differs: go to the kit, there is nothing, or go to the asset.
     return [
+      archivedCandidate(", so there is nothing to release."),
       {
         key: "qty-held-via-kit",
         affected: quantityRows.filter(
@@ -311,6 +333,7 @@ function candidatesFor(
     );
 
     const candidates: BlockerCandidate[] = [
+      archivedCandidate(" and can't be booked."),
       {
         key: "asset-already-in-booking",
         affected: assets.filter((i) =>
@@ -372,7 +395,12 @@ function candidatesFor(
     return candidates;
   }
 
-  // update_location: any scanned item can move.
+  // update_location: any item still in service can move.
+  if (action === "update_location") {
+    return [archivedCandidate(" and can't be moved.")];
+  }
+
+  // A booking action without its booking context raises nothing.
   return [];
 }
 

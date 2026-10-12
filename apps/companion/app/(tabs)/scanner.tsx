@@ -52,6 +52,14 @@ import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
 import {
+  ARCHIVED_BADGE_STATUS,
+  ARCHIVED_ROW_ERROR,
+  archivedIdsFromError,
+  archivedScanNote,
+  assetBadgeStatus,
+  isArchivedAsset,
+} from "@/lib/archived-assets";
+import {
   computeBlockers,
   blockedQrIds,
   type BatchScanAction,
@@ -172,6 +180,11 @@ type ScannedItem = {
   /** Assets only: false when the asset is marked unavailable to book. */
   availableToBook?: boolean;
   /**
+   * Assets only: the asset is archived (read-only, cannot be booked). The row
+   * shows "Archived" and raises the "asset-archived" blocker.
+   */
+  archived?: boolean;
+  /**
    * Assets only: the model this asset belongs to, or null. Fulfil mode matches
    * it against the booking's outstanding reservations, so progress counts only
    * units that genuinely fulfil one instead of counting every scan.
@@ -195,6 +208,28 @@ type ScannedItem = {
   /** Why the last submit did not move this row, as the server said it. */
   submitError?: string;
 };
+
+/**
+ * Marks the asset rows a refusal named as archived, leaving every other row
+ * as it was. A no-op when the refusal named none.
+ *
+ * @param setItems - The setter of the scan list to mark
+ * @param archivedAssetIds - From `archivedIdsFromError`
+ */
+function markArchivedRows(
+  setItems: (update: (prev: ScannedItem[]) => ScannedItem[]) => void,
+  archivedAssetIds: string[]
+) {
+  if (archivedAssetIds.length === 0) return;
+  const archived = new Set(archivedAssetIds);
+  setItems((prev) =>
+    prev.map((item) =>
+      item.type === "asset" && archived.has(item.targetId)
+        ? { ...item, archived: true, submitError: ARCHIVED_ROW_ERROR }
+        : item
+    )
+  );
+}
 
 /** The custody mode for an action, or null for the other scanner actions. */
 function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
@@ -787,6 +822,8 @@ function ScannerContent() {
               // below, which is the kit a kit-linked QR points at directly).
               kitId: string | null;
               availableToBook: boolean;
+              /** Set when the asset is archived. Absent on older servers. */
+              archivedAt?: string | null;
               /**
                * Model this asset belongs to, or null. Fulfil mode matches it
                * against the booking's outstanding reservations so progress counts
@@ -1505,6 +1542,7 @@ function ScannerContent() {
             category: asset.category?.name || null,
             kitId: asset.kitId ?? null,
             availableToBook: asset.availableToBook,
+            archived: isArchivedAsset(asset),
             assetModelId: asset.assetModelId ?? null,
           };
 
@@ -1512,6 +1550,24 @@ function ScannerContent() {
           // ineligible items with one-tap fixes (web parity).
           if (isBookingAddMode) {
             setBookingCheckinItems((prev) => [newItem, ...prev]);
+            // An archived asset joins the list flagged, so the card says so
+            // now rather than "added" and leaving the blocker to explain.
+            if (newItem.archived) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: asset.title,
+                message: archivedScanNote(
+                  isBookingFulfilMode ? "booking_fulfil" : "booking_add"
+                ),
+              });
+              setTimeout(() => setScanResult(null), 1800);
+              finalizeScan();
+              return;
+            }
             flashFrame("success");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
@@ -1653,7 +1709,8 @@ function ScannerContent() {
           // only swaps underscores — so a CHECKED_OUT asset flashed
           // "CHECKED OUT" here and then "Checked out" on the detail screen it
           // navigates to 950ms later.
-          const statusLabel = formatStatus(asset.status);
+          // An archived asset reads "Archived", as on the screen it opens.
+          const statusLabel = formatStatus(assetBadgeStatus(asset));
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1723,11 +1780,26 @@ function ScannerContent() {
           mainImage: asset.mainImage,
           category: asset.category?.name || null,
           kitId: asset.kitId ?? null,
+          archived: isArchivedAsset(asset),
           assetType: asset.type,
           quantityFacts,
         };
 
         setScannedItems((prev) => [newItem, ...prev]);
+        // An archived asset joins the list flagged by its blocker; the card
+        // says why at once instead of "added".
+        if (newItem.archived && isBatchAction(action)) {
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setScanResult({
+            type: "error",
+            title: asset.title,
+            message: archivedScanNote(action as BatchScanAction),
+          });
+          setTimeout(() => setScanResult(null), 1800);
+          finalizeScan();
+          return;
+        }
         flashFrame("success");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         playScanSound();
@@ -1930,6 +2002,13 @@ function ScannerContent() {
     ]);
     setIsSubmitting(false);
 
+    // Assets the server refused because they are archived: only these rows
+    // are marked, and they now read "Archived" and raise their blocker.
+    const archivedAssetIds = archivedIdsFromError(
+      "errorDetails" in assetResult ? assetResult.errorDetails : null
+    );
+    const archivedSet = new Set(archivedAssetIds);
+
     const summary = summarizeCustodySubmit(
       mode,
       plan,
@@ -1939,6 +2018,7 @@ function ScannerContent() {
         skippedQuantityTracked: assetResult.data?.skippedQuantityTracked ?? 0,
         refusedQuantities: assetResult.data?.refusedQuantities,
         movedQuantityAssetIds: assetResult.data?.movedQuantityAssetIds,
+        archivedAssetIds,
       },
       audience
     );
@@ -1957,7 +2037,13 @@ function ScannerContent() {
         .filter((item) => !succeeded.has(item.qrId))
         .map((item) =>
           summary.rowErrors[item.qrId]
-            ? { ...item, submitError: summary.rowErrors[item.qrId] }
+            ? {
+                ...item,
+                submitError: summary.rowErrors[item.qrId],
+                archived:
+                  item.archived ||
+                  (item.type === "asset" && archivedSet.has(item.targetId)),
+              }
             : item
         )
     );
@@ -1999,6 +2085,14 @@ function ScannerContent() {
 
           const error = assetResult.error || kitResult.error;
           if (error) {
+            // An archived refusal names its rows: mark those, so the operator
+            // removes them and moves the rest.
+            markArchivedRows(
+              setScannedItems,
+              archivedIdsFromError(
+                "errorDetails" in assetResult ? assetResult.errorDetails : null
+              )
+            );
             Alert.alert("Error", error);
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -2059,7 +2153,7 @@ function ScannerContent() {
           text: "Add",
           onPress: async () => {
             setIsBookingSubmitting(true);
-            const { error } = await api.addScannedToBooking(
+            const { error, errorDetails } = await api.addScannedToBooking(
               currentOrg.id,
               bookingId,
               assetIds,
@@ -2068,6 +2162,10 @@ function ScannerContent() {
             setIsBookingSubmitting(false);
 
             if (error) {
+              markArchivedRows(
+                setBookingCheckinItems,
+                archivedIdsFromError(errorDetails)
+              );
               Alert.alert("Error", error);
               return;
             }
@@ -2739,6 +2837,8 @@ function ScannerContent() {
     const cap = custodyMode && facts ? unitsFor(custodyMode, facts) : 0;
     return {
       ...item,
+      // The row reads "Archived", never the status it is frozen in.
+      status: item.archived ? ARCHIVED_BADGE_STATUS : item.status,
       quantity:
         custodyMode && facts && cap > 0
           ? {
@@ -2756,6 +2856,13 @@ function ScannerContent() {
     ? batchDrawerItems.find((item) => item.qrId === quantityEditQrId) ?? null
     : null;
   const showBookingDrawer = isBookingMode && bookingCheckinItems.length > 0;
+  // The booking list as its drawer shows it: an archived row reads
+  // "Archived", and a row the last submit refused carries the reason.
+  const bookingDrawerItems = bookingCheckinItems.map((item) => ({
+    ...item,
+    status: item.archived ? ARCHIVED_BADGE_STATUS : item.status,
+    error: item.submitError,
+  }));
 
   // Instruction text
   const instructionMap: Record<ScannerAction, string> = {
@@ -3131,7 +3238,7 @@ function ScannerContent() {
           {/* ── Booking Drawer (check-in / scan-to-add) ── */}
           {showBookingDrawer && (
             <BatchDrawer
-              items={bookingCheckinItems}
+              items={bookingDrawerItems}
               keyField="targetId"
               title={
                 isBookingAddMode

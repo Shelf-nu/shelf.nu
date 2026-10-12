@@ -23,11 +23,21 @@ set -euo pipefail
 # them to `.maestro/env/e2e-scan-checkout.env`. Re-running `scan-checkout-up`
 # resets every fixture asset to AVAILABLE, which a previous run leaves out.
 #
+# `archived-up` / `archived-stale` / `archived-down`: archived-assets fixture
+# for flows/archived/*. Archived and active assets with known QR codes, a kit
+# with one of each as members, a DRAFT booking per requester role and an audit
+# that hold archived assets. Writes `.maestro/env/e2e-archived.env`.
+# `archived-stale` archives one of the active assets mid-flow, so a scan the
+# app took as active is refused by the server. Re-running `archived-up` resets.
+#
 # Usage:
 #   ./seed-e2e.sh up                  # fulfil fixture, write env/e2e.env
 #   ./seed-e2e.sh down                # remove it
 #   ./seed-e2e.sh scan-checkout-up    # flow 19 fixture, write env/e2e-scan-checkout.env
 #   ./seed-e2e.sh scan-checkout-down  # remove it
+#   ./seed-e2e.sh archived-up         # archived-assets fixture, write env/e2e-archived.env
+#   ./seed-e2e.sh archived-stale      # archive its active tripod mid-flow
+#   ./seed-e2e.sh archived-down       # remove it
 #
 # Targets the workspace named "$WORKSPACE" (default "GRANULAR WORKSPACE").
 # Reads the DB connection from the monorepo-root .env (DIRECT_URL), or from
@@ -58,6 +68,25 @@ SCAN_DELTA="ce2escanchkdelta000001"   # never added to the booking
 SCAN_KIT_QR="e2eskchkqr01"
 SCAN_CHARLIE_QR="e2eskchkqra3"
 SCAN_DELTA_QR="e2eskchkqra4"
+
+# Archived-assets fixture. One archived and two active assets, a kit holding an
+# archived and an active member, a DRAFT booking per requester role holding the
+# archived asset and an active one, and an audit expecting the same two. Fixed
+# ids and QR codes, like the scan-checkout fixture.
+ARCH_ENV_OUT="$MAESTRO_DIR/env/e2e-archived.env"
+ARCH_CAMERA="ce2earchcamera00000001"   # archived
+ARCH_TRIPOD="ce2earchtripod00000001"   # active
+ARCH_STAND="ce2earchstand000000001"    # active, for a scan that goes stale
+ARCH_LENS="ce2earchlens0000000001"     # archived kit member
+ARCH_LIGHT="ce2earchlight000000001"    # active kit member
+ARCH_KIT="ce2earchkit00000000001"
+ARCH_BOOKING="ce2earchbooking0000001"     # owner's draft
+ARCH_BOOKING_SS="ce2earchbookingss00001"  # self-service member's draft
+ARCH_AUDIT="ce2earchaudit000000001"
+ARCH_CAMERA_QR="e2earchqr001"
+ARCH_TRIPOD_QR="e2earchqr002"
+ARCH_STAND_QR="e2earchqr003"
+ARCH_KIT_QR="e2earchqrkit"
 
 DB="${DATABASE_URL:-}"
 if [ -z "$DB" ]; then
@@ -223,8 +252,98 @@ SQL
     rm -f "$SCAN_ENV_OUT"
     echo "✓ Removed the scan-to-check-out fixture from '${WORKSPACE}'."
     ;;
+  archived-up)
+    OWNER_ID=$(psql_q -c "select \"userId\" from \"UserOrganization\" where \"organizationId\"='${ORG_ID}' and 'OWNER'=any(roles) limit 1;")
+    SS_ID=$(psql_q -c "select \"userId\" from \"UserOrganization\" where \"organizationId\"='${ORG_ID}' and 'SELF_SERVICE'=any(roles) limit 1;")
+    SS_TM=$(psql_q -c "select id from \"TeamMember\" where \"userId\"='${SS_ID}' and \"organizationId\"='${ORG_ID}' and \"deletedAt\" is null limit 1;")
+    # Deleting and recreating resets every fixture row: bookings, audit, kit and
+    # QR codes go first, then the assets (custody, notes and scans cascade).
+    psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
+BEGIN;
+DELETE FROM "Booking" WHERE id IN ('${ARCH_BOOKING}','${ARCH_BOOKING_SS}')
+   OR (name LIKE 'E2E Archive Draft%' AND "organizationId"='${ORG_ID}');
+DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
+DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
+DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
+DELETE FROM "Asset" WHERE id IN ('${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}');
+
+INSERT INTO "Asset" (id,title,"organizationId","userId",value,"archivedAt","updatedAt") VALUES
+  ('${ARCH_CAMERA}','E2E Archived Camera','${ORG_ID}','${OWNER_ID}',1000,NOW(),NOW()),
+  ('${ARCH_TRIPOD}','E2E Active Tripod','${ORG_ID}','${OWNER_ID}',100,NULL,NOW()),
+  ('${ARCH_STAND}','E2E Active Stand','${ORG_ID}','${OWNER_ID}',50,NULL,NOW()),
+  ('${ARCH_LENS}','E2E Archived Lens','${ORG_ID}','${OWNER_ID}',500,NOW(),NOW()),
+  ('${ARCH_LIGHT}','E2E Active Light','${ORG_ID}','${OWNER_ID}',200,NULL,NOW());
+INSERT INTO "Kit" (id,name,"organizationId","createdById","updatedAt")
+VALUES ('${ARCH_KIT}','E2E Archive Kit','${ORG_ID}','${OWNER_ID}',NOW());
+INSERT INTO "AssetKit" (id,"assetId","kitId","organizationId","updatedAt") VALUES
+  ('${ARCH_KIT}_lens','${ARCH_LENS}','${ARCH_KIT}','${ORG_ID}',NOW()),
+  ('${ARCH_KIT}_light','${ARCH_LIGHT}','${ARCH_KIT}','${ORG_ID}',NOW());
+INSERT INTO "Qr" (id,"kitId","assetId","organizationId","userId","updatedAt") VALUES
+  ('${ARCH_CAMERA_QR}',NULL,'${ARCH_CAMERA}','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${ARCH_TRIPOD_QR}',NULL,'${ARCH_TRIPOD}','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${ARCH_STAND_QR}',NULL,'${ARCH_STAND}','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${ARCH_KIT_QR}','${ARCH_KIT}',NULL,'${ORG_ID}','${OWNER_ID}',NOW());
+
+-- Drafts start tomorrow, so reserving them asks no early-start question.
+INSERT INTO "Booking" (id,name,status,"organizationId","creatorId","custodianUserId",
+                       "custodianTeamMemberId","from","to","updatedAt") VALUES
+  ('${ARCH_BOOKING}','E2E Archive Draft','DRAFT','${ORG_ID}','${OWNER_ID}','${OWNER_ID}',NULL,
+   NOW()+interval '1 day',NOW()+interval '2 days',NOW()),
+  ('${ARCH_BOOKING_SS}','E2E Archive Draft SS','DRAFT','${ORG_ID}','${SS_ID}','${SS_ID}',
+   NULLIF('${SS_TM}',''),NOW()+interval '1 day',NOW()+interval '2 days',NOW());
+INSERT INTO "BookingAsset" (id,"bookingId","assetId") VALUES
+  ('${ARCH_BOOKING}_camera','${ARCH_BOOKING}','${ARCH_CAMERA}'),
+  ('${ARCH_BOOKING}_tripod','${ARCH_BOOKING}','${ARCH_TRIPOD}'),
+  ('${ARCH_BOOKING_SS}_camera','${ARCH_BOOKING_SS}','${ARCH_CAMERA}'),
+  ('${ARCH_BOOKING_SS}_tripod','${ARCH_BOOKING_SS}','${ARCH_TRIPOD}');
+
+INSERT INTO "AuditSession" (id,name,status,"expectedAssetCount","createdById","organizationId","updatedAt")
+VALUES ('${ARCH_AUDIT}','E2E Archive Audit','PENDING',2,'${OWNER_ID}','${ORG_ID}',NOW());
+INSERT INTO "AuditAsset" (id,"auditSessionId","assetId","updatedAt") VALUES
+  ('${ARCH_AUDIT}_camera','${ARCH_AUDIT}','${ARCH_CAMERA}',NOW()),
+  ('${ARCH_AUDIT}_tripod','${ARCH_AUDIT}','${ARCH_TRIPOD}',NOW());
+COMMIT;
+SQL
+
+    mkdir -p "$MAESTRO_DIR/env"
+    cat > "$ARCH_ENV_OUT" <<ENV
+# Generated by seed-e2e.sh archived-up. Do not edit by hand.
+SHELF_TEST_ARCHIVED_ASSET_ID=${ARCH_CAMERA}
+SHELF_TEST_ARCHIVED_QR_ID=${ARCH_CAMERA_QR}
+SHELF_TEST_ACTIVE_ASSET_ID=${ARCH_TRIPOD}
+SHELF_TEST_ACTIVE_QR_ID=${ARCH_TRIPOD_QR}
+SHELF_TEST_SECOND_ACTIVE_QR_ID=${ARCH_STAND_QR}
+SHELF_TEST_ARCHIVED_KIT_ID=${ARCH_KIT}
+SHELF_TEST_ARCHIVED_BOOKING_ID=${ARCH_BOOKING}
+SHELF_TEST_ARCHIVED_BOOKING_SS_ID=${ARCH_BOOKING_SS}
+SHELF_TEST_ARCHIVED_AUDIT_ID=${ARCH_AUDIT}
+ENV
+    echo "✓ Seeded the archived-assets fixture (2 archived, 3 active, kit, 2 drafts, audit) in '${WORKSPACE}'."
+    echo "  wrote $ARCH_ENV_OUT"
+    ;;
+  archived-stale)
+    # Archives the active tripod behind the app's back, for the half-way step
+    # of flows/archived/steps/owner-stale-*.yaml: the app scanned it as active,
+    # so only the server can say it is archived now.
+    psql_q -c "UPDATE \"Asset\" SET \"archivedAt\"=NOW() WHERE id='${ARCH_TRIPOD}';" >/dev/null
+    echo "✓ Archived E2E Active Tripod (the app still holds it as active)."
+    ;;
+  archived-down)
+    psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
+BEGIN;
+DELETE FROM "Booking" WHERE id IN ('${ARCH_BOOKING}','${ARCH_BOOKING_SS}')
+   OR (name LIKE 'E2E Archive Draft%' AND "organizationId"='${ORG_ID}');
+DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
+DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
+DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
+DELETE FROM "Asset" WHERE id IN ('${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}');
+COMMIT;
+SQL
+    rm -f "$ARCH_ENV_OUT"
+    echo "✓ Removed the archived-assets fixture from '${WORKSPACE}'."
+    ;;
   *)
-    echo "Usage: $0 up|down|scan-checkout-up|scan-checkout-down" >&2
+    echo "Usage: $0 up|down|scan-checkout-up|scan-checkout-down|archived-up|archived-stale|archived-down" >&2
     exit 1
     ;;
 esac

@@ -73,6 +73,7 @@ test("booking_fulfil keeps the rules that are not about kit membership", () => {
 
 /** Ids in display order, pinned so a new blocker needs a new case. */
 const EXPECTED_ASSIGN_IDS = [
+  "asset-archived",
   "qty-nothing-free",
   "asset-in-custody",
   "asset-checked-out",
@@ -83,6 +84,7 @@ const EXPECTED_ASSIGN_IDS = [
 ];
 
 const EXPECTED_RELEASE_IDS = [
+  "asset-archived",
   "qty-held-via-kit",
   "qty-nothing-held",
   "qty-several-holders",
@@ -174,6 +176,7 @@ test("healthy rows raise no custody blocker", () => {
 
 /** One row in the state that raises each assign id. */
 const ASSIGN_CASES: Record<string, BlockableItem> = {
+  "asset-archived": asset({ archived: true }),
   "qty-nothing-free": quantityRow({
     quantityFacts: quantityFacts({ assignable: 0 }),
   }),
@@ -187,6 +190,7 @@ const ASSIGN_CASES: Record<string, BlockableItem> = {
 
 /** One row in the state that raises each release id. */
 const RELEASE_CASES: Record<string, BlockableItem> = {
+  "asset-archived": asset({ archived: true }),
   "qty-held-via-kit": quantityRow({
     quantityFacts: quantityFacts({ holders: [], hasKitHeldUnits: true }),
   }),
@@ -278,4 +282,79 @@ test("each blocker removes only the rows it names", () => {
     groups[0].message,
     "1 asset has no units available. Every unit is in custody, in a kit, or out on a booking."
   );
+});
+
+// ── Archived assets ───────────────────────────────────
+//
+// An archived asset is read-only and cannot be booked, in every batch mode.
+// It raises its own blocker and nothing else, so the operator reads one reason
+// for it rather than a list of side effects.
+
+test("update location can raise only the archived blocker", () => {
+  assert.deepEqual(blockerKeysFor("update_location"), ["asset-archived"]);
+});
+
+test("the booking modes raise the archived blocker first", () => {
+  assert.equal(blockerKeysFor("booking_add", ctx)[0], "asset-archived");
+  assert.equal(blockerKeysFor("booking_fulfil", ctx)[0], "asset-archived");
+});
+
+test("an archived row is flagged in every batch mode, with the consequence named", () => {
+  const archived = asset({ archived: true, title: "Old camera" });
+  const messages = {
+    assign_custody: "1 asset is archived and can't be put in custody.",
+    release_custody: "1 asset is archived, so there is nothing to release.",
+    update_location: "1 asset is archived and can't be moved.",
+    booking_add: "1 asset is archived and can't be booked.",
+    booking_fulfil: "1 asset is archived and can't be booked.",
+  } as const;
+  for (const [action, message] of Object.entries(messages)) {
+    const groups = computeBlockers(
+      action as keyof typeof messages,
+      [archived],
+      ctx
+    );
+    assert.deepEqual(
+      groups.map((g) => [g.key, g.qrIds, g.message]),
+      [["asset-archived", ["qr-a"], message]],
+      action
+    );
+  }
+});
+
+test("an archived row raises no other blocker, whatever else is true of it", () => {
+  // Not in custody and part of a kit: on a live row these raise two blockers.
+  const archived = asset({ archived: true, kitId: "kit-9" });
+  assert.deepEqual(idsFor("release_custody", [archived]), ["asset-archived"]);
+  assert.deepEqual(idsFor("assign_custody", [archived]), ["asset-archived"]);
+  assert.deepEqual(
+    computeBlockers(
+      "booking_add",
+      [{ ...archived, availableToBook: false }],
+      ctx
+    ).map((g) => g.key),
+    ["asset-archived"]
+  );
+});
+
+test("only the archived rows are flagged; the active ones stay clean", () => {
+  const archived = asset({
+    qrId: "qr-old",
+    targetId: "asset-old",
+    archived: true,
+  });
+  const active = asset({ qrId: "qr-new", targetId: "asset-new" });
+  const groups = computeBlockers("update_location", [archived, active]);
+  assert.deepEqual(
+    groups.map((g) => [g.key, g.qrIds, g.message]),
+    [["asset-archived", ["qr-old"], "1 asset is archived and can't be moved."]]
+  );
+});
+
+test("a row from a server that predates archiving reads as active", () => {
+  assert.deepEqual(
+    idsFor("assign_custody", [asset({ archived: undefined })]),
+    []
+  );
+  assert.deepEqual(computeBlockers("update_location", [asset()]), []);
 });
