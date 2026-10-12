@@ -252,8 +252,10 @@ const PLAN_GRANTING_STATUSES: Stripe.Subscription.Status[] = [
  * - its previous tier item was higher than its tier item now;
  * - the user is on exactly that previous tier, so it was this subscription
  *   that put them there (a Custom or hand-set tier is left alone);
- * - no other live subscription of the customer carries that tier or a higher
- *   one.
+ * - no live subscription of the customer carries that tier or a higher one,
+ *   as Stripe holds them now. That includes this subscription: a late or
+ *   retried event for a switch the customer has since reversed changes
+ *   nothing, because the event's snapshot is not what Stripe holds today.
  *
  * @param args.event - The `customer.subscription.updated` event
  * @param args.subscription - The subscription as it is after the update
@@ -321,13 +323,14 @@ async function applyPlanDowngrade({
   if (!isHigherTier(previousTierId, tierId as TierId)) return;
   if (user.tierId !== previousTierId) return;
 
-  // A second subscription can still pay for the higher plan, for instance one
-  // Team subscription per workspace.
-  const otherSubscriptions =
+  // Read every subscription as Stripe holds it now, this one included. A
+  // second subscription can still pay for the higher plan (one Team
+  // subscription per workspace, for instance), and this one may already be
+  // back on it when the event arrives late or is retried.
+  const liveSubscriptions =
     await getCustomerSubscriptionsWithProducts(customerId);
-  const higherPlanPaidElsewhere = otherSubscriptions.some(
+  const higherPlanStillPaid = liveSubscriptions.some(
     (sub) =>
-      sub.id !== subscription.id &&
       PLAN_GRANTING_STATUSES.includes(sub.status) &&
       sub.items.data.some((item) => {
         const product = item.price?.product;
@@ -341,7 +344,7 @@ async function applyPlanDowngrade({
         );
       })
   );
-  if (higherPlanPaidElsewhere) return;
+  if (higherPlanStillPaid) return;
 
   await db.user
     .update({

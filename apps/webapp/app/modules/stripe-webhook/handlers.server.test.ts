@@ -577,7 +577,25 @@ describe("handleSubscriptionUpdated", () => {
       );
     }
 
+    /** The event's subscription as Stripe holds it now, products expanded. */
+    function liveSubscription(productId: string) {
+      return {
+        id: "sub_1",
+        status: "active",
+        metadata: {},
+        items: { data: [{ price: { product: PRODUCTS[productId] } }] },
+      };
+    }
+
     it("lowers the plan when the subscription moved from Team to Plus", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(PLUS_PRODUCT)
+      );
+
       await handleSubscriptionUpdated(teamToPlusEvent(), user);
 
       expect(mockUserUpdate).toHaveBeenCalledWith({
@@ -585,6 +603,20 @@ describe("handleSubscriptionUpdated", () => {
         data: { tierId: TierId.tier_1 },
         select: { id: true },
       });
+    });
+
+    it("ignores a late Team to Plus event once the subscription is back on Team", async () => {
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: "sub_1" }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        liveSubscription(TEAM_PRODUCT)
+      );
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
     });
 
     it("leaves a Custom plan alone when its subscription moves down", async () => {
