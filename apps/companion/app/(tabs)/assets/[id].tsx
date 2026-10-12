@@ -13,7 +13,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  Dimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -1634,8 +1633,10 @@ const useStyles = createStyles((colors, shadows) => ({
     justifyContent: "center",
     alignItems: "center",
   },
+  // Sized against the full-screen overlay rather than a window size read when
+  // the styles are built, so the image follows a rotation or a window resize.
   zoomImage: {
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height * 0.7,
+    width: "100%",
+    height: "70%",
   },
 }));

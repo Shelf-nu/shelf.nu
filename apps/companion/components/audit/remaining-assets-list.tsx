@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   Modal,
   Platform,
-  Dimensions,
+  useWindowDimensions,
 } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -34,6 +34,8 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
   const { colors } = useTheme();
   const styles = useStyles();
   const [previewAsset, setPreviewAsset] = useState<RemainingAsset | null>(null);
+  // The preview fills the live window, so it follows a rotation or a resize.
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
   const handlePreviewImage = useCallback((item: RemainingAsset) => {
     const imageUri = item.mainImage || item.thumbnailImage;
@@ -181,7 +183,7 @@ export function RemainingAssetsList({ items }: RemainingAssetsListProps) {
                   uri:
                     previewAsset.mainImage || previewAsset.thumbnailImage || "",
                 }}
-                style={styles.previewImage}
+                style={{ width: windowWidth - 40, height: windowHeight * 0.55 }}
                 contentFit="contain"
               />
               <Text style={styles.previewAssetName} numberOfLines={2}>
@@ -289,10 +291,6 @@ const useStyles = createStyles((colors) => ({
   previewContent: {
     alignItems: "center",
     gap: spacing.md,
-  },
-  previewImage: {
-    width: Dimensions.get("window").width - 40,
-    height: Dimensions.get("window").height * 0.55,
   },
   previewAssetName: {
     fontSize: fontSize.lg,
