@@ -77,10 +77,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           image: true,
           imageExpiration: true,
-          // Kits link to assets via the `AssetKit` pivot model — count that
+          // Kits link to assets via the `AssetKit` pivot model. Count that
           // relation, then re-key it below to `_count.assets`, the key the
-          // companion reads.
-          // Archived members are out of service and not counted.
+          // companion reads. Archived members are out of service and not
+          // counted, matching the kit screen's own count.
           _count: {
             select: { assetKits: { where: { asset: { archivedAt: null } } } },
           },
