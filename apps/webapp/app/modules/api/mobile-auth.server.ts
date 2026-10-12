@@ -19,6 +19,7 @@ import {
   createSsoRequiredError,
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -538,7 +539,8 @@ export const MOBILE_KIT_SELECT = {
   name: true,
   status: true,
   image: true,
-  _count: { select: { assetKits: true } },
+  // The scanner's "Kit • N assets"; archived members are not counted.
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
   // blocker — both mirror the web scanner drawers.

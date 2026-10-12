@@ -15,6 +15,7 @@ import {
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import {
   redactCustodianForViewer,
   type RowWithCustody,
@@ -361,7 +362,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assetKits: true } },
+                _count: KIT_ACTIVE_MEMBER_COUNT,
               },
             })
           : Promise.resolve([]),
