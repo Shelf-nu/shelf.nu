@@ -93,6 +93,15 @@ function submit(intent: string) {
 describe("asset detail action: archive and reinstate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(archiveAsset).mockResolvedValue({
+      id: "a1",
+      archivedAt: new Date(),
+      draftBookings: [],
+    });
+    vi.mocked(unarchiveAsset).mockResolvedValue({
+      id: "a1",
+      availableToBook: true,
+    });
     vi.mocked(requirePermission).mockResolvedValue({
       organizationId: "org-1",
       role: "ADMIN",
@@ -147,6 +156,8 @@ describe("asset detail action: archive and reinstate", () => {
     expect(assertAssetsAreNotArchived).toHaveBeenCalledWith({
       assetIds: ["a1"],
       organizationId: "org-1",
+      // Words the refusal for the acting user's role.
+      actorUserId: "user-1",
     });
   });
 

@@ -2,6 +2,7 @@ import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -170,6 +171,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // without this a caller could attach another workspace's assets (cross-org
     // IDOR). Kit-derived asset ids are already org-scoped by the query below.
     await assertAssetsBelongToOrg({ assetIds, organizationId });
+
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
 
     /**
      * Resolve each scanned kit into one slice per `AssetKit` membership.

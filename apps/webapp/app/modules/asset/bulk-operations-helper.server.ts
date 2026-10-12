@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
+import type { BookableListScope } from "./list-scope.server";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
@@ -69,7 +70,7 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param organizationId - Organization to scope query
  * @param filters - URL search params string with advanced filters
  * @param settings - Asset index settings with columns configuration
- * @param availableToBookOnly - Filter to bookable assets only (for self-service)
+ * @param bookableScope - The caller's list scope; `null` selects every asset
  * @param timeZone - Acting user's IANA timezone; forwarded to
  *   {@link generateWhereClause} so built-in date-column filters truncate the
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
@@ -81,14 +82,14 @@ async function getAdvancedFilteredAssetIds({
   organizationId,
   filters,
   settings,
-  availableToBookOnly = false,
+  bookableScope = null,
   timeZone = "UTC",
   honorArchivedView = false,
 }: {
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
-  availableToBookOnly?: boolean;
+  bookableScope?: BookableListScope | null;
   timeZone?: string;
   honorArchivedView?: boolean;
 }): Promise<string[]> {
@@ -113,7 +114,7 @@ async function getAdvancedFilteredAssetIds({
       search,
       parsedFilters,
       undefined, // no specific assetIds filter
-      availableToBookOnly,
+      bookableScope,
       timeZone,
       lowStockOnly,
       // The Active/Archived view, only for callers that opt in (issue #382);
@@ -132,7 +133,7 @@ async function getAdvancedFilteredAssetIds({
     throw new ShelfError({
       cause,
       message: "Something went wrong while fetching asset IDs",
-      additionalData: { organizationId, filters, availableToBookOnly },
+      additionalData: { organizationId, filters, bookableScope },
       label,
     });
   }
@@ -243,7 +244,6 @@ export async function resolveAssetIdsForBulkOperation({
       organizationId,
       filters: currentSearchParams,
       settings,
-      availableToBookOnly: false, // Set based on user role if needed
       timeZone,
       honorArchivedView,
     });

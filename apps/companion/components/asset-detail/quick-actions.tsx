@@ -60,6 +60,13 @@ interface QuickActionsProps {
    * Undefined (older server) leaves it enabled — the server still validates.
    */
   custodyAvailable?: number;
+  /**
+   * Set when the asset is archived: why it cannot be changed (role-aware, from
+   * `lib/archived-assets.ts`). Custody, Move and Edit then render disabled
+   * with this as their screen-reader hint; the screen shows it in a notice.
+   * More stays live, because an archived asset can still be deleted.
+   */
+  archivedReason?: string;
 }
 
 export const QuickActions = memo(function QuickActions({
@@ -78,9 +85,13 @@ export const QuickActions = memo(function QuickActions({
   canDelete,
   isQtyTracked = false,
   custodyAvailable,
+  archivedReason,
 }: QuickActionsProps) {
   const { colors } = useTheme();
   const styles = useStyles();
+  // An archived asset is read-only: the server refuses custody, moves and
+  // edits, so those render disabled instead of offering a tap that fails.
+  const isArchived = archivedReason !== undefined;
 
   const hasCustody = !!asset.custody;
   const isAvailable = asset.status === "AVAILABLE";
@@ -128,21 +139,25 @@ export const QuickActions = memo(function QuickActions({
             <TouchableOpacity
               style={[
                 styles.primaryActionBlack,
-                assignQtyDisabled && styles.primaryActionDisabled,
+                (assignQtyDisabled || isArchived) &&
+                  styles.primaryActionDisabled,
               ]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 onAssignCustody();
               }}
-              disabled={assignQtyDisabled}
+              disabled={assignQtyDisabled || isArchived}
               activeOpacity={0.7}
               accessibilityLabel={
                 isSelfService
                   ? "Take custody of asset"
                   : "Assign custody of asset"
               }
+              accessibilityHint={archivedReason}
               accessibilityRole="button"
-              accessibilityState={{ disabled: assignQtyDisabled }}
+              accessibilityState={{
+                disabled: assignQtyDisabled || isArchived,
+              }}
             >
               <Ionicons
                 name="person-add-outline"
@@ -153,7 +168,7 @@ export const QuickActions = memo(function QuickActions({
                 {isSelfService ? "Take Custody" : "Assign Custody"}
               </Text>
             </TouchableOpacity>
-            {assignQtyDisabled && (
+            {assignQtyDisabled && !isArchived && (
               <Text style={styles.assignDisabledHint}>
                 No units available to assign right now.
               </Text>
@@ -182,7 +197,7 @@ export const QuickActions = memo(function QuickActions({
             <TouchableOpacity
               style={[
                 styles.primaryActionBlack,
-                kitBlock && styles.primaryActionDisabled,
+                (kitBlock || isArchived) && styles.primaryActionDisabled,
               ]}
               onPress={() => {
                 if (kitBlock) {
@@ -192,15 +207,19 @@ export const QuickActions = memo(function QuickActions({
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                 onAssignCustody();
               }}
+              // Archived wins over the kit block: nothing about the kit makes
+              // an archived asset assignable, so there is nothing to explain
+              // on tap. The notice above the actions already says why.
+              disabled={isArchived}
               activeOpacity={0.7}
               accessibilityLabel={
                 isSelfService
                   ? "Take custody of asset"
                   : "Assign custody of asset"
               }
-              accessibilityHint={kitBlock?.reason}
+              accessibilityHint={archivedReason ?? kitBlock?.reason}
               accessibilityRole="button"
-              accessibilityState={{ disabled: !!kitBlock }}
+              accessibilityState={{ disabled: !!kitBlock || isArchived }}
             >
               <Ionicons
                 name="person-add-outline"
@@ -211,7 +230,7 @@ export const QuickActions = memo(function QuickActions({
                 {isSelfService ? "Take Custody" : "Assign Custody"}
               </Text>
             </TouchableOpacity>
-            {kitBlock && (
+            {kitBlock && !isArchived && (
               <Text style={styles.assignDisabledHint}>{kitBlock.reason}</Text>
             )}
           </>
@@ -222,13 +241,19 @@ export const QuickActions = memo(function QuickActions({
         <View style={styles.secondaryActionsRow}>
           {canUpdate && (
             <TouchableOpacity
-              style={styles.secondaryAction}
+              style={[
+                styles.secondaryAction,
+                isArchived && styles.primaryActionDisabled,
+              ]}
               onPress={onLocationPress}
+              disabled={isArchived}
               activeOpacity={0.7}
               accessibilityLabel={
                 isQtyTracked ? "Manage placements" : "Update location"
               }
+              accessibilityHint={archivedReason}
               accessibilityRole="button"
+              accessibilityState={{ disabled: isArchived }}
             >
               <Ionicons
                 name="location-outline"
@@ -248,11 +273,17 @@ export const QuickActions = memo(function QuickActions({
           )}
           {canUpdate && (
             <TouchableOpacity
-              style={styles.secondaryAction}
+              style={[
+                styles.secondaryAction,
+                isArchived && styles.primaryActionDisabled,
+              ]}
               onPress={onEditPress}
+              disabled={isArchived}
               activeOpacity={0.7}
               accessibilityLabel="Edit asset"
+              accessibilityHint={archivedReason}
               accessibilityRole="button"
+              accessibilityState={{ disabled: isArchived }}
             >
               <Ionicons
                 name="create-outline"

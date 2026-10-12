@@ -1493,10 +1493,20 @@ export default function AssetOverview() {
                       Available for bookings
                     </p>
                     <p className="text-[12px] text-gray-600">
-                      Asset is available for being used in bookings
+                      {/* An archived asset can't be booked whatever this says.
+                          The switch shows Off for it, and this line keeps the
+                          stored setting, which a reinstate brings back. */}
+                      {asset?.archivedAt
+                        ? `Archived assets can't be booked. When reinstated, it will be ${
+                            asset.availableToBook ? "available" : "unavailable"
+                          } for bookings again.`
+                        : "Asset is available for being used in bookings"}
                     </p>
                   </div>
                   <Switch
+                    // Remount when the archive state flips, so defaultChecked
+                    // is read again rather than kept from the previous state.
+                    key={asset?.archivedAt ? "archived" : "active"}
                     name={zo.fields.availableToBook()}
                     disabled={
                       !canUpdateAvailability ||
@@ -1504,7 +1514,9 @@ export default function AssetOverview() {
                       // Archived assets are frozen: no actions except reinstate.
                       !!asset?.archivedAt
                     } // Disable for self service users + archived assets
-                    defaultChecked={asset?.availableToBook}
+                    defaultChecked={
+                      !asset?.archivedAt && asset?.availableToBook
+                    }
                     required
                     title={
                       asset?.archivedAt

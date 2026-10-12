@@ -41,6 +41,12 @@ vitest.mock("react-router", async () => {
   return { ...actual, data: createDataMock() };
 });
 
+// why: the archived pre-check is a database read. These cases are about
+// other rules, so no requested asset is archived unless a test says so.
+vitest.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vitest.fn().mockResolvedValue(null),
+}));
+
 // why: external auth, no Supabase in tests
 vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn().mockResolvedValue({ user: { id: "user-1" } }),

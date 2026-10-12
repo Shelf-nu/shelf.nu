@@ -31,7 +31,13 @@ import { accessFor } from "@helpers/role-access";
 // — which vitest reports separately from the assertions, so the suite can go
 // green while still being broken.
 vi.mock("~/database/db.server", () => ({
-  db: { $connect: vi.fn(), $transaction: vi.fn() },
+  db: {
+    $connect: vi.fn(),
+    $transaction: vi.fn(),
+    // why: the loader counts the kit's archived members for its empty-kit
+    // reasons; none here.
+    assetKit: { count: vi.fn().mockResolvedValue(0) },
+  },
 }));
 
 const { mockRequirePermission } = vi.hoisted(() => ({

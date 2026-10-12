@@ -145,6 +145,7 @@ function kitFixture({
       asset: {
         status: AssetStatus.AVAILABLE,
         availableToBook: true,
+        archivedAt: null,
         custody: [],
         ...member,
       },
