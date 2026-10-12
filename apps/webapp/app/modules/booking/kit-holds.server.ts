@@ -17,6 +17,7 @@
  */
 
 import { AssetType, BookingStatus, KitStatus, Prisma } from "@prisma/client";
+import { kitsWithoutActiveAssetsRefusal } from "@shelf/labels";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 import { resolveSliceKitIds } from "./slice-kit-attribution";
@@ -299,6 +300,65 @@ export async function assertKitsCustodyAssignable(
       shouldBeCaptured: false,
     });
   }
+}
+
+/**
+ * Refuses kits that hold no active asset: only archived members, or none.
+ *
+ * Archived members are left out of kit custody and kit bookings (issue #382),
+ * so such a kit would be held or booked while nothing in it is, and its
+ * archived members could then never be reinstated ("kit in use"). One query:
+ * a kit with no member whose asset is active.
+ *
+ * Read-only. Inside a transaction, call it after the members' archive lock
+ * so an archive committing in between cannot empty the kit behind it.
+ *
+ * @param client Pass the active `tx` when called inside a transaction.
+ * @param args.action What is being refused, for the message.
+ * @throws {ShelfError} 400 naming each such kit, with
+ *   `additionalData.kitIdsWithoutActiveAssets`.
+ */
+export async function assertKitsHaveActiveAssets(
+  client: Pick<ExtendedPrismaClient, "kit">,
+  {
+    kitIds,
+    organizationId,
+    action,
+  }: {
+    kitIds: string[];
+    organizationId: string;
+    action: "custody" | "booking";
+  }
+): Promise<void> {
+  if (kitIds.length === 0) return;
+
+  const kitsWithoutActiveAssets = await client.kit.findMany({
+    where: {
+      id: { in: [...new Set(kitIds)] },
+      organizationId,
+      assetKits: { none: { asset: { archivedAt: null } } },
+    },
+    select: { id: true, name: true, _count: { select: { assetKits: true } } },
+  });
+  if (kitsWithoutActiveAssets.length === 0) return;
+
+  throw new ShelfError({
+    cause: null,
+    label: "Kit",
+    status: 400,
+    title: "Kit has no active assets",
+    message: kitsWithoutActiveAssetsRefusal({
+      kits: kitsWithoutActiveAssets.map((kit) => ({
+        name: kit.name,
+        hasArchivedAssets: kit._count.assetKits > 0,
+      })),
+      action,
+    }),
+    additionalData: {
+      kitIdsWithoutActiveAssets: kitsWithoutActiveAssets.map((kit) => kit.id),
+    },
+    shouldBeCaptured: false,
+  });
 }
 
 /** Up to three kit names, then "and N more", for a refusal message. */

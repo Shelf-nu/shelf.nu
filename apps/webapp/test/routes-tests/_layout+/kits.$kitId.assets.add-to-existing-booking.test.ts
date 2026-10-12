@@ -42,6 +42,8 @@ vi.mock("~/database/db.server", () => ({
 vi.mock("~/modules/booking/service.server", () => ({
   assertKitsAddableToActiveBooking: vi.fn(),
   buildKitSlicesForBooking: vi.fn(),
+  // why: archived kit members left out, for the toast; none by default.
+  countArchivedKitMembers: vi.fn().mockResolvedValue(0),
   createKitBookingNote: vi.fn(),
   getExistingBookingDetails: vi.fn(),
   loadBookingsData: vi.fn(),

@@ -5,7 +5,10 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildUnavailableAssets } from "./unavailable-assets";
+import {
+  buildArchivedAssets,
+  buildUnavailableAssets,
+} from "./unavailable-assets";
 
 function row(
   overrides: Partial<Parameters<typeof buildUnavailableAssets>[0][number]> = {}
@@ -95,5 +98,37 @@ describe("buildUnavailableAssets", () => {
       "First",
       "Second",
     ]);
+  });
+});
+
+describe("buildArchivedAssets", () => {
+  it("names each archived asset once, with the kit its first row sits in", () => {
+    expect(
+      buildArchivedAssets([
+        { id: "a", title: "Camera", archivedAt: new Date(), kit: null },
+        { id: "b", title: "Tripod", archivedAt: null, kit: null },
+        {
+          id: "a",
+          title: "Camera",
+          archivedAt: new Date(),
+          kit: { name: "Shoot Kit" },
+        },
+        {
+          id: "c",
+          title: "Light",
+          archivedAt: "2026-10-01T00:00:00Z",
+          kit: { name: "Shoot Kit" },
+        },
+      ])
+    ).toEqual([
+      { id: "a", title: "Camera", kitName: null },
+      { id: "c", title: "Light", kitName: "Shoot Kit" },
+    ]);
+  });
+
+  it("is empty when nothing on the booking is archived", () => {
+    expect(
+      buildArchivedAssets([{ id: "b", title: "Tripod", kit: null }])
+    ).toEqual([]);
   });
 });

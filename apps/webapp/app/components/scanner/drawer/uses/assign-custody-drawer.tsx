@@ -431,6 +431,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.inCustody(
       showStateBadges && asset.status === AssetStatus.IN_CUSTODY
     ),

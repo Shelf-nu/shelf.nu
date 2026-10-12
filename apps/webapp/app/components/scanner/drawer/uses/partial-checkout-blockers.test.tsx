@@ -33,6 +33,7 @@ const EXPECTED_IDS = [
   "kit-assets-booked-elsewhere",
   "redundant-kit-assets",
   "kits-not-in-booking",
+  "assets-archived",
   "invalid-codes",
 ];
 
@@ -307,6 +308,21 @@ describe("buildPartialCheckoutBlockers", () => {
       qrKit: kitItem("k1", { members: [{ id: "elsewhere" }] }),
     });
     expect(activeIds(built)).toEqual(["kits-not-in-booking"]);
+  });
+
+  it("assets-archived: an archived booked asset, resolved by dropping it", () => {
+    const built = build({
+      qr1: assetItem({ id: "a1", archivedAt: new Date() }),
+      qr2: assetItem({ id: "a2" }),
+    });
+    expect(activeIds(built)).toEqual(["assets-archived"]);
+    built.blockerConfigs.find((b) => b.id === "assets-archived")?.onResolve?.();
+    expect(removedBy(built.removeAssetsFromList)).toEqual(["a1"]);
+  });
+
+  it("assets-archived: an active asset does not block", () => {
+    const built = build({ qr1: assetItem({ id: "a1", archivedAt: null }) });
+    expect(activeIds(built)).not.toContain("assets-archived");
   });
 
   it("invalid-codes: a code that resolved to nothing", () => {

@@ -42,6 +42,7 @@ import {
   EXPLICIT_REQUIREMENT_ROLE_LABELS,
   explicitRequirementSwitchDescription,
   KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -49,6 +50,11 @@ import {
   kitMemberCustodyBlockedReason,
   kitMemberCustodyRefusal,
   kitMembersCustodyRefusal,
+  archivedAssetBlockedReason,
+  archivedAssetsLeftOut,
+  archivedAssetsRefusal,
+  kitWithoutActiveAssetsReason,
+  kitsWithoutActiveAssetsRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -343,6 +349,119 @@ test("the multi-member refusal counts the members and names the first three", ()
       ["Tripod", "Gimbal", "Mic", "Light", "Stand"].map(member)
     ),
     '5 of the selected assets are part of a kit: "Tripod", "Gimbal", "Mic" and 2 more. Assign custody to the kit, or remove them from the kit first.'
+  );
+});
+
+test("an archived asset's disabled reason never offers a reinstate the reader lacks", () => {
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true }),
+    "This asset is archived. Reinstate it to make changes."
+  );
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true, action: "book" }),
+    "This asset is archived. Reinstate it to book it."
+  );
+  for (const action of ["change", "book"]) {
+    const reason = archivedAssetBlockedReason({ canReinstate: false, action });
+    assert.equal(
+      reason,
+      "This asset is archived. Ask an admin to reinstate it."
+    );
+    assert.doesNotMatch(reason, /Reinstate it/);
+  }
+  // A reinstate held up by an in-use kit names the way out.
+  assert.match(
+    KIT_IN_USE_REINSTATE_REASON,
+    /Release or check in the kit first/
+  );
+});
+
+test("the archived refusal names the assets and the way out for this reader", () => {
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: true,
+    }),
+    '"Cam A" is archived. Reinstate it to make changes.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Ask an admin to reinstate it.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A", "Cam B"],
+      fix: "remove-from-list",
+      canReinstate: false,
+    }),
+    '"Cam A" and "Cam B" are archived. Remove them from the list and try again.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["A", "B", "C", "D", "E"],
+      fix: "remove-from-booking",
+      canReinstate: true,
+    }),
+    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "remove-from-booking",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Remove it from the booking or ask an admin to reinstate it.'
+  );
+});
+
+test("left-out counts agree in number", () => {
+  assert.equal(archivedAssetsLeftOut(1), "1 archived asset was left out.");
+  assert.equal(archivedAssetsLeftOut(3), "3 archived assets were left out.");
+});
+
+test("a kit with no active asset says whether it is empty or only archived", () => {
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: true }],
+      action: "custody",
+    }),
+    'Kit "Camera Kit" holds only archived assets, so there is nothing to put into custody. Add an active asset to it, or have an admin reinstate one.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: false }],
+      action: "booking",
+    }),
+    'Kit "Camera Kit" has no assets, so there is nothing to book. Add assets to it first.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: ["A", "B", "C", "D"].map((name) => ({
+        name,
+        hasArchivedAssets: true,
+      })),
+      action: "custody",
+    }),
+    '4 kits have no active assets, so there is nothing to put into custody: "A", "B", "C" and 1 more. Add active assets to them first.'
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: true,
+      action: "booking",
+    }),
+    "This kit holds only archived assets. Add an active asset to book this kit."
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: false,
+      action: "custody",
+    }),
+    "This kit has no assets. Add assets to assign custody."
   );
 });
 
