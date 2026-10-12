@@ -25,9 +25,15 @@
  * @see {@link file://./../../components/assets/assets-index/asset-model-assets-sheet.tsx}
  */
 import { AssetType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { ArchivedFilter } from "~/modules/asset/types";
+import {
+  applyArchivedFilter,
+  getArchivedFilterFromParams,
+} from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
@@ -37,6 +43,7 @@ import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { applyAssetModelBucketFilters } from "./bucket";
@@ -92,25 +99,32 @@ function stringifyFilters(params: URLSearchParams): string {
  *   never from the request
  * @param availableToBookOnly - Restricts the count to assets the viewer may
  *   reserve, matching the asset query beside it
+ * @param archivedFilter - The index's Active / Archived / All view (issue #382).
+ *   Not a filter the user can clear, so it scopes this count too: counting
+ *   archived assets in the Active view would promise rows that clearing every
+ *   filter still never shows.
  * @returns How many assets the bucket holds, filters aside
  */
 async function countBucketAssetsIgnoringFilters({
   bucket,
   organizationId,
   availableToBookOnly,
+  archivedFilter,
 }: {
   bucket: AssetModelBucket;
   organizationId: string;
   availableToBookOnly: boolean;
+  archivedFilter: ArchivedFilter;
 }): Promise<number> {
-  return db.asset.count({
-    where: {
-      organizationId,
-      type: AssetType.INDIVIDUAL,
-      assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
-      ...(availableToBookOnly ? { availableToBook: true } : {}),
-    },
-  });
+  const where: Prisma.AssetWhereInput = {
+    organizationId,
+    type: AssetType.INDIVIDUAL,
+    assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
+    ...(availableToBookOnly ? { availableToBook: true } : {}),
+  };
+  applyArchivedFilter(where, archivedFilter);
+
+  return db.asset.count({ where });
 }
 
 /**
@@ -211,6 +225,15 @@ export async function loadAssetModelBucketAssets({
     // through it.
     const availableToBookOnly = access.policy.assets.listScope === "bookable";
 
+    // The index's Archived and All views are for members who can act on what
+    // is in them (`asset: archive`, issue #382); everyone else is held to the
+    // Active view whatever the forwarded string says, as on the index itself.
+    const honorArchivedView = roleHasPermission({
+      roles: [access.role],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.archive,
+    });
+
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
         request,
@@ -220,6 +243,7 @@ export async function loadAssetModelBucketAssets({
         canUseBarcodes,
         timeZone,
         availableToBookOnly,
+        honorArchivedView,
       });
 
     // Only an empty sheet has a use for this, and only an empty sheet pays for
@@ -231,6 +255,9 @@ export async function loadAssetModelBucketAssets({
             bucket,
             organizationId,
             availableToBookOnly,
+            archivedFilter: honorArchivedView
+              ? getArchivedFilterFromParams(forwarded)
+              : "active",
           })
         : null;
 

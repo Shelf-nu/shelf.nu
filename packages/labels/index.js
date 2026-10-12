@@ -485,3 +485,60 @@ export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
   BOOKING_METHOD.scanned,
   BOOKING_METHOD.selected,
 ]);
+
+/**
+ * Name of the form field that carries a typed delete confirmation. The bulk
+ * delete endpoints read it, and every confirm dialog posts it under this name.
+ */
+export const DELETE_CONFIRMATION_FIELD = "confirmation";
+
+/**
+ * Reduces a typed delete confirmation to the form it is compared in.
+ *
+ * Unicode NFC first: a macOS keyboard can emit a decomposed "é" while the
+ * stored name holds the composed one, and the two would never match. Then
+ * trims, collapses runs of whitespace (a title with a double space must not
+ * demand one) and lower-cases. The point of the field is a deliberate act, not
+ * a spelling test.
+ *
+ * @param {unknown} value - what the user typed, or the expected name or count
+ * @returns {string} the comparable form; "" for null or undefined
+ */
+export function normalizeDeleteConfirmation(value) {
+  return String(value ?? "")
+    .normalize("NFC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/**
+ * Whether a typed confirmation unlocks a delete.
+ *
+ * One rule for every surface: the webapp dialogs, the server guard on bulk
+ * deletes and the companion's delete sheets all call this, so the button the
+ * user sees enabled is never refused by the server for a spelling difference.
+ * An expected value that is blank never matches, so an empty input cannot
+ * confirm a nameless item.
+ *
+ * @param {unknown} typed - what the user typed
+ * @param {string | number} expected - the item's name, or the number of
+ *   selected items for a bulk delete
+ * @returns {boolean} true when they match after normalization
+ */
+export function deleteConfirmationMatches(typed, expected) {
+  const want = normalizeDeleteConfirmation(expected);
+  return want.length > 0 && normalizeDeleteConfirmation(typed) === want;
+}
+
+/**
+ * What a permanent delete removes, for the deletes both apps offer. The
+ * webapp's delete dialogs and the companion's delete sheets show these, so a
+ * user reads the same consequences on either device.
+ */
+export const DELETE_CONSEQUENCE_LABELS = Object.freeze({
+  ASSET:
+    "This permanently deletes the asset and everything recorded on it: notes, custody, reminders and custom field values. It is removed from every booking, kit and audit it was part of, past and upcoming, and its QR code is unlinked. This cannot be undone.",
+  BOOKING:
+    "This permanently deletes the booking with its notes, model reservations and check-in and check-out history. If it is ongoing or overdue, its assets become available. This cannot be undone.",
+});

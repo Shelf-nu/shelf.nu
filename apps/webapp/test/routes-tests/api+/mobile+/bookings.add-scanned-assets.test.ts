@@ -212,6 +212,8 @@ describe("POST /api/mobile/bookings/add-scanned-assets — kit provenance", () =
         where: {
           kitId: { in: ["kit-from-another-org"] },
           organizationId: "org-1",
+          // Archived members are left out of the booking (issue #382).
+          asset: { archivedAt: null },
         },
       })
     );

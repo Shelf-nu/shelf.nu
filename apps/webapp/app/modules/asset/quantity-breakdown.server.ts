@@ -62,6 +62,7 @@ export async function getAssetQuantityRows(
   { assetId, organizationId }: GetAssetQuantityRowsArgs
 ) {
   const asset = await db.asset.findFirst({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read for the asset's own detail page, which archived assets keep
     where: { id: assetId, organizationId },
     select: {
       id: true,

@@ -5,7 +5,10 @@ import { ShelfError } from "~/utils/error";
 import { getParamsValues, ALL_SELECTED_KEY } from "~/utils/list";
 import { generateWhereClause, parseFiltersWithHierarchy } from "./query.server";
 import type { AllowedCustodianFilterIds } from "./utils.server";
-import { getAssetsWhereInput } from "./utils.server";
+import {
+  getArchivedFilterFromParams,
+  getAssetsWhereInput,
+} from "./utils.server";
 import type { Column } from "../asset-index-settings/helpers";
 
 const label = "Assets";
@@ -70,6 +73,8 @@ export function buildAdvancedFilteredAssetIdsQuery(
  * @param timeZone - Acting user's IANA timezone; forwarded to
  *   {@link generateWhereClause} so built-in date-column filters truncate the
  *   day in the user's tz (avoids an off-by-one). Defaults to "UTC".
+ * @param honorArchivedView - Apply the `?archived=` view; otherwise active
+ *   assets only. See {@link resolveAssetIdsForBulkOperation}.
  * @returns Promise resolving to array of asset IDs matching the filters
  */
 async function getAdvancedFilteredAssetIds({
@@ -78,12 +83,14 @@ async function getAdvancedFilteredAssetIds({
   settings,
   availableToBookOnly = false,
   timeZone = "UTC",
+  honorArchivedView = false,
 }: {
   organizationId: string;
   filters: string;
   settings: AssetIndexSettings;
   availableToBookOnly?: boolean;
   timeZone?: string;
+  honorArchivedView?: boolean;
 }): Promise<string[]> {
   try {
     const searchParams = new URLSearchParams(filters);
@@ -108,7 +115,10 @@ async function getAdvancedFilteredAssetIds({
       undefined, // no specific assetIds filter
       availableToBookOnly,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // The Active/Archived view, only for callers that opt in (issue #382);
+      // everyone else selects active assets whatever the URL says.
+      honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
     );
 
     // Minimal query: only SELECT id, but include the same joins the main
@@ -174,12 +184,22 @@ export async function resolveAssetIdsForBulkOperation({
   settings,
   timeZone = "UTC",
   allowedTeamMemberIds,
+  honorArchivedView = false,
 }: {
   assetIds: Asset["id"][];
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
   settings: AssetIndexSettings;
   timeZone?: string;
+  /**
+   * Resolve "select all" in the `?archived=` view the user was looking at
+   * (issue #382). Off by default, so select-all acts on active assets: the
+   * view param is raw URL input, and a list only honours it for members who
+   * may see archived assets. Pass `true` only from bulk actions that work ON
+   * archived assets and are themselves gated to those members (archive,
+   * reinstate, delete), or for a caller proven to hold `asset: archive`.
+   */
+  honorArchivedView?: boolean;
   /**
    * Custodian ids the caller may filter by. Required, with no default, so
    * every bulk operation states an answer — "select all" resolves through
@@ -225,6 +245,7 @@ export async function resolveAssetIdsForBulkOperation({
       settings,
       availableToBookOnly: false, // Set based on user role if needed
       timeZone,
+      honorArchivedView,
     });
   } else {
     // SIMPLE MODE: Use simple where clause
@@ -233,6 +254,7 @@ export async function resolveAssetIdsForBulkOperation({
       organizationId,
       currentSearchParams,
       allowedTeamMemberIds,
+      honorArchivedView,
     });
 
     const assets = await db.asset.findMany({

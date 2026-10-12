@@ -273,7 +273,7 @@ describe("api/audits.bulk-actions action", () => {
         makeRequest({
           intent: "bulk-delete",
           auditIds: ["a1"],
-          confirmation: "DELETE",
+          confirmation: "1",
         })
       );
 
@@ -286,24 +286,41 @@ describe("api/audits.bulk-actions action", () => {
       );
     });
 
-    it("rejects when the confirmation word is missing or wrong", async () => {
+    it("hands the typed count to the service, which checks it against the audits it resolves", async () => {
       vi.mocked(requirePermission).mockResolvedValue({
         organizationId: "org-1",
         access: accessFor([OrganizationRoles.ADMIN]),
       } as any);
+      vi.mocked(bulkDeleteAudits).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          message: "Nothing was deleted.",
+          additionalData: { expectedConfirmation: 1 },
+          label: "Audit",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
 
       const response = (await callAction(
         makeRequest({
           intent: "bulk-delete",
           auditIds: ["a1"],
-          confirmation: "delete", // wrong case — schema requires literal "DELETE"
+          confirmation: "2",
         })
       )) as any;
 
-      // Validation failure: non-2xx response and the service must not be called
-      expect(response.init?.status).toBeDefined();
-      expect(response.init.status).not.toBe(200);
-      expect(bulkDeleteAudits).not.toHaveBeenCalled();
+      expect(bulkDeleteAudits).toHaveBeenCalledWith(
+        expect.objectContaining({ confirmation: "2" })
+      );
+      // The refusal reaches the dialog as a 400 with the number to type.
+      expect(response.init.status).toBe(400);
+      expect(response.data.error.additionalData).toMatchObject({
+        expectedConfirmation: 1,
+      });
+      expect(sendNotification).not.toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Audits deleted" })
+      );
     });
 
     it("forwards auditIds + search params to the service and reports the deleted count in the notification", async () => {
@@ -317,7 +334,7 @@ describe("api/audits.bulk-actions action", () => {
         makeRequest({
           intent: "bulk-delete",
           auditIds: ["a1", "a2", "a3"],
-          confirmation: "DELETE",
+          confirmation: "3",
           currentSearchParams: "status=ARCHIVED",
         })
       );
@@ -330,6 +347,7 @@ describe("api/audits.bulk-actions action", () => {
         organizationId: "org-1",
         userId: "user-1",
         currentSearchParams: "status=ARCHIVED",
+        confirmation: "3",
       });
       expect(sendNotification).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -350,7 +368,7 @@ describe("api/audits.bulk-actions action", () => {
         makeRequest({
           intent: "bulk-delete",
           auditIds: ["a1"],
-          confirmation: "DELETE",
+          confirmation: "1",
         })
       );
 
@@ -380,7 +398,7 @@ describe("api/audits.bulk-actions action", () => {
         makeRequest({
           intent: "bulk-delete",
           auditIds: ["a1"],
-          confirmation: "DELETE",
+          confirmation: "1",
         })
       )) as any;
 

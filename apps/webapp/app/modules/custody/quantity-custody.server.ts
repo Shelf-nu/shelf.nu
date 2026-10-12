@@ -188,6 +188,7 @@ export async function assertAssignableQuantities({
 
   for (const assetId of quantityAssetIds) {
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id lookup; hiding archived here would misreport one as not in this workspace instead of refusing it as archived
       where: { id: assetId, organizationId },
       select: { title: true, quantity: true, type: true },
     });
@@ -702,6 +703,7 @@ async function refusalFor(
   let title = "An asset";
   try {
     const asset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: best-effort title for a refusal message, by id
       where: { id: assetId, organizationId },
       select: { title: true },
     });

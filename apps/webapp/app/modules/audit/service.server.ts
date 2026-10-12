@@ -8,6 +8,7 @@ import type {
 } from "@prisma/client";
 import type { UserOrganization } from "@prisma/client";
 import type { ITXClientDenyList } from "@prisma/client/runtime/library";
+import { deleteConfirmationMatches } from "@shelf/labels";
 import { z } from "zod";
 
 import type { SortingDirection } from "~/components/list/filters/sort-by";
@@ -29,6 +30,7 @@ import {
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import type { ClientHint } from "~/utils/client-hints";
 import type { RawFormatPrefs } from "~/utils/date-format";
+import { assertBulkDeleteConfirmed } from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
@@ -380,6 +382,7 @@ export async function createAuditSession(
   }
 
   const assets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence check for audit scope; audits may include archived assets (e.g. created from a kit)
     where: {
       id: { in: uniqueAssetIds },
       organizationId,
@@ -1242,6 +1245,9 @@ export async function getAssetsForAuditSession({
       select: {
         id: true,
         title: true,
+        // Surfaced so the audit row can flag an archived asset with the
+        // "Archived" badge (issue #382).
+        archivedAt: true,
         mainImage: true,
         thumbnailImage: true,
         // Model cover image for assets with no image of their own
@@ -1418,7 +1424,7 @@ export async function recordAuditScan(
         },
       }),
       db.asset.findUnique({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: deliberate fetch-then-verify — organizationId is selected and explicitly checked immediately below (`if (!scannedAsset || scannedAsset.organizationId !== organizationId) throw 404`), giving a clean cross-org message instead of a raw P2003.; why: a scanned label must resolve to its asset even when archived; audits badge archived assets
         where: { id: assetId },
         select: { id: true, title: true, organizationId: true },
       }),
@@ -3927,16 +3933,6 @@ async function safeRemoveAuditImageFiles(image: {
 }
 
 /**
- * Normalize audit-name confirmation strings for comparison.
- * Trims whitespace, applies Unicode NFC, and lower-cases. NFC matters
- * because macOS keyboards can emit decomposed characters (NFD) while
- * the DB stores the composed form, so `"Résumé" !== "Résumé"` without
- * normalization even when a user types the name exactly.
- */
-const normalizeAuditName = (s: string): string =>
-  s.trim().normalize("NFC").toLowerCase();
-
-/**
  * Permanently deletes an archived audit session and all related data.
  *
  * Prerequisites:
@@ -3944,7 +3940,8 @@ const normalizeAuditName = (s: string): string =>
  *   Delete is the intentional escape hatch past the archive-first contract,
  *   so `assertAuditNotArchived` is deliberately NOT called.
  * - Caller supplies the user's typed confirmation via `expectedName`. The
- *   compare is server-side and case-insensitive after NFC normalization,
+ *   compare is server-side, with `deleteConfirmationMatches` from
+ *   `@shelf/labels` (NFC, trimmed, whitespace collapsed, case-insensitive),
  *   so a tampered client value can't bypass the name check.
  *
  * Cascade behavior (via Prisma `onDelete: Cascade`):
@@ -3997,7 +3994,8 @@ export async function deleteAuditSession({
       });
     }
 
-    if (normalizeAuditName(expectedName) !== normalizeAuditName(audit.name)) {
+    // The shared typed-confirmation rule, the same one the dialog applies.
+    if (!deleteConfirmationMatches(expectedName, audit.name)) {
       throw new ShelfError({
         cause: null,
         message: "Confirmation did not match the audit name.",
@@ -4120,11 +4118,17 @@ export async function bulkDeleteAudits({
   organizationId,
   userId,
   currentSearchParams,
+  confirmation,
 }: {
   auditIds: AuditSession["id"][];
   organizationId: Organization["id"];
   userId: string;
   currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * audits this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }): Promise<{ count: number }> {
   try {
     const selectAll = auditIds.includes(ALL_SELECTED_KEY);
@@ -4201,6 +4205,15 @@ export async function bulkDeleteAudits({
         });
       }
     }
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: auditIds,
+      confirmation,
+      matchedCount: audits.length,
+      noun: { one: "audit", many: "audits" },
+      label,
+    });
 
     const targetIds = audits.map((a) => a.id);
 
@@ -4445,6 +4458,7 @@ async function validateExistingAssetIds(
   if (assetIds.length === 0) return [];
 
   const existingAssets = await db.asset.findMany({
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: duplicating an audit keeps the original scope, which may hold archived assets; only deleted/foreign ids are dropped
     where: {
       id: { in: assetIds },
       organizationId,

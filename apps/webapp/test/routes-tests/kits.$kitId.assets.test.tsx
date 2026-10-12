@@ -6,7 +6,8 @@
  * bookings from across the whole organization, which those roles otherwise
  * never see, and describes a removal they have no permission to perform. These
  * tests pin that the notice data is computed (and shipped) only for callers
- * with `kit`/`update`.
+ * with `kit`/`update`, and that the Active / Archived / All view honours
+ * `?archived=` only for members holding `asset`/`archive`.
  *
  * @see {@link file://./../../app/routes/_layout+/kits.$kitId.assets.tsx}
  */
@@ -14,6 +15,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 
 import {
   getAssetsForKits,
@@ -68,16 +70,17 @@ const KIT_MEMBER = {
  * loader reads to derive its second permission check.
  */
 function mockRole(role: OrganizationRoles) {
-  requirePermissionMock.mockResolvedValue({
-    organizationId: "org-1",
-    userOrganizations: [{ organization: { id: "org-1" }, roles: [role] }],
-  } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+  requirePermissionMock.mockResolvedValue(
+    permissionContext({ roles: [role] }) as unknown as Awaited<
+      ReturnType<typeof requirePermission>
+    >
+  );
 }
 
-function createLoaderArgs(): LoaderFunctionArgs {
+function createLoaderArgs(search = ""): LoaderFunctionArgs {
   return {
     context: { getSession: () => ({ userId: "user-123" }) },
-    request: new Request("https://example.com/kits/kit-123/assets"),
+    request: new Request(`https://example.com/kits/kit-123/assets${search}`),
     params: { kitId: "kit-123" },
   } as unknown as LoaderFunctionArgs;
 }
@@ -137,4 +140,51 @@ describe("kits.$kitId.assets loader — booking-removal notice gate", () => {
       },
     });
   });
+});
+
+describe("kits.$kitId.assets loader: archived view", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMocks.kit.findFirst.mockResolvedValue({ name: "Rack Kit" });
+    getAssetsForKitsMock.mockResolvedValue({
+      items: [],
+    } as unknown as Awaited<ReturnType<typeof getAssetsForKits>>);
+    bookingImpactMock.mockResolvedValue({});
+  });
+
+  it("lists active members only by default", async () => {
+    mockRole(OrganizationRoles.ADMIN);
+
+    await loader(createLoaderArgs());
+
+    expect(getAssetsForKitsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ archivedFilter: "active" })
+    );
+  });
+
+  it.each(["archived", "all"] as const)(
+    "honours ?archived=%s for a member who can archive",
+    async (view) => {
+      mockRole(OrganizationRoles.ADMIN);
+
+      await loader(createLoaderArgs(`?archived=${view}`));
+
+      expect(getAssetsForKitsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ archivedFilter: view })
+      );
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "keeps %s on active members whatever the URL asks for",
+    async (role) => {
+      mockRole(role);
+
+      await loader(createLoaderArgs("?archived=archived"));
+
+      expect(getAssetsForKitsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ archivedFilter: "active" })
+      );
+    }
+  );
 });

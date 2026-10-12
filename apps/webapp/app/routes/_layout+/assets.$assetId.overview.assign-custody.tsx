@@ -144,6 +144,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/assets/${assetId}`);
     }
 
+    /** Archived assets can't be assigned custody (issue #382). */
+    if (asset?.archivedAt) {
+      return redirect(`/assets/${assetId}`);
+    }
+
     // An individually tracked kit member takes custody through its kit, so the
     // page refuses to open for one, with the same 400 the action gives. A plain
     // read: opening a page must not lock the asset row.
@@ -229,6 +234,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * missing asset as a 500.
      */
     const targetAsset = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: existence lookup ahead of the archived guard below, which must see archived rows to answer 'archived' rather than 'not found'
       where: { id: assetId, organizationId },
       select: { type: true },
     });
@@ -323,6 +329,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * 2. Update the asset status to IN_CUSTODY
      * 3. Create a new custody record linked to the custodian
      */
+    // Archived assets can't be assigned custody (issue #382). Guard the action
+    // too (not just the loader) so a crafted POST can't bypass the redirect.
+    const archivedAssetCount = await db.asset.count({
+      where: { id: assetId, organizationId, archivedAt: { not: null } },
+    });
+    if (archivedAssetCount > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: "Reinstate this asset before assigning custody.",
+        additionalData: { userId, assetId },
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
       .$transaction(async (tx) => {
@@ -362,15 +385,33 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             id: assetId,
             organizationId,
             status: { not: AssetStatus.CHECKED_OUT },
+            // The archived check above is a read outside this claim, so an
+            // archive committed in between would otherwise still be handed a
+            // custodian. Riding the predicate on the UPDATE closes that gap;
+            // the zero-row branch below tells the two causes apart.
+            archivedAt: null,
           },
           data: { status: AssetStatus.IN_CUSTODY },
         });
 
         if (claimed.count === 0) {
           const blocked = await tx.asset.findFirst({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: tells the zero-row claim's causes apart, so it must read an archived row's archivedAt
             where: { id: assetId, organizationId },
-            select: { title: true },
+            select: { title: true, archivedAt: true },
           });
+
+          if (blocked?.archivedAt) {
+            throw new ShelfError({
+              cause: null,
+              title: "Asset is archived",
+              message: `"${blocked.title}" was archived before custody could be assigned. Reinstate it first.`,
+              additionalData: { userId, assetId, custodianId },
+              label: "Assets",
+              shouldBeCaptured: false,
+              status: 400,
+            });
+          }
 
           throw new ShelfError({
             cause: null,

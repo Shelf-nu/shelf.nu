@@ -78,7 +78,7 @@ export async function getScannerPickerMeta({
   // Fast-fail on INDIVIDUAL — the qty input never renders, no point
   // computing a strict-available pool.
   const asset = await db.asset.findFirst({
-    where: { id: assetId, organizationId },
+    where: { id: assetId, organizationId, archivedAt: null },
     select: { id: true, type: true, quantity: true, unitOfMeasure: true },
   });
   if (!asset || asset.type !== AssetType.QUANTITY_TRACKED) return null;

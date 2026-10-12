@@ -66,6 +66,22 @@ describe("getAssetModelRollup", () => {
     expect(sql).not.toContain("a.valuation");
   });
 
+  it("counts only active assets by default (issue #382)", async () => {
+    // The model view sits on the asset index, whose default view hides
+    // archived assets; the counts must describe the same set.
+    await getAssetModelRollup(baseArgs);
+
+    expect(lastQueryText()).toContain(`a."archivedAt" IS NULL`);
+  });
+
+  it("follows the Archived and All views", async () => {
+    await getAssetModelRollup({ ...baseArgs, archivedFilter: "archived" });
+    expect(lastQueryText()).toContain(`a."archivedAt" IS NOT NULL`);
+
+    await getAssetModelRollup({ ...baseArgs, archivedFilter: "all" });
+    expect(lastQueryText()).not.toContain(`"archivedAt"`);
+  });
+
   it("restricts the rollup to INDIVIDUAL assets", async () => {
     await getAssetModelRollup(baseArgs);
 

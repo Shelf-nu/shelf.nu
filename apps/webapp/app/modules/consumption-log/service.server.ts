@@ -284,7 +284,7 @@ export async function computeAvailableQuantity(
   try {
     const [asset, custodySum] = await Promise.all([
       client.asset.findUniqueOrThrow({
-        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging)
+        // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetId` org-verified by the caller (adjustQuantity / checkout flows validate the asset against organizationId before logging); why: availability math for a by-id asset; must not throw for an archived one
         where: { id: assetId },
         select: { quantity: true },
       }),

@@ -97,6 +97,9 @@ export async function action({ request }: ActionFunctionArgs) {
         name: newBooking.name,
         status: newBooking.status,
       },
+      // Archived assets in the source are left out of the copy (issue #382);
+      // the app can tell the user how many.
+      droppedArchivedCount: newBooking.droppedArchivedCount,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

@@ -4,6 +4,10 @@ import { redirect } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { permissionContext } from "@helpers/role-access";
 
+import {
+  buildKitSlicesForBooking,
+  createBooking,
+} from "~/modules/booking/service.server";
 import { action } from "~/routes/_layout+/bookings.new";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -11,6 +15,9 @@ const dbMocks = vi.hoisted(() => {
   return {
     booking: {
       create: vi.fn(),
+    },
+    assetKit: {
+      findMany: vi.fn(),
     },
   };
 });
@@ -24,6 +31,11 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: {
       create: dbMocks.booking.create,
+    },
+    // why: the kit flow reads the kit's full membership (archived members
+    // included) to keep every member out of the standalone bucket
+    assetKit: {
+      findMany: dbMocks.assetKit.findMany,
     },
     // why: the action now resolves the acting user's timezone preference via
     // resolveUserFormatPrefsById (db.user.findFirst). null → HARDCODED_DEFAULT_PREFS
@@ -41,6 +53,7 @@ vi.mock("~/utils/roles.server", () => ({
 
 // why: testing booking creation validation without executing actual booking service operations
 vi.mock("~/modules/booking/service.server", () => ({
+  buildKitSlicesForBooking: vi.fn().mockResolvedValue([]),
   createBooking: vi.fn().mockResolvedValue({
     id: "booking-123",
     from: new Date("2024-01-01T10:00:00Z"),
@@ -383,5 +396,62 @@ describe("bookings/new - custodian assignment", () => {
     expect((response as Response).status).toBe(500); // ShelfError for self-assignment restriction
 
     expect(mockBookingCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("bookings/new - kit with an archived member", () => {
+  it("books the kit without the archived member instead of refusing it", async () => {
+    requirePermissionMock.mockResolvedValue({
+      ...permissionContext({ roles: [OrganizationRoles.ADMIN] }),
+      organizationId: "org-1",
+    } as any);
+    mockGetTeamMember.mockResolvedValue({
+      id: "team-member-123",
+      userId: "user-456",
+    });
+    // The kit has two members; the slice builder leaves out the archived one.
+    const activeSlice = {
+      assetKitId: "ak-active",
+      assetId: "asset-active",
+      kitId: "kit-1",
+      quantity: 1,
+    };
+    vi.mocked(buildKitSlicesForBooking).mockResolvedValue([activeSlice]);
+    dbMocks.assetKit.findMany.mockResolvedValue([
+      { assetId: "asset-active" },
+      { assetId: "asset-archived" },
+    ]);
+
+    const formData = new FormData();
+    formData.set("name", "Kit Booking");
+    formData.set("startDate", "2024-01-01T10:00");
+    formData.set("endDate", "2024-01-02T10:00");
+    formData.set(
+      "custodian",
+      JSON.stringify({ id: "team-member-123", name: "Valid Team Member" })
+    );
+    // A form rendered before the member was archived still posts its id.
+    formData.append("assetIds[0]", "asset-active");
+    formData.append("assetIds[1]", "asset-archived");
+    formData.set("kitId", "kit-1");
+
+    const request = new Request("https://example.com/bookings/new", {
+      method: "POST",
+      body: formData,
+    });
+
+    const response = await action(createActionArgs({ request }));
+
+    expect((response as Response).status).toBe(302);
+    expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith({
+      where: { kitId: { in: ["kit-1"] }, kit: { organizationId: "org-1" } },
+      select: { assetId: true },
+    });
+    expect(vi.mocked(createBooking)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: [],
+        kitSlices: [activeSlice],
+      })
+    );
   });
 });

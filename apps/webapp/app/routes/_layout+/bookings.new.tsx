@@ -301,9 +301,16 @@ export async function action({ context, request }: ActionFunctionArgs) {
           shouldBeCaptured: false,
         });
       }
-      const kitMemberIds = new Set(kitSlices.map((s) => s.assetId));
       // Subtract kit members so a kit member is never written as BOTH a kit
       // slice and a standalone row (which would duplicate it on the booking).
+      // Read the membership itself, not `kitSlices`: those leave out archived
+      // members (a kit books without them), and an archived member left in the
+      // standalone bucket makes `createBooking` refuse the whole booking.
+      const kitMemberships = await db.assetKit.findMany({
+        where: { kitId: { in: kitIds }, kit: { organizationId } },
+        select: { assetId: true },
+      });
+      const kitMemberIds = new Set(kitMemberships.map((m) => m.assetId));
       standaloneAssetIds = standaloneAssetIds.filter(
         (id) => !kitMemberIds.has(id)
       );
@@ -384,7 +391,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
       if (standaloneAssetIds.length === 1) {
         const [singleAssetId] = standaloneAssetIds;
         const addedAsset = await db.asset.findFirst({
-          where: { id: singleAssetId, organizationId },
+          // createBooking already refused archived assets.
+          where: { id: singleAssetId, organizationId, archivedAt: null },
           select: { id: true, type: true },
         });
         if (addedAsset && isQuantityTracked(addedAsset)) {

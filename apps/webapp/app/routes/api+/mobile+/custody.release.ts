@@ -55,6 +55,7 @@ export async function action({ request }: ActionFunctionArgs) {
     // QT releases belong to POST /api/mobile/custody/release-quantity, which
     // takes a quantity and releases a single slice.
     const assetToRelease = await db.asset.findFirst({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type guard for a specific asset; releasing custody must not 404 on an archived asset
       where: { id: assetId, organizationId },
       select: { type: true },
     });

@@ -24,6 +24,7 @@ import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { recordEvents } from "~/modules/activity-event/service.server";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
@@ -306,7 +307,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // ("custody of 50 boxes via Kittington"), so pull the fields
           // `formatUnitCount` needs: type + unitOfMeasure. INDIVIDUAL
           // rows continue to render countless ("custody via Kittington").
+          // Archived members are out of service (issue #382) and are left out.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: { id: true, type: true, unitOfMeasure: true },
@@ -331,12 +334,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // remaining-pool rule (qty-tracked rows claim `asset.quantity − already
       // allocated`, fully-allocated assets are skipped) is applied
       // consistently with `updateKitAssets` and `bulkAssignKitCustody`.
+      // The archive row lock on the members, so an archive cannot commit
+      // between the read above and the custody written below (issue #382).
+      // The helper's own read then skips any member archived in between.
+      const memberIds = updatedKit.assetKits.map((ak) => ak.asset.id);
+      await lockAssetsForArchiveGuard(tx, memberIds, organizationId);
       const inheritData = await buildKitCustodyInheritData({
         tx,
         kitId: updatedKit.id,
         kitCustodyId,
         teamMemberId: custodianId,
-        assetIds: updatedKit.assetKits.map((ak) => ak.asset.id),
+        assetIds: memberIds,
       });
 
       if (inheritData.length > 0) {

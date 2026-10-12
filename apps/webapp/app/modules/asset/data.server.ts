@@ -33,6 +33,7 @@ import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
@@ -48,7 +49,11 @@ import {
   refreshExpiredAssetImages,
   updateAssetsWithBookingCustodians,
 } from "./service.server";
-import { getAllSelectedValuesFromFilters } from "./utils.server";
+import type { ArchivedFilter } from "./utils.server";
+import {
+  getAllSelectedValuesFromFilters,
+  getArchivedFilterFromParams,
+} from "./utils.server";
 import { MAX_SAVED_FILTER_PRESETS } from "../asset-filter-presets/constants";
 import { listPresetsForUser } from "../asset-filter-presets/service.server";
 import type { Column } from "../asset-index-settings/helpers";
@@ -228,6 +233,7 @@ export async function simpleModeLoader({
   // `getPaginatedAndFilterableAssets`.
   const { locale, timeZone } = getClientHint(request);
   const assignsSelfOnly = access.custody.assign === "self";
+  const honorArchivedView = canViewArchivedAssets(access);
 
   // Check if URL contains advanced filter syntax (from browser back button or old bookmark)
   // URLSearchParams.toString() encodes colons as %3A, so we must check the decoded values
@@ -304,6 +310,7 @@ export async function simpleModeLoader({
       // This route renders the custodian filter, so its seed is scoped by the
       // custody rule for every restricted role.
       canSeeAllCustody,
+      honorArchivedView,
       filters,
       extraInclude:
         view === "availability"
@@ -562,6 +569,49 @@ export async function simpleModeLoader({
 }
 
 /**
+ * Whether a member may open the Archived and All views (issue #382).
+ *
+ * The same grant that archives and reinstates, so the views follow the
+ * actions: a member who cannot act on an archived asset is not handed a list
+ * of them by editing the URL. Everyone else gets active assets, whatever
+ * `?archived=` says.
+ *
+ * @param access - The member's resolved access, from `requirePermission`
+ * @returns `true` when the member holds `asset: archive`
+ */
+export function canViewArchivedAssets(access: RoleAccess): boolean {
+  return roleHasPermission({
+    roles: [access.role],
+    entity: PermissionEntity.asset,
+    action: PermissionAction.archive,
+  });
+}
+
+/**
+ * The Active / Archived / All view an asset list shows this member.
+ *
+ * What `?archived=` asks for when the member may open the archived views (see
+ * {@link canViewArchivedAssets}), and Active otherwise. Every list that offers
+ * the view menu resolves it here, so the menu and the rows it governs follow
+ * the same grant on every page.
+ *
+ * @param args.access - The member's resolved access, from `requirePermission`
+ * @param args.searchParams - The request's search params
+ * @returns The view to filter the list by
+ */
+export function resolveArchivedViewForMember({
+  access,
+  searchParams,
+}: {
+  access: RoleAccess;
+  searchParams: URLSearchParams;
+}): ArchivedFilter {
+  return canViewArchivedAssets(access)
+    ? getArchivedFilterFromParams(searchParams)
+    : "active";
+}
+
+/**
  * Adapts {@link getAssetModelRollup} to the shape `advancedModeLoader`
  * destructures from the asset query, so the two branches stay interchangeable.
  *
@@ -576,6 +626,7 @@ async function getAssetModelRollupPage({
   filters,
   parsedFilters,
   availableToBookOnly,
+  honorArchivedView,
   sortBy,
   sortDirection,
 }: {
@@ -585,6 +636,8 @@ async function getAssetModelRollupPage({
   filters: string | undefined;
   parsedFilters: Filter[];
   availableToBookOnly: boolean;
+  /** Honour `?archived=` (issue #382); see `canViewArchivedAssets`. */
+  honorArchivedView: boolean;
   sortBy: AssetModelRollupSortKey;
   sortDirection: "asc" | "desc";
 }) {
@@ -592,6 +645,11 @@ async function getAssetModelRollupPage({
     ? new URLSearchParams(filters)
     : getCurrentSearchParams(request);
   const { page, perPageParam, search } = getParamsValues(searchParams);
+  // The Active / Archived / All toggle applies to the model view too, so the
+  // rollup counts the same assets the list would show (issue #382).
+  const archivedFilter = honorArchivedView
+    ? getArchivedFilterFromParams(searchParams)
+    : "active";
   const cookie = await updateCookieWithPerPage(request, perPageParam);
   // Clamp once, here, and report the clamped value. `per_page` reaches the
   // cookie straight from the URL with no upper bound, while the rollup caps its
@@ -613,6 +671,7 @@ async function getAssetModelRollupPage({
       page,
       perPage,
       availableToBookOnly,
+      archivedFilter,
       sortBy,
       sortDirection,
     });
@@ -650,6 +709,7 @@ export async function advancedModeLoader({
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
   const assignsSelfOnly = access.custody.assign === "self";
+  const honorArchivedView = canViewArchivedAssets(access);
 
   /** Parse filters */
   const {
@@ -772,6 +832,7 @@ export async function advancedModeLoader({
           // restricted role's model counts describe the assets it can actually
           // see rather than the whole workspace.
           availableToBookOnly: access.policy.assets.listScope === "bookable",
+          honorArchivedView,
           sortBy: modelSortBy,
           sortDirection: modelSortDirection,
         })
@@ -785,6 +846,7 @@ export async function advancedModeLoader({
           canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
           availableToBookOnly: access.policy.assets.listScope === "bookable",
           preParsedFilters: parsedFilters,
+          honorArchivedView,
           // Both arms carry the same keys so the caller reads them directly.
           // Discriminating a union by `in` here degrades to `unknown` at this
           // file's type complexity, and the failure lands on unrelated

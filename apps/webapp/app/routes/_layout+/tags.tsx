@@ -22,13 +22,18 @@ import TagQuickActions from "~/components/tag/tag-quick-actions";
 import TagUseForFilter from "~/components/tag/tag-use-for-filter";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 
-import { deleteTag, getTags } from "~/modules/tag/service.server";
+import {
+  assertTagDeleteConfirmed,
+  deleteTag,
+  getTags,
+} from "~/modules/tag/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import {
   setCookie,
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -122,15 +127,21 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.delete,
     });
 
-    const { id } = parseData(
+    const { id, confirmation } = parseData(
       await request.formData(),
-      z.object({
-        id: z.string(),
-      }),
+      z
+        .object({
+          id: z.string(),
+        })
+        .merge(DeleteConfirmationSchema),
       {
         additionalData: { userId },
       }
     );
+
+    // A tag on any asset or booking needs its name typed, as the dialog asks;
+    // an unused one deletes with one click.
+    await assertTagDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteTag({ id, organizationId });
 

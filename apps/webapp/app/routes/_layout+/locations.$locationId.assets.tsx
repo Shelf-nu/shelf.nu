@@ -28,6 +28,10 @@ import type {
 } from "react-router";
 import { data, useLoaderData, useParams } from "react-router";
 import z from "zod";
+import {
+  ArchivedViewMenu,
+  useArchivedView,
+} from "~/components/assets/archived-view-menu";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -58,10 +62,15 @@ import {
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { getCustodyFromLocationByPool } from "~/modules/asset/custody-source.server";
+import {
+  canViewArchivedAssets,
+  resolveArchivedViewForMember,
+} from "~/modules/asset/data.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { CurrentSearchParamsSchema } from "~/modules/asset/utils.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
@@ -145,6 +154,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         userOrganizations,
         request,
         teamMemberIds,
+        archivedFilter: resolveArchivedViewForMember({ access, searchParams }),
       }),
       getTeamMemberForCustodianFilter({
         organizationId,
@@ -229,7 +239,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { locationId } = getParams(params, paramsSchema);
 
   try {
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.location,
@@ -283,6 +293,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           organizationId,
           locationId,
           currentSearchParams,
+          // Select all covers the view the list showed (Active by default).
+          honorArchivedView: canViewArchivedAssets(access),
         });
 
         if (resolvedAssetIds.length === 0) {
@@ -322,6 +334,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationAssets() {
   const roles = useOrganizationRoles();
+  const canArchiveAssets = useCanArchiveAssets();
+  const archivedView = useArchivedView(canArchiveAssets);
   const { location } = useLoaderData<typeof loader>();
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -440,12 +454,19 @@ export default function LocationAssets() {
               </When>
             </>
           }
-          customEmptyStateContent={{
-            title: "There are currently no assets at the location",
-            text: "Add assets in this location",
-            newButtonRoute: "manage-assets",
-            newButtonContent: "Add asset",
-          }}
+          titleContent={
+            canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+          }
+          customEmptyStateContent={
+            archivedView === "archived"
+              ? { title: "No archived assets at this location", text: "" }
+              : {
+                  title: "There are currently no assets at the location",
+                  text: "Add assets in this location",
+                  newButtonRoute: "manage-assets",
+                  newButtonContent: "Add asset",
+                }
+          }
         />
       </div>
     </>
@@ -695,6 +716,7 @@ const ListAssetContent = ({
                   id={item.id}
                   status={item.status}
                   availableToBook={item.availableToBook}
+                  isArchived={!!item.archivedAt}
                   asset={item}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}

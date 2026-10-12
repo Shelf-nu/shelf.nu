@@ -144,6 +144,41 @@ The rule triggers when:
 3. The `where` clause doesn't include a `deletedAt` filter
 4. **Ternary operators**: Both branches of a ternary expression are checked independently
 
+### `require-archived-at-check-on-asset-queries`
+
+**Purpose**: Make every Asset read say which side of the archive it wants.
+
+**Problem**: Archived assets (issue #382) are out of service: hidden from lists, counts, pickers and snapshot reports, and refused by bookings, kits and custody. A query that forgets the filter quietly counts or offers them again, and nothing notices: typecheck passes and the result is still a valid list.
+
+**Solution**: Every `<client>.asset.findMany / findFirst / findUnique / count / aggregate / groupBy` (and the `OrThrow` variants) with a literal `where` must name `archivedAt`. Covers `db`, `tx` and any other client identifier.
+
+#### Examples
+
+❌ **Bad**:
+
+```typescript
+const assets = await db.asset.findMany({ where: { organizationId } });
+const total = await db.asset.count();
+```
+
+✅ **Good**:
+
+```typescript
+// Active assets, the default everywhere
+db.asset.findMany({ where: { organizationId, archivedAt: null } });
+
+// Deliberately archived ones
+db.asset.findMany({ where: { organizationId, archivedAt: { not: null } } });
+
+// The query must reach archived assets too: say why
+// eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail page shows archived assets with a badge
+db.asset.findFirst({ where: { id, organizationId } });
+```
+
+**Reach archived on purpose when** the surface shows assets that are already part of a record or a physical label: the asset's own pages, a booking that holds it, a location or kit page, audits, QR/barcode scan resolution, history reports and the backup export. Also guards that read the archive state, and ID allocation (sequential ids must count archived rows).
+
+**Not checked**: a `where` built elsewhere (a variable or a helper such as `getAssetsWhereInput`, which applies the view itself), spreads inside the literal, and writes (the archived freeze in `updateAsset` and the bulk services guards those).
+
 ### `require-button-type`
 
 **Purpose**: Enforce explicit `type` prop on all `<Button>` components rendering as native buttons.
