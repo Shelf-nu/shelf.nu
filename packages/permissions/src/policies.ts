@@ -66,7 +66,8 @@ type RolePolicyShape = {
   assets: {
     /**
      * The asset list shows every asset, or ("bookable") only those available
-     * to book plus the ones in the member's own custody.
+     * to book plus the ones the member holds (in their custody, or checked out
+     * to them on an active booking).
      */
     listScope: "all" | "bookable";
   };

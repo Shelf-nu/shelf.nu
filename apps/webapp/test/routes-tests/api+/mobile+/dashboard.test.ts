@@ -30,6 +30,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -331,18 +332,8 @@ describe("GET /api/mobile/dashboard — asset list scope", () => {
         expect(where).toEqual({
           organizationId: ORG_ID,
           archivedAt: null,
-          AND: [
-            {
-              OR: [
-                { availableToBook: true },
-                {
-                  custody: {
-                    some: { custodian: { userId: CALLER_USER_ID } },
-                  },
-                },
-              ],
-            },
-          ],
+          // The scope's own shape is pinned in list-scope.server.test.ts.
+          AND: [bookableListScopeWhere({ holderUserId: CALLER_USER_ID })],
         });
       }
     }

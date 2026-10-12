@@ -24,6 +24,7 @@ import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
@@ -814,13 +815,10 @@ describe("GET /api/mobile/assets — list scope", () => {
     return findManyMock.mock.calls[0]![0]!.where!;
   }
 
-  /** The list scope a bookable-only role gets: bookable, or held by them. */
-  const BOOKABLE_OR_HELD = {
-    OR: [
-      { availableToBook: true },
-      { custody: { some: { custodian: { userId: FAKE_USER_ID } } } },
-    ],
-  };
+  /** The list scope a bookable-only role gets (its shape is pinned in list-scope.server.test.ts). */
+  const BOOKABLE_OR_HELD = bookableListScopeWhere({
+    holderUserId: FAKE_USER_ID,
+  });
 
   it.each(["SELF_SERVICE", "BASE"] as const)(
     "lists bookable assets and the ones %s holds, as the web index does",

@@ -36,7 +36,7 @@ const ALL_TOGGLES_ON = "ssB,baB,ssC,baC";
  */
 const LIST_SCOPE_LABELS: Record<AssetListScope, string> = {
   all: "Every asset",
-  bookable: "Assets available for bookings, plus those in their custody",
+  bookable: "Assets available for bookings, plus the ones they hold",
 };
 
 const yesNo = (value: boolean) => (value ? "yes" : "no");

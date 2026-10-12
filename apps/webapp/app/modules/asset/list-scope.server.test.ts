@@ -36,11 +36,26 @@ describe("resolveBookableListScope", () => {
 });
 
 describe("bookableListScopeWhere", () => {
-  it("keeps bookable assets and the ones in the holder's custody", () => {
+  it("keeps bookable assets, the holder's custody and what is out to them on an active booking", () => {
     expect(bookableListScopeWhere({ holderUserId: "u-1" })).toEqual({
       OR: [
         { availableToBook: true },
         { custody: { some: { custodian: { userId: "u-1" } } } },
+        {
+          bookingAssets: {
+            some: {
+              checkedOutAt: { not: null },
+              checkedInAt: null,
+              booking: {
+                status: { in: ["ONGOING", "OVERDUE"] },
+                OR: [
+                  { custodianUserId: "u-1" },
+                  { custodianTeamMember: { userId: "u-1" } },
+                ],
+              },
+            },
+          },
+        },
       ],
     });
   });
@@ -58,6 +73,20 @@ describe("bookableListScopeSql", () => {
     expect(sql.sql).toContain(`scope_cu."assetId" = a.id`);
     expect(sql.sql).toContain(`scope_tm."userId" = ?`);
     // The user id travels as a bound parameter, never spliced into the text.
-    expect(sql.values).toEqual(["u-1"]);
+    expect(sql.values.every((value) => value === "u-1")).toBe(true);
+  });
+
+  it("ORs in a slice checked out to the user on an active booking", () => {
+    const sql = bookableListScopeSql({ holderUserId: "u-1" });
+
+    expect(sql.sql).toContain(`FROM "BookingAsset" scope_ba`);
+    expect(sql.sql).toContain(
+      `JOIN "Booking" scope_b ON scope_b.id = scope_ba."bookingId"`
+    );
+    expect(sql.sql).toContain(`scope_ba."checkedOutAt" IS NOT NULL`);
+    expect(sql.sql).toContain(`scope_ba."checkedInAt" IS NULL`);
+    expect(sql.sql).toContain(`scope_b.status IN ('ONGOING', 'OVERDUE')`);
+    expect(sql.sql).toContain(`scope_b."custodianUserId" = ?`);
+    expect(sql.sql).toContain(`scope_btm."userId" = ?`);
   });
 });

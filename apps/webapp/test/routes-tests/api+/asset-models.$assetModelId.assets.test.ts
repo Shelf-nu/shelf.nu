@@ -69,6 +69,7 @@ vitest.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
@@ -217,14 +218,7 @@ describe("asset model assets endpoint", () => {
     // The unfiltered count is narrowed the same way: counted over the wider
     // set, it would report assets this viewer is shown nowhere else.
     expect(unfilteredCountWhere()).toMatchObject({
-      AND: [
-        {
-          OR: [
-            { availableToBook: true },
-            { custody: { some: { custodian: { userId: "user-1" } } } },
-          ],
-        },
-      ],
+      AND: [bookableListScopeWhere({ holderUserId: "user-1" })],
     });
   });
 
