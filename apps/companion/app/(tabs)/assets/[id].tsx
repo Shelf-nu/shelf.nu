@@ -467,17 +467,15 @@ export default function AssetDetailScreen() {
   const performReinstate = async () => {
     if (!currentOrg || !asset) return;
     setIsReinstating(true);
-    try {
-      const { error: err } = await api.reinstateAsset(currentOrg.id, asset.id);
-      if (err) {
-        Alert.alert("Couldn't reinstate", err);
-        return;
-      }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await fetchAsset();
-    } finally {
+    const { error: err } = await api.reinstateAsset(currentOrg.id, asset.id);
+    if (err) {
       setIsReinstating(false);
+      Alert.alert("Couldn't reinstate", err);
+      return;
     }
+    await fetchAsset();
+    setIsReinstating(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
   // ── Delete Asset ──────────────────────────────────
