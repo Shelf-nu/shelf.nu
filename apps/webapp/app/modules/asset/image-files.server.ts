@@ -127,7 +127,9 @@ async function findUnreferencedImageFiles(
 
   // Assets whose photo or thumbnail URL points into one of these folders.
   // The URL path after `/assets/` is the object path, so its second segment
-  // is the folder's asset id, the same as above.
+  // is the folder's asset id, the same as above. There is no `archivedAt`
+  // filter on purpose: an archived asset keeps its photo and can be
+  // reinstated, so the files it shows must stay.
   const folderIds = assetIdsOfPaths(storedFiles.map((file) => file.name));
   const referencingAssets = await db.$queryRaw<
     { mainImage: string | null; thumbnailImage: string | null }[]

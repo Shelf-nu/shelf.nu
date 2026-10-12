@@ -135,22 +135,28 @@ describe("deleteAsset", () => {
 });
 
 describe("bulkDeleteAssets", () => {
-  /** Deletes the given assets as `deleter-2`. */
+  /**
+   * Deletes the given assets as `deleter-2`, confirming with their count as
+   * the bulk delete dialog does.
+   */
   function bulkDelete(assetIds: string[]) {
-    return bulkDeleteAssets({
+    const args = {
       assetIds,
       organizationId: "org-1",
       userId: "deleter-2",
+      confirmation: String(assetIds.length),
       // why: only read by the mocked id resolution
       settings: {} as never,
-    });
+    };
+    return bulkDeleteAssets(args);
   }
 
   it("removes the photo files of every deleted asset, whoever uploaded them", async () => {
     dbMocks.asset.findMany.mockResolvedValue([
-      { id: "asset-1", mainImage: signedAssetUrl("x"), title: "Drill" },
-      { id: "asset-2", mainImage: signedAssetUrl("y"), title: "Saw" },
-      { id: "asset-3", mainImage: null, title: "Tape" },
+      { id: "asset-1", title: "Drill" },
+      { id: "asset-2", title: "Saw" },
+      // No photo, so no files in the bucket.
+      { id: "asset-3", title: "Tape" },
     ]);
     assetImageStorage.upload(
       "uploader-1/asset-1/main-image-100.jpg",
@@ -172,7 +178,7 @@ describe("bulkDeleteAssets", () => {
 
   it("succeeds and logs when the file lookup fails", async () => {
     dbMocks.asset.findMany.mockResolvedValue([
-      { id: "asset-1", mainImage: signedAssetUrl("x"), title: "Drill" },
+      { id: "asset-1", title: "Drill" },
     ]);
     assetImageStorage.queryRaw.mockRejectedValueOnce(new Error("timeout"));
 

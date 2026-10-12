@@ -15,9 +15,10 @@ import {
 import { createActionArgs } from "@mocks/remix";
 
 // why: no database in unit tests; the transaction callback runs against the
-// same stubs, and the raw file lookups go to the storage fake
+// same stubs, the typed-title check reads the title through `findFirst`, and
+// the raw file lookups go to the storage fake
 const dbMocks = vi.hoisted(() => ({
-  asset: { delete: vi.fn() },
+  asset: { delete: vi.fn(), findFirst: vi.fn() },
   $transaction: vi.fn(),
   $queryRaw: vi.fn(),
 }));
@@ -59,8 +60,11 @@ vi.mock("lottie-react", () => ({ default: () => null }));
 
 const { action } = await import("~/routes/_layout+/assets.$assetId");
 
+/** The title of the asset under test, typed to confirm the delete. */
+const ASSET_TITLE = "Drill";
+
 /**
- * Submits the page's delete form as `deleter-2`.
+ * Submits the page's delete form as `deleter-2`, with the title typed.
  *
  * why: a `URLSearchParams` body rather than `FormData`, which happy-dom can
  * alter on the `Request` round-trip.
@@ -74,6 +78,7 @@ function submitDelete(assetId: string) {
         method: "POST",
         body: new URLSearchParams({
           intent: "delete",
+          confirmation: ASSET_TITLE,
           mainImageUrl: signedAssetUrl(
             `uploader-1/${assetId}/main-image-100.jpg`
           ),
@@ -91,6 +96,7 @@ beforeEach(() => {
     (cb: (tx: typeof dbMocks) => Promise<unknown>) => cb(dbMocks)
   );
   dbMocks.asset.delete.mockResolvedValue({ reminders: [] });
+  dbMocks.asset.findFirst.mockResolvedValue({ title: ASSET_TITLE });
 });
 
 describe("asset page delete: photo files", () => {

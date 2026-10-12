@@ -166,4 +166,18 @@ describe("removeImageFilesOfDeletedAssets", () => {
       expect.stringMatching(/"mainImage"[\s\S]*"thumbnailImage"/),
     ]);
   });
+
+  it("lets archived assets keep the files they show", async () => {
+    assetImageStorage.upload("uploader-a/asset-1/main-image-100.jpg");
+
+    await removeImageFilesOfDeletedAssets(["asset-1"]);
+
+    // An archived asset can be reinstated with its photo, so the reference
+    // check must read every remaining asset, archived or not.
+    const assetQuery = assetImageStorage.queryRaw.mock.calls
+      .map(([strings]) => strings.join("?"))
+      .find((sql) => sql.includes('FROM "Asset"'));
+    expect(assetQuery).toBeDefined();
+    expect(assetQuery).not.toMatch(/archivedAt/i);
+  });
 });

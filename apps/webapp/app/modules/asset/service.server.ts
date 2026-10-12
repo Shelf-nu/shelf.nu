@@ -4139,8 +4139,9 @@ export async function deleteOtherImages({
       )
     );
   } catch (cause) {
-    // Image cleanup is non-critical — the asset duplication still succeeds.
-    // Transient Supabase storage errors (e.g., 502) should not pollute Sentry.
+    // Best effort: the new photo is already stored, so a failed cleanup only
+    // leaves a stale file behind. Transient Supabase storage errors (e.g.,
+    // 502) should not pollute Sentry.
     Logger.error(
       new ShelfError({
         cause,
@@ -6459,7 +6460,7 @@ export async function bulkDeleteAssets({
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, mainImage: true, title: true },
+      select: { id: true, title: true },
     });
 
     try {

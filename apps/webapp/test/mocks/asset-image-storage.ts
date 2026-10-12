@@ -55,6 +55,9 @@ function createAssetImageStorage() {
   /** Image URLs of the asset rows that still exist. */
   let remainingAssets: AssetImageRow[] = [];
 
+  // why: stands in for the storage API's `remove`, an HTTP call to Supabase;
+  // it drops the paths from the fake bucket and records each request so a
+  // test can count requests and their sizes
   const remove = vi.fn(async (paths: string[]) => {
     paths.forEach((path) => files.delete(path));
     return { data: paths.map((name) => ({ name })), error: null };
@@ -63,6 +66,9 @@ function createAssetImageStorage() {
   /**
    * Answers the lookups by the SQL text, so the order of the two queries is
    * not part of what a test asserts.
+   *
+   * why: unit tests have no database, and `storage.objects` exists only in a
+   * Supabase Postgres; the fake answers both raw reads from its own state
    */
   const queryRaw = vi.fn(
     async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -88,6 +94,8 @@ function createAssetImageStorage() {
     }
   );
 
+  // why: stands in for `getSupabaseAdmin().storage.from`; it fails on any
+  // bucket but `assets`, so a test also proves the cleanup stays in that one
   const from = vi.fn((bucket: string) => {
     if (bucket !== "assets") {
       throw new Error(`unexpected bucket: ${bucket}`);
