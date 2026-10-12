@@ -123,9 +123,18 @@ import {
   type ResolvedFormatPrefs,
 } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import {
   payload,
@@ -14007,6 +14016,35 @@ export async function removeAssets({
 }
 
 /**
+ * Refuses a single booking delete unless the user typed its name, as the delete
+ * dialog asks. A booking that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The booking to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertBookingDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.booking
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((booking) => booking?.name ?? null),
+    label,
+  });
+}
+
+/**
  * Permanently deletes a booking and reconciles the status of any assets that
  * were checked out on it.
  *
@@ -15305,6 +15343,7 @@ export async function bulkDeleteBookings({
   hints,
   currentSearchParams,
   access,
+  confirmation,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -15313,6 +15352,11 @@ export async function bulkDeleteBookings({
   currentSearchParams?: string | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * bookings this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
@@ -15365,6 +15409,15 @@ export async function bulkDeleteBookings({
       foundIds: bookings.map((booking) => booking.id),
       access,
       action: "delete",
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: bookingIds,
+      confirmation,
+      matchedCount: bookings.length,
+      noun: { one: "booking", many: "bookings" },
+      label,
     });
 
     // Roles whose policy limits delete to drafts may not delete a selection
@@ -15528,6 +15581,9 @@ export async function bulkDeleteBookings({
       }
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message

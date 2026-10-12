@@ -667,10 +667,16 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes specific asset models by IDs", async () => {
     // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
+    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
       organizationId: "org-123",
       userId: "user-1",
     });
@@ -685,20 +691,80 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes all asset models when ALL_SELECTED key is present", async () => {
     // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+      { id: "model-3" },
+    ]);
+    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
       userId: "user-1",
+      confirmation: "3",
     });
 
     // why: the assets of a deleted model need no image cleanup — they never
     // stored a copy, so ON DELETE SET NULL alone drops them to the placeholder.
     expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org-123" },
+      select: { id: true },
     });
+    // The write is the rows read, so the confirmed count is the count removed.
+    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["model-1", "model-2", "model-3"] },
+        organizationId: "org-123",
+      },
+    });
+  });
+
+  it("scopes a select-all to the index search, read from the `s` param", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([{ id: "model-1" }]);
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["all-selected"],
+      organizationId: "org-123",
+      userId: "user-1",
+      currentSearchParams: "s=sony&page=2",
+      confirmation: "1",
+    });
+
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-123",
+        OR: [
+          { name: { contains: "sony", mode: "insensitive" } },
+          { description: { contains: "sony", mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it("refuses a select-all whose typed count is not what it matches", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
+
+    await expect(
+      bulkDeleteAssetModels({
+        assetModelIds: ["all-selected"],
+        organizationId: "org-123",
+        userId: "user-1",
+        confirmation: "1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: { expectedConfirmation: 2 },
+    });
+    expect(db.assetModel.deleteMany).not.toHaveBeenCalled();
   });
 
   it("records the unlink per asset, grouped by the model each one left", async () => {
@@ -724,6 +790,7 @@ describe("bulkDeleteAssetModels", () => {
 
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
       organizationId: "org-123",
       userId: "user-1",
     });
@@ -754,6 +821,8 @@ describe("bulkDeleteAssetModels", () => {
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
       userId: "user-1",
+      // The suite's read resolves to no models.
+      confirmation: "0",
     });
 
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {

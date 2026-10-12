@@ -332,3 +332,31 @@ export declare const CLIENT_DECLARED_BOOKING_METHODS: readonly [
 /** A method an app may declare on a check-in or check-out request. */
 export type ClientDeclaredBookingMethod =
   (typeof CLIENT_DECLARED_BOOKING_METHODS)[number];
+
+/** Name of the form field that carries a typed delete confirmation. */
+export declare const DELETE_CONFIRMATION_FIELD: "confirmation";
+
+/**
+ * Reduces a typed delete confirmation to the form it is compared in: NFC,
+ * trimmed, whitespace collapsed, lower-cased. `""` for null or undefined.
+ */
+export declare function normalizeDeleteConfirmation(value: unknown): string;
+
+/**
+ * Whether a typed confirmation unlocks a delete. Shared by the webapp dialogs,
+ * the server guard on bulk deletes and the companion's delete sheets. A blank
+ * expected value never matches.
+ *
+ * @param typed - what the user typed
+ * @param expected - the item's name, or the number of selected items
+ */
+export declare function deleteConfirmationMatches(
+  typed: unknown,
+  expected: string | number
+): boolean;
+
+/** What a permanent delete removes, for the deletes both apps offer. */
+export declare const DELETE_CONSEQUENCE_LABELS: {
+  readonly ASSET: string;
+  readonly BOOKING: string;
+};

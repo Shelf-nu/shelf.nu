@@ -15143,6 +15143,7 @@ describe("bulkDeleteBookings", () => {
 
     await bulkDeleteBookings({
       bookingIds: ["bk-del-ongoing"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
       access: accessFor([OrganizationRoles.OWNER]),
@@ -15194,6 +15195,7 @@ describe("bulkDeleteBookings", () => {
       await expect(
         bulkDeleteBookings({
           bookingIds: ["bk-draft", "bk-reserved"],
+          confirmation: "2",
           organizationId: "org-1",
           userId: "user-1",
           access: accessFor([role]),
@@ -15219,6 +15221,8 @@ describe("bulkDeleteBookings", () => {
         userId: "user-1",
         access: accessFor([OrganizationRoles.SELF_SERVICE]),
         hints: mockClientHints,
+        // Both resolved rows, so the drafts-only rule is what refuses.
+        confirmation: "2",
       })
     ).rejects.toMatchObject({ status: 403 });
     expect(db.$transaction).not.toHaveBeenCalled();
@@ -15237,6 +15241,7 @@ describe("bulkDeleteBookings", () => {
     await expect(
       bulkDeleteBookings({
         bookingIds: ["bk-draft"],
+        confirmation: "1",
         organizationId: "org-1",
         userId: "user-1",
         access: accessFor([OrganizationRoles.SELF_SERVICE]),
@@ -15263,6 +15268,7 @@ describe("bulkDeleteBookings", () => {
 
     await bulkDeleteBookings({
       bookingIds: ["bk-reserved"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
       access: accessFor([OrganizationRoles.ADMIN]),
@@ -15289,6 +15295,7 @@ describe("bulkDeleteBookings", () => {
 
     await bulkDeleteBookings({
       bookingIds: ["bk-draft"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
       access: accessFor([OrganizationRoles.SELF_SERVICE]),
@@ -15311,6 +15318,7 @@ describe("bulkDeleteBookings", () => {
 
     await bulkDeleteBookings({
       bookingIds: ["bk-draft", "bk-reserved"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
       access: accessFor([OrganizationRoles.ADMIN]),

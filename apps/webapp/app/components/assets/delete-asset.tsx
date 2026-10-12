@@ -1,7 +1,18 @@
+/**
+ * Delete Asset Dialog
+ *
+ * Permanent delete of one asset, from the asset page's actions menu and the
+ * assets index row actions. The user types the asset's title before Delete is
+ * enabled (see {@link TypeToConfirm}); the copy says what the delete takes with
+ * it, because nothing can bring the asset back. The copy is shared with the
+ * companion's delete sheet through `@shelf/labels`.
+ *
+ * @see {@link file://../../routes/_layout+/assets.$assetId.tsx} - Action handler
+ */
 import type { ReactElement } from "react";
-import { cloneElement, forwardRef } from "react";
+import { cloneElement, forwardRef, useId } from "react";
 import type { Asset } from "@prisma/client";
-import { useNavigation } from "react-router";
+import { DELETE_CONSEQUENCE_LABELS } from "@shelf/labels";
 import { Button } from "~/components/shared/button";
 
 import {
@@ -14,7 +25,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "~/components/shared/modal";
-import { isFormProcessing } from "~/utils/form";
+import {
+  TypeToConfirm,
+  useTypeToConfirm,
+} from "~/components/shared/type-to-confirm";
+import { useDisabled } from "~/hooks/use-disabled";
 import { Form } from "../custom-form";
 import { TrashIcon } from "../icons/library";
 
@@ -29,11 +44,19 @@ type DeleteAssetProps = {
 
 export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
   function ({ asset, trigger }, ref) {
-    const navigation = useNavigation();
-    const disabled = isFormProcessing(navigation.state);
+    const disabled = useDisabled();
+    const confirm = useTypeToConfirm(asset.title);
+    // The field sits outside the form that submits; this links the two.
+    const formId = useId();
 
     return (
-      <AlertDialog>
+      <AlertDialog
+        onOpenChange={(open) => {
+          // Each open starts empty: a name typed for an earlier attempt must
+          // not leave the button armed.
+          if (!open) confirm.reset();
+        }}
+      >
         <AlertDialogTrigger ref={ref} asChild>
           {cloneElement(trigger)}
         </AlertDialogTrigger>
@@ -47,10 +70,18 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
             </div>
             <AlertDialogTitle>Delete {asset.title}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this asset? This action cannot be
-              undone.
+              {DELETE_CONSEQUENCE_LABELS.ASSET}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <TypeToConfirm
+            form={formId}
+            expected={asset.title}
+            value={confirm.value}
+            onChange={confirm.setValue}
+            disabled={disabled}
+          />
+
           <AlertDialogFooter>
             <div className="flex justify-center gap-2">
               <AlertDialogCancel asChild>
@@ -59,7 +90,7 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
                 </Button>
               </AlertDialogCancel>
 
-              <Form method="delete" action={`/assets/${asset.id}`}>
+              <Form id={formId} method="delete" action={`/assets/${asset.id}`}>
                 {asset.mainImage && (
                   <input
                     type="hidden"
@@ -72,9 +103,9 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
                   className="border-error-600 bg-error-600 hover:border-error-800 hover:!bg-error-800"
                   type="submit"
                   data-test-id="confirmdeleteAssetButton"
-                  disabled={disabled}
+                  disabled={disabled || !confirm.isConfirmed}
                 >
-                  Delete
+                  {disabled ? "Deleting..." : "Delete"}
                 </Button>
               </Form>
             </div>
