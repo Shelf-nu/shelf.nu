@@ -11227,25 +11227,35 @@ export async function buildKitSlicesForBooking({
 }
 
 /**
- * How many archived members the given kits hold. {@link buildKitSlicesForBooking}
- * leaves them out of the booking, and the kit-booking routes say so in their
- * success message rather than let the booked count quietly differ from the
- * kit's size.
+ * How many archived members of the given kits this add leaves out.
+ * {@link buildKitSlicesForBooking} skips archived members, and the kit-booking
+ * routes say so in their success message rather than let the booked count
+ * quietly differ from the kit's size.
+ *
+ * A membership already on the booking is not left out by this add, even when
+ * its asset was archived after it was booked (archiving keeps DRAFT bookings'
+ * rows), so it is not counted.
  *
  * @param args.kitIds - Kits being booked
  * @param args.organizationId - The caller's workspace
- * @returns The number of archived members across those kits
+ * @param args.existingAssetKitIds - `AssetKit` ids already on the booking
+ * @returns The number of archived memberships this add leaves out
  */
 export async function countArchivedKitMembers({
   kitIds,
   organizationId,
+  existingAssetKitIds,
 }: {
   kitIds: string[];
   organizationId: string;
+  existingAssetKitIds?: ReadonlySet<string>;
 }): Promise<number> {
   if (kitIds.length === 0) return 0;
   return db.assetKit.count({
     where: {
+      ...(existingAssetKitIds && existingAssetKitIds.size > 0
+        ? { id: { notIn: [...existingAssetKitIds] } }
+        : {}),
       kitId: { in: kitIds },
       organizationId,
       asset: { archivedAt: { not: null } },

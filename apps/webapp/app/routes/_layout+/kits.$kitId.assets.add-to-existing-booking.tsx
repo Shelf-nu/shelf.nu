@@ -207,7 +207,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         existingAssetKitIds,
       }),
       // Archived members stay out of the booking; the toast below says so.
-      countArchivedKitMembers({ kitIds, organizationId }),
+      countArchivedKitMembers({ kitIds, organizationId, existingAssetKitIds }),
     ]);
 
     // Empty slices means every membership of the selected kit(s) is already on

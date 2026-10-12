@@ -68,6 +68,7 @@ import {
   updateBasicBooking,
   updateBookingAssets,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
   reserveBooking,
   checkoutBooking,
   getBookingFlags,
@@ -222,6 +223,9 @@ vitest.mock("~/database/db.server", () => ({
       // the singular primitive's `aggregate`. Default to no rows — per-test
       // overrides aren't needed unless a test models kit-allocated units.
       groupBy: vitest.fn().mockResolvedValue([]),
+      // why: `countArchivedKitMembers` counts archived memberships; none by
+      // default.
+      count: vitest.fn().mockResolvedValue(0),
     },
     kit: {
       updateMany: vitest.fn().mockResolvedValue({ count: 0 }),
@@ -3552,6 +3556,48 @@ function stubArchivedKitMemberScan() {
       Promise.resolve(args?.where?.id?.in?.includes("member-archived") ? 1 : 0)
   );
 }
+
+describe("countArchivedKitMembers", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("leaves out memberships the booking already holds", async () => {
+    // why: the count is a single assetKit.count; the where clause is the
+    // behaviour under test, since no real DB is available here.
+    (db.assetKit.count as ReturnType<typeof vitest.fn>).mockResolvedValue(1);
+
+    await countArchivedKitMembers({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      existingAssetKitIds: new Set(["ak-on-booking"]),
+    });
+
+    expect(db.assetKit.count).toHaveBeenCalledWith({
+      where: {
+        id: { notIn: ["ak-on-booking"] },
+        kitId: { in: ["kit-1"] },
+        organizationId: "org-1",
+        asset: { archivedAt: { not: null } },
+      },
+    });
+  });
+
+  it("counts every archived membership when the booking holds none", async () => {
+    (db.assetKit.count as ReturnType<typeof vitest.fn>).mockResolvedValue(2);
+
+    await expect(
+      countArchivedKitMembers({ kitIds: ["kit-1"], organizationId: "org-1" })
+    ).resolves.toBe(2);
+    expect(db.assetKit.count).toHaveBeenCalledWith({
+      where: {
+        kitId: { in: ["kit-1"] },
+        organizationId: "org-1",
+        asset: { archivedAt: { not: null } },
+      },
+    });
+  });
+});
 
 describe("buildKitSlicesForBooking", () => {
   beforeEach(() => {
