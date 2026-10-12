@@ -10,7 +10,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assetImageStorage,
   settleBackgroundWork,
-  signedAssetUrl,
 } from "@mocks/asset-image-storage";
 import { createActionArgs } from "@mocks/remix";
 
@@ -79,9 +78,6 @@ function submitDelete(assetId: string) {
         body: new URLSearchParams({
           intent: "delete",
           confirmation: ASSET_TITLE,
-          mainImageUrl: signedAssetUrl(
-            `uploader-1/${assetId}/main-image-100.jpg`
-          ),
         }),
       }),
     })

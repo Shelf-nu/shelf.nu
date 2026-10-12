@@ -37,7 +37,6 @@ type DeleteAssetProps = {
   asset: {
     id: Asset["id"];
     title: Asset["title"];
-    mainImage: Asset["mainImage"];
   };
   trigger: ReactElement;
 };
@@ -91,13 +90,6 @@ export const DeleteAsset = forwardRef<HTMLButtonElement, DeleteAssetProps>(
               </AlertDialogCancel>
 
               <Form id={formId} method="delete" action={`/assets/${asset.id}`}>
-                {asset.mainImage && (
-                  <input
-                    type="hidden"
-                    value={asset.mainImage}
-                    name="mainImageUrl"
-                  />
-                )}
                 <input type="hidden" value="delete" name="intent" />
                 <Button
                   className="border-error-600 bg-error-600 hover:border-error-800 hover:!bg-error-800"
