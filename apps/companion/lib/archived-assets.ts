@@ -163,6 +163,38 @@ export function archivedScanNote(action: BatchScanAction): string {
   }
 }
 
+/** The part of a scan-list row {@link markArchivedRows} reads and writes. */
+type MarkableRow = {
+  type: "asset" | "kit";
+  /** Asset id for an asset row, kit id for a kit row. */
+  targetId: string;
+  archived?: boolean;
+  submitError?: string;
+};
+
+/**
+ * Marks the asset rows a refusal named as archived: they read "Archived",
+ * raise the "asset-archived" blocker and carry {@link ARCHIVED_ROW_ERROR}.
+ * Every other row is returned as it was, because the server refused the whole
+ * request only on their account.
+ *
+ * @param rows - The scan list
+ * @param archivedAssetIds - From {@link archivedIdsFromError}
+ * @returns The list with those rows marked; the same array when none are named
+ */
+export function markArchivedRows<T extends MarkableRow>(
+  rows: T[],
+  archivedAssetIds: readonly string[]
+): T[] {
+  if (archivedAssetIds.length === 0) return rows;
+  const archived = new Set(archivedAssetIds);
+  return rows.map((row) =>
+    row.type === "asset" && archived.has(row.targetId)
+      ? { ...row, archived: true, submitError: ARCHIVED_ROW_ERROR }
+      : row
+  );
+}
+
 /**
  * The sentence shown after a duplicate when the server left archived assets
  * out of the copy.

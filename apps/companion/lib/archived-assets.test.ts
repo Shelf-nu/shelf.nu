@@ -16,6 +16,7 @@ import {
   assetBadgeStatus,
   droppedArchivedNote,
   isArchivedAsset,
+  markArchivedRows,
 } from "./archived-assets";
 
 test("an asset with an archive stamp is archived", () => {
@@ -103,4 +104,35 @@ test("only an archived refusal names archived ids", () => {
   );
   assert.deepEqual(archivedIdsFromError({ reason: "archived" }), []);
   assert.deepEqual(archivedIdsFromError(null), []);
+});
+
+test("a refusal marks only the asset rows it names as archived", () => {
+  // A fulfil, add-to-booking or location submit the server refused because
+  // one row was archived after it was scanned.
+  const rows = [
+    { type: "asset" as const, targetId: "asset-1", title: "Old camera" },
+    { type: "asset" as const, targetId: "asset-2", title: "Tripod" },
+    {
+      type: "kit" as const,
+      targetId: "asset-1",
+      title: "Kit with a clashing id",
+    },
+  ];
+  assert.deepEqual(markArchivedRows(rows, ["asset-1"]), [
+    {
+      type: "asset",
+      targetId: "asset-1",
+      title: "Old camera",
+      archived: true,
+      submitError: "Archived. Remove it from the list.",
+    },
+    { type: "asset", targetId: "asset-2", title: "Tripod" },
+    // A kit row is never an archived asset, whatever its id.
+    { type: "kit", targetId: "asset-1", title: "Kit with a clashing id" },
+  ]);
+});
+
+test("a refusal that names no archived rows leaves the list as it was", () => {
+  const rows = [{ type: "asset" as const, targetId: "asset-1" }];
+  assert.equal(markArchivedRows(rows, []), rows);
 });

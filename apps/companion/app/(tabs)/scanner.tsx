@@ -53,11 +53,11 @@ import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
 import {
   ARCHIVED_BADGE_STATUS,
-  ARCHIVED_ROW_ERROR,
   archivedIdsFromError,
   archivedScanNote,
   assetBadgeStatus,
   isArchivedAsset,
+  markArchivedRows,
 } from "@/lib/archived-assets";
 import {
   computeBlockers,
@@ -208,28 +208,6 @@ type ScannedItem = {
   /** Why the last submit did not move this row, as the server said it. */
   submitError?: string;
 };
-
-/**
- * Marks the asset rows a refusal named as archived, leaving every other row
- * as it was. A no-op when the refusal named none.
- *
- * @param setItems - The setter of the scan list to mark
- * @param archivedAssetIds - From `archivedIdsFromError`
- */
-function markArchivedRows(
-  setItems: (update: (prev: ScannedItem[]) => ScannedItem[]) => void,
-  archivedAssetIds: string[]
-) {
-  if (archivedAssetIds.length === 0) return;
-  const archived = new Set(archivedAssetIds);
-  setItems((prev) =>
-    prev.map((item) =>
-      item.type === "asset" && archived.has(item.targetId)
-        ? { ...item, archived: true, submitError: ARCHIVED_ROW_ERROR }
-        : item
-    )
-  );
-}
 
 /** The custody mode for an action, or null for the other scanner actions. */
 function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
@@ -2087,12 +2065,10 @@ function ScannerContent() {
           if (error) {
             // An archived refusal names its rows: mark those, so the operator
             // removes them and moves the rest.
-            markArchivedRows(
-              setScannedItems,
-              archivedIdsFromError(
-                "errorDetails" in assetResult ? assetResult.errorDetails : null
-              )
+            const archivedAssetIds = archivedIdsFromError(
+              "errorDetails" in assetResult ? assetResult.errorDetails : null
             );
+            setScannedItems((prev) => markArchivedRows(prev, archivedAssetIds));
             Alert.alert("Error", error);
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -2162,9 +2138,9 @@ function ScannerContent() {
             setIsBookingSubmitting(false);
 
             if (error) {
-              markArchivedRows(
-                setBookingCheckinItems,
-                archivedIdsFromError(errorDetails)
+              const archivedAssetIds = archivedIdsFromError(errorDetails);
+              setBookingCheckinItems((prev) =>
+                markArchivedRows(prev, archivedAssetIds)
               );
               Alert.alert("Error", error);
               return;
@@ -2265,7 +2241,7 @@ function ScannerContent() {
       }
     })();
 
-    const { data, error } = await api
+    const { data, error, errorDetails } = await api
       .fulfilAndCheckoutBooking(
         currentOrg.id,
         bookingId,
@@ -2286,6 +2262,12 @@ function ScannerContent() {
       // booking. Re-reading the booking lets the add blockers flag them as
       // already in this booking. The source sheet, if open, keeps its answers.
       fetchBookingCtx();
+      // An archived refusal names its rows: mark those, so the operator
+      // removes them and checks out the rest.
+      const archivedAssetIds = archivedIdsFromError(errorDetails);
+      setBookingCheckinItems((prev) =>
+        markArchivedRows(prev, archivedAssetIds)
+      );
       Alert.alert("Couldn't check out", error);
       return;
     }

@@ -94,6 +94,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { fulfilAndCheckOut } from "~/modules/booking/fulfil-and-checkout.server";
 import { makeShelfError, type ShelfError } from "~/utils/error";
@@ -259,6 +260,35 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
 
     expect((result as unknown as Response).status).toBe(404);
     expect(getBookingSettingsForOrganization).not.toHaveBeenCalled();
+    expect(fulfilAndCheckOut).not.toHaveBeenCalled();
+  });
+
+  it("names the archived scans and checks nothing out when one is archived", async () => {
+    // A unit archived after it was scanned: the phone marks only that row.
+    const refusal = {
+      message:
+        "Some scanned assets are archived and can't be added to a booking. Reinstate them first.",
+      reason: "archived" as const,
+      archivedAssetIds: ["dell-2"],
+    };
+    vi.mocked(findMobileArchivedRefusal).mockResolvedValueOnce(refusal);
+
+    const result = (await action(
+      createActionArgs({
+        request: createRequest({
+          bookingId: "booking-1",
+          assetIds: ["dell-1", "dell-2"],
+        }),
+      })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ error: refusal });
+    expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
+      assetIds: ["dell-1", "dell-2"],
+      organizationId: "org-1",
+      purpose: "booking",
+    });
     expect(fulfilAndCheckOut).not.toHaveBeenCalled();
   });
 });
