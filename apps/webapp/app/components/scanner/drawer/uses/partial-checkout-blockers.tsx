@@ -16,11 +16,16 @@
 import { AssetStatus } from "@prisma/client";
 import type { AssetType } from "@prisma/client";
 import type { ScanListItems } from "~/atoms/qr-scanner";
+import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import type { BlockerConfig } from "../blockers-factory";
+import {
+  archivedAssetIdsOf,
+  archivedAssetsBlocker,
+} from "./scan-blocker-helpers";
 
 /** Minimal asset shape the type-aware "fully checked out" predicate needs. */
 export type FullyCheckedOutAsset = {
@@ -176,10 +181,17 @@ export function buildPartialCheckoutBlockers({
     alreadyCheckedOutAssets
   );
 
+  // Whole-asset statement, so INDIVIDUAL only. A quantity-tracked pool reads
+  // IN_CUSTODY while a single unit is held and the rest is free stock, and
+  // `partialCheckoutBooking` exempts it the same way: what a pool may send out
+  // is its units left on this booking, which `assets-already-checked-out`
+  // judges instead.
   const assetsInCustody = assets
     .filter(
       (asset) =>
-        bookingAssetIds.has(asset.id) && asset.status === AssetStatus.IN_CUSTODY
+        bookingAssetIds.has(asset.id) &&
+        !isQuantityTracked(asset) &&
+        asset.status === AssetStatus.IN_CUSTODY
     )
     .map((a) => a.id);
   const qrIdsOfAssetsInCustody = qrIdsFor(items, "asset", assetsInCustody);
@@ -386,6 +398,13 @@ export function buildPartialCheckoutBlockers({
       ),
       onResolve: () => removeItemsFromList(qrIdsOfKitsNotInBooking),
     },
+    // `partialCheckoutBooking` refuses an archived asset among the scanned
+    // ones, which fails the whole batch.
+    archivedAssetsBlocker(
+      archivedAssetIdsOf(assets),
+      removeAssetsFromList,
+      "Archived assets are out of service and cannot be checked out. Remove them from the list to continue."
+    ),
     {
       id: "invalid-codes",
       condition: errorQrIds.length > 0,

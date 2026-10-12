@@ -5,6 +5,7 @@ import {
   KitStatus,
   NoteType,
 } from "@prisma/client";
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -24,7 +25,11 @@ import { WarningBox } from "~/components/shared/warning-box";
 import { db } from "~/database/db.server";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { recordEvents } from "~/modules/activity-event/service.server";
-import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
+import {
+  assertKitsCustodyAssignable,
+  assertKitsHaveActiveAssets,
+} from "~/modules/booking/kit-holds.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   buildKitCustodyInheritData,
@@ -94,6 +99,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                 // status is IN_CUSTODY only because *some* units are
                 // operator-allocated (Option B handles that on assign).
                 type: true,
+                // Archived members are left out of kit custody, so a kit with
+                // no active member has nothing to hand over.
+                archivedAt: true,
                 bookingAssets: {
                   where: {
                     booking: {
@@ -119,6 +127,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     if (kit.custody) {
+      return redirect(`/kits/${kitId}`);
+    }
+
+    if (!kit.assetKits.some((ak) => !ak.asset.archivedAt)) {
+      sendNotification({
+        title: "Cannot assign custody at this time.",
+        message: kitWithoutActiveAssetsReason({
+          hasArchivedAssets: kit.assetKits.length > 0,
+          action: "custody",
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
       return redirect(`/kits/${kitId}`);
     }
 
@@ -306,7 +328,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           // ("custody of 50 boxes via Kittington"), so pull the fields
           // `formatUnitCount` needs: type + unitOfMeasure. INDIVIDUAL
           // rows continue to render countless ("custody via Kittington").
+          // Archived members are out of service (issue #382) and are left out.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: { id: true, type: true, unitOfMeasure: true },
@@ -331,12 +355,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // remaining-pool rule (qty-tracked rows claim `asset.quantity − already
       // allocated`, fully-allocated assets are skipped) is applied
       // consistently with `updateKitAssets` and `bulkAssignKitCustody`.
+      // The archive row lock on the members, so an archive cannot commit
+      // between the read above and the custody written below (issue #382).
+      // The helper's own read then skips any member archived in between.
+      const memberIds = updatedKit.assetKits.map((ak) => ak.asset.id);
+      await lockAssetsForArchiveGuard(tx, memberIds, organizationId);
+      // A kit whose members are all archived (or that has none) would be in
+      // custody while nothing in it is. Read under the lock above.
+      await assertKitsHaveActiveAssets(tx, {
+        kitIds: [kitId],
+        organizationId,
+        action: "custody",
+      });
       const inheritData = await buildKitCustodyInheritData({
         tx,
         kitId: updatedKit.id,
         kitCustodyId,
         teamMemberId: custodianId,
-        assetIds: updatedKit.assetKits.map((ak) => ak.asset.id),
+        assetIds: memberIds,
       });
 
       if (inheritData.length > 0) {

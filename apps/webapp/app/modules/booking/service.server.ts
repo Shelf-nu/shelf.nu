@@ -45,6 +45,7 @@ import type {
 import {
   BOOKING_EMPTY_RESERVED_MESSAGE,
   BOOKING_RESERVE_BLOCKED_LABELS,
+  kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
@@ -61,10 +62,12 @@ import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
 import type { BookingForEmail } from "~/emails/types";
+import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
+  getAssetAvailabilityBatch,
 } from "~/modules/asset/availability.server";
 import {
   reconcileManualPlacementsForStockDecrease,
@@ -77,6 +80,7 @@ import {
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertKitsCheckoutable,
+  assertKitsHaveActiveAssets,
   getKitIdsHeldByOtherLiveBookings,
 } from "~/modules/booking/kit-holds.server";
 import {
@@ -122,9 +126,18 @@ import {
   type ResolvedFormatPrefs,
 } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import {
   payload,
@@ -146,6 +159,7 @@ import {
   wrapDescriptionForNote,
 } from "~/utils/markdoc-wrappers";
 import {
+  assertAssetsAreNotArchived,
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertKitsBelongToOrg,
@@ -1127,12 +1141,26 @@ export async function createBooking({
     // free-pool standalone slice may legitimately coexist with kit slices), so
     // we only pay for a type lookup when there is an actual overlap.
     const kitSliceAssetIds = new Set(slices.map((s) => s.assetId));
+
+    /**
+     * Archived assets can't be booked (issue #382). Guarding the UNION here,
+     * not just the standalone bucket, is the point: a kit carries its members
+     * in as `kitSlices`, so a kit holding an archived asset would otherwise
+     * walk one straight into a booking that can then be reserved and checked
+     * out. Every "create a booking with assets" route lands here.
+     */
+    /** Locked and re-checked inside the transaction below. */
+    const archiveGuardAssetIds = [
+      ...new Set([...dedupedAssetIds, ...kitSliceAssetIds]),
+    ];
+
     const overlapAssetIds = dedupedAssetIds.filter((id) =>
       kitSliceAssetIds.has(id)
     );
     let individualOverlapAssetIds = new Set<string>();
     if (overlapAssetIds.length > 0) {
       const overlapTypes = await db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup runs before the archive guard below, which must be the one to refuse archived ids
         where: {
           id: { in: overlapAssetIds },
           organizationId: booking.organizationId,
@@ -1206,6 +1234,26 @@ export async function createBooking({
      */
     const createdBooking = await db.$transaction(
       async (tx) => {
+        /**
+         * Archived assets can't be booked (issue #382). Both the lock and the
+         * check live INSIDE the transaction: a check before it could pass and
+         * then have an archive commit before this booking's rows are written.
+         * The archive services take the same lock, so the two serialize.
+         */
+        await lockAssetsForArchiveGuard(
+          tx,
+          archiveGuardAssetIds,
+          booking.organizationId
+        );
+        await assertAssetsAreNotArchived(
+          {
+            assetIds: archiveGuardAssetIds,
+            organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
+          },
+          tx
+        );
+
         // SECURITY (cross-org IDOR): the asset IDs, tag IDs and custodian team
         // member ID all originate from request/form input. Before connecting
         // them to the new booking we must prove they belong to the booking's
@@ -1344,6 +1392,7 @@ export async function createBooking({
         if (eventAssetIds.length > 0) {
           const assetTypes = await tx.asset.findMany({
             where: {
+              archivedAt: null,
               id: { in: eventAssetIds },
               organizationId: booking.organizationId,
             },
@@ -2174,6 +2223,18 @@ export async function reserveBooking({
       });
     }
 
+    // Backstop for issue #382: every path that adds assets to a booking
+    // refuses archived ones, but a booking is the last place to catch any that
+    // got in another way, before it commits to a pickup.
+    await assertAssetsAreNotArchived({
+      assetIds: [
+        ...new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id)),
+      ],
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
+
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
       const conflictedAssets = bookingFound.bookingAssets
@@ -2771,8 +2832,18 @@ async function readFullCheckoutDepartures(
   tx: any,
   bookingId: Booking["id"]
 ): Promise<{
-  departingSlices: Array<{ id: string; quantity: number }>;
-  checkoutTopUps: Array<{ id: string; assetId: string; residue: number }>;
+  departingSlices: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    quantity: number;
+  }>;
+  checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    residue: number;
+  }>;
 }> {
   /**
    * A quantity-tracked slice partially dispatched by progressive scans before
@@ -2801,6 +2872,7 @@ async function readFullCheckoutDepartures(
   const checkoutTopUps: Array<{
     id: string;
     assetId: string;
+    assetKitId: string | null;
     residue: number;
   }> = [];
   if (preStampedQtySlices.length > 0) {
@@ -2839,6 +2911,7 @@ async function readFullCheckoutDepartures(
           checkoutTopUps.push({
             id: s.id,
             assetId: s.assetId,
+            assetKitId: s.assetKitId,
             residue: s.quantity - units,
           });
         }
@@ -2870,7 +2943,7 @@ async function readFullCheckoutDepartures(
         { checkedOutAt: { not: null }, checkedInAt: { not: null } },
       ],
     },
-    select: { id: true, quantity: true },
+    select: { id: true, assetId: true, assetKitId: true, quantity: true },
   });
 
   return { departingSlices, checkoutTopUps };
@@ -3002,6 +3075,14 @@ async function checkoutBookingWritesWithinTx(
     await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
   }
 
+  // What this call sends out, read before any write below: the guard measures
+  // these units against the shelf, and the stamps further down make departing
+  // slices indistinguishable from ones an earlier batch sent out.
+  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
+    tx,
+    bookingId
+  );
+
   /**
    * Validate quantity availability for QUANTITY_TRACKED assets.
    * Between when a booking was created and checkout, other
@@ -3031,20 +3112,39 @@ async function checkoutBookingWritesWithinTx(
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
+    /**
+     * Standalone units of each pool that physically leave in this call: whole
+     * departing slices plus the residue of slices an earlier scan sent out
+     * only partly. Units this booking already has out are off the shelf, and
+     * `physicalAvailable` has subtracted them, so they are not charged again.
+     * Kit-driven slices draw on their kit's allocation, as in `requested`.
+     */
+    const leavingNowByAsset = new Map<string, number>();
+    const addLeaving = (assetId: string, units: number) =>
+      leavingNowByAsset.set(
+        assetId,
+        (leavingNowByAsset.get(assetId) ?? 0) + units
+      );
+    for (const slice of departingSlices) {
+      if (slice.assetKitId == null) addLeaving(slice.assetId, slice.quantity);
+    }
+    for (const topUp of checkoutTopUps) {
+      if (topUp.assetKitId == null) addLeaving(topUp.assetId, topUp.residue);
+    }
+
     // Sorted so concurrent transactions acquire these row locks in the same
     // global order — prevents deadlocks with `reserveBooking` /
     // `updateBookingAssets`, which lock the same assets sorted too.
     for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
       await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
-      const { bookable } = await getAssetAvailability({
+      const { bookable, physicalAvailable } = await getAssetAvailability({
         assetId,
         organizationId,
         window: { from, to },
         excludeBookingId: bookingId,
         db: tx,
       });
-
       // Sum the requested STANDALONE units for this asset on this booking.
       // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
       // slices (kit-driven units are covered by `inKits`, already reserved out
@@ -3054,10 +3154,24 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > bookable) {
-        const title =
-          qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
-            .title ?? "";
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon. The shelf is measured
+      // against what leaves in this call, the window against the booking's
+      // whole standalone quantity.
+      const leavingNow = leavingNowByAsset.get(assetId) ?? 0;
+      const title =
+        qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
+          .title ?? "";
+      if (leavingNow > physicalAvailable) {
+        insufficientQtyWarnings.push(
+          `"${title}": requested ${leavingNow}, only ${Math.max(
+            0,
+            physicalAvailable
+          )} available right now`
+        );
+      } else if (requested > bookable) {
         insufficientQtyWarnings.push(
           `"${title}": requested ${requested}, only ${Math.max(
             0,
@@ -3117,13 +3231,6 @@ async function checkoutBookingWritesWithinTx(
     },
     data: { status: AssetStatus.CHECKED_OUT },
   });
-
-  // What this call sends out, read before the stamps below make departing
-  // slices indistinguishable from ones an earlier batch sent out.
-  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
-    tx,
-    bookingId
-  );
 
   /**
    * Record where each pool slice's units leave from, before the counters
@@ -3478,6 +3585,15 @@ export async function checkoutBooking({
         organizationId,
       });
     }
+
+    // Backstop for issue #382: an archived asset is out of service and must
+    // never go out, however it reached this booking.
+    await assertAssetsAreNotArchived({
+      assetIds: bookingFoundAssetIds,
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
 
     /** Server-side conflict validation to prevent race conditions */
     if (from && to && bookingFound.bookingAssets) {
@@ -6548,6 +6664,7 @@ export async function checkinBooking({
 
         // Get asset and kit data for consistent formatting
         const assetsWithKitInfo = await db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in note names assets already on the booking, archived ones included
           where: { id: { in: specificAssetIds }, organizationId },
           select: {
             id: true,
@@ -7465,6 +7582,7 @@ export async function partialCheckinBooking({
     );
 
     const scannedAssets = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must reach assets already on the booking, archived ones included
       where: { id: { in: effectiveAssetIds }, organizationId },
       select: { id: true, title: true },
     });
@@ -8792,7 +8910,7 @@ export async function partialCheckinBooking({
       const assetsWithKitInfo =
         assetIdsTouched.length > 0
           ? await db.asset.findMany({
-              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking
+              // eslint-disable-next-line local-rules/require-org-scope-on-id-queries, local-rules/require-archived-at-check-on-asset-queries -- idor-safe: `assetIdsTouched` derive from the org-scoped booking assets/qty summaries in partialCheckinBooking; why: check-in note names assets already on the booking, archived ones included
               where: { id: { in: assetIdsTouched } },
               select: {
                 id: true,
@@ -9248,6 +9366,16 @@ export async function partialCheckoutBooking({
       });
     }
 
+    // An archived asset is out of service and must never go out (issue #382).
+    // Partial check-out is its own path, so it needs the same backstop the
+    // full check-out has.
+    await assertAssetsAreNotArchived({
+      assetIds: effectiveAssetIds,
+      organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
+    });
+
     // QUANTITY_TRACKED dispositions must carry a positive `quantity`. INDIVIDUAL
     // rows always get implicit `quantity = 1` upstream, so this guard only fires
     // on malformed qty payloads from a direct API caller.
@@ -9488,6 +9616,7 @@ export async function partialCheckoutBooking({
     // look at conflicting BookingAsset rows (the `asset.bookings[]`
     // implicit relation no longer exists).
     const scannedAssetsWithConflicts = await db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: conflict read for scanned assets already on the booking; dropping archived ids here would skip their checks silently
       where: { id: { in: assetIds }, organizationId },
       include: {
         bookingAssets: {
@@ -9793,6 +9922,28 @@ export async function partialCheckoutBooking({
           });
         }
 
+        /**
+         * Each pool's availability before this session, read under the row
+         * locks above and before any write below, so the free-stock check
+         * after attribution measures this session's departures against the
+         * pool as it found it. `physicalAvailable` (stock less what custody,
+         * kits and every booking hold out) ignores the window; `bookable`
+         * also sets aside other bookings' reservations over this booking's
+         * window, the figure the Check out button's guard reads.
+         */
+        const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
+          qtyDispositionAssetIds,
+          {
+            organizationId,
+            window:
+              bookingFound.from && bookingFound.to
+                ? { from: bookingFound.from, to: bookingFound.to }
+                : null,
+            excludeBookingId: id,
+            db: tx,
+          }
+        );
+
         // ONE batched committed-remaining read (booking total − Σ prior PBC
         // sessions) for every qty asset. This value is CONSTANT across the
         // disposition loop below: it reads only prior/committed sessions (this
@@ -10061,6 +10212,7 @@ export async function partialCheckoutBooking({
             // Error path only — resolve the titles for a message that names
             // what was lost instead of failing anonymously.
             const taken = await tx.asset.findMany({
+              // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: error-path title lookup for ids this call just tried to flip
               where: {
                 id: { in: individualToFlip },
                 organizationId,
@@ -10344,6 +10496,65 @@ export async function partialCheckoutBooking({
         });
 
         /**
+         * A pool's units are held by one thing at a time: custody, a kit or a
+         * booking. The caps above only bound a claim by what this booking
+         * still owes, so this checks the units leaving standalone slices
+         * against the pool's free stock. Kit-driven slices draw on their
+         * kit's allocation, which the free figure already sets aside.
+         *
+         * A booking already out outranks a reservation (see
+         * {@link outranksReservations}), so for it only units physically held
+         * count. A reserved booking does not yet, so other bookings'
+         * reservations over its window count too: the same `bookable` limit
+         * the Check out button's in-tx guard applies to a batch covering the
+         * whole booking, which reaches it through the delegate above.
+         */
+        const standaloneUnitsByAsset = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          if (ba.assetKitId != null) continue;
+          if (assetTypeById.get(ba.asset.id) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          const units = unitsBySliceId.get(ba.id) ?? 0;
+          if (units <= 0) continue;
+          standaloneUnitsByAsset.set(
+            ba.asset.id,
+            (standaloneUnitsByAsset.get(ba.asset.id) ?? 0) + units
+          );
+        }
+        const freeStockShortfalls: string[] = [];
+        for (const [assetId, units] of standaloneUnitsByAsset) {
+          const availability = availabilityBeforeByAsset.get(assetId);
+          const physicalFree = availability?.physicalAvailable ?? 0;
+          const free = inFlight
+            ? physicalFree
+            : Math.min(physicalFree, availability?.bookable ?? 0);
+          if (units > free) {
+            // Name the limit that binds: the shelf, or other bookings'
+            // reservations over this booking's window.
+            freeStockShortfalls.push(
+              `"${
+                titleByAssetId.get(assetId) ?? ""
+              }": requested ${units}, only ${Math.max(0, free)} available ${
+                free === physicalFree ? "right now" : "in this window"
+              }`
+            );
+          }
+        }
+        if (freeStockShortfalls.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
+              "\n"
+            )}\nThe rest are in custody, in kits, or out on or reserved for other bookings. Release custody, check units in or adjust quantities, then try again.`,
+            additionalData: { bookingId: id, organizationId },
+          });
+        }
+
+        /**
          * Record where each pool slice's units leave from, before the counter
          * below grows: only a slice still at 0 gets a source, so a slice this
          * booking sent out in an earlier session keeps the one it has. An
@@ -10527,6 +10738,7 @@ export async function partialCheckoutBooking({
         // related kit through the pivot row (kits-as-bag-of-assets still treats
         // each asset as a member of at most one kit in this code path).
         const assetsWithKitInfo = await tx.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: activity note names the assets this check-out touched, by id
           where: { id: { in: assetIdsToCheckOut }, organizationId },
           select: {
             id: true,
@@ -10913,10 +11125,9 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  * distinct kit-driven rows — the kit partial unique is on
  * `(bookingId, assetKitId)`, not `(bookingId, assetId)`.
  *
- * Centralizes the resolution previously inlined in the `manage-kits` route
- * action so `createBooking`, the kit-add route, and any future kit→booking flow
- * build slices the exact same, org-scoped way (per the repo's
- * code-abstraction rule).
+ * Every kit-to-booking flow (booking creation, manage-kits, the kit-add route,
+ * the mobile scan) builds its slices here, so they are all resolved the same
+ * org-scoped way and refuse the same kits.
  *
  * SECURITY (cross-org IDOR): `kitIds` originate from request/form input, so the
  * lookup is scoped by `organizationId`. `AssetKit` carries its own
@@ -10929,39 +11140,49 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  * @param params.existingAssetKitIds - Optional set of `AssetKit.id`s already
  *   represented on the target booking; matching memberships are skipped so
  *   re-adding a kit that's already (partly) present is idempotent per slice.
- * @returns One slice spec per newly-added `AssetKit` membership
- * @throws {ShelfError} If the database lookup fails
+ * @param params.kitIdsOnBooking - Optional kits already on the target booking.
+ *   They are not joining it, so they are never refused for having no active
+ *   member: they only contribute whatever new active memberships they have.
+ *   For callers that submit the booking's whole kit selection, not just the
+ *   kits being added.
+ * @returns One slice spec per newly-added `AssetKit` membership of an active
+ *   (not archived) asset
+ * @throws {ShelfError} 400 naming any kit with no active asset, or if the
+ *   database lookup fails
  */
 export async function buildKitSlicesForBooking({
   kitIds,
   organizationId,
   existingAssetKitIds,
+  kitIdsOnBooking,
 }: {
   kitIds: string[];
   organizationId: string;
   existingAssetKitIds?: Set<string>;
+  kitIdsOnBooking?: Set<string>;
 }): Promise<KitSliceSpec[]> {
-  // Nothing to resolve — short-circuit so callers can pass an empty list freely.
+  // Nothing to resolve: short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
 
+  let assetKits: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    kitId: string;
+  }>;
   try {
-    const assetKits = await db.assetKit.findMany({
-      where: { kitId: { in: kitIds }, organizationId },
+    assetKits = await db.assetKit.findMany({
+      // Archived members are left out: the kit is booked with its active
+      // members, the same way kit custody and kit moves skip archived ones, so
+      // one archived member never makes the whole kit unbookable.
+      where: {
+        kitId: { in: kitIds },
+        organizationId,
+        asset: { archivedAt: null },
+      },
       // `kitId` is already the filter column, so selecting it costs nothing.
       select: { id: true, assetId: true, quantity: true, kitId: true },
     });
-
-    // One slice per AssetKit membership, skipping memberships already on the
-    // booking so re-adding a kit doesn't duplicate its slices.
-    return assetKits
-      .filter((ak) => !existingAssetKitIds?.has(ak.id))
-      .map((ak) => ({
-        assetId: ak.assetId,
-        assetKitId: ak.id,
-        // Durable provenance — see `BookingAsset.sourceKitId`.
-        kitId: ak.kitId,
-        quantity: ak.quantity,
-      }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -10971,6 +11192,75 @@ export async function buildKitSlicesForBooking({
       label,
     });
   }
+
+  // A kit whose members are all archived (or that has none) would join the
+  // booking as nothing at all, so it is refused by name. Decided from the same
+  // read that builds the slices: a separate check could pass a kit whose last
+  // active member is archived before this read, and the kit would then drop
+  // out unnoticed whenever another kit still produced slices. A kit id from
+  // another workspace resolves to no kit and refuses nothing. A kit already
+  // on the booking is not joining it, so it is never refused here.
+  const kitIdsWithActiveMembers = new Set(assetKits.map((ak) => ak.kitId));
+  const kitIdsWithoutActiveMembers = kitIds.filter(
+    (kitId) =>
+      !kitIdsWithActiveMembers.has(kitId) && !kitIdsOnBooking?.has(kitId)
+  );
+  if (kitIdsWithoutActiveMembers.length > 0) {
+    await assertKitsHaveActiveAssets(db, {
+      kitIds: kitIdsWithoutActiveMembers,
+      organizationId,
+      action: "booking",
+    });
+  }
+
+  // One slice per AssetKit membership, skipping memberships already on the
+  // booking so re-adding a kit doesn't duplicate its slices.
+  return assetKits
+    .filter((ak) => !existingAssetKitIds?.has(ak.id))
+    .map((ak) => ({
+      assetId: ak.assetId,
+      assetKitId: ak.id,
+      // Durable provenance: see `BookingAsset.sourceKitId`.
+      kitId: ak.kitId,
+      quantity: ak.quantity,
+    }));
+}
+
+/**
+ * How many archived members of the given kits this add leaves out.
+ * {@link buildKitSlicesForBooking} skips archived members, and the kit-booking
+ * routes say so in their success message rather than let the booked count
+ * quietly differ from the kit's size.
+ *
+ * A membership already on the booking is not left out by this add, even when
+ * its asset was archived after it was booked (archiving keeps DRAFT bookings'
+ * rows), so it is not counted.
+ *
+ * @param args.kitIds - Kits being booked
+ * @param args.organizationId - The caller's workspace
+ * @param args.existingAssetKitIds - `AssetKit` ids already on the booking
+ * @returns The number of archived memberships this add leaves out
+ */
+export async function countArchivedKitMembers({
+  kitIds,
+  organizationId,
+  existingAssetKitIds,
+}: {
+  kitIds: string[];
+  organizationId: string;
+  existingAssetKitIds?: ReadonlySet<string>;
+}): Promise<number> {
+  if (kitIds.length === 0) return 0;
+  return db.assetKit.count({
+    where: {
+      ...(existingAssetKitIds && existingAssetKitIds.size > 0
+        ? { id: { notIn: [...existingAssetKitIds] } }
+        : {}),
+      kitId: { in: kitIds },
+      organizationId,
+      asset: { archivedAt: { not: null } },
+    },
+  });
 }
 
 export async function updateBookingAssets({
@@ -11085,6 +11375,19 @@ export async function updateBookingAssets({
         ...new Set([...assetIds, ...slices.map((s) => s.assetId)]),
       ];
 
+      /**
+       * Archived assets can't be booked (issue #382). The union matters here
+       * too: a kit-add passes its members as `kitSlices` with an empty
+       * `assetIds`, so guarding only the standalone bucket would let a kit
+       * carry an archived asset into the booking. Read on `tx` so it sees the
+       * same snapshot as the write.
+       */
+      await lockAssetsForArchiveGuard(tx, uniqueAssetIds, organizationId);
+      await assertAssetsAreNotArchived(
+        { assetIds: uniqueAssetIds, organizationId, actorUserId: userId },
+        tx
+      );
+
       // Validate that all asset IDs exist before inserting into the join table
       // to prevent FK violations when assets are deleted between UI load and
       // submission. `type` is selected so we can enforce the standalone/
@@ -11094,7 +11397,7 @@ export async function updateBookingAssets({
       // shortfall message without a second read, and `assetModelId` groups
       // the new standalone rows by model for the model reservation guard.
       const validAssets = await tx.asset.findMany({
-        where: { id: { in: uniqueAssetIds }, organizationId },
+        where: { id: { in: uniqueAssetIds }, organizationId, archivedAt: null },
         select: {
           id: true,
           type: true,
@@ -11516,7 +11819,11 @@ export async function updateBookingAssets({
         // `title` + `assetModelId` widen this select purely so the same rows
         // can feed model-request fulfilment below without a second round-trip.
         const assetTypeRows = await tx.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             type: true,
@@ -11665,7 +11972,11 @@ export async function updateBookingAssets({
         // the booking"). The multi-asset summary uses
         // `wrapAssetsWithDataForNote`'s popover unchanged.
         const assets = await db.asset.findMany({
-          where: { id: { in: addedAssetIds }, organizationId },
+          where: {
+            id: { in: addedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,
@@ -13417,6 +13728,7 @@ export async function removeAssets({
       }
 
       const removedAssets = await tx.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing assets from a booking must reach archived ones it holds
         where: { id: { in: assetIds }, organizationId },
         select: {
           id: true,
@@ -13908,6 +14220,35 @@ export async function removeAssets({
       label,
     });
   }
+}
+
+/**
+ * Refuses a single booking delete unless the user typed its name, as the delete
+ * dialog asks. A booking that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The booking to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertBookingDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.booking
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((booking) => booking?.name ?? null),
+    label,
+  });
 }
 
 /**
@@ -15018,6 +15359,7 @@ export async function getBookingFlags(
   const assets = await db.asset.findMany({
     // why: organizationId scoping prevents flag computation from reading
     // assets that belong to another tenant.
+    // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: flags are computed over assets already on the booking, archived ones included
     where: {
       id: { in: booking.assetIds },
       organizationId: booking.organizationId,
@@ -15032,6 +15374,7 @@ export async function getBookingFlags(
       type: true,
       status: true,
       availableToBook: true,
+      archivedAt: true,
       assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
@@ -15085,6 +15428,11 @@ export async function getBookingFlags(
   const hasAssets = assets.length > 0;
 
   const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  // An archived asset can sit in a draft (archiving refuses only reserved and
+  // checked-out bookings), and reserve and check-out refuse it. Named on the
+  // page by `buildArchivedAssets`, which reads the same field.
+  const hasArchivedAssets = assets.some((asset) => asset.archivedAt !== null);
 
   /**
    * QUANTITY_TRACKED assets are exempt from the `CHECKED_OUT` /
@@ -15174,6 +15522,7 @@ export async function getBookingFlags(
   return {
     hasAssets,
     hasUnavailableAssets,
+    hasArchivedAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
@@ -15208,6 +15557,7 @@ export async function bulkDeleteBookings({
   hints,
   currentSearchParams,
   access,
+  confirmation,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -15216,6 +15566,11 @@ export async function bulkDeleteBookings({
   currentSearchParams?: string | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * bookings this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
@@ -15268,6 +15623,15 @@ export async function bulkDeleteBookings({
       foundIds: bookings.map((booking) => booking.id),
       access,
       action: "delete",
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: bookingIds,
+      confirmation,
+      matchedCount: bookings.length,
+      noun: { one: "booking", many: "bookings" },
+      label,
     });
 
     // Roles whose policy limits delete to drafts may not delete a selection
@@ -15431,6 +15795,9 @@ export async function bulkDeleteBookings({
       }
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message
@@ -15948,6 +16315,7 @@ async function createNotesForScannedAssetsAndKits({
   // a qty-tracked unit count via wrapAssetWithCountForNote.
   const [assets, scannedKits, bookedRows] = await Promise.all([
     db.asset.findMany({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: note title lookup for assets already scanned onto the booking
       where: { id: { in: assetIds }, organizationId },
       select: {
         id: true,
@@ -16193,6 +16561,8 @@ async function createNotesForScannedAssetsAndKits({
  *   that gained a new `BookingAsset` row on this call) and `claimedAssetIds`
  *   (assets whose pre-existing row answered a reservation without a new row).
  *   A scan that touched nothing new returns both arrays empty.
+ *   `archivedKitMembersLeftOut` counts the archived members of scanned kits
+ *   that were left out, for the caller's success message.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function addScannedAssetsToBookingWithinTx(
@@ -16310,6 +16680,128 @@ async function addScannedAssetsToBookingWithinTx(
     });
 
   /**
+   * Archived assets (issue #382). A directly scanned one is refused by name, so
+   * the operator can take it off the list. A scanned kit is booked with its
+   * active members, as every other kit-add path does: its archived members are
+   * left out and counted for the caller's message. A kit with no active member
+   * left has nothing to book and is refused.
+   */
+  let archivedKitMembersLeftOut = 0;
+  if (allScannedAssetIds.length > 0) {
+    // Row-lock first, the same lock the archive services and the other booking
+    // writes take: a plain read here could pass, then an archive commit before
+    // the BookingAsset rows below are written. Taken after the booking lock
+    // above, so the order matches `updateBookingAssets` (booking, then assets).
+    await lockAssetsForArchiveGuard(tx, allScannedAssetIds, organizationId);
+    await assertAssetsAreNotArchived(
+      {
+        assetIds,
+        organizationId,
+        fix: "remove-from-list",
+        actorUserId: userId,
+      },
+      tx
+    );
+
+    // Counted first, as the archived guard does: the common scan has no
+    // archived member, and the ids are read only when there is one.
+    const kitMemberIds = [...new Set(kitSlices.map((slice) => slice.assetId))];
+    const archivedKitMemberCount =
+      kitMemberIds.length > 0
+        ? await tx.asset.count({
+            where: {
+              id: { in: kitMemberIds },
+              organizationId,
+              archivedAt: { not: null },
+            },
+          })
+        : 0;
+    const archivedKitMemberIds = new Set<string>(
+      archivedKitMemberCount > 0
+        ? (
+            await tx.asset.findMany({
+              where: {
+                id: { in: kitMemberIds },
+                organizationId,
+                archivedAt: { not: null },
+              },
+              select: { id: true },
+            })
+          ).map((asset: { id: string }) => asset.id)
+        : []
+    );
+
+    if (archivedKitMemberIds.size > 0) {
+      // Each slice's kit is read from its `AssetKit` row, which
+      // `assertAssetKitsBelongToOrg` has proven in-org. The spec's `kitId` is
+      // client-supplied and may be blank or foreign, and grouping by it would
+      // let an emptied kit pass with no slices left to book.
+      const kitIdByAssetKitId = new Map<string, string>(
+        (
+          await tx.assetKit.findMany({
+            // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: every id was proven in-org by assertAssetKitsBelongToOrg above
+            where: {
+              id: {
+                in: [
+                  ...new Set(
+                    kitSlices.map((slice) => slice.assetKitId).filter(Boolean)
+                  ),
+                ],
+              },
+            },
+            select: { id: true, kitId: true },
+          })
+        ).map((ak: { id: string; kitId: string }) => [ak.id, ak.kitId])
+      );
+      const kitIdOf = (slice: ScannedKitSliceSpec) =>
+        kitIdByAssetKitId.get(slice.assetKitId);
+
+      const activeKitSlices = kitSlices.filter(
+        (slice) => !archivedKitMemberIds.has(slice.assetId)
+      );
+      const kitIdsStillBooked = new Set(activeKitSlices.map(kitIdOf));
+      const emptiedKitIds = [
+        ...new Set(
+          kitSlices
+            .filter((slice) => archivedKitMemberIds.has(slice.assetId))
+            .map(kitIdOf)
+            .filter(
+              (kitId): kitId is string =>
+                Boolean(kitId) && !kitIdsStillBooked.has(kitId)
+            )
+        ),
+      ];
+      if (emptiedKitIds.length > 0) {
+        const emptiedKits: { id: string; name: string }[] =
+          await tx.kit.findMany({
+            where: { id: { in: emptiedKitIds }, organizationId },
+            select: { id: true, name: true },
+          });
+        throw new ShelfError({
+          cause: null,
+          title: "Kit has no active assets",
+          message: kitsWithoutActiveAssetsRefusal({
+            kits: emptiedKits.map((kit) => ({
+              name: kit.name,
+              hasArchivedAssets: true,
+            })),
+            action: "booking",
+          }),
+          additionalData: {
+            bookingId,
+            kitIdsWithoutActiveAssets: emptiedKits.map((kit) => kit.id),
+          },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      archivedKitMembersLeftOut = archivedKitMemberIds.size;
+      kitSlices = activeKitSlices;
+    }
+  }
+
+  /**
    * Conflict guard (mirrors the reserve/checkout guards): reject the add
    * when any scanned asset (standalone OR kit-driven) is already RESERVED
    * or CHECKED_OUT on a DIFFERENT booking whose window OVERLAPS this
@@ -16325,7 +16817,11 @@ async function addScannedAssetsToBookingWithinTx(
     bookingWindow.to
   ) {
     const candidates = await tx.asset.findMany({
-      where: { id: { in: allScannedAssetIds }, organizationId },
+      where: {
+        id: { in: allScannedAssetIds },
+        organizationId,
+        archivedAt: null,
+      },
       select: {
         id: true,
         title: true,
@@ -16426,7 +16922,11 @@ async function addScannedAssetsToBookingWithinTx(
   const scannedAssetsMeta: ScannedAssetMeta[] =
     allScannedAssetIds.length > 0
       ? await tx.asset.findMany({
-          where: { id: { in: allScannedAssetIds }, organizationId },
+          where: {
+            id: { in: allScannedAssetIds },
+            organizationId,
+            archivedAt: null,
+          },
           select: {
             id: true,
             title: true,
@@ -16907,7 +17407,7 @@ async function addScannedAssetsToBookingWithinTx(
   // rescan. `claimedAssetIds` travels out for the same reason a caller that
   // wants to report what a scan actually did (as opposed to what it asked
   // for) needs both sets, not just one.
-  return { booking, addedAssetIds, claimedAssetIds };
+  return { booking, addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut };
 }
 
 /**
@@ -16920,12 +17420,12 @@ async function addScannedAssetsToBookingWithinTx(
  * @param {string} params.bookingId - The ID of the booking to update.
  * @param {string} params.organizationId - The organization ID associated with the booking.
  * @param {string} params.userId - The ID of the user performing the action.
- * @returns An object carrying the updated `booking` (`{ id, name, status }`)
- *   alongside `addedAssetIds` and `claimedAssetIds`, widened from the plain
- *   booking this function used to return so a caller can tell a genuine add
- *   apart from a rescan that only answered a reservation, or from a scan that
- *   changed nothing at all. Existing callers that only `await` the call and
- *   never read its result are unaffected by the shape change.
+ * @returns The updated `booking` (`{ id, name, status }`), plus:
+ *   - `addedAssetIds` and `claimedAssetIds`, so a caller can tell a genuine
+ *     add apart from a rescan that only answered a reservation, or from a scan
+ *     that changed nothing at all;
+ *   - `archivedKitMembersLeftOut`, the number of archived members of scanned
+ *     kits that were not booked.
  */
 export async function addScannedAssetsToBooking({
   assetIds,
@@ -16983,6 +17483,7 @@ export async function addScannedAssetsToBooking({
       booking: updatedBooking,
       addedAssetIds,
       claimedAssetIds,
+      archivedKitMembersLeftOut,
     } = await db.$transaction(async (tx) =>
       addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
@@ -17011,7 +17512,12 @@ export async function addScannedAssetsToBooking({
       userId,
     });
 
-    return { booking: updatedBooking, addedAssetIds, claimedAssetIds };
+    return {
+      booking: updatedBooking,
+      addedAssetIds,
+      claimedAssetIds,
+      archivedKitMembersLeftOut,
+    };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -17132,13 +17638,25 @@ export async function getExistingBookingDetails(
  */
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][],
-  organizationId: string
+  organizationId: string,
+  /** The acting user, so an archived refusal is worded for their role. */
+  actorUserId?: string
 ): Promise<string[]> {
   try {
+    // Archived assets are refused, not quietly dropped (issue #382): an asset
+    // archived after the page loaded would otherwise vanish from the
+    // selection while the rest booked, with nothing telling the user. Every
+    // other unbookable case in this flow rejects the same way. Org-scoped, so
+    // a foreign id still reads as missing rather than archived.
+    await assertAssetsAreNotArchived({ assetIds, organizationId, actorUserId });
+
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
       // cannot resolve / attach assets that live in another workspace.
-      where: { id: { in: assetIds }, organizationId },
+      // Archived assets (archivedAt set) are excluded so they can't be booked,
+      // even via a direct/crafted add — they're hidden from pickers but the
+      // server must enforce it too (issue #382).
+      where: { id: { in: assetIds }, organizationId, archivedAt: null },
       select: {
         status: true,
         id: true,
@@ -17201,7 +17719,7 @@ export async function processBooking(
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
-      getAvailableAssetsIdsForBooking(assetIds, organizationId),
+      getAvailableAssetsIdsForBooking(assetIds, organizationId, auth.userId),
       getExistingBookingDetails(bookingId, organizationId),
     ]);
 
@@ -17961,6 +18479,35 @@ export async function duplicateBooking({
      * notification recipients), so we mirror the emission pattern here.
      */
     const newBooking = await db.$transaction(async (tx) => {
+      /**
+       * Archived assets are out of service (issue #382), and the source booking
+       * may hold some: archiving is allowed once a booking is finished. They
+       * are DROPPED from the copy rather than refusing it, the same way
+       * detached kit residue is dropped above: the duplicate is a new plan, and
+       * the rest of it is still worth having. Locked first, the lock every
+       * archive and booking write takes, so an archive cannot land between
+       * this read and the insert.
+       */
+      const sliceAssetIds = [...new Set(createSlices.map((s) => s.assetId))];
+      await lockAssetsForArchiveGuard(tx, sliceAssetIds, organizationId);
+      const archivedAssetIds = new Set(
+        sliceAssetIds.length > 0
+          ? (
+              await tx.asset.findMany({
+                where: {
+                  id: { in: sliceAssetIds },
+                  organizationId,
+                  archivedAt: { not: null },
+                },
+                select: { id: true },
+              })
+            ).map((a) => a.id)
+          : []
+      );
+      const isActive = (row: { assetId: string }) =>
+        !archivedAssetIds.has(row.assetId);
+      const slicesToCreate = createSlices.filter(isActive);
+
       const created = await tx.booking.create({
         data: {
           name: bookingToDuplicate.name + " (Copy)",
@@ -17993,7 +18540,7 @@ export async function duplicateBooking({
              * at checkout, so an over-reservation here is surfaced to the
              * user at the right time instead of being silently truncated.
              */
-            create: createSlices,
+            create: slicesToCreate,
           },
           tags: {
             connect: bookingToDuplicate.tags.map((tag) => ({ id: tag.id })),
@@ -18026,7 +18573,7 @@ export async function duplicateBooking({
           entityId: created.id,
           bookingId: created.id,
           meta: {
-            assetCount: createSlices.length,
+            assetCount: slicesToCreate.length,
             duplicatedFromBookingId: bookingToDuplicate.id,
           },
         },
@@ -18039,7 +18586,7 @@ export async function duplicateBooking({
       // event per slice, each carrying that slice's count. We iterate the
       // same create payload (standalone source rows + kit-driven current
       // rows) so the events reflect what was actually inserted.
-      if (createSlices.length > 0) {
+      if (slicesToCreate.length > 0) {
         const eventRows: Array<{
           assetId: string;
           quantity: number;
@@ -18055,7 +18602,7 @@ export async function duplicateBooking({
             quantity: row.quantity,
             asset: row.asset,
           })),
-        ];
+        ].filter(isActive);
 
         await recordEvents(
           eventRows.map((row) => ({
@@ -18072,10 +18619,18 @@ export async function duplicateBooking({
         );
       }
 
-      return created;
+      return {
+        booking: created,
+        droppedArchivedCount: archivedAssetIds.size,
+      };
     });
 
-    return newBooking;
+    // The caller tells the user how many archived assets were left out,
+    // rather than letting them vanish from the copy unannounced.
+    return {
+      ...newBooking.booking,
+      droppedArchivedCount: newBooking.droppedArchivedCount,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

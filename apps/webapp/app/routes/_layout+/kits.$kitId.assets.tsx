@@ -6,6 +6,11 @@ import {
   type MetaFunction,
 } from "react-router";
 import { z } from "zod";
+import { archivedHiddenEmptyState } from "~/components/assets/archived-hidden-empty-state";
+import {
+  ArchivedViewMenu,
+  useArchivedView,
+} from "~/components/assets/archived-view-menu";
 import { AssetCodeBadge } from "~/components/assets/asset-code-badge";
 import { AssetImage } from "~/components/assets/asset-image";
 import { AssetStatusBadge } from "~/components/assets/asset-status-badge";
@@ -25,8 +30,10 @@ import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { resolveArchivedViewForMember } from "~/modules/asset/data.server";
 import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import {
@@ -36,7 +43,12 @@ import {
 import type { ListItemForKitPage } from "~/modules/kit/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError } from "~/utils/error";
-import { payload, error, getParams } from "~/utils/http.server";
+import {
+  payload,
+  error,
+  getCurrentSearchParams,
+  getParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -54,12 +66,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { kitId } = getParams(params, z.object({ kitId: z.string() }));
 
   try {
-    const { organizationId, userOrganizations } = await requirePermission({
-      request,
-      userId,
-      entity: PermissionEntity.kit,
-      action: PermissionAction.read,
-    });
+    const { organizationId, userOrganizations, access } =
+      await requirePermission({
+        request,
+        userId,
+        entity: PermissionEntity.kit,
+        action: PermissionAction.read,
+      });
 
     const isManageAssetsUrl = request.url.includes("manage-assets");
 
@@ -68,16 +81,25 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * page can render `${kit.name}'s assets` (matches the sibling overview
      * route's title pattern) without an extra round-trip.
      */
-    const [assets, kit] = await Promise.all([
+    const [assets, kit, archivedMemberCount] = await Promise.all([
       getAssetsForKits({
         request,
         organizationId,
         kitId,
         ignoreFilters: isManageAssetsUrl,
+        archivedFilter: resolveArchivedViewForMember({
+          access,
+          searchParams: getCurrentSearchParams(request),
+        }),
       }),
       db.kit.findFirst({
         where: { id: kitId, organizationId },
         select: { name: true },
+      }),
+      // Archived members the Active view hides, so its empty state can say
+      // where they went rather than "No assets in this kit".
+      db.assetKit.count({
+        where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
       }),
     ]);
 
@@ -166,6 +188,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...assets,
       ...(bookingImpactByAssetId ? { bookingImpactByAssetId } : {}),
       modelName,
+      archivedMemberCount,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
@@ -175,6 +198,18 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
 export default function KitAssets() {
   const roles = useOrganizationRoles();
+  const canArchiveAssets = useCanArchiveAssets();
+  const archivedView = useArchivedView(canArchiveAssets);
+  const { archivedMemberCount } = useLoaderData<typeof loader>();
+  /** Set only on the Active view of a kit whose members are all archived. */
+  const archivedHiddenState =
+    archivedView === "active"
+      ? archivedHiddenEmptyState({
+          archivedCount: archivedMemberCount,
+          canArchiveAssets,
+          place: "kit",
+        })
+      : null;
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -223,18 +258,27 @@ export default function KitAssets() {
 
         <List
           ItemComponent={ListContent}
-          customEmptyStateContent={{
-            title: "Not assets in kit",
-            text: userRoleCanManageAssets
-              ? "Start by adding your first asset."
-              : "",
-            newButtonContent: userRoleCanManageAssets
-              ? "Add assets"
-              : undefined,
-            newButtonRoute: userRoleCanManageAssets
-              ? "manage-assets?status=AVAILABLE"
-              : undefined,
-          }}
+          titleContent={
+            canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+          }
+          customEmptyStateContent={
+            archivedView === "archived"
+              ? { title: "No archived assets in this kit", text: "" }
+              : {
+                  title: archivedHiddenState?.title ?? "No assets in this kit",
+                  text:
+                    archivedHiddenState?.text ??
+                    (userRoleCanManageAssets
+                      ? "Start by adding your first asset."
+                      : ""),
+                  newButtonContent: userRoleCanManageAssets
+                    ? "Add assets"
+                    : undefined,
+                  newButtonRoute: userRoleCanManageAssets
+                    ? "manage-assets?status=AVAILABLE"
+                    : undefined,
+                }
+          }
           headerChildren={
             <>
               <Th>Category</Th>
@@ -341,6 +385,7 @@ function ListContent({ item }: { item: ListItemForKitPage }) {
                   status={item.status}
                   availableToBook={item.availableToBook}
                   asset={item}
+                  isArchived={!!item.archivedAt}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>

@@ -293,7 +293,7 @@ describe("unassigned assets endpoint", () => {
     expect(filters?.match(/(^|&)type=/g)).toHaveLength(1);
   });
 
-  it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
+  it("restricts to bookable and held assets for a SELF_SERVICE caller, matching the index loader", async () => {
     vitest.mocked(requirePermission).mockResolvedValue(
       caller("SELF_SERVICE", {
         organizationId: "org-1",
@@ -303,13 +303,13 @@ describe("unassigned assets endpoint", () => {
 
     await loader({ context, request: request(), params: {} } as never);
 
-    expect(queryArgs().availableToBookOnly).toBe(true);
+    expect(queryArgs().bookableScope).toEqual({ holderUserId: "user-1" });
   });
 
   it("leaves an ADMIN caller's query unrestricted, matching the index loader", async () => {
     await loader({ context, request: request(), params: {} } as never);
 
-    expect(queryArgs().availableToBookOnly).toBe(false);
+    expect(queryArgs().bookableScope).toBeNull();
   });
 
   it("redacts a foreign custodian's identity when the viewer cannot see all custody", async () => {
@@ -402,6 +402,8 @@ describe("unassigned assets endpoint", () => {
       // this view, so counting them would describe a set the sheet never lists.
       type: "INDIVIDUAL",
       assetModelId: null,
+      // The default Active view hides archived assets (issue #382).
+      archivedAt: null,
     });
 
     const body = (await response.json()) as { unfilteredAssets: number | null };

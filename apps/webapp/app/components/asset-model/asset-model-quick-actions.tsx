@@ -15,7 +15,10 @@ import { DeleteAssetModel } from "./delete-asset-model";
 type AssetModelQuickActionsProps = {
   className?: string;
   style?: CSSProperties;
-  assetModel: Pick<AssetModel, "id" | "name">;
+  /** `_count` lets the delete dialog say how many assets lose the model. */
+  assetModel: Pick<AssetModel, "id" | "name"> & {
+    _count?: { assets: number };
+  };
 };
 
 export default function AssetModelQuickActions({

@@ -60,7 +60,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       id: kitId,
       organizationId,
       extraInclude: {
-        assetKits: { select: { asset: { select: { id: true } } } },
+        // Archived members are frozen; the kit books without them.
+        assetKits: {
+          where: { asset: { archivedAt: null } },
+          select: { asset: { select: { id: true } } },
+        },
       },
       userOrganizations,
       request,

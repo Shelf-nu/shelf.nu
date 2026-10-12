@@ -79,6 +79,13 @@ vi.mock("~/modules/activity-event/service.server", () => ({
 // stock decrease cannot interleave. The lock issues a raw
 // `SELECT ... FOR UPDATE`, which a mocked tx client cannot execute — stub it
 // to return the row the write should be based on.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));

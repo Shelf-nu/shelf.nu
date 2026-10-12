@@ -4,6 +4,8 @@ import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
+import { useSearchParams } from "~/hooks/search-params";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useRoleAccess } from "~/hooks/use-role-access";
@@ -20,6 +22,7 @@ import { userHasPermission } from "~/utils/permissions/permission.validator.clie
 import { tw } from "~/utils/tw";
 import BulkAddToAuditDialog from "./bulk-add-to-audit-dialog";
 import BulkAddToKitDialog from "./bulk-add-to-kit-dialog";
+import BulkArchiveDialog from "./bulk-archive-dialog";
 import BulkAssetModelRemoveDialog from "./bulk-asset-model-remove-dialog";
 import BulkAssetModelUpdateDialog from "./bulk-asset-model-update-dialog";
 import BulkAssignCustodyDialog from "./bulk-assign-custody-dialog";
@@ -86,6 +89,39 @@ function ConditionalDropdown() {
   const disabled = selectedAssets.length === 0;
 
   const allSelected = isSelectingAllItems(selectedAssets);
+
+  const [searchParams] = useSearchParams();
+  /** Archive and Reinstate share one grant, `asset: archive` (issue #382). */
+  const canArchiveAssets = useCanArchiveAssets();
+  /**
+   * The view the list actually shows. The server honours `?archived=` only
+   * for members who can archive; anyone else sees the Active view whatever
+   * the URL says, so their menu must not act as if it were the Archived one.
+   */
+  const viewParam = canArchiveAssets ? searchParams.get("archived") : null;
+  // In the Archived view the selection is archived assets, which are frozen:
+  // every bulk action is disabled except Reinstate (the calm "archived =
+  // read-only except reinstate" rule, issue #382).
+  const archivedView = viewParam === "archived";
+  /**
+   * Whether this selection is frozen. The view alone is not enough: the All
+   * view mixes active and archived rows, so an archived asset picked there
+   * would otherwise light up custody, tags, location, category, kit and
+   * availability. Check the rows themselves, and when "select all" is active
+   * (which puts only the ALL_SELECTED_KEY marker in the selection) fall back
+   * to the view, since any view other than Active can contain archived rows.
+   */
+  const selectionIsArchived = archivedView
+    ? true
+    : allSelected
+    ? viewParam === "all"
+    : selectedAssets.some((asset) => !!asset.archivedAt);
+  const archivedBulkDisabled: { reason: string } | false = selectionIsArchived
+    ? {
+        reason:
+          "Archived assets are read-only. Reinstate them to make changes.",
+      }
+    : false;
 
   const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
@@ -187,6 +223,11 @@ function ConditionalDropdown() {
         <BulkAddToKitDialog />
         <BulkRemoveFromKits />
       </When>
+      {/* Archive and Reinstate share their own grant, `asset: archive`. */}
+      <When truthy={canArchiveAssets}>
+        <BulkArchiveDialog type="archive" />
+        <BulkArchiveDialog type="reinstate" />
+      </When>
 
       <BulkDownloadQrDialog
         isDialogOpen={isBulkDownloadQrOpen}
@@ -286,7 +327,7 @@ function ConditionalDropdown() {
                   type="start-audit"
                   label="Create audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -303,7 +344,7 @@ function ConditionalDropdown() {
                   type="add-to-audit"
                   label="Add to existing audit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
             </When>
@@ -321,7 +362,8 @@ function ConditionalDropdown() {
                   label="Release custody"
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreInCustody ||
+                    archivedBulkDisabled ||
+                    (!allAssetsAreInCustody ||
                     someAssetPartOfUnavailableKit ||
                     disableReleaseCustody
                       ? {
@@ -331,7 +373,7 @@ function ConditionalDropdown() {
                             ? "Self service can only release their own custody."
                             : "Some of the selected assets are not in custody.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -341,7 +383,8 @@ function ConditionalDropdown() {
                   label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
-                    !allAssetsAreAvailable ||
+                    archivedBulkDisabled ||
+                    (!allAssetsAreAvailable ||
                     someAssetPartOfUnavailableKit ||
                     someAssetIsIndividualKitMember
                       ? {
@@ -351,7 +394,7 @@ function ConditionalDropdown() {
                             ? KIT_MEMBERS_CUSTODY_BLOCKED_REASON
                             : "Some of the selected assets are not available.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -368,7 +411,7 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="tag-add"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Assign tags"
                 />
               </DropdownMenuItem>
@@ -376,7 +419,7 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="tag-remove"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                   label="Remove tags"
                 />
               </DropdownMenuItem>
@@ -384,14 +427,14 @@ function ConditionalDropdown() {
                 <BulkUpdateDialogTrigger
                   type="location"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="category"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
@@ -399,7 +442,7 @@ function ConditionalDropdown() {
                   type="asset-model"
                   label="Update asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="py-1 lg:p-0">
@@ -407,7 +450,7 @@ function ConditionalDropdown() {
                   type="asset-model-remove"
                   label="Remove from asset model"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -416,12 +459,13 @@ function ConditionalDropdown() {
                   type="add-to-kit"
                   onClick={closeMenu}
                   disabled={
-                    someAssetCheckedOut
+                    archivedBulkDisabled ||
+                    (someAssetCheckedOut
                       ? {
                           reason:
                             "Some of the selected kits are checked out. Please finish your booking first, before adding them in kit.",
                         }
-                      : isLoading
+                      : isLoading)
                   }
                 />
               </DropdownMenuItem>
@@ -430,7 +474,7 @@ function ConditionalDropdown() {
                   label="Remove from kit"
                   type="remove-from-kit"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-t py-1 lg:p-0">
@@ -438,7 +482,7 @@ function ConditionalDropdown() {
                   label="Mark as available"
                   type="available"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
               <DropdownMenuItem className="border-b py-1 lg:p-0">
@@ -446,9 +490,39 @@ function ConditionalDropdown() {
                   label="Mark as unavailable"
                   type="unavailable"
                   onClick={closeMenu}
-                  disabled={isLoading}
+                  disabled={archivedBulkDisabled || isLoading}
                 />
               </DropdownMenuItem>
+
+              <When truthy={canArchiveAssets}>
+                <DropdownMenuItem className="py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="archive"
+                    label="Archive"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? { reason: "These assets are already archived." }
+                        : isLoading
+                    }
+                  />
+                </DropdownMenuItem>
+                <DropdownMenuItem className="border-b py-1 lg:p-0">
+                  <BulkUpdateDialogTrigger
+                    type="reinstate"
+                    label="Reinstate"
+                    onClick={closeMenu}
+                    disabled={
+                      archivedView
+                        ? isLoading
+                        : {
+                            reason:
+                              "Switch to the Archived view to reinstate assets.",
+                          }
+                    }
+                  />
+                </DropdownMenuItem>
+              </When>
 
               <DropdownMenuItem className="py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
@@ -456,6 +530,8 @@ function ConditionalDropdown() {
                   label="Delete"
                   onClick={closeMenu}
                   disabled={
+                    // Archived assets can still be permanently deleted in bulk
+                    // (Delete + Reinstate are the only allowed bulk actions).
                     someAssetCheckedOut
                       ? {
                           reason:

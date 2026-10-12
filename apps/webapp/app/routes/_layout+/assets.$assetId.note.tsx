@@ -50,6 +50,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     // Validate that the asset belongs to the user's organization
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership check for notes on the asset's own page, which stays usable for archived assets
       where: { id: assetId, organizationId },
       select: { id: true },
     });

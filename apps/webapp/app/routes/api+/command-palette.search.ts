@@ -8,6 +8,7 @@ import {
   serializeImageExpiration,
 } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { resolveBookableListScope } from "~/modules/asset/list-scope.server";
 import { getAssets } from "~/modules/asset/service.server";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import {
@@ -317,8 +318,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
           orderDirection: "asc",
           perPage: 8,
           // The same list scope as the asset index: roles limited to bookable
-          // assets never find the rest by searching.
-          availableToBookOnly: access.policy.assets.listScope === "bookable",
+          // assets find only those, plus the ones in their own custody.
+          bookableScope: resolveBookableListScope({ access, userId }),
           extraInclude: {
             // Model cover image for assets with no image of their own
             ...ASSET_MODEL_IMAGE_SELECT,
@@ -361,7 +362,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assetKits: true } },
+                // Archived members are out of service and not counted.
+                _count: {
+                  select: {
+                    assetKits: { where: { asset: { archivedAt: null } } },
+                  },
+                },
               },
             })
           : Promise.resolve([]),
@@ -393,7 +399,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assetLocations: true } },
+                // Archived assets are out of service and not counted.
+                _count: {
+                  select: {
+                    assetLocations: { where: { asset: { archivedAt: null } } },
+                  },
+                },
               },
             })
           : Promise.resolve([]),

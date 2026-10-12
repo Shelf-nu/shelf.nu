@@ -52,6 +52,7 @@ import {
 } from "~/modules/booking/checkout-source-location.server";
 import { sendBookingUpdatedEmail } from "~/modules/booking/email-helpers";
 import {
+  assertBookingDeleteConfirmed,
   archiveBooking,
   cancelBooking,
   checkinAssets,
@@ -72,13 +73,17 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
-import { buildUnavailableAssets } from "~/modules/booking/unavailable-assets";
+import {
+  buildArchivedAssets,
+  buildUnavailableAssets,
+} from "~/modules/booking/unavailable-assets";
 import {
   calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
   stillOutOnOverdueKitSlice,
 } from "~/modules/booking/utils.server";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -101,6 +106,7 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -110,6 +116,7 @@ import {
   userPrefs,
 } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import {
   ShelfError,
@@ -410,6 +417,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       rawAssets,
       bookingFlags,
       rawKits,
+      modelShortfalls,
     ] = await Promise.all([
       /**
        * We need to fetch the team members for the custodian filter in sidebar.
@@ -451,6 +459,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
        * SECURITY (cross-org IDOR): scope to the caller's organizationId.
        */
       db.asset.findMany({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: a booking that already holds an archived asset must still show it (with its badge)
         where: {
           id: { in: allBookingAssetIds },
           organizationId,
@@ -594,6 +603,23 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           _count: { select: { assetKits: true } },
         },
       }),
+
+      /**
+       * Model reservations this booking's dates can no longer fill, e.g. after
+       * an admin archived a unit with "Archive anyway". Measured only while
+       * units can still be assigned; a finished booking's leftovers are history.
+       */
+      canAssignModelUnits(booking.status)
+        ? findModelRequestShortfallsForBooking({
+            booking: {
+              id: booking.id,
+              from: booking.from,
+              to: booking.to,
+              modelRequests: booking.modelRequests ?? [],
+            },
+            organizationId,
+          })
+        : [],
     ]);
 
     // Index the enriched assets for lookup during per-slice projection below.
@@ -1207,6 +1233,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         currentOrganization,
         header,
         booking,
+        modelShortfalls,
         modelName,
         /**
          * Whether any QUANTITY_TRACKED unit on this booking has been accounted
@@ -1251,6 +1278,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Names what `bookingFlags.hasUnavailableAssets` refuses over. Built
         // from rows already fetched above, so it adds no query.
         unavailableAssets: buildUnavailableAssets(bookingAssets),
+        // Names what `bookingFlags.hasArchivedAssets` refuses over, from the
+        // same rows, so it adds no query either.
+        archivedAssets: buildArchivedAssets(bookingAssets),
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           // Each `bookingAssets` row is built from a `BookingAsset` pivot
@@ -1544,6 +1574,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         const b = await getBooking({ id, organizationId, request });
         assertCanDeleteBooking({ access, booking: b, userId });
       }
+
+      // The dialog asks for the booking's name; refuse a request that skipped
+      // it. A booking already gone is left to `deleteBooking` to report.
+      const { confirmation } = parseData(formData, DeleteConfirmationSchema);
+      await assertBookingDeleteConfirmed({ id, organizationId, confirmation });
 
       const deletedBooking = await deleteBooking(
         { id, organizationId },
@@ -1884,6 +1919,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // Post-pivot, asset → booking lookup goes via the `BookingAsset` pivot.
         const checkedOutAssetIdsBeforeCheckin = (
           await db.asset.findMany({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: check-in must cover every asset already out on the booking, archived ones included
             where: {
               bookingAssets: { some: { bookingId: id } },
               organizationId,
@@ -1975,6 +2011,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         // Get the asset data for proper note generation
         const asset = await db.asset.findUnique({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: removing an archived asset from a booking stays allowed and its note needs the title
           where: { id: assetId, organizationId },
           select: { id: true, title: true },
         });
@@ -2229,6 +2266,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
          * asset — `standaloneAssetIds` carries that provenance separately.
          */
         const assets = await db.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: bulk removal from a booking may include archived assets, which stays allowed
           where: { id: { in: assetOrKitIds }, organizationId },
           select: { id: true, title: true },
         });

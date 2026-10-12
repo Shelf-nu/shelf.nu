@@ -88,6 +88,7 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     ] = await Promise.all([
       own
         ? db.asset.count({
+            // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: transferOnRoleChange moves archived assets too, so the count the admin confirms must include them
             where: { userId: targetUserId, organizationId },
           })
         : none,

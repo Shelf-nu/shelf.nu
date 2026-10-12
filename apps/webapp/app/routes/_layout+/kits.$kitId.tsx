@@ -34,6 +34,7 @@ import {
 } from "~/modules/barcode/validation";
 import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
+  assertKitDeleteConfirmed,
   deleteKit,
   deleteKitImage,
   emitAssetKitDetachmentNotes,
@@ -56,6 +57,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -111,6 +113,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assetKits: {
+            // Archived members are out of service and left out of kit custody
+            // and kit bookings (issue #382), so the page's availability badge,
+            // Book and custody actions read the active members only. They
+            // never sit on a live booking either, so the current booking and
+            // the custody card lose nothing. `archivedMemberCount` below says
+            // how many are hidden.
+            where: { asset: { archivedAt: null } },
             select: {
               // The membership id is the kit-slice discriminator booked rows
               // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
@@ -246,8 +255,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    /** Members left out of `kit.assetKits` above because they are archived. */
+    const archivedMemberCount = await db.assetKit.count({
+      where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
+    });
+
     return payload({
       kit: redactedKit,
+      archivedMemberCount,
       currentBooking,
       header,
       modelName,
@@ -329,6 +344,14 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     switch (intent) {
       case "delete": {
+        // The dialog asks for the kit's name; refuse a request that skipped it.
+        const { confirmation } = parseData(formData, DeleteConfirmationSchema);
+        await assertKitDeleteConfirmed({
+          id: kitId,
+          organizationId,
+          confirmation,
+        });
+
         await deleteKit({ id: kitId, organizationId, actorUserId: userId });
 
         if (image) {

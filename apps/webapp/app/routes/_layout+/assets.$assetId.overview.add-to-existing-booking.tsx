@@ -81,6 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         ids: assetId ? [assetId] : undefined,
       }),
       db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: loads the one asset the dialog was opened for; updateBookingAssets refuses an archived asset with its own message
         where: { id: assetId, organizationId },
         select: {
           id: true,
@@ -161,6 +162,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (quantity != null && finalAssetIds.length === 1) {
       const assetId = finalAssetIds[0];
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup for one specific asset; the archive guard in updateBookingAssets must still see it to refuse with the archived message
         where: { id: assetId, organizationId },
         select: { id: true, title: true, type: true },
       });

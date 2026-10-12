@@ -74,6 +74,9 @@ vitest.mock("~/database/db.server", () => {
       asset: {
         findMany: vitest.fn().mockResolvedValue([]),
       },
+      // why: the archive guard row-locks the booked assets with a raw
+      // `SELECT ... FOR UPDATE`; the lock returns nothing the code reads.
+      $queryRaw: vitest.fn().mockResolvedValue([]),
     };
     return { tx, pending };
   };
@@ -157,6 +160,7 @@ vitest.mock("~/utils/org-validation.server", () => ({
   assertTagsBelongToOrg: vitest.fn().mockResolvedValue(undefined),
   assertTeamMemberBelongsToOrg: vitest.fn().mockResolvedValue(undefined),
   assertUserBelongsToOrg: vitest.fn().mockResolvedValue(undefined),
+  assertAssetsAreNotArchived: vitest.fn().mockResolvedValue(undefined),
 }));
 
 /**

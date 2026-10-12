@@ -45,6 +45,12 @@ vi.mock("react-router", async () => {
       asset: mockAsset,
       custodySources: { multiSource: false, options: [], poolAvailable: 0 },
     }),
+    // why: the Archive / Reinstate item posts through a fetcher, which needs a
+    // data router; these tests never submit it, so an idle stub is enough.
+    useFetcher: () => ({ state: "idle", submit: vi.fn() }),
+    // why: `useDisabled` reads the navigation state alongside the fetcher's;
+    // nothing is navigating in these tests.
+    useNavigation: () => ({ state: "idle" }),
   };
 });
 

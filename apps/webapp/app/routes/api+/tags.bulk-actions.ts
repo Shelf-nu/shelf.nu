@@ -43,7 +43,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
         // `currentSearchParams` carries the filters the user was looking at.
         // Without it a "select all" over a filtered list deletes every tag in
         // the workspace while the UI reports the filtered count.
-        const { tagIds, currentSearchParams } = parseData(
+        const { tagIds, confirmation, currentSearchParams } = parseData(
           formData,
           BulkDeleteTagsSchema.and(CurrentSearchParamsSchema)
         );
@@ -52,6 +52,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           tagIds,
           organizationId,
           currentSearchParams,
+          confirmation,
         });
 
         sendNotification({

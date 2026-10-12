@@ -30,6 +30,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   getMobileUserContext,
@@ -291,4 +292,73 @@ describe("GET /api/mobile/dashboard — active audits", () => {
       expect(where.assignments).toBeUndefined();
     }
   );
+});
+
+describe("GET /api/mobile/dashboard — asset list scope", () => {
+  /**
+   * Runs the dashboard loader and returns the `where` of every asset query,
+   * grouped by what the Home tab draws from it.
+   */
+  async function captureAssetWheres() {
+    await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/dashboard?orgId=${ORG_ID}`
+        ),
+      })
+    );
+
+    const countWheres = vi
+      .mocked(db.asset.count)
+      .mock.calls.map((call) => call[0]!.where as Prisma.AssetWhereInput);
+    return {
+      total: countWheres.find((where) => !where.custody),
+      myCustody: countWheres.find((where) => where.custody),
+      byStatus: vi.mocked(db.asset.groupBy).mock.calls[0]![0]!
+        .where as Prisma.AssetWhereInput,
+      newest: vi.mocked(db.asset.findMany).mock.calls[0]![0]!
+        .where as Prisma.AssetWhereInput,
+    };
+  }
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "counts and lists bookable assets and the ones %s holds, as the Assets tab does",
+    async (role) => {
+      actAs(role);
+
+      const { total, byStatus, newest } = await captureAssetWheres();
+
+      for (const where of [total, byStatus, newest]) {
+        expect(where).toEqual({
+          organizationId: ORG_ID,
+          archivedAt: null,
+          // The scope's own shape is pinned in list-scope.server.test.ts.
+          AND: [bookableListScopeWhere({ holderUserId: CALLER_USER_ID })],
+        });
+      }
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "still counts every asset %s holds, like the custody tab",
+    async (role) => {
+      actAs(role);
+
+      const { myCustody } = await captureAssetWheres();
+
+      expect(myCustody).toBeDefined();
+      expect(myCustody).not.toHaveProperty("availableToBook");
+      expect(myCustody).not.toHaveProperty("AND");
+    }
+  );
+
+  it("counts and lists every asset for ADMIN", async () => {
+    actAs(OrganizationRoles.ADMIN);
+
+    const { total, byStatus, newest } = await captureAssetWheres();
+
+    for (const where of [total, byStatus, newest]) {
+      expect(where).toEqual({ organizationId: ORG_ID, archivedAt: null });
+    }
+  });
 });

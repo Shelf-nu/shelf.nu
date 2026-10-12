@@ -717,6 +717,7 @@ export async function getAssetAvailabilityBatch(
     const [assetRows, custodyGroups, inKitsGroups, checkedOutBreakdownByAsset] =
       await Promise.all([
         client.asset.findMany({
+          // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: id-keyed quantity read for the requested assets; callers choose the pool, and a booking holding an archived asset still needs its figures
           where: { id: { in: uniqueAssetIds }, organizationId },
           select: { id: true, quantity: true },
         }),

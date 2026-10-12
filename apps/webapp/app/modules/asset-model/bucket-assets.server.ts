@@ -8,7 +8,7 @@
  *
  * It lives here rather than in either route because almost everything around
  * that predicate is a guard: the permission gate, the organization scope, the
- * `availableToBookOnly` narrowing a viewer limited to bookable assets gets, and the custodian
+ * list-scope narrowing a viewer limited to bookable assets gets, and the custodian
  * redaction applied before the payload leaves. Two routes each carrying their
  * own copy of that stack is how one of them ends up missing a guard, which on
  * this endpoint exposes data rather than merely looking wrong.
@@ -25,9 +25,20 @@
  * @see {@link file://./../../components/assets/assets-index/asset-model-assets-sheet.tsx}
  */
 import { AssetType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
+import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
+import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import type { ArchivedFilter } from "~/modules/asset/types";
+import {
+  applyArchivedFilter,
+  getArchivedFilterFromParams,
+} from "~/modules/asset/utils.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
@@ -37,6 +48,7 @@ import { payload, error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { applyAssetModelBucketFilters } from "./bucket";
@@ -90,27 +102,34 @@ function stringifyFilters(params: URLSearchParams): string {
  *   with no model at all.
  * @param organizationId - The caller's workspace, from `requirePermission` and
  *   never from the request
- * @param availableToBookOnly - Restricts the count to assets the viewer may
- *   reserve, matching the asset query beside it
+ * @param bookableScope - The viewer's list scope, matching the asset query
+ *   beside it; `null` counts every asset
+ * @param archivedFilter - The index's Active / Archived / All view (issue #382).
+ *   Not a filter the user can clear, so it scopes this count too: counting
+ *   archived assets in the Active view would promise rows that clearing every
+ *   filter still never shows.
  * @returns How many assets the bucket holds, filters aside
  */
 async function countBucketAssetsIgnoringFilters({
   bucket,
   organizationId,
-  availableToBookOnly,
+  bookableScope,
+  archivedFilter,
 }: {
   bucket: AssetModelBucket;
   organizationId: string;
-  availableToBookOnly: boolean;
+  bookableScope: BookableListScope | null;
+  archivedFilter: ArchivedFilter;
 }): Promise<number> {
-  return db.asset.count({
-    where: {
-      organizationId,
-      type: AssetType.INDIVIDUAL,
-      assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
-      ...(availableToBookOnly ? { availableToBook: true } : {}),
-    },
-  });
+  const where: Prisma.AssetWhereInput = {
+    organizationId,
+    type: AssetType.INDIVIDUAL,
+    assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
+    ...(bookableScope ? { AND: [bookableListScopeWhere(bookableScope)] } : {}),
+  };
+  applyArchivedFilter(where, archivedFilter);
+
+  return db.asset.count({ where });
 }
 
 /**
@@ -209,7 +228,16 @@ export async function loadAssetModelBucketAssets({
     // limited to bookable assets sees the same set here as on the page that
     // opened the sheet. Both endpoints are reachable directly, not only
     // through it.
-    const availableToBookOnly = access.policy.assets.listScope === "bookable";
+    const bookableScope = resolveBookableListScope({ access, userId });
+
+    // The index's Archived and All views are for members who can act on what
+    // is in them (`asset: archive`, issue #382); everyone else is held to the
+    // Active view whatever the forwarded string says, as on the index itself.
+    const honorArchivedView = roleHasPermission({
+      roles: [access.role],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.archive,
+    });
 
     const { assets, totalAssets, page, perPage, totalPages } =
       await getAdvancedPaginatedAndFilterableAssets({
@@ -219,7 +247,8 @@ export async function loadAssetModelBucketAssets({
         filters: stringifyFilters(forwarded),
         canUseBarcodes,
         timeZone,
-        availableToBookOnly,
+        bookableScope,
+        honorArchivedView,
       });
 
     // Only an empty sheet has a use for this, and only an empty sheet pays for
@@ -230,7 +259,10 @@ export async function loadAssetModelBucketAssets({
         ? await countBucketAssetsIgnoringFilters({
             bucket,
             organizationId,
-            availableToBookOnly,
+            bookableScope,
+            archivedFilter: honorArchivedView
+              ? getArchivedFilterFromParams(forwarded)
+              : "active",
           })
         : null;
 

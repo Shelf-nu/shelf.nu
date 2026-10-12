@@ -69,6 +69,7 @@ vitest.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
@@ -194,10 +195,10 @@ describe("asset model assets endpoint", () => {
     expect(args.filters).toContain("status=is:AVAILABLE");
     expect(args.filters).toContain("assetModel=is:am-1");
     // An ADMIN caller gets the unrestricted query, matching the index loader.
-    expect(args.availableToBookOnly).toBe(false);
+    expect(args.bookableScope).toBeNull();
   });
 
-  it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
+  it("restricts to bookable and held assets for a SELF_SERVICE caller, matching the index loader", async () => {
     vitest.mocked(requirePermission).mockResolvedValue(
       caller("SELF_SERVICE", {
         organizationId: "org-1",
@@ -213,10 +214,12 @@ describe("asset model assets endpoint", () => {
 
     const [args] = vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mock
       .calls[0];
-    expect(args.availableToBookOnly).toBe(true);
+    expect(args.bookableScope).toEqual({ holderUserId: "user-1" });
     // The unfiltered count is narrowed the same way: counted over the wider
     // set, it would report assets this viewer is shown nowhere else.
-    expect(unfilteredCountWhere()).toMatchObject({ availableToBook: true });
+    expect(unfilteredCountWhere()).toMatchObject({
+      AND: [bookableListScopeWhere({ holderUserId: "user-1" })],
+    });
   });
 
   it("counts the model's own assets unfiltered when nothing matched, scoped to the caller's organization", async () => {
@@ -238,12 +241,52 @@ describe("asset model assets endpoint", () => {
       // count including stock pools would not describe the same set.
       type: "INDIVIDUAL",
       assetModelId: "am-1",
+      // The index's default Active view hides archived assets, and clearing
+      // filters never shows them, so they are not "hidden by your filters".
+      archivedAt: null,
     });
 
     const body = (await response.json()) as { unfilteredAssets: number | null };
     // What separates "your filters exclude everything in this model" from "this
     // model is empty" in the sheet's one empty-state sentence.
     expect(body.unfilteredAssets).toBe(52);
+  });
+
+  it("counts within the index's Archived view when the caller is in it (issue #382)", async () => {
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    // The view is not a filter the user can clear, so it scopes this count too.
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: { not: null },
+    });
+  });
+
+  it("holds a member without asset: archive to the Active view (issue #382)", async () => {
+    // A BASE member never sees the Archived tab. Typing `archived=archived`
+    // into the forwarded string must not hand them the archived set anyway.
+    vitest
+      .mocked(requirePermission)
+      .mockResolvedValue(caller("BASE", { organizationId: "org-1" }) as never);
+
+    await loader({
+      context,
+      request: request(
+        "https://x.test/api/asset-models/am-1/assets?filters=archived%3Darchived"
+      ),
+      params: { assetModelId: "am-1" },
+    } as never);
+
+    expect(unfilteredCountWhere()).toMatchObject({
+      assetModelId: "am-1",
+      archivedAt: null,
+    });
   });
 
   it("skips the unfiltered count when the filtered set has rows", async () => {

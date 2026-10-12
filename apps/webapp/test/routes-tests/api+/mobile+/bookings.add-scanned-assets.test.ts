@@ -49,6 +49,9 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     assetKit: { findMany: vi.fn().mockResolvedValue([]) },
     asset: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: resolving kits refuses one with no active member first; every kit
+    // here has one.
+    kit: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -212,6 +215,8 @@ describe("POST /api/mobile/bookings/add-scanned-assets — kit provenance", () =
         where: {
           kitId: { in: ["kit-from-another-org"] },
           organizationId: "org-1",
+          // Archived members are left out of the booking (issue #382).
+          asset: { archivedAt: null },
         },
       })
     );

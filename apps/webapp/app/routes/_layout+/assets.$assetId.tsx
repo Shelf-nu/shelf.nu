@@ -17,16 +17,25 @@ import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { draftBookingsNote } from "~/modules/asset/archive-messages";
+import {
+  CONFIRM_MODEL_SHORTFALL_FIELD,
+  isModelShortfallMessage,
+} from "~/modules/asset/archive-shortfall";
 import { getCustodySourceSummary } from "~/modules/asset/custody-source.server";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
 import {
+  archiveAsset,
+  assertAssetDeleteConfirmed,
   deleteAsset,
   getAsset,
   relinkAssetQrCode,
+  unarchiveAsset,
 } from "~/modules/asset/service.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createAssetReminder } from "~/modules/asset-reminder/service.server";
@@ -45,6 +54,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -54,6 +64,7 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -271,6 +282,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       z.object({
         intent: z.enum([
           "delete",
+          "archive",
+          "reinstate",
           "relink-qr-code",
           "set-reminder",
           "add-barcode",
@@ -289,6 +302,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       delete: {
         entity: PermissionEntity.asset,
         action: PermissionAction.delete,
+      },
+      // Reinstating is the inverse of archiving, so one grant covers both.
+      archive: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
+      },
+      reinstate: {
+        entity: PermissionEntity.asset,
+        action: PermissionAction.archive,
       },
       "relink-qr-code": {
         entity: PermissionEntity.asset,
@@ -310,8 +332,27 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       ...intent2Permission[intent],
     });
 
+    // Archived assets are frozen (issue #382): only delete + reinstate are
+    // allowed. Block the other mutating intents server-side.
+    if (
+      intent === "relink-qr-code" ||
+      intent === "set-reminder" ||
+      intent === "add-barcode"
+    ) {
+      await assertAssetsAreNotArchived({
+        assetIds: [id],
+        organizationId,
+        actorUserId: userId,
+      });
+    }
+
     switch (intent) {
       case "delete": {
+        const { confirmation } = parseData(formData, DeleteConfirmationSchema);
+
+        // The dialog asks for the asset's title; refuse a request that skipped it.
+        await assertAssetDeleteConfirmed({ id, organizationId, confirmation });
+
         // Name the actor, or the activity event records the deletion as
         // "System". `deleteAsset` also removes the stored image files.
         await deleteAsset({ organizationId, id, actorUserId: userId });
@@ -324,6 +365,49 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         });
 
         return redirect("/assets");
+      }
+
+      case "archive": {
+        const { draftBookings } = await archiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+          // Set by the "Archive anyway" prompt after the shortfall warning.
+          confirmModelShortfall:
+            formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
+        });
+
+        sendNotification({
+          title: "Asset archived",
+          message: `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
+            draftBookings
+          )}`,
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
+      }
+
+      case "reinstate": {
+        const { availableToBook } = await unarchiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+        });
+
+        sendNotification({
+          title: "Asset reinstated",
+          // Archiving never changed availability, so an asset marked
+          // unavailable before it was archived is still unavailable now.
+          message: availableToBook
+            ? "The asset is active again and available to book."
+            : "The asset is active again. It is still marked as unavailable for bookings.",
+          icon: { name: "success", variant: "success" },
+          senderId: authSession.userId,
+        });
+
+        return payload({ success: true });
       }
 
       case "relink-qr-code": {
@@ -464,7 +548,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     }
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
-    return data(error(reason), { status: reason.status });
+    // The model-reservation warning is a question, not a failure: the Actions
+    // menu turns it into an "Archive anyway" prompt, so no error toast.
+    const isShortfallWarning = isModelShortfallMessage(reason.message);
+    return data(error(reason, !isShortfallWarning), { status: reason.status });
   }
 }
 
@@ -530,13 +617,20 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <AssetStatusBadge
               id={asset.id}
               status={asset.status}
               availableToBook={asset.availableToBook}
               asset={asset}
+              isArchived={!!asset.archivedAt}
             />
+            {/* When it left service; who did it is on the Activity tab. */}
+            {asset.archivedAt ? (
+              <span className="text-sm text-gray-600">
+                Archived on <DateS date={asset.archivedAt} />
+              </span>
+            ) : null}
           </div>
         }
       >

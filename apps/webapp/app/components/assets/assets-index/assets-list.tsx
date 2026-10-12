@@ -57,10 +57,10 @@ import { AssetIndexFilters } from "./filters";
 import { ListItemTagsColumn } from "./list-item-tags-column";
 import BookSelectedModelsDropdown from "./model-booking/book-selected-models-dropdown";
 import { getUnselectableModelRows } from "./model-booking/unselectable-model-rows";
+import { useAssetAvailabilityData } from "./use-asset-availability-data";
 import AvailabilityCalendar from "../../availability-calendar/availability-calendar";
 import { ResourceTitleLink } from "../../availability-calendar/resource-title-link";
 import { CategoryBadge } from "../category-badge";
-import { useAssetAvailabilityData } from "./use-asset-availability-data";
 
 /**
  * The model view's bulk-action toolbar, built once.
@@ -97,11 +97,18 @@ export const AssetsList = ({
   disableTeamMemberFilter,
   disableBulkActions,
   wrapperClassName,
+  titleContent,
 }: {
   customEmptyStateContent?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
   disableBulkActions?: boolean;
   wrapperClassName?: string;
+  /**
+   * Replaces the title of the asset list (not the model view). The asset index
+   * passes its Active / Archived / All menu here; leave it out on pages whose
+   * loader ignores `?archived=`, where that menu would change nothing.
+   */
+  titleContent?: ListProps["titleContent"];
 }) => {
   const {
     items,
@@ -529,6 +536,7 @@ export const AssetsList = ({
               customEmptyStateContent={
                 customEmptyStateContent ? customEmptyStateContent : undefined
               }
+              titleContent={titleContent}
               headerChildren={headerChildren}
               extraItemComponentProps={
                 modeIsSimple ? undefined : advancedExtraProps
@@ -632,6 +640,7 @@ export const ListAssetContent = ({
                   status={item.status}
                   availableToBook={item.availableToBook}
                   asset={item}
+                  isArchived={!!item.archivedAt}
                 />
                 {displayCode ? <AssetCodeBadge {...displayCode} /> : null}
               </div>

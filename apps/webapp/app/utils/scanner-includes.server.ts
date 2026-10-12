@@ -115,7 +115,12 @@ export const KIT_INCLUDE = {
       name: true,
     },
   },
-  _count: { select: { assetKits: true } },
+  // The "(N assets)" a scanned kit row shows: active members, since archived
+  // ones are left out of kit custody and bookings. `assetKits` below keeps
+  // them, so the server can leave them out and say so.
+  _count: {
+    select: { assetKits: { where: { asset: { archivedAt: null } } } },
+  },
   assetKits: {
     select: {
       // Scanner needs the AssetKit's own id so kit-driven
@@ -136,6 +141,9 @@ export const KIT_INCLUDE = {
           // remaining-units map, INDIVIDUAL is binary).
           type: true,
           availableToBook: true,
+          // Archived members are left out of kit custody and bookings; the
+          // drawers flag a kit whose members are all archived.
+          archivedAt: true,
           custody: true,
           // Which `AssetModel` the member is an instance of. The fulfil
           // drawer matches a kit's members against the booking's

@@ -81,6 +81,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const { access } = await getMobileUserContext(user.id, organizationId);
 
     const storedAsset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail screen must still load an archived asset
       where: {
         // why: inline-scope to org so cross-org probes 404 — matches the
         // pattern used by every other mobile route.
