@@ -1,6 +1,5 @@
 ---
 description: When you discover a new reusable coding pattern or receive feedback about how to write code in this project, create a new rule file in .claude/rules/
-globs: ["**/*"]
 ---
 
 When you notice a new pattern that should be standardized across the
@@ -10,7 +9,9 @@ repeated implementations — create a new rule file in `.claude/rules/`.
 Each rule file should:
 
 - Have a descriptive filename (e.g., `use-badge-colors.md`)
-- Include `description` and `globs` frontmatter
+- Include `description` and `paths` frontmatter (`paths`, a YAML list of
+  globs, is what Claude Code reads; `globs` is ignored and makes the rule load
+  every session). Omit `paths` only for a rule that truly applies everywhere
 - Show a ❌ Bad / ✅ Good code example where applicable
 - Be concise (under 30 lines)
 

@@ -1,3 +1,13 @@
+---
+description: Working hours are the physical location's wall clock; override dates are absolute (getOverrideDateKey), times use the acting user's preference zone
+paths:
+  - "apps/webapp/app/modules/working-hours/**"
+  - "apps/webapp/app/modules/booking/**"
+  - "apps/webapp/app/components/booking/**"
+  - "apps/webapp/app/components/working-hours/**"
+  - "apps/webapp/app/routes/**/*working-hours*"
+---
+
 # Working Hours Are Local To The Physical Location
 
 Working hours describe when a **physical place** is open. Both halves are

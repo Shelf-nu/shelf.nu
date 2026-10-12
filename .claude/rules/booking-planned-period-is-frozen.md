@@ -1,3 +1,11 @@
+---
+description: originalFrom/originalTo are the planned period and are never overwritten once a booking starts; readers pick planned or live and stay on it
+paths:
+  - "apps/webapp/app/modules/booking/**"
+  - "apps/webapp/app/modules/reports/**"
+  - "apps/webapp/app/routes/**/*booking*"
+---
+
 # A Booking's Planned Period Is Frozen Once It Starts
 
 `Booking` carries two date pairs and they are not interchangeable:

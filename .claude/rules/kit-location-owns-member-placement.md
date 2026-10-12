@@ -1,3 +1,12 @@
+---
+description: Kit.locationId owns member placement; go through cascadeKitLocationToAssets / preserveKitDrivenPlacements
+paths:
+  - "apps/webapp/app/modules/kit/**"
+  - "apps/webapp/app/modules/location/**"
+  - "apps/webapp/app/modules/asset/**"
+  - "apps/webapp/app/routes/**/*kit*"
+---
+
 # A Kit's Location Owns Its Members' Placement
 
 `Kit.locationId` is the source of truth for where its member assets are. Any

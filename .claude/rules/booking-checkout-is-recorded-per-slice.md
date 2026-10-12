@@ -1,3 +1,13 @@
+---
+description: Whether an asset went out on a booking is answered by the BookingAsset slice markers, never by Asset.status or PartialBookingCheckout rows
+paths:
+  - "apps/webapp/app/modules/booking/**"
+  - "apps/webapp/app/routes/**/*booking*"
+  - "apps/webapp/app/routes/api+/mobile+/**"
+  - "apps/webapp/app/components/scanner/**"
+  - "apps/webapp/app/modules/reports/**"
+---
+
 # "Was This Checked Out?" Is Answered By The Slice, Not By Status Or Records
 
 Three sources look like they answer _"was this asset checked out on this booking?"_. Only

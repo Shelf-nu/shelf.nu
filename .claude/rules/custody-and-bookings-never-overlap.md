@@ -1,6 +1,6 @@
 ---
 description: Custody and a checked-out booking are exclusive holds on the same units; only location overlaps them
-globs:
+paths:
   - "apps/webapp/app/modules/booking/**"
   - "apps/webapp/app/modules/custody/**"
   - "apps/webapp/app/modules/kit/**"

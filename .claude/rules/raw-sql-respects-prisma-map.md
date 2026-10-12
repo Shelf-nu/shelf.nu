@@ -1,3 +1,10 @@
+---
+description: Raw SQL must use @map column names, avoid bigint casts on float sums, and COALESCE nullable columns
+paths:
+  - "apps/webapp/app/**/*.server.ts"
+  - "packages/database/**"
+---
+
 Prisma's `@map` decouples the schema field name from the actual DB column.
 `Asset.valuation` is `@map("value")`, so `value` is what Postgres knows.
 **Typecheck cannot validate raw SQL** — `Prisma.sql\`...\``is just a string

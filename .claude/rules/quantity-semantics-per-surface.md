@@ -1,3 +1,10 @@
+---
+description: Four different quantity fields exist; name which one a surface multiplies by before reaching for getAssetTotalValue
+paths:
+  - "apps/webapp/app/**/*.{ts,tsx}"
+  - "packages/quantity-control/**"
+---
+
 # Quantity Semantics Per Surface
 
 Shelf has FOUR different `quantity` fields across the schema, each

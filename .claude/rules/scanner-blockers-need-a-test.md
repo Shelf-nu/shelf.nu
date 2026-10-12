@@ -1,3 +1,11 @@
+---
+description: Every scanner blocker is derived in a pure builder with a stable id and pinned by a manifest test
+paths:
+  - "apps/webapp/app/components/scanner/**"
+  - "apps/companion/lib/batch-blockers*"
+  - "apps/companion/app/**/scan*"
+---
+
 # Every Scanner Blocker Needs a Test
 
 A scanner blocker is the row's answer to "why can this not go". A **missing**
