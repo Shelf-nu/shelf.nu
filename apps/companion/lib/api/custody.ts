@@ -48,13 +48,26 @@ export const custodyApi = {
     assetId: string,
     teamMemberId: string,
     quantity: number,
-    note?: string
+    note?: string,
+    /**
+     * Where the units come from: a location id, or `null` for the unplaced
+     * units. Sent only for a pool placed at two or more locations; left out,
+     * the server records its own default (the pool's one location, or no
+     * source).
+     */
+    locationId?: string | null
   ) => {
     const result = await apiFetch<QuantityCustodyResponse>(
       `/api/mobile/custody/assign-quantity?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetId, teamMemberId, quantity, note }),
+        body: JSON.stringify({
+          assetId,
+          teamMemberId,
+          quantity,
+          note,
+          ...(locationId !== undefined ? { locationId } : {}),
+        }),
         // why: non-idempotent — a timed-out-but-landed request must not be
         // auto-retried, or the assignment double-applies.
         retry: false,
@@ -79,7 +92,17 @@ export const custodyApi = {
     assetId: string,
     teamMemberId: string,
     quantity: number,
-    options?: { consumed?: number; note?: string }
+    options?: {
+      consumed?: number;
+      note?: string;
+      /**
+       * Release only the units taken from this source: a location id, `null`
+       * for the unplaced units, or `"unrecorded"` for units whose source was
+       * never recorded. Left out, the server draws the holder's rows in its
+       * fixed order.
+       */
+      locationId?: string | null;
+    }
   ) => {
     const result = await apiFetch<QuantityCustodyResponse>(
       `/api/mobile/custody/release-quantity?orgId=${orgId}`,
@@ -91,6 +114,9 @@ export const custodyApi = {
           quantity,
           consumed: options?.consumed,
           note: options?.note,
+          ...(options?.locationId !== undefined
+            ? { locationId: options.locationId }
+            : {}),
         }),
         // why: non-idempotent — a timed-out-but-landed request must not be
         // auto-retried, or the release double-applies.
@@ -129,23 +155,59 @@ export const custodyApi = {
     return result;
   },
 
-  /** Bulk assign custody of multiple assets to a team member */
-  bulkAssignCustody: (orgId: string, assetIds: string[], custodianId: string) =>
+  /**
+   * Bulk assign custody of multiple assets to a team member.
+   *
+   * `quantities` gives units per QUANTITY_TRACKED asset id in `assetIds`; the
+   * server assigns those unit by unit and the rest whole, checking every unit
+   * count before it writes anything. Omitted when empty, so a scan without
+   * quantity rows sends the same body as before.
+   */
+  bulkAssignCustody: (
+    orgId: string,
+    assetIds: string[],
+    custodianId: string,
+    quantities: Record<string, number> = {}
+  ) =>
     apiFetch<BulkActionResponse>(
       `/api/mobile/bulk-assign-custody?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetIds, custodianId }),
+        body: JSON.stringify({
+          assetIds,
+          custodianId,
+          ...(Object.keys(quantities).length > 0 ? { quantities } : {}),
+        }),
+        // why: units make it non-idempotent: a timed-out-but-landed request
+        // must not be auto-retried, or the units are assigned twice.
+        retry: Object.keys(quantities).length === 0,
       }
     ),
 
-  /** Bulk release custody of multiple assets */
-  bulkReleaseCustody: (orgId: string, assetIds: string[]) =>
+  /**
+   * Bulk release custody of multiple assets.
+   *
+   * `quantities` gives units per QUANTITY_TRACKED asset id in `assetIds`; the
+   * server releases those from each asset's single holder and the rest whole.
+   * Omitted when empty, so a scan without quantity rows sends the same body
+   * as before.
+   */
+  bulkReleaseCustody: (
+    orgId: string,
+    assetIds: string[],
+    quantities: Record<string, number> = {}
+  ) =>
     apiFetch<BulkActionResponse>(
       `/api/mobile/bulk-release-custody?orgId=${orgId}`,
       {
         method: "POST",
-        body: JSON.stringify({ assetIds }),
+        body: JSON.stringify({
+          assetIds,
+          ...(Object.keys(quantities).length > 0 ? { quantities } : {}),
+        }),
+        // why: units make it non-idempotent: a timed-out-but-landed request
+        // must not be auto-retried, or the units are released twice.
+        retry: Object.keys(quantities).length === 0,
       }
     ),
 

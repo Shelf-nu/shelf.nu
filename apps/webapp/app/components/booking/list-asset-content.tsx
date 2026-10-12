@@ -5,8 +5,9 @@ import { LocationBadge } from "~/components/location/location-badge";
 import { useBookingBulkActions } from "~/hooks/use-booking-bulk-actions";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import type {
@@ -20,7 +21,12 @@ import {
   resolveBookingRowQtyState,
   resolveQtyStockBadgeVariant,
 } from "~/utils/booking-assets";
-import { canRoleRemoveBookingAssets } from "~/utils/bookings";
+import { mayRemoveBookingItems } from "~/utils/bookings";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { tw } from "~/utils/tw";
 import { AssetRowActionsDropdown } from "./asset-row-actions-dropdown";
 import {
@@ -30,6 +36,7 @@ import {
 } from "./availability-label";
 import { FulfilsModelBadge } from "./fulfils-model-badge";
 import { RemovedFromKitBadge } from "./removed-from-kit-badge";
+import { ArchivedBadge } from "../assets/archived-badge";
 import { AssetCodeBadge } from "../assets/asset-code-badge";
 import { AssetImage } from "../assets/asset-image";
 import { AssetStatusBadge } from "../assets/asset-status-badge";
@@ -93,7 +100,8 @@ export default function ListAssetContent({
     >;
   }>();
   const currentOrganization = useCurrentOrganization();
-  const { isBaseOrSelfService, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
   const { hasAny: hasAnyBulkAction } = useBookingBulkActions();
 
   // Resolve the asset's display code (QR id, SAM id, or barcode value) per
@@ -145,20 +153,28 @@ export default function ListAssetContent({
     // Never show actions if asset is part of a kit
     if (isPartOfKit) return false;
 
-    // Admins and owners can always see actions
-    if (!isBaseOrSelfService) return true;
+    // Members who write every booking see the menu on every row; others only
+    // on a booking they hold, within their removable statuses.
+    if (roleAccess.bookings.writeAll) return true;
 
-    // Check if user is the custodian of the item
     const isUserCustodian = booking?.custodianUser?.id === user?.id;
     if (!isUserCustodian) return false;
 
     /**
-     * BASE stops at DRAFT, SELF_SERVICE at RESERVED. Resolved through the
-     * shared helper rather than spelled out inline, so this menu, the bulk
-     * actions menu and the two server-side remove gates cannot drift apart.
+     * Resolved through the shared helper rather than spelled out inline, so
+     * this menu, the bulk actions menu and the two server-side remove gates
+     * cannot drift apart.
      */
-    return canRoleRemoveBookingAssets({ roles, booking });
-  }, [isPartOfKit, booking, user?.id, roles, isBaseOrSelfService]);
+    return mayRemoveBookingItems({
+      canUpdateBooking: userHasPermission({
+        roles,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.update,
+      }),
+      access: roleAccess,
+      bookingStatus: booking.status,
+    });
+  }, [isPartOfKit, booking, user?.id, roles, roleAccess]);
 
   /**
    * Qty-tracked partial dispositioning.
@@ -330,13 +346,19 @@ export default function ListAssetContent({
               */}
               <div className="flex flex-wrap items-center gap-2">
                 {isFinished && wasCheckedOut ? (
-                  <ReturnedBadge />
+                  <>
+                    <ReturnedBadge />
+                    {/* The asset may have been archived after it came back;
+                        the row still says so (issue #382). */}
+                    {item.archivedAt ? <ArchivedBadge /> : null}
+                  </>
                 ) : (
                   <AssetStatusBadge
                     id={item.id}
                     status={contextStatus}
                     availableToBook={item.availableToBook}
                     asset={item}
+                    isArchived={!!item.archivedAt}
                     // For QT rows the resolved `contextStatus` already encodes
                     // the booking-context truth (AVAILABLE via
                     // `getBookingContextAssetStatus` for DRAFT/RESERVED, or
@@ -368,6 +390,18 @@ export default function ListAssetContent({
                     resolved in the overview loader. */}
                 {item.fulfilsModelName ? (
                   <FulfilsModelBadge modelName={item.fulfilsModelName} />
+                ) : null}
+                {/* Where this pool slice's units left from. Recorded only when
+                    the slice goes out, so its presence alone means it went
+                    out (the row's unit counter is session-derived and reads 0
+                    after a one-click check-out). Resolved in the overview
+                    loader, only for pools at two or more placements. It is
+                    also what check-in takes used-up units off, so a location
+                    picked by default is never a silent guess. */}
+                {item.sourceLocation ? (
+                  <span className="text-xs text-gray-500">
+                    from {item.sourceLocation.name}
+                  </span>
                 ) : null}
               </div>
             </div>

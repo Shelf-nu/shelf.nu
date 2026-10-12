@@ -12,6 +12,7 @@
  */
 import { AssetType } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
 
@@ -127,7 +128,7 @@ describe("bulk release custody as SELF_SERVICE", () => {
       organizationId: "org-1",
       role: "SELF_SERVICE",
       canUseBarcodes: false,
-      canSeeAllCustody: false,
+      access: accessFor(["SELF_SERVICE"]),
     } as never);
     vi.mocked(bulkCheckInAssets).mockResolvedValue({
       skippedQuantityTracked: 1,

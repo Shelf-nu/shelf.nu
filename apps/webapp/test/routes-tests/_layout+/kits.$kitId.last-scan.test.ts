@@ -23,6 +23,7 @@
  */
 
 import { OrganizationRoles } from "@prisma/client";
+import { accessFor } from "@helpers/role-access";
 
 // why: importing the route pulls in `db.server`, whose non-production
 // initialization calls `db.$connect()`. Without this the test attempts a real
@@ -30,7 +31,13 @@ import { OrganizationRoles } from "@prisma/client";
 // — which vitest reports separately from the assertions, so the suite can go
 // green while still being broken.
 vi.mock("~/database/db.server", () => ({
-  db: { $connect: vi.fn(), $transaction: vi.fn() },
+  db: {
+    $connect: vi.fn(),
+    $transaction: vi.fn(),
+    // why: the loader counts the kit's archived members for its empty-kit
+    // reasons; none here.
+    assetKit: { count: vi.fn().mockResolvedValue(0) },
+  },
 }));
 
 const { mockRequirePermission } = vi.hoisted(() => ({
@@ -96,7 +103,10 @@ function callerHolds(roles: OrganizationRoles[]) {
     organizationId: ORG,
     currentOrganization: { id: ORG },
     canUseBarcodes: false,
-    canSeeAllCustody: true,
+    access: accessFor(roles, {
+      selfServiceCanSeeCustody: true,
+      baseUserCanSeeCustody: true,
+    }),
     userOrganizations: [{ organization: { id: ORG }, roles }],
   });
 }

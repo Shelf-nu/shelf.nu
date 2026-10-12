@@ -40,8 +40,10 @@ type MockDb = {
     findFirstOrThrow: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
+  $queryRaw: ReturnType<typeof vi.fn>;
   userOrganization: {
     findMany: ReturnType<typeof vi.fn>;
+    findUnique: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
   };
   organization: {
@@ -67,7 +69,32 @@ const dbMock = vi.hoisted<MockDb>(() => ({
     // so whether it ran is the assertion target of the free-trial tests.
     update: vi.fn(),
   },
-  userOrganization: { findMany: vi.fn(), update: vi.fn() },
+  // why: transferOwnership locks both memberships with a raw
+  // `SELECT ... FOR UPDATE` before re-reading them inside the transaction.
+  $queryRaw: vi.fn().mockResolvedValue([]),
+  userOrganization: {
+    findMany: vi.fn(),
+    // why: the locked re-read answers with the same membership rows the
+    // test's earlier `findMany` returned, so the transfer sees no change in
+    // between unless a test says otherwise.
+    findUnique: vi.fn(
+      async ({
+        where,
+      }: {
+        where: { userId_organizationId: { userId: string } };
+      }) => {
+        const results = dbMock.userOrganization.findMany.mock.results;
+        const rows = (await results[results.length - 1]?.value) as
+          | { roles: OrganizationRoles[]; user: { id: string } }[]
+          | undefined;
+        const row = rows?.find(
+          (r) => r.user.id === where.userId_organizationId.userId
+        );
+        return row ? { roles: row.roles } : null;
+      }
+    ),
+    update: vi.fn(),
+  },
   organization: {
     update: vi.fn(),
     // why: this is the assertion target. Whether it was called is exactly what

@@ -25,20 +25,23 @@ vi.mock("~/modules/qr/service.server", () => qrMocks);
 
 // why: authorization and the select-all filter have their own coverage; here
 // they only need to resolve so the handler reaches the QR reads.
-vi.mock("~/utils/roles.server", () => ({
-  requirePermission: vi.fn().mockResolvedValue({
-    organizationId: "org-1",
-    role: "ADMIN",
-    canSeeAllCustody: true,
-    // The loader reads these off the organization for the response, after the
-    // QR work — omitting them makes the handler 500 on its last line while the
-    // assertions below still pass.
-    currentOrganization: {
-      qrIdDisplayPreference: "qrId",
-      showShelfBranding: true,
-    },
-  }),
-}));
+vi.mock("~/utils/roles.server", async () => {
+  const { accessFor } = await import("@helpers/role-access");
+  return {
+    requirePermission: vi.fn().mockResolvedValue({
+      organizationId: "org-1",
+      role: "ADMIN",
+      access: accessFor(["ADMIN"]),
+      // The loader reads these off the organization for the response, after the
+      // QR work; omitting them makes the handler 500 on its last line while the
+      // assertions below still pass.
+      currentOrganization: {
+        qrIdDisplayPreference: "qrId",
+        showShelfBranding: true,
+      },
+    }),
+  };
+});
 // why: the select-all path narrows a custodian filter through this, and it hits
 // the database; these cases pass explicit ids, so it only needs to resolve.
 vi.mock("~/modules/team-member/service.server", () => ({

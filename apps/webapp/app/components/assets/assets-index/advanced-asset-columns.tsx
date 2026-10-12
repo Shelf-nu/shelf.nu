@@ -36,7 +36,7 @@ import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDateFormatter } from "~/hooks/use-date-formatter";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
@@ -228,6 +228,7 @@ export function AdvancedIndexColumn({
           status={item.status}
           availableToBook={item.availableToBook}
           asset={item}
+          isArchived={!!item.archivedAt}
         />
       );
 
@@ -290,7 +291,18 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (
@@ -419,11 +431,13 @@ function StatusColumn({
   status,
   availableToBook,
   asset,
+  isArchived = false,
 }: {
   id: string;
   status: AssetStatus;
   availableToBook?: boolean;
   asset?: AdvancedIndexAsset;
+  isArchived?: boolean;
 }) {
   return (
     <Td className="w-full max-w-none whitespace-nowrap">
@@ -432,6 +446,7 @@ function StatusColumn({
         status={status}
         availableToBook={availableToBook ?? true}
         asset={asset}
+        isArchived={isArchived}
       />
     </Td>
   );
@@ -529,7 +544,7 @@ export function CustodyColumn({
 }: {
   custody: AdvancedIndexAsset["custody"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { primary, others, total } = formatCustodyList(custody ?? []);
 
   return (
@@ -825,7 +840,7 @@ function UpcomingBookingsColumn({
 }: {
   bookings: AdvancedIndexAsset["bookings"];
 }) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,

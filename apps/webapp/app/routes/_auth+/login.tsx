@@ -22,7 +22,11 @@ import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { ContinueWithEmailForm } from "~/modules/auth/components/continue-with-email-form";
-import { signInWithEmail } from "~/modules/auth/service.server";
+import {
+  INVALID_CREDENTIALS_MESSAGE,
+  signInWithEmail,
+} from "~/modules/auth/service.server";
+import { isSsoDomainEmail } from "~/modules/auth/sso-enforcement.server";
 
 import {
   getSelectedOrganization,
@@ -71,6 +75,13 @@ const LoginFormSchema = z.object({
 });
 
 export async function action({ context, request }: ActionFunctionArgs) {
+  /**
+   * Set when a wrong email/password pair was typed for an address on a domain
+   * configured for SSO. It depends only on the domain, never on the account, so
+   * it is the same for every address on that domain whether or not it exists.
+   */
+  let ssoDomainHint = false;
+
   try {
     const method = getActionMethod(request);
 
@@ -122,7 +133,20 @@ export async function action({ context, request }: ActionFunctionArgs) {
           { shouldBeCaptured: false }
         );
 
-        const authSession = await signInWithEmail(email, password);
+        let authSession: Awaited<ReturnType<typeof signInWithEmail>>;
+        try {
+          authSession = await signInWithEmail(email, password);
+        } catch (cause) {
+          if (
+            isLikeShelfError(cause) &&
+            cause.message === INVALID_CREDENTIALS_MESSAGE
+          ) {
+            // The hint is a courtesy: a failed domain lookup must not replace
+            // the sign-in error the person actually needs to see.
+            ssoDomainHint = await isSsoDomainEmail(email).catch(() => false);
+          }
+          throw cause;
+        }
 
         if (!authSession) {
           return redirect(`/otp?email=${encodeURIComponent(email)}&mode=login`);
@@ -159,7 +183,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
         ? cause.shouldBeCaptured
         : !isZodValidationError(cause)
     );
-    return data(error(reason), { status: reason.status });
+    return data({ ...error(reason), ssoDomainHint }, { status: reason.status });
   }
 }
 
@@ -174,7 +198,12 @@ export default function IndexLoginForm() {
   const redirectTo = searchParams.get("redirectTo") ?? undefined;
   const acceptedInvite = searchParams.get("acceptedInvite");
   const passwordReset = searchParams.get("password_reset");
+  /** Set by the app layout when it ends a session whose address must use SSO. */
+  const ssoRequired = searchParams.get("sso_required");
   const data = useActionData<typeof action>();
+  const ssoDomainHint = Boolean(
+    data && "ssoDomainHint" in data && data.ssoDomainHint
+  );
 
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
@@ -195,6 +224,13 @@ export default function IndexLoginForm() {
         <div className="mb-8 text-center text-success-600">
           You have successfully reset your password. You can now use your new
           password to login.
+        </div>
+      ) : null}
+
+      {ssoRequired ? (
+        <div role="alert" className="mb-8 text-center text-error-600">
+          This email address signs in with single sign-on. Please use Login with
+          SSO.
         </div>
       ) : null}
       <Form ref={zo.ref} method="post" replace className="flex flex-col gap-5">
@@ -224,6 +260,15 @@ export default function IndexLoginForm() {
           error={zo.errors.password()?.message || data?.error.message}
         />
         <input type="hidden" name={zo.fields.redirectTo()} value={redirectTo} />
+        {ssoDomainHint ? (
+          <p role="status" className="text-sm text-gray-600">
+            If your organization uses single sign-on, use{" "}
+            <Button variant="link" to="/sso-login">
+              Login with SSO
+            </Button>
+            .
+          </p>
+        ) : null}
         <Button
           className="text-center"
           type="submit"

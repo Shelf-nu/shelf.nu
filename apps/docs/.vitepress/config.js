@@ -102,6 +102,7 @@ export default {
           { text: "Error Handling", link: "/handling-errors" },
           { text: "Select All Pattern", link: "/select-all-pattern" },
           { text: "Utility Hooks", link: "/hooks" },
+          { text: "Roles & Permissions", link: "/roles-and-permissions" },
           {
             text: "Scanner Drawer Development",
             link: "/scanner-drawer-development",
@@ -173,6 +174,10 @@ export default {
           {
             text: "Shibboleth",
             link: "/sso/providers/shibboleth",
+          },
+          {
+            text: "Okta",
+            link: "/sso/providers/okta",
           },
         ],
       },

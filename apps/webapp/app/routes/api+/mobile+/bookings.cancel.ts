@@ -33,8 +33,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * require the same — BASE has `booking:update` but NOT `booking:cancel`, so the
  * looser `update` gate would let a BASE user cancel via the API even though the
  * UI/permission map deny it). We also add the shared `validateBookingOwnership`
- * guard (no-op for admin/owner; creator-or-custodian for self-service) since the
- * web relies on the page loader's read-filter that a direct POST bypasses.
+ * guard (no-op when the caller's access writes every booking; creator-or-
+ * custodian otherwise) since the web relies on the page loader's read-filter
+ * that a direct POST bypasses.
  * Mobile must never be more permissive than web.
  *
  * Body: { bookingId: string, cancellationReason?: string (<=500) }
@@ -73,7 +74,7 @@ export async function action({ request }: ActionFunctionArgs) {
       "Booking"
     );
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // Org-scoped lookup (foreign-org id 404s) + ownership fields for the guard.
     const booking = await db.booking.findFirst({
@@ -88,12 +89,12 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    // Mirror web's effective behavior: self-service/base may only cancel their
-    // own (creator OR custodian). No-op for admin/owner.
+    // Mirror web's effective behavior: a caller who does not write every
+    // booking may only cancel their own (creator OR custodian).
     validateBookingOwnership({
       booking,
       userId: user.id,
-      role,
+      access,
       action: "cancel",
     });
 

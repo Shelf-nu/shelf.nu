@@ -59,13 +59,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        request,
-        userId,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.update,
-      });
+    const { organizationId, access } = await requirePermission({
+      request,
+      userId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.update,
+    });
 
     const formData = await request.formData();
     const { assetId, quantity } = parseData(
@@ -125,18 +124,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * `Role2PermissionMap`. Without this guard those roles can hit any
      * `bookingId` in the org and inflate or shrink the booked quantity
      * of another user's reservation (cross-user IDOR within the org).
+     * No-op when `access.bookings.writeAll`.
      */
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking: {
-          creatorId: bookingAsset.booking.creatorId,
-          custodianUserId: bookingAsset.booking.custodianUserId,
-        },
-        userId,
-        role,
-        action: "adjust asset quantity on",
-      });
-    }
+    validateBookingOwnership({
+      booking: {
+        creatorId: bookingAsset.booking.creatorId,
+        custodianUserId: bookingAsset.booking.custodianUserId,
+      },
+      userId,
+      access,
+      action: "adjust asset quantity on",
+    });
 
     /** Only QUANTITY_TRACKED assets can have their booked quantity adjusted */
     if (!isQuantityTracked(bookingAsset.asset)) {

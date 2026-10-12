@@ -57,13 +57,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, canSeeAllBookings, canSeeAllCustody } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
 
     const searchParams = getCurrentSearchParams(request);
     const { perPageParam } = getParamsValues(searchParams);
@@ -82,7 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       tags: filterTags,
     } = await getBookingsFilterData({
       request,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
       userId,
     });
@@ -138,7 +137,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
           getAll:
             searchParams.has("getAll") &&
             hasGetAllValue(searchParams, "teamMember"),
-          filterByUserId: !canSeeAllCustody, // If the user can see all custody, we don't filter by userId
+          filterByUserId: !access.custody.seeAll, // If the user can see all custody, we don't filter by userId
           userId,
         }),
         getTagsForBookingTagsFilter({

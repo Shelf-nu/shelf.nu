@@ -30,7 +30,7 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isFormProcessing } from "~/utils/form";
 
 /** Props for the AdjustBookingAssetQuantityDialog component */
@@ -108,11 +108,9 @@ export function AdjustBookingAssetQuantityDialog({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
 }: AdjustBookingAssetQuantityDialogProps) {
-  // Owners/admins may see how OTHER bookings compete for the pool (a count +
-  // a link to resolve); self-service/base users only get the generic note —
-  // they can't view other people's bookings.
-  const { isBaseOrSelfService } = useUserRoleHelper();
-  const canViewOtherBookings = !isBaseOrSelfService;
+  // The link opens the bookings index; offer it exactly when that index would
+  // show this member other people's bookings.
+  const canViewOtherBookings = useRoleAccess().bookings.seeAll;
   const [internalOpen, setInternalOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;

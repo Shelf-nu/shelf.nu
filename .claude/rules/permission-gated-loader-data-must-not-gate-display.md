@@ -7,13 +7,13 @@ globs: ["apps/webapp/app/routes/**/*.tsx", "apps/webapp/app/routes/**/*.ts"]
 
 Skipping a query for users who can't edit is a legitimate optimization. It
 becomes a **silent data-loss bug** the moment a display path reads from the
-skipped result — the page renders empty for BASE and SELF_SERVICE and looks
+skipped result: the page renders empty for every member without the edit grant and looks
 perfectly healthy for whoever wrote it (ADMIN/OWNER short-circuit to allow-all
 in `hasPermission`).
 
 This shipped: the asset overview gated `getActiveCustomFields` on
 `asset: update`, but the page built its ENTIRE custom-fields list from those
-definitions. Every BASE and SELF_SERVICE user saw zero custom fields for three
+definitions. Every member without `asset: update` saw zero custom fields for three
 months. Typecheck, unit tests and `validate` were green throughout — an empty
 array is a valid array.
 
@@ -41,5 +41,5 @@ A row you surface but the action refuses to write must render read-only —
 don't hand a user an editor that dead-ends on a 400.
 
 **Verify as the lowest role, not as an owner.** No automated check in this repo
-catches this class; only loading the page as BASE or SELF_SERVICE does. See
-[[org-scope-user-supplied-ids]] for the inverse failure (over-exposure).
+catches this class; only loading the page as a member without the edit grant does (the lowest-privilege roles; see the matrix in `apps/docs/roles-and-permissions.md`).
+See [[org-scope-user-supplied-ids]] for the inverse failure (over-exposure).

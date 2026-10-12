@@ -8,10 +8,7 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import { CustomFieldType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
@@ -59,6 +56,7 @@ import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
+import { isMaxFileSizeError } from "./form-data-parse-errors.server";
 import {
   buildImportReadyCsvFromAssets,
   type ColumnScope,
@@ -132,13 +130,6 @@ export const parseCsv = (csvData: ArrayBuffer) => {
 /** Checks if a CSV row is empty (all cells are empty or whitespace-only) */
 function isEmptyRow(row: string[]): boolean {
   return row.every((cell) => cell.trim() === "");
-}
-
-/** Walks the cause chain to check if a MaxFileSizeExceededError is present */
-function isMaxFileSizeError(error: unknown): boolean {
-  if (error instanceof MaxFileSizeExceededError) return true;
-  const cause = (error as { cause?: unknown })?.cause;
-  return cause ? isMaxFileSizeError(cause) : false;
 }
 
 /** Takes a request object and extracts the file from it and parses it as csvData */
@@ -425,6 +416,14 @@ async function resolveExportAssets({
     assetIds: takeAll ? undefined : ids,
     canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
     timeZone,
+    // The export reproduces the index view it was started from, Archived and
+    // All included (issue #382). Reaching it takes `asset: export`, which only
+    // ADMIN and OWNER hold, the same members who hold `asset: archive`.
+    honorArchivedView: true,
+    // Hand-picked rows carry no view (only a select-all forwards the index's
+    // params), so the ids alone decide: an archived row the user ticked in
+    // the Archived or All view is exported, not dropped by the Active default.
+    archivedFilter: takeAll ? undefined : "all",
   });
 
   return { assets };

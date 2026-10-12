@@ -99,6 +99,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       applySlashCommand,
       handleSlashKeyDown,
       setSlashIndex,
+      clearSlash,
     } = useSlashCommands(commands, viewRef);
 
     const { runCommand, handleParagraphChange } = useEditorCommands(
@@ -118,7 +119,14 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       placeholder,
       maxLength,
       shouldAutoFocus,
-      onBlur,
+      onBlur: (event) => {
+        // The slash menu is portaled to the body and positioned against the
+        // viewport, so it outlives the editor's focus unless it is closed here.
+        // Clicking the menu itself never reaches this: every control in the
+        // editor chrome cancels mousedown, so the editor keeps focus.
+        clearSlash();
+        onBlur?.(event);
+      },
       onFocus,
       onChange,
       onStateUpdate: (state: EditorState, view: EditorView) => {
