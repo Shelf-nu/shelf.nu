@@ -18903,7 +18903,7 @@
     "OWNER": "all",
     "ADMIN": "all",
     "SELF_SERVICE": "bookable",
-    "BASE": "all",
+    "BASE": "bookable",
     "OWNER+ADMIN": "all",
     "OWNER+SELF_SERVICE": "all",
     "OWNER+BASE": "all",
@@ -18916,8 +18916,8 @@
     "BASE+OWNER": "all",
     "BASE+ADMIN": "all",
     "BASE+SELF_SERVICE": "bookable",
-    "(none)": "all",
-    "UNKNOWN_ROLE": "all"
+    "(none)": "bookable",
+    "UNKNOWN_ROLE": "bookable"
   },
   "D-32": {
     "OWNER": true,
