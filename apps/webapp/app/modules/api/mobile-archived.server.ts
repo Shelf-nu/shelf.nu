@@ -19,25 +19,20 @@
  * `reason` is the machine-readable discriminator the companion branches on
  * (as `"unclaimed"` is on the QR routes); `message` is human copy, which the
  * current app replaces with its own row-level wording and older builds show
- * as is. For a change (custody, location) it comes from the shared guard, so
- * the phone and the web word the refusal the same way; for a booking it is the
- * booking service's scan refusal. The services keep their own guards; this
+ * as is. For a change (custody, location) it is the shared guard's wording,
+ * so the phone and the web word the refusal the same way; for a booking it is
+ * the booking service's scan refusal. The services keep their own guards; this
  * check only answers earlier and more precisely.
  *
- * @see {@link file://./../../utils/org-validation.server.ts} assertAssetsAreNotArchived
+ * @see {@link file://./../../utils/org-validation.server.ts} assertAssetsAreNotArchived, ARCHIVED_ASSETS_MESSAGE
  * @see apps/companion/lib/archived-assets.ts the client reader (`archivedIdsFromError`)
  */
 
 import { db } from "~/database/db.server";
-import { isLikeShelfError } from "~/utils/error";
-import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
+import { ARCHIVED_ASSETS_MESSAGE } from "~/utils/org-validation.server";
 
 /** The `reason` the companion branches on for an archived refusal. */
 export const MOBILE_ARCHIVED_ERROR_REASON = "archived";
-
-/** Fallback copy, used only if the shared guard ever stops throwing. */
-const ARCHIVED_FALLBACK_MESSAGE =
-  "Archived assets are read-only. Reinstate them before making changes.";
 
 /**
  * The refusal for archived assets scanned into a booking. Same words as the
@@ -99,32 +94,8 @@ export async function findMobileArchivedRefusal({
     message:
       purpose === "booking"
         ? ARCHIVED_BOOKING_MESSAGE
-        : await sharedArchivedMessage(archivedAssetIds, organizationId),
+        : ARCHIVED_ASSETS_MESSAGE,
     reason: MOBILE_ARCHIVED_ERROR_REASON,
     archivedAssetIds,
   };
-}
-
-/**
- * The wording the shared guard uses for these archived assets.
- *
- * @param archivedAssetIds - Ids known to be archived
- * @param organizationId - Their workspace
- * @returns The guard's message
- */
-async function sharedArchivedMessage(
-  archivedAssetIds: string[],
-  organizationId: string
-): Promise<string> {
-  try {
-    await assertAssetsAreNotArchived({
-      assetIds: archivedAssetIds,
-      organizationId,
-    });
-  } catch (cause) {
-    if (isLikeShelfError(cause)) return cause.message;
-    throw cause;
-  }
-  // Reached only if an asset was reinstated between the two reads.
-  return ARCHIVED_FALLBACK_MESSAGE;
 }

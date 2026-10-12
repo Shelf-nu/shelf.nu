@@ -7509,9 +7509,6 @@ export async function bulkCheckOutAssets({
       timeZone,
     });
 
-    // Archived assets are frozen (issue #382): can't be assigned custody.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
-
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
      */
@@ -7567,6 +7564,11 @@ export async function bulkCheckOutAssets({
         shouldBeCaptured: false,
       });
     }
+
+    // Archived assets are out of service and take no custody. Checked after
+    // the scope rule, so a caller who may not make this assignment at all is
+    // told that, rather than to remove a row and be refused again.
+    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
 
     /**
      * Filter out QUANTITY_TRACKED assets — they require per-asset

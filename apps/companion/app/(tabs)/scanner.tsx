@@ -442,14 +442,15 @@ function ScannerContent() {
   }, [fetchBookingCtx]);
 
   // Blockers for the add-to-booking list (the check-in flow has its own
-  // eligibility rule at scan time and no blockers).
+  // eligibility rule at scan time and no blockers). Computed before the
+  // booking loads too: an archived row is blocked without it.
   const bookingBlockers = useMemo<BlockerGroup[]>(
     () =>
-      isBookingAddMode && bookingCtx
+      isBookingAddMode
         ? computeBlockers(
             isBookingFulfilMode ? "booking_fulfil" : "booking_add",
             bookingCheckinItems,
-            bookingCtx
+            bookingCtx ?? undefined
           )
         : [],
     [isBookingAddMode, isBookingFulfilMode, bookingCtx, bookingCheckinItems]
@@ -2009,21 +2010,19 @@ function ScannerContent() {
     }
     Alert.alert(summary.title, summary.message);
 
+    // This submit's errors replace the last one's on every row left: a row
+    // it did not fault (one only waiting on an archived row) reads clean.
     const succeeded = new Set(summary.succeededQrIds);
     setScannedItems((prev) =>
       prev
         .filter((item) => !succeeded.has(item.qrId))
-        .map((item) =>
-          summary.rowErrors[item.qrId]
-            ? {
-                ...item,
-                submitError: summary.rowErrors[item.qrId],
-                archived:
-                  item.archived ||
-                  (item.type === "asset" && archivedSet.has(item.targetId)),
-              }
-            : item
-        )
+        .map((item) => ({
+          ...item,
+          submitError: summary.rowErrors[item.qrId],
+          archived:
+            item.archived ||
+            (item.type === "asset" && archivedSet.has(item.targetId)),
+        }))
     );
     lastScanRef.current = "";
   };

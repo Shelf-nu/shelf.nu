@@ -175,6 +175,14 @@ export async function assertAssetsBelongToOrg(
 }
 
 /**
+ * The refusal for a change to archived assets, as {@link assertAssetsAreNotArchived}
+ * words it. Exported so a caller that answers the same refusal earlier (the
+ * mobile routes, which also name the archived ids) uses the same words.
+ */
+export const ARCHIVED_ASSETS_MESSAGE =
+  "Archived assets are read-only. Reinstate them before making changes.";
+
+/**
  * Asserts that none of the given assets are archived.
  *
  * Archived assets are frozen: the only allowed mutations are reinstate and
@@ -211,8 +219,7 @@ export async function assertAssetsAreNotArchived(
     throw new ShelfError({
       cause: null,
       title: "Asset is archived",
-      message:
-        "Archived assets are read-only. Reinstate them before making changes.",
+      message: ARCHIVED_ASSETS_MESSAGE,
       label,
       status: 400,
       shouldBeCaptured: false,

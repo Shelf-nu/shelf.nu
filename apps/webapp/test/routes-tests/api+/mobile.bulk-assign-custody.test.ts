@@ -222,6 +222,12 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
       access: accessFor(["SELF_SERVICE"]),
       canUseBarcodes: false,
     });
+    // Assigning to themselves, so the route's own scope check lets it through.
+    (getTeamMember as any).mockResolvedValue({
+      id: "custodian-1",
+      name: "Test User",
+      user: { id: mockUser.id },
+    });
 
     const request = createBulkAssignRequest({
       assetIds: ["asset-1"],
@@ -296,6 +302,32 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
       organizationId: "org-1",
       purpose: "change",
     });
+    expect(bulkCheckOutAssets).not.toHaveBeenCalled();
+  });
+
+  it("refuses a self-scope caller assigning to someone else before looking at archived rows", async () => {
+    // Removing the archived row would not help: the scope refuses the request
+    // whatever the list holds, so that is the answer the phone gets first.
+    (getMobileUserContext as any).mockResolvedValue({
+      access: accessFor(["SELF_SERVICE"]),
+      canUseBarcodes: false,
+    });
+    (getTeamMember as any).mockResolvedValue({
+      id: "custodian-1",
+      name: "Jane Doe",
+      user: { id: "someone-else" },
+    });
+
+    const request = createBulkAssignRequest({
+      assetIds: ["asset-1", "asset-archived"],
+      custodianId: "custodian-1",
+    });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(403);
+    expect(findMobileArchivedRefusal).not.toHaveBeenCalled();
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });
 });

@@ -299,6 +299,18 @@ test("the booking modes raise the archived blocker first", () => {
   assert.equal(blockerKeysFor("booking_fulfil", ctx)[0], "asset-archived");
 });
 
+test("the booking modes block an archived row before the booking has loaded", () => {
+  const archived = asset({ archived: true });
+  for (const action of ["booking_add", "booking_fulfil"] as const) {
+    assert.deepEqual(blockerKeysFor(action), ["asset-archived"], action);
+    assert.deepEqual(
+      computeBlockers(action, [archived]).map((g) => [g.key, g.qrIds]),
+      [["asset-archived", ["qr-a"]]],
+      action
+    );
+  }
+});
+
 test("an archived row is flagged in every batch mode, with the consequence named", () => {
   const archived = asset({ archived: true, title: "Old camera" });
   const messages = {

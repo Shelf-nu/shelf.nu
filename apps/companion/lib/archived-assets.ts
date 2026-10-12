@@ -175,8 +175,9 @@ type MarkableRow = {
 /**
  * Marks the asset rows a refusal named as archived: they read "Archived",
  * raise the "asset-archived" blocker and carry {@link ARCHIVED_ROW_ERROR}.
- * Every other row is returned as it was, because the server refused the whole
- * request only on their account.
+ * The server refused the whole request only on their account, so every other
+ * row loses any error an earlier submit left on it: none of them was at fault
+ * this time, and an old reason beside the archived one would contradict it.
  *
  * @param rows - The scan list
  * @param archivedAssetIds - From {@link archivedIdsFromError}
@@ -191,6 +192,8 @@ export function markArchivedRows<T extends MarkableRow>(
   return rows.map((row) =>
     row.type === "asset" && archived.has(row.targetId)
       ? { ...row, archived: true, submitError: ARCHIVED_ROW_ERROR }
+      : row.submitError
+      ? { ...row, submitError: undefined }
       : row
   );
 }

@@ -175,8 +175,9 @@ function candidatesFor(
 ): BlockerCandidate[] {
   // Archived rows raise only their own blocker, so every other rule reads the
   // rows that are still in service.
-  const archived = items.filter((i) => i.type === "asset" && i.archived);
-  const live = items.filter((i) => !archived.includes(i));
+  const isArchived = (i: BlockableItem) => i.type === "asset" && !!i.archived;
+  const archived = items.filter(isArchived);
+  const live = items.filter((i) => !isArchived(i));
   const assets = live.filter((i) => i.type === "asset");
   const wholeAssets = live.filter(isWholeAsset);
   const quantityRows = live.filter(isQuantityRow);
@@ -324,7 +325,12 @@ function candidatesFor(
     ];
   }
 
-  if ((action === "booking_add" || action === "booking_fulfil") && bookingCtx) {
+  if (action === "booking_add" || action === "booking_fulfil") {
+    const archivedForBooking = archivedCandidate(" and can't be booked.");
+    // The archived rule reads nothing from the booking, so it holds while the
+    // booking is still loading. Every other rule here needs its context.
+    if (!bookingCtx) return [archivedForBooking];
+
     // Mirrors the web add-assets-to-booking drawer, including that checked-out
     // items only block when the booking itself is checked out (ONGOING or
     // OVERDUE), and that there is no kit-already-in-booking rule.
@@ -333,7 +339,7 @@ function candidatesFor(
     );
 
     const candidates: BlockerCandidate[] = [
-      archivedCandidate(" and can't be booked."),
+      archivedForBooking,
       {
         key: "asset-already-in-booking",
         affected: assets.filter((i) =>
@@ -396,12 +402,7 @@ function candidatesFor(
   }
 
   // update_location: any item still in service can move.
-  if (action === "update_location") {
-    return [archivedCandidate(" and can't be moved.")];
-  }
-
-  // A booking action without its booking context raises nothing.
-  return [];
+  return [archivedCandidate(" and can't be moved.")];
 }
 
 /**
@@ -409,7 +410,8 @@ function candidatesFor(
  * depend on the booking's status, so they take its context.
  *
  * @param action - The batch action.
- * @param bookingCtx - Required for the booking actions.
+ * @param bookingCtx - The booking, for the booking actions. Without it they
+ *   raise only the archived blocker.
  * @returns The ids, whether or not any row raises them now.
  */
 export function blockerKeysFor(
@@ -427,8 +429,9 @@ export function blockerKeysFor(
  *
  * @param action - The batch action.
  * @param items - The scan list.
- * @param bookingCtx - Required for the `booking_add` and `booking_fulfil`
- *   actions; ignored otherwise. Without it those actions raise nothing.
+ * @param bookingCtx - The booking, for the `booking_add` and `booking_fulfil`
+ *   actions; ignored otherwise. Until it loads, those actions raise only the
+ *   archived blocker, the one rule that reads nothing from the booking.
  * @returns One group per blocker some row raises, in display order.
  */
 export function computeBlockers(

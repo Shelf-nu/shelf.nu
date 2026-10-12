@@ -132,6 +132,21 @@ test("a refusal marks only the asset rows it names as archived", () => {
   ]);
 });
 
+test("an archived refusal clears the errors an earlier submit left on the other rows", () => {
+  const rows = [
+    { type: "asset" as const, targetId: "asset-1" },
+    {
+      type: "asset" as const,
+      targetId: "asset-2",
+      submitError: "Only 2 units are free.",
+    },
+  ];
+  assert.deepEqual(
+    markArchivedRows(rows, ["asset-1"]).map((row) => row.submitError),
+    ["Archived. Remove it from the list.", undefined]
+  );
+});
+
 test("a refusal that names no archived rows leaves the list as it was", () => {
   const rows = [{ type: "asset" as const, targetId: "asset-1" }];
   assert.equal(markArchivedRows(rows, []), rows);

@@ -134,12 +134,9 @@ export async function action({ request }: ActionFunctionArgs) {
       action: "check out",
     });
 
-    // Decided after the booking and ownership checks, so a missing or foreign
-    // booking answers 404. Judged by the caller's access (its effective role),
-    // like the loader's `canQuickCheckout`. Under the requirement only the scanned
-    // units are checked out.
     // Answer an archived scan by naming the archived rows, so the app marks
-    // only those (see mobile-archived.server.ts).
+    // only those (see mobile-archived.server.ts). After the booking and
+    // ownership checks, so a missing or foreign booking still answers 404.
     const archivedRefusal = await findMobileArchivedRefusal({
       assetIds,
       organizationId,
@@ -149,6 +146,9 @@ export async function action({ request }: ActionFunctionArgs) {
       return data({ error: archivedRefusal }, { status: 400 });
     }
 
+    // Judged by the caller's access (its effective role), like the loader's
+    // `canQuickCheckout`. Under the requirement only the scanned units are
+    // checked out.
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const requireExplicitCheckout = isExplicitScanRequired({

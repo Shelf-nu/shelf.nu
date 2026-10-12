@@ -81,6 +81,9 @@ describe("findMobileArchivedRefusal", () => {
       organizationId: "org-1",
       purpose: "change",
     });
+    // One read: the wording is borrowed, not re-derived by running the guard.
+    expect(findManyMock).toHaveBeenCalledTimes(1);
+    expect(countMock).not.toHaveBeenCalled();
 
     // Whatever the guard says for these assets is what the phone is sent.
     const guardMessage = await assertAssetsAreNotArchived({

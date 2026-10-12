@@ -73,37 +73,32 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       assignedOnly: !canSeeAllAudits,
     });
 
-    // Fetch session details and scans in parallel
-    const [{ session, expectedAssets }, scans] = await Promise.all([
-      getAuditSessionDetails({
-        id: auditId,
-        organizationId,
-        refreshExpectedAssetImages: true,
-      }),
-      getAuditScans({ auditSessionId: auditId, organizationId }),
-    ]);
-
-    // Which of the audit's assets are archived, so the app can badge those
-    // rows. One extra read keyed on ids the two calls above already returned.
-    const auditedAssetIds = [
-      ...new Set([
-        ...expectedAssets.map((a) => a.id),
-        ...scans.flatMap((s) => (s.assetId ? [s.assetId] : [])),
-      ]),
-    ];
+    // Session details, scans, and which of the audit's assets are archived
+    // (so the app can badge those rows), all in parallel. The archived read is
+    // scoped through the audit's own relations, so it needs no id list: an
+    // asset belongs to the audit when it is expected in it or was scanned in it.
+    const [{ session, expectedAssets }, scans, archivedAssets] =
+      await Promise.all([
+        getAuditSessionDetails({
+          id: auditId,
+          organizationId,
+          refreshExpectedAssetImages: true,
+        }),
+        getAuditScans({ auditSessionId: auditId, organizationId }),
+        db.asset.findMany({
+          where: {
+            organizationId,
+            archivedAt: { not: null },
+            OR: [
+              { auditEntries: { some: { auditSessionId: auditId } } },
+              { auditScans: { some: { auditSessionId: auditId } } },
+            ],
+          },
+          select: { id: true, archivedAt: true },
+        }),
+      ]);
     const archivedAtById = new Map(
-      auditedAssetIds.length === 0
-        ? []
-        : (
-            await db.asset.findMany({
-              where: {
-                id: { in: auditedAssetIds },
-                organizationId,
-                archivedAt: { not: null },
-              },
-              select: { id: true, archivedAt: true },
-            })
-          ).map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
+      archivedAssets.map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
     );
 
     // why: completing is assignee-gated server-side (requireAuditAssignee in

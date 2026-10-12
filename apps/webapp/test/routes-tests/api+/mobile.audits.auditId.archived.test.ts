@@ -141,9 +141,12 @@ describe("GET /api/mobile/audits/:auditId archive stamps", () => {
     expect(db.asset.findMany).toHaveBeenCalledTimes(1);
     expect(db.asset.findMany).toHaveBeenCalledWith({
       where: {
-        id: { in: ["asset-active", "asset-archived"] },
         organizationId: "org-1",
         archivedAt: { not: null },
+        OR: [
+          { auditEntries: { some: { auditSessionId: "audit-1" } } },
+          { auditScans: { some: { auditSessionId: "audit-1" } } },
+        ],
       },
       select: { id: true, archivedAt: true },
     });
