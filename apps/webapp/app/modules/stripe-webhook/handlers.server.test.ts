@@ -1,5 +1,6 @@
 /**
- * Stripe webhook handlers — add-ons bundled on a tier subscription.
+ * Stripe webhook handlers: add-ons bundled on a tier subscription, and the
+ * plan a tier subscription grants when it changes.
  *
  * A Team trial or checkout can carry the Audits and Barcodes add-ons as extra
  * line items on the tier subscription. Once workspace creation has linked that
@@ -161,6 +162,7 @@ import {
 import type { WebhookUser } from "./helpers.server";
 
 const TEAM_PRODUCT = "prod_team";
+const PLUS_PRODUCT = "prod_plus";
 const BARCODES_PRODUCT = "prod_barcodes";
 const BARCODES_PRODUCT_V2 = "prod_barcodes_v2";
 const AUDITS_PRODUCT = "prod_audits";
@@ -171,6 +173,7 @@ const PRODUCTS: Record<
   { id: string; metadata: Record<string, string> }
 > = {
   [TEAM_PRODUCT]: { id: TEAM_PRODUCT, metadata: { shelf_tier: "tier_2" } },
+  [PLUS_PRODUCT]: { id: PLUS_PRODUCT, metadata: { shelf_tier: "tier_1" } },
   [AUDITS_PRODUCT]: {
     id: AUDITS_PRODUCT,
     metadata: { product_type: "addon", addon_type: "audits" },
@@ -558,6 +561,75 @@ describe("handleSubscriptionUpdated", () => {
     ).rejects.toBeInstanceOf(Stripe.errors.StripeConnectionError);
 
     expect(mockOrgUpdate).not.toHaveBeenCalled();
+  });
+
+  describe("plan changes", () => {
+    /** An update that swapped the Team item for a Plus item, as the billing portal does. */
+    function teamToPlusEvent() {
+      return buildEvent(
+        "customer.subscription.updated",
+        buildSubscription({ productIds: [PLUS_PRODUCT], metadata: {} }),
+        {
+          items: {
+            data: buildSubscription({ productIds: [TEAM_PRODUCT] }).items.data,
+          },
+        }
+      );
+    }
+
+    it("lowers the plan when the subscription moved from Team to Plus", async () => {
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockUserUpdate).toHaveBeenCalledWith({
+        where: { customerId: "cus_1" },
+        data: { tierId: TierId.tier_1 },
+        select: { id: true },
+      });
+    });
+
+    it("leaves a Custom plan alone when its subscription moves down", async () => {
+      await handleSubscriptionUpdated(teamToPlusEvent(), {
+        ...user,
+        tierId: TierId.custom,
+      });
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("keeps Team while another live subscription still pays for it", async () => {
+      const secondTeam = {
+        id: "sub_second_team",
+        status: "active",
+        metadata: { organizationId: "org-2" },
+        items: { data: [{ price: { product: PRODUCTS[TEAM_PRODUCT] } }] },
+      };
+      mockSubscriptionsList.mockResolvedValue({
+        data: [{ id: secondTeam.id }],
+        has_more: false,
+      });
+      mockSubscriptionsRetrieve.mockResolvedValue(secondTeam);
+
+      await handleSubscriptionUpdated(teamToPlusEvent(), user);
+
+      expect(mockSubscriptionsList).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: "cus_1" })
+      );
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+    });
+
+    it("does not touch the plan when the update kept the plan item", async () => {
+      const subscription = buildSubscription({ productIds: [TEAM_PRODUCT] });
+
+      await handleSubscriptionUpdated(
+        buildEvent("customer.subscription.updated", subscription, {
+          items: { data: subscription.items.data },
+        }),
+        user
+      );
+
+      expect(mockUserUpdate).not.toHaveBeenCalled();
+      expect(mockSubscriptionsList).not.toHaveBeenCalled();
+    });
   });
 });
 

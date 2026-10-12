@@ -22,6 +22,7 @@ import {
   fetchStripeSubscription,
   getCustomerActiveSubscription,
   getCustomerNotificationData,
+  getCustomerSubscriptionsWithProducts,
   getDataFromStripeEvent,
   getInvoiceNotificationData,
   getStripeCustomer,
@@ -227,6 +228,136 @@ async function disableAddonsRemovedFromSubscription({
     data: removed,
     select: { id: true },
   });
+}
+
+/** Subscription statuses that still grant the plan on their tier item. */
+const PLAN_GRANTING_STATUSES: Stripe.Subscription.Status[] = [
+  "active",
+  "trialing",
+  "past_due",
+];
+
+/**
+ * Lowers the user's tier when an update moved the subscription to a cheaper
+ * plan, for instance Team to Plus in the billing portal.
+ *
+ * The upgrade branch of `handleSubscriptionUpdated` only ever raises the tier;
+ * this is the only path that lowers it on an update, so the plan a customer
+ * uses follows the plan they pay for in both directions.
+ *
+ * Stripe lists the pre-update line items in `previous_attributes.items`. The
+ * tier is lowered only when all of these hold, so a tier set by hand is never
+ * touched by an unrelated update:
+ * - the subscription still grants a plan (active, trialing or past due);
+ * - its previous tier item was higher than its tier item now;
+ * - the user is on exactly that previous tier, so it was this subscription
+ *   that put them there (a Custom or hand-set tier is left alone);
+ * - no other live subscription of the customer carries that tier or a higher
+ *   one.
+ *
+ * @param args.event - The `customer.subscription.updated` event
+ * @param args.subscription - The subscription as it is after the update
+ * @param args.tierId - The tier the subscription carries after the update
+ * @param args.user - The user the customer belongs to
+ * @param args.customerId - The Stripe customer of the subscription
+ */
+async function applyPlanDowngrade({
+  event,
+  subscription,
+  tierId,
+  user,
+  customerId,
+}: {
+  event: Stripe.Event;
+  subscription: Stripe.Subscription;
+  tierId: string | undefined;
+  user: WebhookUser;
+  customerId: string;
+}) {
+  if (!tierId || !(tierId in TierId)) return;
+  if (!PLAN_GRANTING_STATUSES.includes(subscription.status)) return;
+
+  const previousItems = (
+    event.data.previous_attributes as
+      | { items?: { data?: Stripe.SubscriptionItem[] } }
+      | undefined
+  )?.items?.data;
+  if (!previousItems?.length) return;
+
+  const productIdOf = (item: Stripe.SubscriptionItem) =>
+    typeof item.price?.product === "string"
+      ? item.price.product
+      : item.price?.product?.id;
+  const currentProductIds = new Set(subscription.items.data.map(productIdOf));
+
+  let previousTierId: TierId | undefined;
+  for (const item of previousItems) {
+    const productId = productIdOf(item);
+    // A product still on the subscription carries the tier it carries now.
+    if (!productId || currentProductIds.has(productId)) continue;
+
+    // Same reading as `disableAddonsRemovedFromSubscription`: a product Stripe
+    // no longer knows cannot be a tier this app tracks; any other failure is
+    // rethrown so Stripe retries the webhook.
+    let product: Stripe.Product;
+    try {
+      product = await stripe.products.retrieve(productId);
+    } catch (cause) {
+      const isUnknownProduct =
+        cause instanceof Stripe.errors.StripeInvalidRequestError &&
+        (cause.code === "resource_missing" || cause.statusCode === 404);
+      if (!isUnknownProduct) throw cause;
+      continue;
+    }
+    if (product.metadata?.product_type === "addon") continue;
+    const shelfTier = product.metadata?.shelf_tier;
+    if (!shelfTier || !(shelfTier in TierId)) continue;
+    if (!previousTierId || isHigherTier(shelfTier as TierId, previousTierId)) {
+      previousTierId = shelfTier as TierId;
+    }
+  }
+
+  if (!previousTierId) return;
+  if (!isHigherTier(previousTierId, tierId as TierId)) return;
+  if (user.tierId !== previousTierId) return;
+
+  // A second subscription can still pay for the higher plan, for instance one
+  // Team subscription per workspace.
+  const otherSubscriptions =
+    await getCustomerSubscriptionsWithProducts(customerId);
+  const higherPlanPaidElsewhere = otherSubscriptions.some(
+    (sub) =>
+      sub.id !== subscription.id &&
+      PLAN_GRANTING_STATUSES.includes(sub.status) &&
+      sub.items.data.some((item) => {
+        const product = item.price?.product;
+        if (typeof product !== "object" || product === null) return false;
+        if (product.deleted) return false;
+        const otherTier = product.metadata?.shelf_tier;
+        return (
+          !!otherTier &&
+          otherTier in TierId &&
+          isHigherOrEqualTier(otherTier as TierId, previousTierId)
+        );
+      })
+  );
+  if (higherPlanPaidElsewhere) return;
+
+  await db.user
+    .update({
+      where: { customerId },
+      data: { tierId: tierId as TierId },
+      select: { id: true },
+    })
+    .catch((cause) => {
+      throw new ShelfError({
+        cause,
+        message: "Failed to apply plan downgrade",
+        additionalData: { customerId, tierId, previousTierId },
+        label: "Stripe webhook",
+        status: 500,
+      });
+    });
 }
 
 /**
@@ -612,6 +743,13 @@ export async function handleSubscriptionUpdated(
     subscription,
     hasAuditAddon,
     hasBarcodeAddon,
+  });
+  await applyPlanDowngrade({
+    event,
+    subscription,
+    tierId,
+    user,
+    customerId,
   });
 
   const newSubscriptionIsHigherTier = isHigherTier(
