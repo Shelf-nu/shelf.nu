@@ -2,6 +2,7 @@
 description: Raw SQL must use @map column names, avoid bigint casts on float sums, and COALESCE nullable columns
 paths:
   - "apps/webapp/app/**/*.server.ts"
+  - "apps/webapp/app/**/*.server.test.ts"
   - "packages/database/**"
   - "apps/webapp/app/routes/**"
   - "apps/webapp/app/utils/**"

@@ -9,9 +9,9 @@ repeated implementations — create a new rule file in `.claude/rules/`.
 Each rule file should:
 
 - Have a descriptive filename (e.g., `use-badge-colors.md`)
-- Include `description` and `paths` frontmatter (`paths`, a YAML list of
-  globs, is what Claude Code reads; `globs` is ignored and makes the rule load
-  every session). Omit `paths` only for a rule that truly applies everywhere
+- Include `description` and `paths` frontmatter. Claude Code reads `paths`, a
+  YAML list of globs, and ignores `globs`. Without `paths`, the rule loads every
+  session. Omit `paths` only when the rule applies everywhere.
 - Show a ❌ Bad / ✅ Good code example where applicable
 - Be concise (under 30 lines)
 
