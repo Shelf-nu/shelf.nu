@@ -1,5 +1,7 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { extractStoragePath } from "~/components/assets/asset-image/utils";
+import { db } from "~/database/db.server";
 import { updateKit } from "~/modules/kit/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
@@ -25,27 +27,33 @@ export async function action({ context, request }: ActionFunctionArgs) {
       action: PermissionAction.read,
     });
 
-    const { kitId, image } = parseData(
+    const { kitId } = parseData(
       await request.formData(),
       z.object({
         kitId: z.string(),
-        image: z.string(),
       })
     );
 
-    const url = new URL(image);
-    const path = url.pathname;
+    // Re-sign the kit's own stored image, never a URL from the request: the
+    // signed URL is written back onto the kit, and deleting the kit removes
+    // the file that URL names.
+    const storedKit = await db.kit.findFirst({
+      where: { id: kitId, organizationId },
+      select: { image: true },
+    });
 
-    const start = path.indexOf("/kits/");
-
-    const filename = start !== -1 ? path.slice(start + "/kits/".length) : null;
+    const filename = storedKit?.image
+      ? extractStoragePath(storedKit.image, "kits")
+      : null;
 
     if (!filename) {
       throw new ShelfError({
         cause: null,
         message: "Cannot find kit filename",
-        additionalData: { userId, kitId, image },
+        additionalData: { userId, kitId },
         label: "Kit",
+        status: 404,
+        shouldBeCaptured: false,
       });
     }
 

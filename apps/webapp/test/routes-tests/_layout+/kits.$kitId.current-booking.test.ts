@@ -60,7 +60,6 @@ vi.mock("~/modules/kit/service.server", async (importOriginal) => {
   return {
     getKit: mockGetKit,
     deleteKit: vi.fn(),
-    deleteKitImage: vi.fn(),
     getKitCurrentBooking: actual.getKitCurrentBooking,
   };
 });

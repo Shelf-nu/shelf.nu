@@ -2937,7 +2937,7 @@ type KitForDeletion = {
  *   3. Outside the tx (best-effort, audit-only):
  *      a. Write asset notes — one `createNotes` call per in-custody
  *        kit so each group gets its kit's correct custodian.
- *      b. Delete kit images.
+ *      b. Delete each kit's stored image (see `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
  *   responsible for org-scoping the read.
@@ -3171,7 +3171,7 @@ async function performKitDeletion({
 
   const kitWithImages = kits.filter((k) => !!k.image);
   await Promise.all(
-    kitWithImages.map((k) => deleteKitImage({ url: k.image! }))
+    kitWithImages.map((k) => deleteKitImage({ url: k.image!, kitId: k.id }))
   );
 }
 
@@ -3297,11 +3297,27 @@ export async function deleteKit({
   }
 }
 
+/**
+ * Removes a kit's image file from storage. Best-effort: a failure is logged,
+ * never thrown, so a storage problem cannot fail the kit delete around it.
+ *
+ * Kit images live at `<uploaderUserId>/<kitId>/<file>` (see `updateKitImage`),
+ * and only a file inside `kitId`'s own folder is removed. A URL naming any
+ * other path in the bucket is refused, so a kit can never take another kit's
+ * file (or another workspace's) with it.
+ *
+ * @param args.url - The kit's stored `image` URL, read from the kit row
+ * @param args.kitId - The kit whose image this is
+ * @param args.bucketName - Storage bucket holding kit images
+ * @returns `true` once removed, `undefined` when refused or failed
+ */
 export async function deleteKitImage({
   url,
+  kitId,
   bucketName = "kits",
 }: {
   url: string;
+  kitId: Kit["id"];
   bucketName?: string;
 }) {
   try {
@@ -3310,7 +3326,17 @@ export async function deleteKitImage({
       throw new ShelfError({
         cause: null,
         message: "Cannot extract the image path from the URL",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
+        label,
+      });
+    }
+
+    const [, kitFolder] = path.split("/");
+    if (kitFolder !== kitId) {
+      throw new ShelfError({
+        cause: null,
+        message: "Refused to delete a kit image outside the kit's own folder",
+        additionalData: { kitId, path, bucketName },
         label,
       });
     }
@@ -3329,7 +3355,7 @@ export async function deleteKitImage({
       new ShelfError({
         cause,
         message: "Failed to delete kit image",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
         label,
       })
     );

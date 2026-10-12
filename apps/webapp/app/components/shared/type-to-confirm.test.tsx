@@ -98,10 +98,7 @@ const SURFACES: Surface[] = [
   {
     name: "kit",
     element: (
-      <DeleteKit
-        kit={{ id: "k1", name: "Studio Kit", image: null }}
-        trigger={openButton}
-      />
+      <DeleteKit kit={{ id: "k1", name: "Studio Kit" }} trigger={openButton} />
     ),
     expected: "Studio Kit",
     confirmLabel: /^delete$/i,
