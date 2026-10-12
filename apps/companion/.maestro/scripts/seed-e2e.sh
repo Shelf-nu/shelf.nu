@@ -83,6 +83,11 @@ ARCH_KIT="ce2earchkit00000000001"
 ARCH_BOOKING="ce2earchbooking0000001"     # owner's draft
 ARCH_BOOKING_SS="ce2earchbookingss00001"  # self-service member's draft
 ARCH_AUDIT="ce2earchaudit000000001"
+# Cleanup is keyed on these ids only: the fixture's own bookings, plus any
+# booking holding one of its assets (the copies the duplicate flow makes).
+# Nothing is matched by name, so no other booking in the workspace is touched.
+ARCH_ASSET_IDS_SQL="'${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}'"
+ARCH_BOOKING_IDS_SQL="'${ARCH_BOOKING}','${ARCH_BOOKING_SS}'"
 ARCH_CAMERA_QR="e2earchqr001"
 ARCH_TRIPOD_QR="e2earchqr002"
 ARCH_STAND_QR="e2earchqr003"
@@ -255,17 +260,22 @@ SQL
   archived-up)
     OWNER_ID=$(psql_q -c "select \"userId\" from \"UserOrganization\" where \"organizationId\"='${ORG_ID}' and 'OWNER'=any(roles) limit 1;")
     SS_ID=$(psql_q -c "select \"userId\" from \"UserOrganization\" where \"organizationId\"='${ORG_ID}' and 'SELF_SERVICE'=any(roles) limit 1;")
+    if [ -z "$OWNER_ID" ] || [ -z "$SS_ID" ]; then
+      echo "✗ '${WORKSPACE}' needs an OWNER and a SELF_SERVICE member for the archived fixture." >&2
+      exit 1
+    fi
     SS_TM=$(psql_q -c "select id from \"TeamMember\" where \"userId\"='${SS_ID}' and \"organizationId\"='${ORG_ID}' and \"deletedAt\" is null limit 1;")
     # Deleting and recreating resets every fixture row: bookings, audit, kit and
     # QR codes go first, then the assets (custody, notes and scans cascade).
     psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 BEGIN;
-DELETE FROM "Booking" WHERE id IN ('${ARCH_BOOKING}','${ARCH_BOOKING_SS}')
-   OR (name LIKE 'E2E Archive Draft%' AND "organizationId"='${ORG_ID}');
+DELETE FROM "Booking" WHERE id IN (${ARCH_BOOKING_IDS_SQL})
+   OR ("organizationId"='${ORG_ID}' AND id IN (
+     SELECT "bookingId" FROM "BookingAsset" WHERE "assetId" IN (${ARCH_ASSET_IDS_SQL})));
 DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
 DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
 DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
-DELETE FROM "Asset" WHERE id IN ('${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}');
+DELETE FROM "Asset" WHERE id IN (${ARCH_ASSET_IDS_SQL});
 
 INSERT INTO "Asset" (id,title,"organizationId","userId",value,"archivedAt","updatedAt") VALUES
   ('${ARCH_CAMERA}','E2E Archived Camera','${ORG_ID}','${OWNER_ID}',1000,NOW(),NOW()),
@@ -331,12 +341,13 @@ ENV
   archived-down)
     psql "$DB" -v ON_ERROR_STOP=1 >/dev/null <<SQL
 BEGIN;
-DELETE FROM "Booking" WHERE id IN ('${ARCH_BOOKING}','${ARCH_BOOKING_SS}')
-   OR (name LIKE 'E2E Archive Draft%' AND "organizationId"='${ORG_ID}');
+DELETE FROM "Booking" WHERE id IN (${ARCH_BOOKING_IDS_SQL})
+   OR ("organizationId"='${ORG_ID}' AND id IN (
+     SELECT "bookingId" FROM "BookingAsset" WHERE "assetId" IN (${ARCH_ASSET_IDS_SQL})));
 DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
 DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
 DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
-DELETE FROM "Asset" WHERE id IN ('${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}');
+DELETE FROM "Asset" WHERE id IN (${ARCH_ASSET_IDS_SQL});
 COMMIT;
 SQL
     rm -f "$ARCH_ENV_OUT"
