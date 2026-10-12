@@ -52,9 +52,12 @@ export const GET_KIT_STATIC_INCLUDES = {
 };
 
 export const KITS_INCLUDE_FIELDS = {
-  // The count semantics are identical (rows per kit) since today's
-  // unique constraint on `AssetKit.assetId` keeps it 1:1.
-  _count: { select: { assetKits: true } },
+  // Members per kit (`AssetKit` is unique per asset and kit). Archived members
+  // are out of service and left out of kit custody and bookings, so they are
+  // not counted either.
+  _count: {
+    select: { assetKits: { where: { asset: { archivedAt: null } } } },
+  },
   // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
   // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so
   // every kit-listing surface needs these included to render the chip.

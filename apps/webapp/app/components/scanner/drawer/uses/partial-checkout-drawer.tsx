@@ -46,6 +46,7 @@ import { tw } from "~/utils/tw";
 import {
   createAvailabilityLabels,
   kitLabelPresets,
+  assetLabelPresets,
 } from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
@@ -992,6 +993,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // Use custom configurations for partial check-out context
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     // Custom preset for redundant assets (highest priority - blocking issue)
     {
       condition: isRedundant && isInBooking,

@@ -35,6 +35,8 @@ const EXPECTED_ASSIGN_IDS = [
   "kits-in-custody",
   "kits-with-assets-in-custody",
   "kits-checked-out",
+  "assets-archived",
+  "kits-only-archived",
   "invalid-codes",
 ];
 
@@ -139,14 +141,22 @@ function kitItem(
   {
     status = "AVAILABLE",
     memberStatuses = [],
-  }: { status?: string; memberStatuses?: string[] } = {}
+    memberArchivedAt = [],
+  }: {
+    status?: string;
+    memberStatuses?: string[];
+    /** Per member, in `memberStatuses` order; missing means active. */
+    memberArchivedAt?: (string | null)[];
+  } = {}
 ) {
   return {
     type: "kit" as const,
     data: {
       id,
       status,
-      assetKits: memberStatuses.map((s) => ({ asset: { status: s } })),
+      assetKits: memberStatuses.map((s, i) => ({
+        asset: { status: s, archivedAt: memberArchivedAt[i] ?? null },
+      })),
     } as never,
   };
 }
@@ -195,6 +205,40 @@ describe("buildAssignCustodyBlockers", () => {
       qr1: assetItem({ id: "a1" }),
       qr2: qtyItem("a2", { available: 40 }),
       qr3: kitItem("k1"),
+    });
+    expect(activeIds(built)).toEqual([]);
+  });
+
+  it("assets-archived: an archived asset, which still reads AVAILABLE", () => {
+    const built = build("assign", {
+      qr1: assetItem({ id: "a1", archivedAt: new Date() }),
+      qr2: assetItem({ id: "a2" }),
+    });
+    expect(activeIds(built)).toEqual(["assets-archived"]);
+    built.blockerConfigs.find((b) => b.id === "assets-archived")?.onResolve();
+    expect(removedBy(built.removeAssetsFromList)).toEqual(["a1"]);
+  });
+
+  it("kits-only-archived: a kit whose every member is archived", () => {
+    const built = build("assign", {
+      qr1: kitItem("k1", {
+        memberStatuses: ["AVAILABLE", "AVAILABLE"],
+        memberArchivedAt: ["2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z"],
+      }),
+    });
+    expect(activeIds(built)).toEqual(["kits-only-archived"]);
+    built.blockerConfigs
+      .find((b) => b.id === "kits-only-archived")
+      ?.onResolve();
+    expect(removedBy(built.removeItemsFromList)).toEqual(["qr1"]);
+  });
+
+  it("kits-only-archived: does not fire while one member is active", () => {
+    const built = build("assign", {
+      qr1: kitItem("k1", {
+        memberStatuses: ["AVAILABLE", "AVAILABLE"],
+        memberArchivedAt: ["2026-10-01T00:00:00Z", null],
+      }),
     });
     expect(activeIds(built)).toEqual([]);
   });
