@@ -811,28 +811,46 @@ describe("GET /api/mobile/assets — list scope", () => {
         request: new Request(`http://localhost:3000/api/mobile/assets${query}`),
       })
     );
-    return findManyMock.mock.calls[0]![0]!.where;
+    return findManyMock.mock.calls[0]![0]!.where!;
   }
 
+  /** The list scope a bookable-only role gets: bookable, or held by them. */
+  const BOOKABLE_OR_HELD = {
+    OR: [
+      { availableToBook: true },
+      { custody: { some: { custodian: { userId: FAKE_USER_ID } } } },
+    ],
+  };
+
   it.each(["SELF_SERVICE", "BASE"] as const)(
-    "lists only bookable assets to %s, as the web index does",
+    "lists bookable assets and the ones %s holds, as the web index does",
     async (role) => {
-      expect(await whereFor(role)).toMatchObject({
-        availableToBook: true,
-      });
+      const where = await whereFor(role);
+      expect(where.AND).toEqual([BOOKABLE_OR_HELD]);
+      expect(where).not.toHaveProperty("availableToBook");
     }
   );
 
+  it("keeps the scope beside an AVAILABLE status filter rather than replacing it", async () => {
+    const where = await whereFor("BASE", "?status=AVAILABLE");
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual(BOOKABLE_OR_HELD);
+  });
+
   it.each(["SELF_SERVICE", "BASE"] as const)(
-    "still lists every asset %s holds on the custody tab",
+    "lists every asset %s holds on the custody tab, bookable or not",
     async (role) => {
-      expect(await whereFor(role, "?myCustody=true")).not.toHaveProperty(
-        "availableToBook"
-      );
+      const where = await whereFor(role, "?myCustody=true");
+      expect(where.custody).toEqual({
+        some: { custodian: { userId: FAKE_USER_ID } },
+      });
+      expect(where).not.toHaveProperty("availableToBook");
     }
   );
 
   it("does not narrow the list for ADMIN", async () => {
-    expect(await whereFor("ADMIN")).not.toHaveProperty("availableToBook");
+    const where = await whereFor("ADMIN");
+    expect(where).not.toHaveProperty("AND");
+    expect(where).not.toHaveProperty("availableToBook");
   });
 });

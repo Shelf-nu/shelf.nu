@@ -64,7 +64,10 @@ type RolePolicyShape = {
     documentsForOthers: boolean;
   };
   assets: {
-    /** The asset list shows every asset, or only those available to book. */
+    /**
+     * The asset list shows every asset, or ("bookable") only those available
+     * to book plus the ones in the member's own custody.
+     */
     listScope: "all" | "bookable";
   };
   custody: {

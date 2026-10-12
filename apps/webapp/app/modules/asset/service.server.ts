@@ -68,6 +68,8 @@ import {
   loadCustodySources,
   rehomeCustodyForPlacementChange,
 } from "~/modules/asset/custody-source.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
+import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import {
   assertStockNotBelowManualPlacements,
   reconcileManualPlacementsForStockDecrease,
@@ -672,7 +674,8 @@ export async function getAssets(params: {
    * */
   hideUnavailableToAddToKit?: boolean;
   assetKitFilter?: string | null;
-  availableToBookOnly?: boolean;
+  /** The caller's list scope; `null` or omitted lists every asset. */
+  bookableScope?: BookableListScope | null;
   /**
    * Active/Archived/All view dimension (orthogonal to `status`). Defaults to
    * `active`, so every caller hides archived assets unless it opts in.
@@ -697,7 +700,7 @@ export async function getAssets(params: {
     teamMemberIds,
     extraInclude,
     assetKitFilter,
-    availableToBookOnly,
+    bookableScope,
     archivedFilter = "active",
   } = params;
 
@@ -713,8 +716,10 @@ export async function getAssets(params: {
     // filters them by archived state. No re-query is needed on this path.
     applyArchivedFilter(where, archivedFilter);
 
-    if (availableToBookOnly) {
-      where.availableToBook = true;
+    // In `AND`, not spread: the scope is an OR group, and search and the
+    // category filter below write `where.OR`.
+    if (bookableScope) {
+      where.AND = [bookableListScopeWhere(bookableScope)];
     }
 
     if (search) {
@@ -1067,7 +1072,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   assetIds,
   getBookings = false,
   canUseBarcodes = false,
-  availableToBookOnly = false,
+  bookableScope = null,
   preParsedFilters,
   timeZone = "UTC",
   honorArchivedView = false,
@@ -1080,7 +1085,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   assetIds?: string[];
   getBookings?: boolean;
   canUseBarcodes?: boolean;
-  availableToBookOnly?: boolean;
+  /** The caller's list scope; `null` or omitted lists every asset. */
+  bookableScope?: BookableListScope | null;
   /** Pre-parsed filters — pass these to skip redundant parseFiltersWithHierarchy call */
   preParsedFilters?: Filter[];
   /**
@@ -1140,7 +1146,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       search,
       parsedFilters,
       assetIds,
-      availableToBookOnly,
+      bookableScope,
       timeZone,
       lowStockOnly,
       // Active/Archived/All dimension — keeps the advanced (raw-SQL) index in
@@ -5420,7 +5426,7 @@ export async function getPaginatedAndFilterableAssets({
   excludeTagsQuery = false,
   excludeLocationQuery = false,
   filters = "",
-  availableToBookOnly,
+  bookableScope,
   canSeeAllCustody,
   userId,
   honorArchivedView = false,
@@ -5436,8 +5442,8 @@ export async function getPaginatedAndFilterableAssets({
   excludeLocationQuery?: boolean;
   filters?: string;
 
-  /** Limit the list to assets available to book (the caller's `assets.listScope` is "bookable"). */
-  availableToBookOnly?: boolean;
+  /** The caller's list scope (see `resolveBookableListScope`); `null` or omitted lists every asset. */
+  bookableScope?: BookableListScope | null;
   /**
    * Resolved custody read-visibility, from `requirePermission`. Required so
    * the custodian filter seed is scoped by the custody rule for every
@@ -5555,7 +5561,7 @@ export async function getPaginatedAndFilterableAssets({
         teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,
-        availableToBookOnly,
+        bookableScope,
         archivedFilter: honorArchivedView
           ? getArchivedFilterFromParams(searchParams)
           : "active",

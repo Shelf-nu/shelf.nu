@@ -19,6 +19,10 @@ import {
 import { resolveAssetImage } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
+import {
   ASSET_IMAGE_RESIGN_LIMITS,
   refreshExpiredAssetImages,
 } from "~/modules/asset/service.server";
@@ -62,16 +66,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
     // The asset KPI, the status breakdown and the newest-assets list describe
     // the same assets the caller's Assets tab lists: active assets only, and
-    // for a role whose `assets.listScope` is "bookable", only those available
-    // for bookings. The custody count ignores the list scope, like the
-    // custody tab.
-    const assetListWhere: Prisma.AssetWhereInput = {
-      organizationId,
-      archivedAt: null,
-      ...(access.policy.assets.listScope === "bookable" && {
-        availableToBook: true,
-      }),
-    };
+    // for a role whose `assets.listScope` is "bookable", those available for
+    // bookings plus the ones in the caller's custody. Each query names
+    // `archivedAt` itself so the archived-at lint rule can check it.
+    const bookableScope = resolveBookableListScope({
+      access,
+      userId: user.id,
+    });
+    const listScopeWhere: Prisma.AssetWhereInput = bookableScope
+      ? { AND: [bookableListScopeWhere(bookableScope)] }
+      : {};
 
     // Which bookings the Home sections may draw from.
     // `requireOrganizationAccess` above proves membership and performs NO role
@@ -115,8 +119,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       overdueBookingsResult,
       activeAudits,
     ] = await Promise.all([
-      // KPI: Total assets (active only — archived excluded, issue #382)
-      db.asset.count({ where: assetListWhere }),
+      // KPI: Total assets, as the Assets tab lists them
+      db.asset.count({
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
+      }),
 
       // KPI: Categories
       db.category.count({ where: { organizationId } }),
@@ -129,16 +135,16 @@ export async function loader({ request }: LoaderFunctionArgs) {
         where: { organizationId, deletedAt: null },
       }),
 
-      // Assets by status (active inventory only — archived excluded)
+      // Assets by status, over the same assets as the KPI
       db.asset.groupBy({
         by: ["status"],
-        where: assetListWhere,
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         _count: { id: true },
       }),
 
-      // My custody count — assets currently in custody of this user.
-      // Phase 2 widened `Asset.custody` from 1:1 to 1:many for
-      // QUANTITY_TRACKED multi-custodian support, so we filter via `some`.
+      // My custody count: assets currently in this user's custody, bookable
+      // or not, like the custody tab. `Asset.custody` is one-to-many (a
+      // quantity-tracked asset can have several holders), so filter via `some`.
       db.asset.count({
         where: {
           organizationId,
@@ -154,9 +160,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
         },
       }),
 
-      // 5 newest assets (exclude archived — issue #382)
+      // 5 newest assets, from the same assets as the KPI
       db.asset.findMany({
-        where: assetListWhere,
+        where: { organizationId, archivedAt: null, ...listScopeWhere },
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {

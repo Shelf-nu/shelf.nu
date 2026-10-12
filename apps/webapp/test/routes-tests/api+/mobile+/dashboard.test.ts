@@ -321,16 +321,28 @@ describe("GET /api/mobile/dashboard — asset list scope", () => {
   }
 
   it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "counts and lists only bookable assets for %s, as the Assets tab does",
+    "counts and lists bookable assets and the ones %s holds, as the Assets tab does",
     async (role) => {
       actAs(role);
 
       const { total, byStatus, newest } = await captureAssetWheres();
 
       for (const where of [total, byStatus, newest]) {
-        expect(where).toMatchObject({
+        expect(where).toEqual({
           organizationId: ORG_ID,
-          availableToBook: true,
+          archivedAt: null,
+          AND: [
+            {
+              OR: [
+                { availableToBook: true },
+                {
+                  custody: {
+                    some: { custodian: { userId: CALLER_USER_ID } },
+                  },
+                },
+              ],
+            },
+          ],
         });
       }
     }
@@ -345,6 +357,7 @@ describe("GET /api/mobile/dashboard — asset list scope", () => {
 
       expect(myCustody).toBeDefined();
       expect(myCustody).not.toHaveProperty("availableToBook");
+      expect(myCustody).not.toHaveProperty("AND");
     }
   );
 

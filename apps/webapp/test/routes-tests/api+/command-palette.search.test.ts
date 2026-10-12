@@ -139,11 +139,11 @@ describe("command-palette search", () => {
   });
 
   it.each([["SELF_SERVICE"], ["BASE"]])(
-    "searches only bookable assets for %s",
+    "searches only bookable assets and the caller's own for %s",
     async (role) => {
       await search([role]);
       expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
-        availableToBookOnly: true,
+        bookableScope: { holderUserId: "caller" },
       });
     }
   );
@@ -151,7 +151,7 @@ describe("command-palette search", () => {
   it("searches every asset for ADMIN", async () => {
     await search(["ADMIN"]);
     expect(vi.mocked(getAssets).mock.calls[0][0]).toMatchObject({
-      availableToBookOnly: false,
+      bookableScope: null,
     });
   });
 
