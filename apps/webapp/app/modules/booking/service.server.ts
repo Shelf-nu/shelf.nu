@@ -66,6 +66,7 @@ import {
   ACTIVE_BOOKING_STATUSES,
   assertAssetQuantitiesAvailable,
   getAssetAvailability,
+  getAssetAvailabilityBatch,
 } from "~/modules/asset/availability.server";
 import {
   reconcileManualPlacementsForStockDecrease,
@@ -123,9 +124,18 @@ import {
   type ResolvedFormatPrefs,
 } from "~/utils/date-format";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import type { ErrorLabel } from "~/utils/error";
-import { isLikeShelfError, isNotFoundError, ShelfError } from "~/utils/error";
+import {
+  isLikeShelfError,
+  isNotFoundError,
+  rethrowIfClientError,
+  ShelfError,
+} from "~/utils/error";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import {
   payload,
@@ -2817,8 +2827,18 @@ async function readFullCheckoutDepartures(
   tx: any,
   bookingId: Booking["id"]
 ): Promise<{
-  departingSlices: Array<{ id: string; quantity: number }>;
-  checkoutTopUps: Array<{ id: string; assetId: string; residue: number }>;
+  departingSlices: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    quantity: number;
+  }>;
+  checkoutTopUps: Array<{
+    id: string;
+    assetId: string;
+    assetKitId: string | null;
+    residue: number;
+  }>;
 }> {
   /**
    * A quantity-tracked slice partially dispatched by progressive scans before
@@ -2847,6 +2867,7 @@ async function readFullCheckoutDepartures(
   const checkoutTopUps: Array<{
     id: string;
     assetId: string;
+    assetKitId: string | null;
     residue: number;
   }> = [];
   if (preStampedQtySlices.length > 0) {
@@ -2885,6 +2906,7 @@ async function readFullCheckoutDepartures(
           checkoutTopUps.push({
             id: s.id,
             assetId: s.assetId,
+            assetKitId: s.assetKitId,
             residue: s.quantity - units,
           });
         }
@@ -2916,7 +2938,7 @@ async function readFullCheckoutDepartures(
         { checkedOutAt: { not: null }, checkedInAt: { not: null } },
       ],
     },
-    select: { id: true, quantity: true },
+    select: { id: true, assetId: true, assetKitId: true, quantity: true },
   });
 
   return { departingSlices, checkoutTopUps };
@@ -3048,6 +3070,14 @@ async function checkoutBookingWritesWithinTx(
     await assertKitsCheckoutable(tx, { kitIds, bookingId, organizationId });
   }
 
+  // What this call sends out, read before any write below: the guard measures
+  // these units against the shelf, and the stamps further down make departing
+  // slices indistinguishable from ones an earlier batch sent out.
+  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
+    tx,
+    bookingId
+  );
+
   /**
    * Validate quantity availability for QUANTITY_TRACKED assets.
    * Between when a booking was created and checkout, other
@@ -3077,20 +3107,39 @@ async function checkoutBookingWritesWithinTx(
   if (uniqueQtyTrackedAssetIds.length > 0) {
     const insufficientQtyWarnings: string[] = [];
 
+    /**
+     * Standalone units of each pool that physically leave in this call: whole
+     * departing slices plus the residue of slices an earlier scan sent out
+     * only partly. Units this booking already has out are off the shelf, and
+     * `physicalAvailable` has subtracted them, so they are not charged again.
+     * Kit-driven slices draw on their kit's allocation, as in `requested`.
+     */
+    const leavingNowByAsset = new Map<string, number>();
+    const addLeaving = (assetId: string, units: number) =>
+      leavingNowByAsset.set(
+        assetId,
+        (leavingNowByAsset.get(assetId) ?? 0) + units
+      );
+    for (const slice of departingSlices) {
+      if (slice.assetKitId == null) addLeaving(slice.assetId, slice.quantity);
+    }
+    for (const topUp of checkoutTopUps) {
+      if (topUp.assetKitId == null) addLeaving(topUp.assetId, topUp.residue);
+    }
+
     // Sorted so concurrent transactions acquire these row locks in the same
     // global order — prevents deadlocks with `reserveBooking` /
     // `updateBookingAssets`, which lock the same assets sorted too.
     for (const assetId of [...uniqueQtyTrackedAssetIds].sort()) {
       await lockAssetForQuantityUpdate(tx, assetId, organizationId);
 
-      const { bookable } = await getAssetAvailability({
+      const { bookable, physicalAvailable } = await getAssetAvailability({
         assetId,
         organizationId,
         window: { from, to },
         excludeBookingId: bookingId,
         db: tx,
       });
-
       // Sum the requested STANDALONE units for this asset on this booking.
       // Callers pre-filter `qtyTrackedBookingAssets` to `assetKitId == null`
       // slices (kit-driven units are covered by `inKits`, already reserved out
@@ -3100,10 +3149,24 @@ async function checkoutBookingWritesWithinTx(
         .filter((ba) => ba.asset.id === assetId)
         .reduce((sum, ba) => sum + ba.quantity, 0);
 
-      if (requested > bookable) {
-        const title =
-          qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
-            .title ?? "";
+      // The units leave now, so they must also be on the shelf now. `bookable`
+      // is windowed by this booking's planned dates and leaves out units
+      // another booking still has out when it ends before this one starts,
+      // which an early check-out hands over too soon. The shelf is measured
+      // against what leaves in this call, the window against the booking's
+      // whole standalone quantity.
+      const leavingNow = leavingNowByAsset.get(assetId) ?? 0;
+      const title =
+        qtyTrackedBookingAssets.find((ba) => ba.asset.id === assetId)?.asset
+          .title ?? "";
+      if (leavingNow > physicalAvailable) {
+        insufficientQtyWarnings.push(
+          `"${title}": requested ${leavingNow}, only ${Math.max(
+            0,
+            physicalAvailable
+          )} available right now`
+        );
+      } else if (requested > bookable) {
         insufficientQtyWarnings.push(
           `"${title}": requested ${requested}, only ${Math.max(
             0,
@@ -3163,13 +3226,6 @@ async function checkoutBookingWritesWithinTx(
     },
     data: { status: AssetStatus.CHECKED_OUT },
   });
-
-  // What this call sends out, read before the stamps below make departing
-  // slices indistinguishable from ones an earlier batch sent out.
-  const { departingSlices, checkoutTopUps } = await readFullCheckoutDepartures(
-    tx,
-    bookingId
-  );
 
   /**
    * Record where each pool slice's units leave from, before the counters
@@ -9857,6 +9913,28 @@ export async function partialCheckoutBooking({
           });
         }
 
+        /**
+         * Each pool's availability before this session, read under the row
+         * locks above and before any write below, so the free-stock check
+         * after attribution measures this session's departures against the
+         * pool as it found it. `physicalAvailable` (stock less what custody,
+         * kits and every booking hold out) ignores the window; `bookable`
+         * also sets aside other bookings' reservations over this booking's
+         * window, the figure the Check out button's guard reads.
+         */
+        const availabilityBeforeByAsset = await getAssetAvailabilityBatch(
+          qtyDispositionAssetIds,
+          {
+            organizationId,
+            window:
+              bookingFound.from && bookingFound.to
+                ? { from: bookingFound.from, to: bookingFound.to }
+                : null,
+            excludeBookingId: id,
+            db: tx,
+          }
+        );
+
         // ONE batched committed-remaining read (booking total − Σ prior PBC
         // sessions) for every qty asset. This value is CONSTANT across the
         // disposition loop below: it reads only prior/committed sessions (this
@@ -10407,6 +10485,65 @@ export async function partialCheckoutBooking({
             quantity: sessionQuantities[index] ?? 1,
           })),
         });
+
+        /**
+         * A pool's units are held by one thing at a time: custody, a kit or a
+         * booking. The caps above only bound a claim by what this booking
+         * still owes, so this checks the units leaving standalone slices
+         * against the pool's free stock. Kit-driven slices draw on their
+         * kit's allocation, which the free figure already sets aside.
+         *
+         * A booking already out outranks a reservation (see
+         * {@link outranksReservations}), so for it only units physically held
+         * count. A reserved booking does not yet, so other bookings'
+         * reservations over its window count too: the same `bookable` limit
+         * the Check out button's in-tx guard applies to a batch covering the
+         * whole booking, which reaches it through the delegate above.
+         */
+        const standaloneUnitsByAsset = new Map<string, number>();
+        for (const ba of bookingFound.bookingAssets) {
+          if (ba.assetKitId != null) continue;
+          if (assetTypeById.get(ba.asset.id) !== AssetType.QUANTITY_TRACKED) {
+            continue;
+          }
+          const units = unitsBySliceId.get(ba.id) ?? 0;
+          if (units <= 0) continue;
+          standaloneUnitsByAsset.set(
+            ba.asset.id,
+            (standaloneUnitsByAsset.get(ba.asset.id) ?? 0) + units
+          );
+        }
+        const freeStockShortfalls: string[] = [];
+        for (const [assetId, units] of standaloneUnitsByAsset) {
+          const availability = availabilityBeforeByAsset.get(assetId);
+          const physicalFree = availability?.physicalAvailable ?? 0;
+          const free = inFlight
+            ? physicalFree
+            : Math.min(physicalFree, availability?.bookable ?? 0);
+          if (units > free) {
+            // Name the limit that binds: the shelf, or other bookings'
+            // reservations over this booking's window.
+            freeStockShortfalls.push(
+              `"${
+                titleByAssetId.get(assetId) ?? ""
+              }": requested ${units}, only ${Math.max(0, free)} available ${
+                free === physicalFree ? "right now" : "in this window"
+              }`
+            );
+          }
+        }
+        if (freeStockShortfalls.length > 0) {
+          throw new ShelfError({
+            cause: null,
+            label,
+            status: 400,
+            shouldBeCaptured: false,
+            message: `Some quantity-tracked assets have insufficient availability:\n${freeStockShortfalls.join(
+              "\n"
+            )}\nThe rest are in custody, in kits, or out on or reserved for other bookings. Release custody, check units in or adjust quantities, then try again.`,
+            additionalData: { bookingId: id, organizationId },
+          });
+        }
 
         /**
          * Record where each pool slice's units leave from, before the counter
@@ -14007,6 +14144,35 @@ export async function removeAssets({
 }
 
 /**
+ * Refuses a single booking delete unless the user typed its name, as the delete
+ * dialog asks. A booking that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The booking to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertBookingDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.booking
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((booking) => booking?.name ?? null),
+    label,
+  });
+}
+
+/**
  * Permanently deletes a booking and reconciles the status of any assets that
  * were checked out on it.
  *
@@ -15305,6 +15471,7 @@ export async function bulkDeleteBookings({
   hints,
   currentSearchParams,
   access,
+  confirmation,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
@@ -15313,6 +15480,11 @@ export async function bulkDeleteBookings({
   currentSearchParams?: string | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * bookings this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
@@ -15365,6 +15537,15 @@ export async function bulkDeleteBookings({
       foundIds: bookings.map((booking) => booking.id),
       access,
       action: "delete",
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: bookingIds,
+      confirmation,
+      matchedCount: bookings.length,
+      noun: { one: "booking", many: "bookings" },
+      label,
     });
 
     // Roles whose policy limits delete to drafts may not delete a selection
@@ -15528,6 +15709,9 @@ export async function bulkDeleteBookings({
       }
     }
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     const message =
       cause instanceof ShelfError
         ? cause.message

@@ -28,6 +28,10 @@ import {
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
   BOOKING_METHOD,
+  DELETE_CONFIRMATION_FIELD,
+  DELETE_CONSEQUENCE_LABELS,
+  deleteConfirmationMatches,
+  normalizeDeleteConfirmation,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_ADJECTIVES,
@@ -350,4 +354,39 @@ test("the declarable booking methods are BOOKING_METHOD's values, never quick", 
     Object.values(BOOKING_METHOD).sort()
   );
   assert.equal(CLIENT_DECLARED_BOOKING_METHODS.includes("quick"), false);
+});
+
+test("a typed delete confirmation matches its name loosely but never blank", () => {
+  // Case, edge whitespace and doubled spaces do not decide a delete.
+  assert.equal(
+    deleteConfirmationMatches("  camera   kit ", "Camera Kit"),
+    true
+  );
+  // A composed é (NFC) and a decomposed one (NFD, as macOS can type it).
+  assert.equal(deleteConfirmationMatches("Résumé", "Résumé"), true);
+  // Counts are compared as text.
+  assert.equal(deleteConfirmationMatches("12", 12), true);
+  assert.equal(deleteConfirmationMatches(" 12 ", 12), true);
+  // A different name, a prefix or a different count is refused.
+  assert.equal(deleteConfirmationMatches("Camera", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("11", 12), false);
+  // Nothing typed, or nothing to match, never unlocks.
+  assert.equal(deleteConfirmationMatches("", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches(undefined, "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("", ""), false);
+  assert.equal(deleteConfirmationMatches("   ", "  "), false);
+});
+
+test("the confirmation field name is the one the bulk endpoints read", () => {
+  assert.equal(DELETE_CONFIRMATION_FIELD, "confirmation");
+  assert.equal(normalizeDeleteConfirmation(null), "");
+});
+
+test("each delete consequence says it is permanent", () => {
+  for (const text of Object.values(DELETE_CONSEQUENCE_LABELS)) {
+    assert.match(text, /permanently deletes/);
+    assert.match(text, /This cannot be undone\.$/);
+    // House rule: no em or en dashes in user-facing strings.
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
 });
