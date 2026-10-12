@@ -8,7 +8,7 @@
  *
  * @see {@link file://../../../scripts/render-roles-doc.ts}
  */
-import type { OrganizationRole } from "./role-access";
+import type { OrganizationRole, RolePolicy } from "./role-access";
 import { ROLE_LABELS, ROLES_BY_RANK } from "./role-access";
 
 export const ROLES_DOC_BEGIN =
@@ -22,10 +22,23 @@ export type EffectiveAccessSnapshot = {
   "D-14": Record<string, Record<string, boolean>>;
   "D-28": Record<string, Record<string, boolean>>;
   "D-21": Record<string, string[]>;
+  "D-31": Record<string, AssetListScope>;
   "D-33": Record<string, string>;
 };
 
+type AssetListScope = RolePolicy["assets"]["listScope"];
+
 const ALL_TOGGLES_ON = "ssB,baB,ssC,baC";
+
+/**
+ * Plain-language cell for each `assets.listScope` value. Keyed by the policy's
+ * own union, so a new scope does not compile until it has a label.
+ */
+const LIST_SCOPE_LABELS: Record<AssetListScope, string> = {
+  all: "Every asset",
+  bookable: "Assets available for bookings, plus the ones they hold",
+};
+
 const yesNo = (value: boolean) => (value ? "yes" : "no");
 
 /** A "no value" cell: a word, never a dash, per the doc's own no-dash rule. */
@@ -82,6 +95,10 @@ export function renderEffectiveAccessMarkdown(
     [
       "Removes booking items in",
       ...roles.map((role) => snapshot["D-21"][role].join(", ") || NONE),
+    ],
+    [
+      "Asset list shows",
+      ...roles.map((role) => LIST_SCOPE_LABELS[snapshot["D-31"][role]]),
     ],
     ["Default asset index", ...roles.map((role) => snapshot["D-33"][role])],
   ]);

@@ -24,6 +24,7 @@ import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { canUseBarcodes } from "~/utils/subscription.server";
 import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
@@ -811,25 +812,43 @@ describe("GET /api/mobile/assets — list scope", () => {
         request: new Request(`http://localhost:3000/api/mobile/assets${query}`),
       })
     );
-    return findManyMock.mock.calls[0]![0]!.where;
+    return findManyMock.mock.calls[0]![0]!.where!;
   }
 
-  it("lists only bookable assets to SELF_SERVICE, as the web index does", async () => {
-    expect(await whereFor("SELF_SERVICE")).toMatchObject({
-      availableToBook: true,
-    });
+  /** The list scope a bookable-only role gets (its shape is pinned in list-scope.server.test.ts). */
+  const BOOKABLE_OR_HELD = bookableListScopeWhere({
+    holderUserId: FAKE_USER_ID,
   });
 
-  it("still lists every asset SELF_SERVICE holds on the custody tab", async () => {
-    expect(
-      await whereFor("SELF_SERVICE", "?myCustody=true")
-    ).not.toHaveProperty("availableToBook");
-  });
-
-  it.each(["BASE", "ADMIN"] as const)(
-    "does not narrow the list for %s",
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "lists bookable assets and the ones %s holds, as the web index does",
     async (role) => {
-      expect(await whereFor(role)).not.toHaveProperty("availableToBook");
+      const where = await whereFor(role);
+      expect(where.AND).toEqual([BOOKABLE_OR_HELD]);
+      expect(where).not.toHaveProperty("availableToBook");
     }
   );
+
+  it("keeps the scope beside an AVAILABLE status filter rather than replacing it", async () => {
+    const where = await whereFor("BASE", "?status=AVAILABLE");
+    expect(where.AND).toHaveLength(2);
+    expect(where.AND).toContainEqual(BOOKABLE_OR_HELD);
+  });
+
+  it.each(["SELF_SERVICE", "BASE"] as const)(
+    "lists every asset %s holds on the custody tab, bookable or not",
+    async (role) => {
+      const where = await whereFor(role, "?myCustody=true");
+      expect(where.custody).toEqual({
+        some: { custodian: { userId: FAKE_USER_ID } },
+      });
+      expect(where).not.toHaveProperty("availableToBook");
+    }
+  );
+
+  it("does not narrow the list for ADMIN", async () => {
+    const where = await whereFor("ADMIN");
+    expect(where).not.toHaveProperty("AND");
+    expect(where).not.toHaveProperty("availableToBook");
+  });
 });
