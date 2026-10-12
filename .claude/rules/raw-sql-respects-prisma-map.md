@@ -3,6 +3,8 @@ description: Raw SQL must use @map column names, avoid bigint casts on float sum
 paths:
   - "apps/webapp/app/**/*.server.ts"
   - "packages/database/**"
+  - "apps/webapp/app/routes/**"
+  - "apps/webapp/app/utils/**"
 ---
 
 Prisma's `@map` decouples the schema field name from the actual DB column.

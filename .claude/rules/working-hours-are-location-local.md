@@ -6,6 +6,9 @@ paths:
   - "apps/webapp/app/components/booking/**"
   - "apps/webapp/app/components/working-hours/**"
   - "apps/webapp/app/routes/**/*working-hours*"
+  - "apps/webapp/app/components/assets/assets-index/**"
+  - "apps/webapp/app/modules/organization/**"
+  - "apps/webapp/app/routes/**/*booking*"
 ---
 
 # Working Hours Are Local To The Physical Location

@@ -4,6 +4,8 @@ paths:
   - "apps/webapp/app/modules/booking/**"
   - "apps/webapp/app/modules/reports/**"
   - "apps/webapp/app/routes/**/*booking*"
+  - "apps/webapp/app/components/booking/**"
+  - "apps/webapp/app/utils/csv.server.ts"
 ---
 
 # A Booking's Planned Period Is Frozen Once It Starts

@@ -6,6 +6,11 @@ paths:
   - "apps/webapp/app/routes/api+/mobile+/**"
   - "apps/webapp/app/components/scanner/**"
   - "apps/webapp/app/modules/reports/**"
+  - "apps/webapp/app/modules/asset/**"
+  - "apps/webapp/app/modules/kit/**"
+  - "apps/webapp/app/components/booking/**"
+  - "apps/webapp/app/components/assets/**"
+  - "apps/webapp/app/routes/**/*kit*"
 ---
 
 # "Was This Checked Out?" Is Answered By The Slice, Not By Status Or Records
