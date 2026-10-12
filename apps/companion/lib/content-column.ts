@@ -49,8 +49,9 @@ export function isTabletScreen(width: number, height: number): boolean {
 /**
  * Window width, in points, from which the tab bar becomes a sidebar on the
  * left. Tablets held sideways clear it (iPad Air 11" is 1,180 wide, a 10"
- * Android tablet 1,280); held upright they stay below it and keep the bottom
- * tab bar. Phones are locked upright, so they never reach it.
+ * Android tablet 1,280); held upright most stay below it and keep the bottom
+ * tab bar. A 13" iPad is 1,024 wide even upright, so it keeps the sidebar in
+ * both orientations. Phones are locked upright, so they never reach it.
  */
 const TAB_SIDEBAR_MIN_WIDTH = 1000;
 

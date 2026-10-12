@@ -1,3 +1,14 @@
+/**
+ * Hooks that read the content column's side padding from the live window.
+ *
+ * `components/content-column.tsx` uses the gutter to decide when a screen is
+ * wide enough to show the background either side of the column; full-screen
+ * sheets use it as padding, since they sit outside any navigator's
+ * `screenLayout`.
+ *
+ * @see lib/content-column.ts for the column widths
+ */
+
 import { Platform, useWindowDimensions } from "react-native";
 import { CONTENT_MAX_WIDTH, contentGutter } from "@/lib/content-column";
 

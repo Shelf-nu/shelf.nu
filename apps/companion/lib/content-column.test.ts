@@ -31,7 +31,7 @@ describe("contentGutter", () => {
     assert.equal(contentGutter(390, FORM_MAX_WIDTH), 0);
   });
 
-  it("rounds down so the column never exceeds the cap", () => {
+  it("rounds down so the column is never narrower than the cap", () => {
     const gutter = contentGutter(1001);
     assert.ok(1001 - gutter * 2 >= CONTENT_MAX_WIDTH);
   });
@@ -62,5 +62,9 @@ describe("showsTabSidebar", () => {
   it("shows the sidebar on tablets held sideways", () => {
     assert.equal(showsTabSidebar(1180), true);
     assert.equal(showsTabSidebar(1280), true);
+  });
+
+  it("shows the sidebar on a 13-inch iPad held upright", () => {
+    assert.equal(showsTabSidebar(1024), true);
   });
 });

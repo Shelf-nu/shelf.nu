@@ -12,9 +12,9 @@ export const unstable_settings = { initialRouteName: "index" };
 
 /**
  * Booking screens sit in the content column on wide windows. On iOS the
- * Add-to-Booking modal is left alone: an iPad presents it as a sheet already
- * narrower than the window, so a gutter measured from the window would crush
- * it. Android presents it full screen, so it takes the column like the rest.
+ * Add-to-Booking modal is left alone: an iPad presents it as a sheet the system
+ * sizes for the screen, so it needs no column of its own. Android presents it
+ * full screen, so it takes the column like the rest.
  */
 const BOOKINGS_SCREEN_LAYOUT = contentColumnLayout({
   except: Platform.OS === "ios" ? ["add-assets"] : [],
