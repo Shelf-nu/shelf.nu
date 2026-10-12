@@ -52,6 +52,13 @@ vi.mock("~/database/db.server", () => ({
   db: { booking: { findFirst: vi.fn() } },
 }));
 
+// why: the archived pre-check (its own suite: mobile-archived.server.test.ts)
+// reads assets through the fake db, which ignores the archived filter. None of
+// these fixtures are archived, so it reports nothing.
+vi.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vi.fn().mockResolvedValue(null),
+}));
+
 // why: JWT validation, org membership and the permission gate are out of scope
 // here; the rest of the module stays real.
 vi.mock("~/modules/api/mobile-auth.server", async () => {

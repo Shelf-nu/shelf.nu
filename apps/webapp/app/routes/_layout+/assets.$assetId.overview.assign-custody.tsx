@@ -49,6 +49,10 @@ import {
   wrapUserLinkForNote,
 } from "~/utils/markdoc-wrappers";
 import {
+  assertAssetsAreNotArchived,
+  userCanReinstateAssets,
+} from "~/utils/org-validation.server";
+import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
@@ -331,20 +335,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     // Archived assets can't be assigned custody (issue #382). Guard the action
     // too (not just the loader) so a crafted POST can't bypass the redirect.
-    const archivedAssetCount = await db.asset.count({
-      where: { id: assetId, organizationId, archivedAt: { not: null } },
+    // Self-service reaches this route and can't reinstate, so the refusal is
+    // worded for the acting user's role.
+    await assertAssetsAreNotArchived({
+      assetIds: [assetId],
+      organizationId,
+      actorUserId: userId,
     });
-    if (archivedAssetCount > 0) {
-      throw new ShelfError({
-        cause: null,
-        title: "Asset is archived",
-        message: "Reinstate this asset before assigning custody.",
-        additionalData: { userId, assetId },
-        label: "Assets",
-        status: 400,
-        shouldBeCaptured: false,
-      });
-    }
 
     // Use transaction to ensure custody assignment and activity event are atomic
     const asset = await db
@@ -405,7 +402,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             throw new ShelfError({
               cause: null,
               title: "Asset is archived",
-              message: `"${blocked.title}" was archived before custody could be assigned. Reinstate it first.`,
+              message: `"${
+                blocked.title
+              }" was archived before custody could be assigned. ${
+                (await userCanReinstateAssets({ userId, organizationId }))
+                  ? "Reinstate it first."
+                  : "Ask an admin to reinstate it."
+              }`,
               additionalData: { userId, assetId, custodianId },
               label: "Assets",
               shouldBeCaptured: false,

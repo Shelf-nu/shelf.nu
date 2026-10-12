@@ -28,6 +28,7 @@ import type {
 } from "react-router";
 import { data, useLoaderData, useParams } from "react-router";
 import z from "zod";
+import { archivedHiddenEmptyState } from "~/components/assets/archived-hidden-empty-state";
 import {
   ArchivedViewMenu,
   useArchivedView,
@@ -62,6 +63,7 @@ import {
 import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
+import { db } from "~/database/db.server";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
@@ -142,6 +144,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       // findMany and synthesizes the array here.
       { location, totalAssetsWithinLocation, assets },
       { teamMembers, totalTeamMembers },
+      archivedAssetCount,
     ] = await Promise.all([
       getLocation({
         organizationId,
@@ -165,6 +168,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // When the user cannot see all custody, only return their own team member
         filterByUserId: !access.custody.seeAll,
         userId,
+      }),
+      // Archived assets the Active view hides, so its empty state can say
+      // where they went.
+      db.asset.count({
+        where: {
+          organizationId,
+          archivedAt: { not: null },
+          assetLocations: { some: { locationId } },
+        },
       }),
     ]);
 
@@ -218,6 +230,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
     return payload({
       location,
+      archivedAssetCount,
       header,
       modelName,
       items,
@@ -336,7 +349,16 @@ export default function LocationAssets() {
   const roles = useOrganizationRoles();
   const canArchiveAssets = useCanArchiveAssets();
   const archivedView = useArchivedView(canArchiveAssets);
-  const { location } = useLoaderData<typeof loader>();
+  const { location, archivedAssetCount } = useLoaderData<typeof loader>();
+  /** Set only on the Active view of a location whose assets are all archived. */
+  const archivedHiddenState =
+    archivedView === "active"
+      ? archivedHiddenEmptyState({
+          archivedCount: archivedAssetCount,
+          canArchiveAssets,
+          place: "location",
+        })
+      : null;
   const userRoleCanManageAssets = userHasPermission({
     roles,
     entity: PermissionEntity.location,
@@ -461,8 +483,11 @@ export default function LocationAssets() {
             archivedView === "archived"
               ? { title: "No archived assets at this location", text: "" }
               : {
-                  title: "There are currently no assets at the location",
-                  text: "Add assets in this location",
+                  title:
+                    archivedHiddenState?.title ??
+                    "There are currently no assets at the location",
+                  text:
+                    archivedHiddenState?.text ?? "Add assets in this location",
                   newButtonRoute: "manage-assets",
                   newButtonContent: "Add asset",
                 }

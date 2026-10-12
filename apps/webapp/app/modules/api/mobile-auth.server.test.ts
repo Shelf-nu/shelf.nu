@@ -4,6 +4,8 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   getMobileAssetForViewer,
+  MOBILE_ASSET_SELECT,
+  MOBILE_KIT_SELECT,
   requireMobileAuth,
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
@@ -11,6 +13,7 @@ import {
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
 import { recordMobileActivity } from "./mobile-usage.server";
@@ -98,6 +101,7 @@ const baseAsset = {
     thumbnailImage: string | null;
   } | null,
   availableToBook: true,
+  archivedAt: null as Date | null,
   category: null,
   type: "INDIVIDUAL" as const,
   quantity: null,
@@ -130,6 +134,16 @@ function custodyRow(
     custodian: { id, name, userId: opts.userId ?? null },
   };
 }
+
+describe("MOBILE_KIT_SELECT", () => {
+  it("sends the same members it counts: archived ones are left out of both", () => {
+    // The phone derives the kit's blockers from these members. An archived
+    // member the server would not book must not refuse the kit on the phone.
+    const activeOnly = { asset: { archivedAt: null } };
+    expect(MOBILE_KIT_SELECT.assetKits.where).toEqual(activeOnly);
+    expect(KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where).toEqual(activeOnly);
+  });
+});
 
 describe("shapeMobileAssetResponse", () => {
   it("returns null for kit, kitId, location, and custody when all pivots are empty", () => {
@@ -245,6 +259,21 @@ describe("shapeMobileAssetResponse", () => {
     expect(result.mainImage).toBeNull();
     expect(result.thumbnailImage).toBeNull();
     expect(result.imageSource).toBe("placeholder");
+  });
+
+  // The companion badges an archived asset and turns its actions off; it can
+  // only do that if the stamp survives the shaper.
+  it("passes archivedAt through, null for an active asset", () => {
+    const archivedAt = new Date("2026-10-09T13:44:00.000Z");
+
+    expect(shapeMobileAssetResponse(baseAsset).archivedAt).toBeNull();
+    expect(
+      shapeMobileAssetResponse({ ...baseAsset, archivedAt }).archivedAt
+    ).toEqual(archivedAt);
+  });
+
+  it("selects archivedAt in MOBILE_ASSET_SELECT", () => {
+    expect(MOBILE_ASSET_SELECT).toMatchObject({ archivedAt: true });
   });
 
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {

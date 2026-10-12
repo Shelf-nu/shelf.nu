@@ -22,6 +22,10 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import type { BlockerConfig } from "../blockers-factory";
+import {
+  archivedAssetIdsOf,
+  archivedAssetsBlocker,
+} from "./scan-blocker-helpers";
 
 /** Minimal asset shape the type-aware "fully checked out" predicate needs. */
 export type FullyCheckedOutAsset = {
@@ -394,6 +398,13 @@ export function buildPartialCheckoutBlockers({
       ),
       onResolve: () => removeItemsFromList(qrIdsOfKitsNotInBooking),
     },
+    // `partialCheckoutBooking` refuses an archived asset among the scanned
+    // ones, which fails the whole batch.
+    archivedAssetsBlocker(
+      archivedAssetIdsOf(assets),
+      removeAssetsFromList,
+      "Archived assets are out of service and cannot be checked out. Remove them from the list to continue."
+    ),
     {
       id: "invalid-codes",
       condition: errorQrIds.length > 0,

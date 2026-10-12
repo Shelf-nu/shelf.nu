@@ -19,6 +19,7 @@ import {
   bulkArchiveAssets,
   bulkUnarchiveAssets,
 } from "~/modules/asset/service.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError } from "~/utils/error";
 import {
   PermissionAction,
@@ -89,6 +90,7 @@ describe("POST /api/assets/bulk-archive", () => {
     vi.mocked(bulkArchiveAssets).mockResolvedValue({
       archivedCount: 2,
       skippedCount: 0,
+      draftBookings: [],
     });
     vi.mocked(bulkUnarchiveAssets).mockResolvedValue({
       unarchivedCount: 2,
@@ -137,6 +139,40 @@ describe("POST /api/assets/bulk-archive", () => {
       })
     );
     expect(bulkArchiveAssets).not.toHaveBeenCalled();
+  });
+
+  it("does not report a run that archived nothing as a success", async () => {
+    vi.mocked(bulkArchiveAssets).mockResolvedValueOnce({
+      archivedCount: 0,
+      skippedCount: 1,
+      draftBookings: [],
+    });
+
+    await submit("archive", ["a1"]);
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Nothing archived",
+        icon: expect.objectContaining({ variant: "gray" }),
+      })
+    );
+  });
+
+  it("names the drafts that still hold what was archived", async () => {
+    vi.mocked(bulkArchiveAssets).mockResolvedValueOnce({
+      archivedCount: 1,
+      skippedCount: 0,
+      draftBookings: [{ id: "b1", name: "Shoot" }],
+    });
+
+    await submit("archive", ["a1"]);
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Assets archived",
+        message: expect.stringContaining('the draft booking "Shoot"'),
+      })
+    );
   });
 
   it("refuses a caller without the grant and writes nothing", async () => {

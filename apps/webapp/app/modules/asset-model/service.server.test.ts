@@ -33,6 +33,8 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findMany: vitest.fn(),
       updateMany: vitest.fn(),
+      // why: the list counts each model's archived assets to show active ones.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
     // why: `createLoadUserForNotes` is NOT mocked, so the real memoized loader
     // runs and reads this stub to build the note's author link.
@@ -235,13 +237,24 @@ describe("getAssetModels", () => {
 
   it("returns paginated asset models with asset counts", async () => {
     const mockModels = [
-      createAssetModelFactory({ id: "model-1", name: "Model A" }),
-      createAssetModelFactory({ id: "model-2", name: "Model B" }),
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 3 },
+      },
+      {
+        ...createAssetModelFactory({ id: "model-2", name: "Model B" }),
+        _count: { assets: 2 },
+      },
     ];
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue(mockModels);
     // @ts-expect-error mock setup
     db.assetModel.count.mockResolvedValue(2);
+    // why: one of model-1's three assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-1", _count: { _all: 1 } },
+    ]);
 
     const result = await getAssetModels({
       organizationId: "org-123",
@@ -249,7 +262,20 @@ describe("getAssetModels", () => {
       perPage: 10,
     });
 
-    expect(result.assetModels).toEqual(mockModels);
+    // `_count.assets` keeps every linked asset (the delete warning needs
+    // them all); `activeAssetCount` is what the list shows.
+    expect(result.assetModels).toEqual([
+      { ...mockModels[0], activeAssetCount: 2 },
+      { ...mockModels[1], activeAssetCount: 2 },
+    ]);
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-123",
+          archivedAt: { not: null },
+        }),
+      })
+    );
     expect(result.totalAssetModels).toBe(2);
     expect(db.assetModel.findMany).toHaveBeenCalledWith(
       expect.objectContaining({

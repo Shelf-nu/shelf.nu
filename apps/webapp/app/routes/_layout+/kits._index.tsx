@@ -128,7 +128,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         userId,
         extraInclude: {
           qrCodes: { select: { id: true } },
+          // Active members only: an archived member is left out of the kit's
+          // bookings, so it must not mark the kit unavailable to book.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               // AssetKit.id surfaces the kit-slice discriminator. The
               // consumer filters `bookingAssets[].assetKitId === ak.id`
