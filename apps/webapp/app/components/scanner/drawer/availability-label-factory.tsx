@@ -82,6 +82,19 @@ export function createAvailabilityLabels(
  * Predefined label configurations for common asset states
  */
 export const assetLabelPresets = {
+  /**
+   * Archived assets are read-only (issue #382) and still read AVAILABLE, so
+   * without this a scanned archived asset looks like any other row.
+   */
+  archived: (isArchived: boolean = false): AvailabilityLabelConfig => ({
+    condition: isArchived,
+    badgeText: "Archived",
+    tooltipTitle: "Asset is archived",
+    tooltipContent:
+      "Archived assets are read-only. Remove it from the list to continue.",
+    priority: 120,
+  }),
+
   inCustody: (isInCustody: boolean = false): AvailabilityLabelConfig => ({
     condition: isInCustody,
     badgeText: "In custody",

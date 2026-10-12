@@ -191,6 +191,7 @@ function makeKit({
       asset: {
         status: "AVAILABLE",
         availableToBook: true,
+        archivedAt: null,
         // `KIT_INCLUDE` selects custody as a relation list, so an unheld
         // member is an empty array rather than null.
         custody: [],

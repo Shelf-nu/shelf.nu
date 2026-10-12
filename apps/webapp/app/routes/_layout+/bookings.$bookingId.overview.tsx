@@ -73,13 +73,17 @@ import {
   updateBookingNotificationRecipients,
 } from "~/modules/booking/service.server";
 import { shapeBookingAssets } from "~/modules/booking/shape-booking-assets";
-import { buildUnavailableAssets } from "~/modules/booking/unavailable-assets";
+import {
+  buildArchivedAssets,
+  buildUnavailableAssets,
+} from "~/modules/booking/unavailable-assets";
 import {
   calculateBookingLifecycleProgress,
   calculatePartialCheckinProgress,
   calculateUnitCheckinProgress,
   stillOutOnOverdueKitSlice,
 } from "~/modules/booking/utils.server";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { assertQuickCheckoutAllowed } from "~/modules/booking-settings/explicit-checkout";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { createNotes } from "~/modules/note/service.server";
@@ -102,6 +106,7 @@ import {
   canSeeBooking,
   validateBookingOwnership,
 } from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { calculateTotalValueOfAssets } from "~/utils/bookings";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
@@ -1204,12 +1209,30 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         })
       : [];
 
+    /**
+     * Model reservations this booking's dates can no longer fill, e.g. after
+     * an admin archived a unit with "Archive anyway". Measured only while
+     * units can still be assigned; a finished booking's leftovers are history.
+     */
+    const modelShortfalls = canAssignModelUnits(booking.status)
+      ? await findModelRequestShortfallsForBooking({
+          booking: {
+            id: booking.id,
+            from: booking.from,
+            to: booking.to,
+            modelRequests: booking.modelRequests ?? [],
+          },
+          organizationId,
+        })
+      : [];
+
     return data(
       payload({
         userId,
         currentOrganization,
         header,
         booking,
+        modelShortfalls,
         modelName,
         /**
          * Whether any QUANTITY_TRACKED unit on this booking has been accounted
@@ -1254,6 +1277,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         // Names what `bookingFlags.hasUnavailableAssets` refuses over. Built
         // from rows already fetched above, so it adds no query.
         unavailableAssets: buildUnavailableAssets(bookingAssets),
+        // Names what `bookingFlags.hasArchivedAssets` refuses over, from the
+        // same rows, so it adds no query either.
+        archivedAssets: buildArchivedAssets(bookingAssets),
         totalKits: view.totalKits,
         totalValue: calculateTotalValueOfAssets({
           // Each `bookingAssets` row is built from a `BookingAsset` pivot

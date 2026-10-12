@@ -20,7 +20,10 @@ import type {
   KitFromQr,
 } from "~/routes/api+/get-scanned-item.$qrId";
 import { tw } from "~/utils/tw";
-import { createAvailabilityLabels } from "../availability-label-factory";
+import {
+  createAvailabilityLabels,
+  assetLabelPresets,
+} from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
@@ -267,6 +270,7 @@ export function AssetRow({
 
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     // Custom preset for "already in this kit"
     {
       condition: location.assetLocations.some(

@@ -57,12 +57,14 @@ import {
 } from "~/modules/booking/service.server";
 import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import {
   canSeeBooking,
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -825,6 +827,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (sum, mr) => sum + mr.outstandingQuantity,
       0
     );
+    // Reservations the booking's dates can no longer fill (e.g. a unit was
+    // archived with "Archive anyway"), so the app can warn like the web page.
+    const modelReservationShortfalls = canAssignModelUnits(booking.status)
+      ? await findModelRequestShortfallsForBooking({
+          booking: {
+            id: booking.id,
+            from: booking.from,
+            to: booking.to,
+            modelRequests: booking.modelRequests,
+          },
+          organizationId,
+        })
+      : [];
 
     // Attach the per-asset counters (computed up-front, above) to each QT
     // asset so the app's pickers can cap inputs; INDIVIDUAL rows pass through
@@ -1002,6 +1017,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequests,
         modelRequestCount,
         outstandingModelUnitCount,
+        modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
       },

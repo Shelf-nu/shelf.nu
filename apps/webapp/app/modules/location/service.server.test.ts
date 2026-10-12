@@ -51,6 +51,18 @@ describe("getLocationTotalValuation", () => {
     expect(total).toBe(0);
   });
 
+  it("leaves archived assets out of the value stored at the location", async () => {
+    queryRawMock.mockResolvedValue([{ total: 10 }]);
+
+    await getLocationTotalValuation({ locationId: "loc-123" });
+
+    // `Prisma.sql` is a template object; its joined strings are the SQL text.
+    const sql = (
+      queryRawMock.mock.calls[0][0] as { strings: string[] }
+    ).strings.join("?");
+    expect(sql).toContain('a."archivedAt" IS NULL');
+  });
+
   it("returns 0 when the raw query returns no rows", async () => {
     queryRawMock.mockResolvedValue([]);
 

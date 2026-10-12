@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { CopyIcon, PencilIcon, QrCodeIcon, Trash2Icon } from "lucide-react";
 import { Button } from "~/components/shared/button";
 import When from "~/components/when/when";
@@ -19,6 +20,8 @@ type AssetQuickActionsProps = {
   asset: Pick<AssetsFromViewItem, "id" | "title" | "mainImage"> & {
     qrId: string;
     sequentialId?: string | null;
+    /** Set on archived rows (the Archived and All views). */
+    archivedAt?: Date | string | null;
   };
 };
 
@@ -28,6 +31,22 @@ export default function AssetQuickActions({
   asset,
 }: AssetQuickActionsProps) {
   const roles = useOrganizationRoles();
+  /**
+   * Archived assets are read-only (issue #382): Edit and Duplicate are greyed
+   * with the reason, matching the asset's own Actions menu. The edit page and
+   * `duplicateAsset` refuse them too.
+   */
+  const archivedDisabled = asset.archivedAt
+    ? {
+        reason: archivedAssetBlockedReason({
+          canReinstate: userHasPermission({
+            roles,
+            entity: PermissionEntity.asset,
+            action: PermissionAction.archive,
+          }),
+        }),
+      }
+    : false;
 
   return (
     <div className={tw("flex items-center gap-2", className)} style={style}>
@@ -45,6 +64,7 @@ export default function AssetQuickActions({
           to={`/assets/${asset.id}/edit`}
           aria-label="Edit asset information"
           tooltip="Edit asset information"
+          disabled={archivedDisabled}
         >
           <PencilIcon className="size-4" />
         </Button>
@@ -86,6 +106,7 @@ export default function AssetQuickActions({
           to={`/assets/${asset.id}/overview/duplicate`}
           aria-label="Duplicate asset"
           tooltip="Duplicate asset"
+          disabled={archivedDisabled}
         >
           <CopyIcon className="size-4" />
         </Button>

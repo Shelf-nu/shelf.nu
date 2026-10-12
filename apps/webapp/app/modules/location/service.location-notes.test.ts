@@ -700,6 +700,50 @@ describe("location service activity logging", () => {
     });
   });
 
+  describe("updateLocationKits with archived kit members", () => {
+    it("moves and notes only active members, leaving archived ones where they are", async () => {
+      dbMocks.location.findUniqueOrThrow.mockResolvedValueOnce({
+        id: "loc-1",
+        organizationId: "org-1",
+        kits: [],
+      });
+      dbMocks.location.update.mockResolvedValueOnce({ id: "loc-1" });
+      dbMocks.kit.findMany.mockResolvedValue([
+        { id: "kit-1", name: "Shoot Kit", assetKits: [] },
+      ]);
+
+      await updateLocationKits({
+        locationId: "loc-1",
+        kitIds: ["kit-1"],
+        removedKitIds: [],
+        organizationId: "org-1",
+        userId: "user-1",
+        request: new Request("https://example.com"),
+      });
+
+      // The members read (for notes) and the pivot writes both skip archived.
+      expect(dbMocks.kit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            assetKits: expect.objectContaining({
+              where: { asset: { archivedAt: null } },
+            }),
+          }),
+        })
+      );
+      expect(dbMocks.assetKit.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        })
+      );
+      expect(dbMocks.assetLocation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          assetKit: { kitId: { in: ["kit-1"] }, asset: { archivedAt: null } },
+        },
+      });
+    });
+  });
+
   describe("updateLocationKits cross-organization guard", () => {
     it("rejects when a kitId does not belong to the caller's organization", async () => {
       dbMocks.kit.count.mockResolvedValueOnce(1);

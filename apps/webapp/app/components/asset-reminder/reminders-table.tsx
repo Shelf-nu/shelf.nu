@@ -3,7 +3,11 @@ import type { Prisma } from "@prisma/client";
 import { useParams } from "react-router";
 import colors from "tailwindcss/colors";
 import type { ASSET_REMINDER_INCLUDE_FIELDS } from "~/modules/asset-reminder/fields";
+import { ArchivedBadge } from "../assets/archived-badge";
 import { List } from "../list";
+import ActionsDropdown from "./actions-dropdown";
+import { getReminderStatus } from "./reminder-status";
+import type { ReminderStatus } from "./reminder-status";
 import ReminderTeamMembers from "./reminder-team-members";
 import SetOrEditReminderDialog from "./set-or-edit-reminder-dialog";
 import { ListContentWrapper } from "../list/content-wrapper";
@@ -13,7 +17,6 @@ import { Badge } from "../shared/badge";
 import { Button } from "../shared/button";
 import { DateS } from "../shared/date";
 import { Td, Th } from "../table";
-import ActionsDropdown from "./actions-dropdown";
 import When from "../when/when";
 
 type RemindersTableProps = {
@@ -26,6 +29,17 @@ export const REMINDERS_SORTING_OPTIONS = {
   createdAt: "Date Created",
   updatedAt: "Date Updated",
 } as const;
+
+/**
+ * Dot colour per status. Paused and Not sent are grey: the archived asset's
+ * reminder is waiting on a reinstate, not on time.
+ */
+const REMINDER_STATUS_COLORS: Record<ReminderStatus, string> = {
+  Pending: colors.yellow["500"],
+  "Reminder sent": colors.green["500"],
+  Paused: colors.gray["500"],
+  "Not sent": colors.gray["500"],
+};
 
 export default function RemindersTable({
   isAssetReminderPage,
@@ -119,9 +133,10 @@ function ListContent({
   }>;
   extraProps: { isAssetReminderPage: boolean };
 }) {
-  const now = new Date();
-  const status =
-    now < new Date(item.alertDateTime) ? "Pending" : "Reminder sent";
+  const status = getReminderStatus({
+    alertDateTime: item.alertDateTime,
+    assetArchivedAt: item.asset.archivedAt,
+  });
 
   return (
     <>
@@ -129,27 +144,24 @@ function ListContent({
       <Td className="max-w-62 md:max-w-96">{item.message}</Td>
       <When truthy={!extraProps.isAssetReminderPage}>
         <Td>
-          <Button
-            className="hover:underline"
-            to={`/assets/${item.asset.id}/overview`}
-            target="_blank"
-            variant={"link-gray"}
-          >
-            {item.asset.title}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              className="hover:underline"
+              to={`/assets/${item.asset.id}/overview`}
+              target="_blank"
+              variant={"link-gray"}
+            >
+              {item.asset.title}
+            </Button>
+            {item.asset.archivedAt ? <ArchivedBadge /> : null}
+          </div>
         </Td>
       </When>
       <Td>
         <DateS date={item.alertDateTime} includeTime />
       </Td>
       <Td>
-        <Badge
-          color={
-            status === "Pending" ? colors.yellow["500"] : colors.green["500"]
-          }
-        >
-          {status}
-        </Badge>
+        <Badge color={REMINDER_STATUS_COLORS[status]}>{status}</Badge>
       </Td>
       <Td>
         <ReminderTeamMembers

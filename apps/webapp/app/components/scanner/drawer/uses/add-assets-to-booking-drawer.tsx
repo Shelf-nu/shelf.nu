@@ -673,6 +673,7 @@ export function AssetRow({
 
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.unavailable(!asset.availableToBook),
     assetLabelPresets.partOfKit(
       asset.assetKits.length > 0,

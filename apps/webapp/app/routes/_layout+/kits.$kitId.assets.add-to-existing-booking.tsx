@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { CalendarCheck } from "lucide-react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
@@ -22,6 +23,7 @@ import {
 import {
   assertKitsAddableToActiveBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
   createKitBookingNote,
   getExistingBookingDetails,
   loadBookingsData,
@@ -198,11 +200,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // skipping any AssetKit already on the booking. Routing members through
     // `kitSlices` rather than the standalone `assetIds` bucket is what keeps the
     // kit recognizable in the booking overview (which groups by `assetKitId`).
-    const kitSlices = await buildKitSlicesForBooking({
-      kitIds,
-      organizationId,
-      existingAssetKitIds,
-    });
+    const [kitSlices, archivedMembersLeftOut] = await Promise.all([
+      buildKitSlicesForBooking({
+        kitIds,
+        organizationId,
+        existingAssetKitIds,
+      }),
+      // Archived members stay out of the booking; the toast below says so.
+      countArchivedKitMembers({ kitIds, organizationId }),
+    ]);
 
     // Empty slices means every membership of the selected kit(s) is already on
     // the booking — nothing new to add. Surface the same friendly message as
@@ -290,7 +296,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
     sendNotification({
       title: "Booking Updated",
-      message: "Your booking has been updated successfully",
+      message: `Your booking has been updated successfully.${
+        archivedMembersLeftOut > 0
+          ? ` ${archivedAssetsLeftOut(archivedMembersLeftOut)}`
+          : ""
+      }`,
       icon: { name: "success", variant: "success" },
       senderId: authSession.userId,
     });

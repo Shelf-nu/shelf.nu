@@ -26,6 +26,7 @@ import {
   TagUseFor,
 } from "@prisma/client";
 import { withPrismaRetry } from "@shelf/database";
+import { archivedAssetsRefusal } from "@shelf/labels";
 import { releaseCategory } from "@shelf/quantity-control";
 import { LRUCache } from "lru-cache";
 import type { LoaderFunctionArgs } from "react-router";
@@ -180,6 +181,7 @@ import {
   assertLocationBelongsToOrg,
   assertTagsBelongToOrg,
   assertTeamMemberBelongsToOrg,
+  userCanReinstateAssets,
 } from "~/utils/org-validation.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
 import {
@@ -190,6 +192,7 @@ import {
 import { resolveTeamMemberName, resolveUserDisplayName } from "~/utils/user";
 import { lockAssetsForArchiveGuard } from "./archive-lock.server";
 import { formatModelShortfallMessage } from "./archive-shortfall";
+import type { ModelReservationShortfall } from "./archive-shortfall";
 import { custodiesForRestore } from "./backup-custody";
 import {
   placementsForRestore,
@@ -243,6 +246,7 @@ import {
   getAssetModel,
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
+import { createSystemBookingNotes } from "../booking-note/service.server";
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
@@ -264,6 +268,7 @@ import {
   createTagChangeNoteIfNeeded,
   type TagSummary,
 } from "../note/service.server";
+import { USER_NAME_SELECT } from "../user/fields";
 import { getUserByID } from "../user/service.server";
 
 const label: ErrorLabel = "Assets";
@@ -1071,6 +1076,7 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   preParsedFilters,
   timeZone = "UTC",
   honorArchivedView = false,
+  archivedFilter,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1097,6 +1103,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * member without the grant, gets active assets whatever the URL says.
    */
   honorArchivedView?: boolean;
+  /**
+   * Explicit Active/Archived/All dimension, winning over `honorArchivedView`.
+   * For a request that names its own `assetIds`: the ids are the user's pick,
+   * archived rows included, whatever view the request came from.
+   */
+  archivedFilter?: ArchivedFilter;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1143,9 +1155,12 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       availableToBookOnly,
       timeZone,
       lowStockOnly,
-      // Active/Archived/All dimension — keeps the advanced (raw-SQL) index in
-      // sync with the simple index's default-hide-archived behavior.
-      honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
+      // Active/Archived/All dimension, which keeps the advanced (raw-SQL)
+      // index in sync with the simple index's default-hide-archived behavior.
+      archivedFilter ??
+        (honorArchivedView
+          ? getArchivedFilterFromParams(searchParams)
+          : "active")
     );
     const sortByValues = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } =
@@ -2078,7 +2093,11 @@ export async function updateAsset({
      * column directly (`api+/asset.refresh-main-image`, the mobile refresh)
      * and never comes through here, so every caller is a user edit.
      */
-    await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: [id],
+      organizationId,
+      actorUserId: userId,
+    });
 
     const isChangingLocation = newLocationId !== currentLocationId;
     /**
@@ -3584,6 +3603,89 @@ export async function deleteAsset({
 }
 
 /**
+ * The Activity-tab note for an archive or a reinstate, one per asset.
+ *
+ * The ASSET_ARCHIVED / ASSET_UNARCHIVED events feed reports; the note is what a
+ * person reads on the asset's Activity tab to learn who archived it and when.
+ * Written through the caller's transaction so the note commits with the state
+ * change, and is rolled back with it (e.g. by an unconfirmed model shortfall).
+ *
+ * @param tx - The archive or reinstate transaction
+ * @param args.assetIds - The assets this call actually changed
+ * @param args.actorUserId - Who did it; the note reads "System" without one
+ * @param args.verb - "archived" or "reinstated"
+ */
+async function writeArchiveStateNotes(
+  tx: {
+    note: {
+      createMany: (args: {
+        data: Prisma.NoteUncheckedCreateInput[];
+      }) => Promise<{ count: number }>;
+    };
+  },
+  {
+    assetIds,
+    actorUserId,
+    verb,
+  }: {
+    assetIds: string[];
+    actorUserId?: string;
+    verb: "archived" | "reinstated";
+  }
+): Promise<void> {
+  if (assetIds.length === 0) return;
+
+  const actor = actorUserId
+    ? await getUserByID(actorUserId, {
+        select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+      })
+    : null;
+  const actorLink = actor
+    ? wrapUserLinkForNote({ ...actor, id: actor.id })
+    : "**System**";
+
+  await tx.note.createMany({
+    data: assetIds.map((assetId) => ({
+      content: `${actorLink} ${verb} the asset.`,
+      type: "UPDATE" as const,
+      userId: actorUserId ?? null,
+      assetId,
+    })),
+  });
+}
+
+/**
+ * The draft bookings that hold any of the given assets.
+ *
+ * Archiving is allowed while an asset sits in a DRAFT booking (a draft has
+ * promised nothing), but that draft is then refused at Reserve until the asset
+ * is removed or reinstated. The archive success message names them so the
+ * archiver knows, instead of the draft's owner finding out at Reserve.
+ *
+ * @param args.assetIds - The assets just archived
+ * @param args.organizationId - The caller's workspace
+ * @returns Each draft once, by name
+ */
+async function findDraftBookingsHoldingAssets({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: string[];
+  organizationId: string;
+}): Promise<Array<{ id: string; name: string }>> {
+  if (assetIds.length === 0) return [];
+  return db.booking.findMany({
+    where: {
+      organizationId,
+      status: BookingStatus.DRAFT,
+      bookingAssets: { some: { assetId: { in: assetIds } } },
+    },
+    select: { id: true, name: true },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+/**
  * Booking states that stop an asset from being archived: the booking has
  * committed to the asset (RESERVED) or the asset is out on it (ONGOING,
  * OVERDUE). The AVAILABLE status check does not cover RESERVED, because an
@@ -3625,7 +3727,8 @@ const ARCHIVE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
  * @param args.id - The asset to archive.
  * @param args.organizationId - The caller's workspace (org-scopes the write).
  * @param args.actorUserId - Optional user the ASSET_ARCHIVED event is attributed to.
- * @returns The archived asset id and the archive timestamp.
+ * @returns The archived asset id, the archive timestamp, and the draft
+ *   bookings that still hold it (they can't be reserved until it is removed).
  * @throws {ShelfError} On a failed guard or a database error.
  */
 /**
@@ -3642,6 +3745,8 @@ const ARCHIVE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
  * @param args.organizationId - The caller's workspace
  * @param args.confirmed - The user already chose to archive anyway
  * @param args.tx - The archive transaction
+ * @returns The bookings left short once confirmed (empty when none are), so
+ *   the caller can tell their owners on the booking itself
  * @throws {ShelfError} 409 naming every booking left short, when unconfirmed
  */
 async function assertNoModelShortfallUnlessConfirmed({
@@ -3654,15 +3759,15 @@ async function assertNoModelShortfallUnlessConfirmed({
   organizationId: string;
   confirmed: boolean;
   tx: Parameters<typeof findModelReservationsShortAfterArchive>[0]["tx"];
-}): Promise<void> {
-  if (confirmed || assetModelIds.length === 0) return;
+}): Promise<ModelReservationShortfall[]> {
+  if (assetModelIds.length === 0) return [];
 
   const shortfalls = await findModelReservationsShortAfterArchive({
     assetModelIds,
     organizationId,
     tx,
   });
-  if (shortfalls.length === 0) return;
+  if (shortfalls.length === 0 || confirmed) return shortfalls;
 
   throw new ShelfError({
     cause: null,
@@ -3673,6 +3778,65 @@ async function assertNoModelShortfallUnlessConfirmed({
     status: 409,
     shouldBeCaptured: false,
   });
+}
+
+/**
+ * Tells each booking an "Archive anyway" left short, on the booking itself.
+ *
+ * The booking's owner is often not the admin who archived, and the booking
+ * page only shows the shortfall while someone looks at it. A note in the
+ * booking's activity names who archived what and what the booking now lacks.
+ * Written through the archive transaction, so it commits with the archive.
+ *
+ * @param tx - The archive transaction
+ * @param args.shortfalls - Bookings left short (from the confirmed archive)
+ * @param args.archivedTitles - Titles of the assets this call archived
+ * @param args.actorUserId - Who archived; "System" without one
+ * @param args.organizationId - The caller's workspace
+ */
+async function noteModelShortfallsOnBookings(
+  tx: Parameters<typeof createSystemBookingNotes>[1],
+  {
+    shortfalls,
+    archivedTitles,
+    actorUserId,
+    organizationId,
+  }: {
+    shortfalls: ModelReservationShortfall[];
+    archivedTitles: string[];
+    actorUserId?: string;
+    organizationId: string;
+  }
+): Promise<void> {
+  if (shortfalls.length === 0) return;
+
+  const actor = actorUserId
+    ? await getUserByID(actorUserId, {
+        select: { id: true, ...USER_NAME_SELECT } satisfies Prisma.UserSelect,
+      })
+    : null;
+  const actorLink = actor
+    ? wrapUserLinkForNote({ ...actor, id: actor.id })
+    : "**System**";
+  const what =
+    archivedTitles.length === 1
+      ? `**${stripMarkdocDelimiters(archivedTitles[0])}**`
+      : `${archivedTitles.length} assets`;
+
+  await createSystemBookingNotes(
+    {
+      notes: shortfalls.map((shortfall) => ({
+        bookingId: shortfall.bookingId,
+        content: `${actorLink} archived ${what}. This booking's reservation of **${stripMarkdocDelimiters(
+          shortfall.modelName
+        )}** is now ${shortfall.short} ${
+          shortfall.short === 1 ? "unit" : "units"
+        } short for its dates. Reduce it to what can be assigned.`,
+      })),
+      organizationId,
+    },
+    tx
+  );
 }
 
 export async function archiveAsset({
@@ -3696,6 +3860,7 @@ export async function archiveAsset({
       where: { id, organizationId },
       select: {
         id: true,
+        title: true,
         type: true,
         status: true,
         archivedAt: true,
@@ -3811,11 +3976,17 @@ export async function archiveAsset({
         });
       }
 
-      await assertNoModelShortfallUnlessConfirmed({
+      const shortfalls = await assertNoModelShortfallUnlessConfirmed({
         assetModelIds: asset.assetModelId ? [asset.assetModelId] : [],
         organizationId,
         confirmed: confirmModelShortfall,
         tx,
+      });
+      await noteModelShortfallsOnBookings(tx, {
+        shortfalls,
+        archivedTitles: [asset.title],
+        actorUserId,
+        organizationId,
       });
 
       // Activity event inside the tx for atomicity (wires the dormant action).
@@ -3830,9 +4001,20 @@ export async function archiveAsset({
         },
         tx
       );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: [id],
+        actorUserId,
+        verb: "archived",
+      });
     });
 
-    return { id, archivedAt };
+    const draftBookings = await findDraftBookingsHoldingAssets({
+      assetIds: [id],
+      organizationId,
+    });
+
+    return { id, archivedAt, draftBookings };
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -3855,8 +4037,8 @@ export async function archiveAsset({
  *
  * @param args.id - The asset to reinstate.
  * @param args.organizationId - The caller's workspace (org-scopes the write).
- * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event is attributed to.
- * @returns The reinstated asset id.
+ * @param args.actorUserId - Optional user the ASSET_UNARCHIVED event and note are attributed to.
+ * @returns The reinstated asset id and whether it is marked available to book.
  * @throws {ShelfError} If the asset is missing, not archived, or on a DB error.
  */
 /**
@@ -3892,6 +4074,9 @@ export async function unarchiveAsset({
       select: {
         id: true,
         archivedAt: true,
+        // Archiving leaves this untouched, so the reinstate message can say
+        // whether the asset is bookable again.
+        availableToBook: true,
         assetKits: { select: { kit: { select: { status: true } } } },
       },
     });
@@ -3966,9 +4151,15 @@ export async function unarchiveAsset({
         },
         tx
       );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: [id],
+        actorUserId,
+        verb: "reinstated",
+      });
     });
 
-    return { id };
+    return { id, availableToBook: asset.availableToBook };
   } catch (cause) {
     if (isLikeShelfError(cause)) {
       throw cause;
@@ -4021,7 +4212,12 @@ export async function bulkArchiveAssets({
    * {@link assertNoModelShortfallUnlessConfirmed}.
    */
   confirmModelShortfall?: boolean;
-}): Promise<{ archivedCount: number; skippedCount: number }> {
+}): Promise<{
+  archivedCount: number;
+  skippedCount: number;
+  /** Draft bookings that still hold an archived asset; see the helper. */
+  draftBookings: Array<{ id: string; name: string }>;
+}> {
   try {
     const resolvedIds = await resolveAssetIdsForBulkOperation({
       assetIds,
@@ -4062,7 +4258,11 @@ export async function bulkArchiveAssets({
     const eligibleIds = eligible.map((a) => a.id);
 
     if (eligibleIds.length === 0) {
-      return { archivedCount: 0, skippedCount: resolvedIds.length };
+      return {
+        archivedCount: 0,
+        skippedCount: resolvedIds.length,
+        draftBookings: [],
+      };
     }
 
     const archivedAt = new Date();
@@ -4102,7 +4302,7 @@ export async function bulkArchiveAssets({
 
       const written = await tx.asset.findMany({
         where: { id: { in: eligibleIds }, organizationId, archivedAt },
-        select: { id: true, assetModelId: true },
+        select: { id: true, title: true, assetModelId: true },
       });
       archivedIds = written.map((a) => a.id);
 
@@ -4110,13 +4310,19 @@ export async function bulkArchiveAssets({
 
       // The whole batch is refused (and rolled back) on an unconfirmed
       // shortfall, so the warning names every booking it would affect at once.
-      await assertNoModelShortfallUnlessConfirmed({
+      const shortfalls = await assertNoModelShortfallUnlessConfirmed({
         assetModelIds: written.flatMap((a) =>
           a.assetModelId ? [a.assetModelId] : []
         ),
         organizationId,
         confirmed: confirmModelShortfall,
         tx,
+      });
+      await noteModelShortfallsOnBookings(tx, {
+        shortfalls,
+        archivedTitles: written.map((a) => a.title),
+        actorUserId,
+        organizationId,
       });
 
       await recordEvents(
@@ -4130,11 +4336,21 @@ export async function bulkArchiveAssets({
         })),
         tx
       );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: archivedIds,
+        actorUserId,
+        verb: "archived",
+      });
     });
 
     return {
       archivedCount: archivedIds.length,
       skippedCount: resolvedIds.length - archivedIds.length,
+      draftBookings: await findDraftBookingsHoldingAssets({
+        assetIds: archivedIds,
+        organizationId,
+      }),
     };
   } catch (cause) {
     // Keep an upstream error's own message (e.g. an invalid advanced filter);
@@ -4262,6 +4478,12 @@ export async function bulkUnarchiveAssets({
         })),
         tx
       );
+
+      await writeArchiveStateNotes(tx, {
+        assetIds: unarchivedIds,
+        actorUserId,
+        verb: "reinstated",
+      });
     });
 
     return {
@@ -4344,7 +4566,11 @@ export async function replaceAssetPlacements({
     // Archived assets are frozen (issue #382). Only quantity-tracked assets
     // reach this today, and those cannot be archived, so this is a backstop
     // for the day one can.
-    await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: [assetId],
+      organizationId,
+      actorUserId: userId,
+    });
 
     const asset = await db.asset.findUniqueOrThrow({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: by-id read after assertAssetsAreNotArchived already refused archived assets
@@ -4832,7 +5058,11 @@ export async function updateAssetMainImage({
     // deleted, before `updateAsset` turned the change down. A new asset cannot
     // be archived yet, so it skips the read.
     if (!isNewAsset) {
-      await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+      await assertAssetsAreNotArchived({
+        assetIds: [assetId],
+        organizationId,
+        actorUserId: userId,
+      });
     }
 
     const fileData = await parseFileFormData({
@@ -5167,8 +5397,9 @@ async function deleteDuplicatesAfterFailure({
  * @param params.organizationId - The caller's validated organization ID; all
  *   duplicates and copied tags are constrained to this org
  * @returns The list of created duplicate assets
- * @throws {ShelfError} 400 "No units to copy" for a quantity-tracked asset with
- *   no units in stock (see `canDuplicateAsset`), 4xx from `createAsset` as
+ * @throws {ShelfError} 400 for an archived asset, 400 "No units to copy" for a
+ *   quantity-tracked asset with no units in stock (see `canDuplicateAsset`),
+ *   4xx from `createAsset` as
  *   written, and a wrapped error if duplication otherwise fails
  */
 export async function duplicateAsset({
@@ -5207,6 +5438,32 @@ export async function duplicateAsset({
     });
 
     const isPool = isQuantityTracked(asset);
+
+    // An archived asset is out of service. A copy would put an active twin of
+    // it back into circulation, so it is refused like every other change.
+    if (asset.archivedAt) {
+      throw new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: archivedAssetsRefusal({
+          titles: [asset.title],
+          fix: "reinstate",
+          canReinstate: await userCanReinstateAssets({
+            userId,
+            organizationId,
+          }),
+        }),
+        additionalData: {
+          assetId: asset.id,
+          organizationId,
+          archivedAssetIds: [asset.id],
+          archivedAssetTitles: [asset.title],
+        },
+        label,
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
 
     if (!canDuplicateAsset(asset)) {
       throw new ShelfError({
@@ -7510,7 +7767,11 @@ export async function bulkCheckOutAssets({
     });
 
     // Archived assets are frozen (issue #382): can't be assigned custody.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     /**
      * In order to make notes for the assets we have to make this query to get info about assets
@@ -7621,7 +7882,7 @@ export async function bulkCheckOutAssets({
       // archive paths take, so the two serialize (issue #382).
       await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: resolvedIds, organizationId },
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
         tx
       );
       // why: hard cross-org guard inside the tx. Mirrors the org-scoped
@@ -8054,7 +8315,11 @@ export async function bulkUpdateAssetLocation({
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     /** We have to create notes for all the assets so we have make this query */
     const [assets, user] = await Promise.all([
@@ -8176,7 +8441,7 @@ export async function bulkUpdateAssetLocation({
       // archive paths take, so the two serialize (issue #382).
       await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: resolvedIds, organizationId },
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
         tx
       );
       if (assetsToUpdate.length > 0) {
@@ -8387,7 +8652,11 @@ export async function bulkUpdateAssetCategory({
     }
 
     // Archived assets are frozen (issue #382): can't change their category.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Fetch before-state so we can emit per-asset events and notes only for
     // assets whose category actually changes.
@@ -8441,7 +8710,7 @@ export async function bulkUpdateAssetCategory({
       // archive paths take, so the two serialize (issue #382).
       await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: resolvedIds, organizationId },
+        { assetIds: resolvedIds, organizationId, actorUserId: userId },
         tx
       );
       await tx.asset.updateMany({
@@ -8588,7 +8857,11 @@ export async function bulkUpdateAssetModel({
     });
 
     // Archived assets are frozen (issue #382): can't be edited in bulk either.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     /** An empty `assetModelId` is the "remove from asset model" request. */
     const newAssetModelId = assetModelId || null;
@@ -8706,7 +8979,7 @@ export async function bulkUpdateAssetModel({
           // archive paths take, so the two serialize (issue #382).
           await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
           await assertAssetsAreNotArchived(
-            { assetIds: resolvedIds, organizationId },
+            { assetIds: resolvedIds, organizationId, actorUserId: userId },
             tx
           );
           /**
@@ -8891,7 +9164,11 @@ export async function bulkAssignAssetTags({
     }
 
     // Archived assets are frozen (issue #382): can't add/remove their tags.
-    await assertAssetsAreNotArchived({ assetIds: resolvedIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: resolvedIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Validate that every tag id belongs to this organization before
     // wiring it into the `connect`/`disconnect` payload. Prisma's nested
@@ -8953,7 +9230,7 @@ export async function bulkAssignAssetTags({
         // archive paths take, so the two serialize (issue #382).
         await lockAssetsForArchiveGuard(tx, resolvedIds, organizationId);
         await assertAssetsAreNotArchived(
-          { assetIds: resolvedIds, organizationId },
+          { assetIds: resolvedIds, organizationId, actorUserId: userId },
           tx
         );
         const results = await Promise.all(
@@ -9118,7 +9395,11 @@ export async function relinkAssetQrCode({
   // every relink goes through (the asset page, the QR "link" page and the
   // companion), rather than on each route. Org-scoped, so an asset that is
   // not the caller's passes through to the 404 below.
-  await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+  await assertAssetsAreNotArchived({
+    assetIds: [assetId],
+    organizationId,
+    actorUserId: userId,
+  });
 
   const [qr, user, asset] = await Promise.all([
     getQr({ id: qrId }),

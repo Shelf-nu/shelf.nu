@@ -11,10 +11,12 @@
  */
 import type PgBoss from "pg-boss";
 import { db } from "~/database/db.server";
+import { sendEmail } from "~/emails/mail.server";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
 import type { AssetsSchedulerData } from "./scheduler.server";
 import { regierAssetWorkers } from "./worker.server";
+import { createNote } from "../note/service.server";
 
 // @vitest-environment node
 
@@ -61,6 +63,7 @@ vi.mock("../note/service.server", () => ({
 // why: spying on Logger to verify logging behavior without touching Sentry/pino
 vi.mock("~/utils/logger", () => ({
   Logger: {
+    info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
   },
@@ -131,6 +134,45 @@ describe("regierAssetWorkers", () => {
 
     expect(Logger.warn).toHaveBeenCalled();
     expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("sends nothing and writes no note when the reminder's asset is archived", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(createNote).not.toHaveBeenCalled();
+    expect(Logger.error).not.toHaveBeenCalled();
+  });
+
+  it("emails and notes as usual when the reminder's asset is active", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [{ user: { email: "a@example.com", firstName: "A" } }],
+      asset: { id: "asset-1", title: "Camera", archivedAt: null },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await expect(workerHandler(buildJob())).resolves.toBeUndefined();
+
+    expect(sendEmail).toHaveBeenCalledOnce();
+    expect(createNote).toHaveBeenCalledOnce();
   });
 
   it("rethrows when the handler fails, so pg-boss retries the job", async () => {

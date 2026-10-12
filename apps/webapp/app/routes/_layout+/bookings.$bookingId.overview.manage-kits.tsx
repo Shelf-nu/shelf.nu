@@ -5,6 +5,10 @@ import {
   KitStatus,
   type Prisma,
 } from "@prisma/client";
+import {
+  archivedAssetsLeftOut,
+  kitsWithoutActiveAssetsRefusal,
+} from "@shelf/labels";
 import { useAtomValue, useSetAtom } from "jotai";
 import type {
   LinksFunction,
@@ -79,6 +83,7 @@ import { isKitPartiallyCheckedIn } from "~/utils/booking-assets";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint } from "~/utils/client-hints";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -496,6 +501,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
                 type: true,
                 unitOfMeasure: true,
                 status: true,
+                // Archived members are left out of the booking (issue #382),
+                // like every other kit-add path.
+                archivedAt: true,
               },
             },
           },
@@ -515,6 +523,43 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         .filter((v): v is string => v != null)
     );
 
+    /**
+     * Kits joining the booking now (none of their memberships on it yet). One
+     * with no active member would add nothing, so it is refused by name; the
+     * archived members of the rest are left out and counted for the toast.
+     */
+    const kitsJoining = selectedKits.filter(
+      (kit) => !kit.assetKits.some((ak) => existingAssetKitIds.has(ak.id))
+    );
+    const kitsWithoutActiveAssets = kitsJoining.filter(
+      (kit) => !kit.assetKits.some((ak) => !ak.asset.archivedAt)
+    );
+    if (kitsWithoutActiveAssets.length > 0) {
+      throw new ShelfError({
+        cause: null,
+        title: "Kit has no active assets",
+        message: kitsWithoutActiveAssetsRefusal({
+          kits: kitsWithoutActiveAssets.map((kit) => ({
+            name: kit.name,
+            hasArchivedAssets: kit.assetKits.length > 0,
+          })),
+          action: "booking",
+        }),
+        additionalData: {
+          bookingId,
+          kitIdsWithoutActiveAssets: kitsWithoutActiveAssets.map((k) => k.id),
+        },
+        label: "Booking",
+        status: 400,
+        shouldBeCaptured: false,
+      });
+    }
+    const archivedMembersLeftOut = kitsJoining.reduce(
+      (count, kit) =>
+        count + kit.assetKits.filter((ak) => ak.asset.archivedAt).length,
+      0
+    );
+
     // Build the kit-driven slice specs — one element per `AssetKit`
     // membership we'd want to insert. Skip slices whose AssetKit is
     // already represented in the booking — the user already added that
@@ -530,6 +575,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     for (const kit of selectedKits) {
       for (const ak of kit.assetKits) {
         if (existingAssetKitIds.has(ak.id)) continue; // kit-slice already present
+        if (ak.asset.archivedAt) continue; // archived members stay out
         kitSlices.push({
           assetId: ak.asset.id,
           assetKitId: ak.id,
@@ -547,7 +593,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     // represented). Kits whose AssetKits are all already present in the
     // booking are no-ops here.
     const newlyAddedKits = selectedKits.filter((kit) =>
-      kit.assetKits.some((ak) => !existingAssetKitIds.has(ak.id))
+      kit.assetKits.some(
+        // An archived member is never added, so it does not make a kit new.
+        (ak) => !ak.asset.archivedAt && !existingAssetKitIds.has(ak.id)
+      )
     );
 
     // Get partial check-in details to determine actual availability using context-aware status
@@ -741,6 +790,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * client-supplied form value, so route it through `safeRedirect` to block
      * open-redirects to another origin — falling back to the booking page.
      */
+    if (archivedMembersLeftOut > 0) {
+      sendNotification({
+        title: "Kits added",
+        message: archivedAssetsLeftOut(archivedMembersLeftOut),
+        icon: { name: "success", variant: "success" },
+        senderId: userId,
+      });
+    }
+
     if (redirectTo) {
       return redirect(safeRedirect(redirectTo, `/bookings/${bookingId}`));
     }

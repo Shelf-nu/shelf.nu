@@ -185,6 +185,30 @@ export function buildAssignCustodyBlockers({
     )
     .map((asset) => asset.id);
 
+  /**
+   * Archived assets are read-only (issue #382). They read AVAILABLE, so no
+   * status blocker catches them, and the server refuses the whole batch over
+   * one of them.
+   */
+  const archivedAssets = assets
+    .filter((asset) => !!asset && !!asset.archivedAt)
+    .map((asset) => asset.id);
+
+  /**
+   * Kits whose members are all archived: kit custody leaves archived members
+   * out, so there is nothing to hand over and the server refuses the kit.
+   */
+  const qrIdsOfKitsOnlyArchived = qrIdsForKitIds(
+    items,
+    kits
+      .filter(
+        (kit) =>
+          kit.assetKits.length > 0 &&
+          kit.assetKits.every((ak) => !!ak.asset.archivedAt)
+      )
+      .map((kit) => kit.id)
+  );
+
   const qrIdsOfKitsInCustody = qrIdsForKitIds(
     items,
     kits
@@ -310,6 +334,32 @@ export function buildAssignCustodyBlockers({
       ),
       description: "Note: Checked out kits cannot be assigned custody.",
       onResolve: () => removeItemsFromList(qrIdsOfKitsCheckedOut),
+    },
+    {
+      id: "assets-archived",
+      condition: archivedAssets.length > 0,
+      count: archivedAssets.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
+          archived.
+        </>
+      ),
+      description: "Archived assets can't be assigned custody.",
+      onResolve: () => removeAssetsFromList(archivedAssets),
+    },
+    {
+      id: "kits-only-archived",
+      condition: qrIdsOfKitsOnlyArchived.length > 0,
+      count: qrIdsOfKitsOnlyArchived.length,
+      message: (count: number) => (
+        <>
+          <strong>{`${count} kit${count > 1 ? "s hold" : " holds"}`}</strong>{" "}
+          only archived assets.
+        </>
+      ),
+      description: "There is nothing in them to put into custody.",
+      onResolve: () => removeItemsFromList(qrIdsOfKitsOnlyArchived),
     },
     invalidCodesBlocker(errorQrIds, removeItemsFromList),
   ];

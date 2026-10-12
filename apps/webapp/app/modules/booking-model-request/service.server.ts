@@ -1165,6 +1165,87 @@ export async function findModelReservationsShortAfterArchive({
   return shortfalls;
 }
 
+/** One model reservation on a booking that the free pool can no longer fill. */
+export type BookingModelShortfall = {
+  assetModelId: string;
+  modelName: string;
+  /** Units of the reservation still unassigned. */
+  outstanding: number;
+  /** Units the booking can still get for its dates, after its named units. */
+  available: number;
+  /** Units the reservation is promised beyond what the pool holds. */
+  short: number;
+};
+
+/**
+ * The booking's own model reservations that its dates can no longer fill.
+ *
+ * A reservation is measured when the booking leaves DRAFT. The pool can shrink
+ * after that, for example when an admin archives a unit with "Archive anyway"
+ * (issue #382), and nothing on the booking said so until check-out was
+ * refused. This measures every outstanding reservation now, the same way
+ * {@link findModelReservationsShortAfterArchive} does, so the booking page can
+ * warn its owner.
+ *
+ * Read-only and lock-free, for a page loader: the numbers are a warning, and
+ * the reserve and check-out guards still measure under their own locks.
+ *
+ * @param args.booking - The booking, with its dates and outstanding reservations
+ * @param args.organizationId - The caller's workspace
+ * @returns One entry per reservation left short, empty when all fit
+ */
+export async function findModelRequestShortfallsForBooking({
+  booking,
+  organizationId,
+}: {
+  booking: {
+    id: string;
+    from: Date | null;
+    to: Date | null;
+    modelRequests: Array<{
+      assetModelId: string;
+      quantity: number;
+      fulfilledQuantity: number;
+      fulfilledAt: Date | string | null;
+      assetModel: { name: string };
+    }>;
+  };
+  organizationId: string;
+}): Promise<BookingModelShortfall[]> {
+  const shortfalls: BookingModelShortfall[] = [];
+
+  for (const request of booking.modelRequests) {
+    if (request.fulfilledAt) continue;
+    const outstanding = request.quantity - request.fulfilledQuantity;
+    if (outstanding <= 0) continue;
+
+    const fit = await measureModelPoolFit({
+      bookingId: booking.id,
+      assetModelId: request.assetModelId,
+      organizationId,
+      from: booking.from,
+      to: booking.to,
+      outstanding,
+      tx: db,
+    });
+    if (fit.fits) continue;
+
+    const available = Math.max(
+      0,
+      fit.availability.available - fit.namedNotInCustody
+    );
+    shortfalls.push({
+      assetModelId: request.assetModelId,
+      modelName: request.assetModel.name,
+      outstanding,
+      available,
+      short: outstanding - available,
+    });
+  }
+
+  return shortfalls;
+}
+
 /**
  * Locks every `AssetModel` a booking still owes units for.
  *

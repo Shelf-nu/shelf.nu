@@ -222,6 +222,68 @@ export declare function kitMembersCustodyRefusal(
 export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
 /**
+ * The reason an action on an archived asset is disabled. A reader who cannot
+ * reinstate (no asset `archive` permission) is told to ask an admin.
+ *
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ * @param options.action - what the disabled control does; defaults to "change"
+ */
+export declare function archivedAssetBlockedReason(options: {
+  canReinstate: boolean;
+  action?: "change" | "book";
+}): string;
+
+/** How an archived-assets refusal tells the reader to move on. */
+export type ArchivedAssetsFix =
+  | "reinstate"
+  | "remove-from-list"
+  | "remove-from-booking";
+
+/**
+ * The refusal when a request touches archived assets: names the first few
+ * titles, then the way out for this request and this reader.
+ *
+ * @param options.titles - titles of the archived assets, at least one
+ * @param options.fix - "reinstate" for a change to the asset itself,
+ *   "remove-from-list" for a batch the reader built, "remove-from-booking" for
+ *   a booking that holds them
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ */
+export declare function archivedAssetsRefusal(options: {
+  titles: string[];
+  fix: ArchivedAssetsFix;
+  canReinstate: boolean;
+}): string;
+
+/**
+ * "1 archived asset was left out." / "2 archived assets were left out."
+ *
+ * @param count - archived assets left out, at least one
+ */
+export declare function archivedAssetsLeftOut(count: number): string;
+
+/**
+ * The refusal when kits with no active asset (only archived ones, or none) are
+ * put into custody or booked.
+ *
+ * @param options.kits - at least one; `hasArchivedAssets` is false for an empty kit
+ * @param options.action - what was refused
+ */
+export declare function kitsWithoutActiveAssetsRefusal(options: {
+  kits: { name: string; hasArchivedAssets: boolean }[];
+  action: "custody" | "booking";
+}): string;
+
+/**
+ * The reason a kit's Book or custody action is disabled because the kit holds
+ * no active asset.
+ */
+export declare function kitWithoutActiveAssetsReason(options: {
+  hasArchivedAssets: boolean;
+  action: "custody" | "booking";
+}): string;
+
+/**
  * The semantic weight a status badge carries, independent of any palette. Each
  * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
  * the companion's light/dark theme), so the VALUES stay app-owned while the

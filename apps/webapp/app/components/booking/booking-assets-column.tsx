@@ -75,6 +75,7 @@ export function BookingAssetsColumn() {
     partialCheckinProgress,
     partialCheckoutDetails,
     checkedOutAssetIds,
+    modelShortfalls,
   } = useLoaderData<BookingPageLoaderData>();
   // const [searchParams] = useSearchParams();
 
@@ -234,6 +235,7 @@ export function BookingAssetsColumn() {
           <BookingModelReservationsSection
             modelRequests={booking.modelRequests}
             canAssign={canAssignModelUnits(booking.status)}
+            shortfalls={modelShortfalls}
             className="-mx-4 mb-2 md:mx-0"
             /* Gives the outstanding work the same weight as "Scan to add" on
                the assets list below. Without it, assigning units meant either

@@ -45,6 +45,7 @@ import type {
 import {
   BOOKING_EMPTY_RESERVED_MESSAGE,
   BOOKING_RESERVE_BLOCKED_LABELS,
+  kitsWithoutActiveAssetsRefusal,
 } from "@shelf/labels";
 import { isBefore } from "date-fns";
 import { DateTime } from "luxon";
@@ -79,6 +80,7 @@ import {
 import { stripMarkdocDelimiters } from "~/modules/audit/note-content.server";
 import {
   assertKitsCheckoutable,
+  assertKitsHaveActiveAssets,
   getKitIdsHeldByOtherLiveBookings,
 } from "~/modules/booking/kit-holds.server";
 import {
@@ -1247,6 +1249,7 @@ export async function createBooking({
           {
             assetIds: archiveGuardAssetIds,
             organizationId: booking.organizationId,
+            actorUserId: booking.creatorId,
           },
           tx
         );
@@ -2228,6 +2231,8 @@ export async function reserveBooking({
         ...new Set(bookingFound.bookingAssets.map((ba) => ba.asset.id)),
       ],
       organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
     });
 
     /** Server-side conflict validation to prevent race conditions */
@@ -3586,6 +3591,8 @@ export async function checkoutBooking({
     await assertAssetsAreNotArchived({
       assetIds: bookingFoundAssetIds,
       organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
     });
 
     /** Server-side conflict validation to prevent race conditions */
@@ -9365,6 +9372,8 @@ export async function partialCheckoutBooking({
     await assertAssetsAreNotArchived({
       assetIds: effectiveAssetIds,
       organizationId,
+      fix: "remove-from-booking",
+      actorUserId: userId,
     });
 
     // QUANTITY_TRACKED dispositions must carry a positive `quantity`. INDIVIDUAL
@@ -11134,7 +11143,8 @@ export type ScannedKitSliceSpec = Omit<KitSliceSpec, "quantity"> & {
  *   re-adding a kit that's already (partly) present is idempotent per slice.
  * @returns One slice spec per newly-added `AssetKit` membership of an active
  *   (not archived) asset
- * @throws {ShelfError} If the database lookup fails
+ * @throws {ShelfError} 400 naming any kit with no active asset, or if the
+ *   database lookup fails
  */
 export async function buildKitSlicesForBooking({
   kitIds,
@@ -11147,6 +11157,14 @@ export async function buildKitSlicesForBooking({
 }): Promise<KitSliceSpec[]> {
   // Nothing to resolve — short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
+
+  // A kit whose members are all archived (or that has none) would join the
+  // booking as nothing at all. Refused by name instead.
+  await assertKitsHaveActiveAssets(db, {
+    kitIds,
+    organizationId,
+    action: "booking",
+  });
 
   try {
     const assetKits = await db.assetKit.findMany({
@@ -11182,6 +11200,33 @@ export async function buildKitSlicesForBooking({
       label,
     });
   }
+}
+
+/**
+ * How many archived members the given kits hold. {@link buildKitSlicesForBooking}
+ * leaves them out of the booking, and the kit-booking routes say so in their
+ * success message rather than let the booked count quietly differ from the
+ * kit's size.
+ *
+ * @param args.kitIds - Kits being booked
+ * @param args.organizationId - The caller's workspace
+ * @returns The number of archived members across those kits
+ */
+export async function countArchivedKitMembers({
+  kitIds,
+  organizationId,
+}: {
+  kitIds: string[];
+  organizationId: string;
+}): Promise<number> {
+  if (kitIds.length === 0) return 0;
+  return db.assetKit.count({
+    where: {
+      kitId: { in: kitIds },
+      organizationId,
+      asset: { archivedAt: { not: null } },
+    },
+  });
 }
 
 export async function updateBookingAssets({
@@ -11305,7 +11350,7 @@ export async function updateBookingAssets({
        */
       await lockAssetsForArchiveGuard(tx, uniqueAssetIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: uniqueAssetIds, organizationId },
+        { assetIds: uniqueAssetIds, organizationId, actorUserId: userId },
         tx
       );
 
@@ -15295,6 +15340,7 @@ export async function getBookingFlags(
       type: true,
       status: true,
       availableToBook: true,
+      archivedAt: true,
       assetKits: { select: { kitId: true } },
       bookingAssets: {
         where: {
@@ -15348,6 +15394,11 @@ export async function getBookingFlags(
   const hasAssets = assets.length > 0;
 
   const hasUnavailableAssets = assets.some((asset) => !asset.availableToBook);
+
+  // An archived asset can sit in a draft (archiving refuses only reserved and
+  // checked-out bookings), and reserve and check-out refuse it. Named on the
+  // page by `buildArchivedAssets`, which reads the same field.
+  const hasArchivedAssets = assets.some((asset) => asset.archivedAt !== null);
 
   /**
    * QUANTITY_TRACKED assets are exempt from the `CHECKED_OUT` /
@@ -15437,6 +15488,7 @@ export async function getBookingFlags(
   return {
     hasAssets,
     hasUnavailableAssets,
+    hasArchivedAssets,
     hasCheckedOutAssets,
     hasAlreadyBookedAssets,
     hasAssetsInCustody,
@@ -16475,6 +16527,8 @@ async function createNotesForScannedAssetsAndKits({
  *   that gained a new `BookingAsset` row on this call) and `claimedAssetIds`
  *   (assets whose pre-existing row answered a reservation without a new row).
  *   A scan that touched nothing new returns both arrays empty.
+ *   `archivedKitMembersLeftOut` counts the archived members of scanned kits
+ *   that were left out, for the caller's success message.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function addScannedAssetsToBookingWithinTx(
@@ -16591,30 +16645,100 @@ async function addScannedAssetsToBookingWithinTx(
       select: { from: true, to: true },
     });
 
-  // Archived assets can't be added to a booking, even via scan (issue #382).
-  // Pickers hide them, but the scanner takes raw ids so the server enforces it.
+  /**
+   * Archived assets (issue #382). A directly scanned one is refused by name, so
+   * the operator can take it off the list. A scanned kit is booked with its
+   * active members, as every other kit-add path does: its archived members are
+   * left out and counted for the caller's message. A kit with no active member
+   * left has nothing to book and is refused.
+   */
+  let archivedKitMembersLeftOut = 0;
   if (allScannedAssetIds.length > 0) {
     // Row-lock first, the same lock the archive services and the other booking
     // writes take: a plain read here could pass, then an archive commit before
     // the BookingAsset rows below are written. Taken after the booking lock
     // above, so the order matches `updateBookingAssets` (booking, then assets).
     await lockAssetsForArchiveGuard(tx, allScannedAssetIds, organizationId);
-    const archivedScannedCount = await tx.asset.count({
-      where: {
-        id: { in: allScannedAssetIds },
+    await assertAssetsAreNotArchived(
+      {
+        assetIds,
         organizationId,
-        archivedAt: { not: null },
+        fix: "remove-from-list",
+        actorUserId: userId,
       },
-    });
-    if (archivedScannedCount > 0) {
-      throw new ShelfError({
-        cause: null,
-        message:
-          "Some scanned assets are archived and can't be added to a booking. Reinstate them first.",
-        label: "Booking",
-        status: 400,
-        shouldBeCaptured: false,
-      });
+      tx
+    );
+
+    // Counted first, as the archived guard does: the common scan has no
+    // archived member, and the ids are read only when there is one.
+    const kitMemberIds = [...new Set(kitSlices.map((slice) => slice.assetId))];
+    const archivedKitMemberCount =
+      kitMemberIds.length > 0
+        ? await tx.asset.count({
+            where: {
+              id: { in: kitMemberIds },
+              organizationId,
+              archivedAt: { not: null },
+            },
+          })
+        : 0;
+    const archivedKitMemberIds = new Set<string>(
+      archivedKitMemberCount > 0
+        ? (
+            await tx.asset.findMany({
+              where: {
+                id: { in: kitMemberIds },
+                organizationId,
+                archivedAt: { not: null },
+              },
+              select: { id: true },
+            })
+          ).map((asset: { id: string }) => asset.id)
+        : []
+    );
+
+    if (archivedKitMemberIds.size > 0) {
+      const activeKitSlices = kitSlices.filter(
+        (slice) => !archivedKitMemberIds.has(slice.assetId)
+      );
+      const kitIdsStillBooked = new Set(
+        activeKitSlices.map((slice) => slice.kitId)
+      );
+      const emptiedKitIds = [
+        ...new Set(
+          kitSlices
+            .filter((slice) => archivedKitMemberIds.has(slice.assetId))
+            .map((slice) => slice.kitId)
+            .filter((kitId) => kitId && !kitIdsStillBooked.has(kitId))
+        ),
+      ];
+      if (emptiedKitIds.length > 0) {
+        const emptiedKits: { id: string; name: string }[] =
+          await tx.kit.findMany({
+            where: { id: { in: emptiedKitIds }, organizationId },
+            select: { id: true, name: true },
+          });
+        throw new ShelfError({
+          cause: null,
+          title: "Kit has no active assets",
+          message: kitsWithoutActiveAssetsRefusal({
+            kits: emptiedKits.map((kit) => ({
+              name: kit.name,
+              hasArchivedAssets: true,
+            })),
+            action: "booking",
+          }),
+          additionalData: {
+            bookingId,
+            kitIdsWithoutActiveAssets: emptiedKits.map((kit) => kit.id),
+          },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
+      archivedKitMembersLeftOut = archivedKitMemberIds.size;
+      kitSlices = activeKitSlices;
     }
   }
 
@@ -17224,7 +17348,7 @@ async function addScannedAssetsToBookingWithinTx(
   // rescan. `claimedAssetIds` travels out for the same reason a caller that
   // wants to report what a scan actually did (as opposed to what it asked
   // for) needs both sets, not just one.
-  return { booking, addedAssetIds, claimedAssetIds };
+  return { booking, addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut };
 }
 
 /**
@@ -17241,8 +17365,8 @@ async function addScannedAssetsToBookingWithinTx(
  *   alongside `addedAssetIds` and `claimedAssetIds`, widened from the plain
  *   booking this function used to return so a caller can tell a genuine add
  *   apart from a rescan that only answered a reservation, or from a scan that
- *   changed nothing at all. Existing callers that only `await` the call and
- *   never read its result are unaffected by the shape change.
+ *   changed nothing at all, plus `archivedKitMembersLeftOut` (archived
+ *   members of scanned kits that were left out).
  */
 export async function addScannedAssetsToBooking({
   assetIds,
@@ -17300,6 +17424,7 @@ export async function addScannedAssetsToBooking({
       booking: updatedBooking,
       addedAssetIds,
       claimedAssetIds,
+      archivedKitMembersLeftOut,
     } = await db.$transaction(async (tx) =>
       addScannedAssetsToBookingWithinTx(tx, {
         assetIds,
@@ -17328,7 +17453,12 @@ export async function addScannedAssetsToBooking({
       userId,
     });
 
-    return { booking: updatedBooking, addedAssetIds, claimedAssetIds };
+    return {
+      booking: updatedBooking,
+      addedAssetIds,
+      claimedAssetIds,
+      archivedKitMembersLeftOut,
+    };
   } catch (cause) {
     const message =
       cause instanceof ShelfError
@@ -17449,7 +17579,9 @@ export async function getExistingBookingDetails(
  */
 export async function getAvailableAssetsIdsForBooking(
   assetIds: Asset["id"][],
-  organizationId: string
+  organizationId: string,
+  /** The acting user, so an archived refusal is worded for their role. */
+  actorUserId?: string
 ): Promise<string[]> {
   try {
     // Archived assets are refused, not quietly dropped (issue #382): an asset
@@ -17457,7 +17589,7 @@ export async function getAvailableAssetsIdsForBooking(
     // selection while the rest booked, with nothing telling the user. Every
     // other unbookable case in this flow rejects the same way. Org-scoped, so
     // a foreign id still reads as missing rather than archived.
-    await assertAssetsAreNotArchived({ assetIds, organizationId });
+    await assertAssetsAreNotArchived({ assetIds, organizationId, actorUserId });
 
     const selectedAssets = await db.asset.findMany({
       // SECURITY (cross-org IDOR): scope by organizationId so an attacker
@@ -17528,7 +17660,7 @@ export async function processBooking(
 ) {
   try {
     const [finalAssetIds, bookingInfo] = await Promise.all([
-      getAvailableAssetsIdsForBooking(assetIds, organizationId),
+      getAvailableAssetsIdsForBooking(assetIds, organizationId, auth.userId),
       getExistingBookingDetails(bookingId, organizationId),
     ]);
 

@@ -34,7 +34,10 @@ import type {
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
 import { tw } from "~/utils/tw";
-import { createAvailabilityLabels } from "../availability-label-factory";
+import {
+  createAvailabilityLabels,
+  assetLabelPresets,
+} from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import {
@@ -277,6 +280,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // Use predefined presets to create label configurations for asset rows
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     ...(primaryLocation
       ? [
           {

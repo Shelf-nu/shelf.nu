@@ -30,6 +30,7 @@ const ASSET_REMINDER_INCLUDES_FOR_EMAIL = {
       title: true,
       mainImage: true,
       mainImageExpiration: true,
+      archivedAt: true,
     },
   },
   organization: { select: { name: true, customEmailFooter: true } },
@@ -62,6 +63,18 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
           label: "Asset Scheduler",
           shouldBeCaptured: false,
         })
+      );
+      return;
+    }
+
+    /**
+     * An archived asset is out of service (issue #382): its reminders stay
+     * quiet, with no email and no "System has sent" note. The reminder row is
+     * kept, and fires as usual if the asset is reinstated before its time.
+     */
+    if (reminder.asset.archivedAt) {
+      Logger.info(
+        `Asset reminder ${reminder.id} skipped: asset ${reminder.assetId} is archived.`
       );
       return;
     }
