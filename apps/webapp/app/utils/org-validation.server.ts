@@ -31,8 +31,15 @@ import type {
   User,
 } from "@prisma/client";
 import { TagUseFor } from "@prisma/client";
+import type { ArchivedAssetsFix } from "@shelf/labels";
+import { archivedAssetsRefusal } from "@shelf/labels";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { hasPermission } from "~/utils/permissions/permission.validator.server";
 
 const label = "Request validation";
 
@@ -45,9 +52,13 @@ const label = "Request validation";
 export type OrgValidationTxClient = {
   asset: {
     findMany: (args: {
-      where: { id: { in: string[] }; organizationId: string };
-      select: { id: true };
-    }) => Promise<{ id: string }[]>;
+      where: {
+        id: { in: string[] };
+        organizationId: string;
+        archivedAt?: { not: null };
+      };
+      select: { id: true; title?: true };
+    }) => Promise<{ id: string; title?: string }[]>;
     count: (args: {
       where: {
         id: { in: string[] };
@@ -175,24 +186,31 @@ export async function assertAssetsBelongToOrg(
 }
 
 /**
- * The refusal for a change to archived assets, as {@link assertAssetsAreNotArchived}
- * words it. Exported so a caller that answers the same refusal earlier (the
- * mobile routes, which also name the archived ids) uses the same words.
- */
-export const ARCHIVED_ASSETS_MESSAGE =
-  "Archived assets are read-only. Reinstate them before making changes.";
-
-/**
  * Asserts that none of the given assets are archived.
  *
  * Archived assets are frozen: the only allowed mutations are reinstate and
  * permanent delete (issue #382). Call this to server-enforce the UI's disabled
  * state on every OTHER asset mutation (edit, location, tags, category, kit-add,
- * availability, …), so a crafted request can't change an archived asset.
- * Dedupes the input; a no-op for an empty list.
+ * availability, custody, bookings), so a crafted request can't change an
+ * archived asset. Dedupes the input; a no-op for an empty list.
+ *
+ * The refusal names the archived assets (`archivedAssetsRefusal` in
+ * `@shelf/labels`) and carries them in `additionalData` as
+ * `archivedAssetIds` / `archivedAssetTitles` (same order, the input's order).
+ * The way out it offers depends on `fix` and on whether the reader may
+ * reinstate: pass `canReinstate` when the caller knows, or `actorUserId` to
+ * look it up. With neither, the wording tells the reader to ask an admin, which
+ * is true for every role.
  *
  * @param params.assetIds - Asset IDs sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
+ * @param params.fix - How the reader moves on: "reinstate" for a change to the
+ *   asset itself, "remove-from-list" for a batch they built,
+ *   "remove-from-booking" for a booking that holds the assets. Defaults to
+ *   "remove-from-list" for several assets and "reinstate" for one.
+ * @param params.canReinstate - Whether the reader holds `asset: archive`
+ * @param params.actorUserId - The acting user, read only on refusal to decide
+ *   `canReinstate` when the caller did not pass it
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
  * @throws {ShelfError} 400 if any of the assets is archived
  */
@@ -200,31 +218,94 @@ export async function assertAssetsAreNotArchived(
   {
     assetIds,
     organizationId,
-  }: { assetIds: Asset["id"][]; organizationId: string },
+    fix,
+    canReinstate,
+    actorUserId,
+  }: {
+    assetIds: Asset["id"][];
+    organizationId: string;
+    fix?: ArchivedAssetsFix;
+    canReinstate?: boolean;
+    actorUserId?: string;
+  },
   tx?: OrgValidationTxClient
 ): Promise<void> {
   if (assetIds.length === 0) return;
 
   const client = tx ?? db;
+  const uniqueIds = [...new Set(assetIds)];
 
+  // The count is the common path (nothing archived); titles are read only
+  // when there is something to refuse.
   const archivedCount = await client.asset.count({
     where: {
-      id: { in: [...new Set(assetIds)] },
+      id: { in: uniqueIds },
       organizationId,
       archivedAt: { not: null },
     },
   });
 
-  if (archivedCount > 0) {
-    throw new ShelfError({
-      cause: null,
-      title: "Asset is archived",
-      message: ARCHIVED_ASSETS_MESSAGE,
-      label,
-      status: 400,
-      shouldBeCaptured: false,
-      additionalData: { organizationId },
+  if (archivedCount === 0) return;
+
+  const archivedRows = await client.asset.findMany({
+    where: { id: { in: uniqueIds }, organizationId, archivedAt: { not: null } },
+    select: { id: true, title: true },
+  });
+  const titleById = new Map(
+    archivedRows.map((row) => [row.id, row.title ?? ""])
+  );
+  // Input order, so the first assets named are the ones the reader listed first.
+  const archivedAssetIds = uniqueIds.filter((id) => titleById.has(id));
+  const archivedAssetTitles = archivedAssetIds.map(
+    (id) => titleById.get(id) ?? ""
+  );
+
+  const readerCanReinstate =
+    canReinstate ??
+    (actorUserId
+      ? await userCanReinstateAssets({ userId: actorUserId, organizationId })
+      : false);
+
+  throw new ShelfError({
+    cause: null,
+    title: "Asset is archived",
+    message: archivedAssetsRefusal({
+      titles: archivedAssetTitles,
+      fix: fix ?? (uniqueIds.length > 1 ? "remove-from-list" : "reinstate"),
+      canReinstate: readerCanReinstate,
+    }),
+    label,
+    status: 400,
+    shouldBeCaptured: false,
+    additionalData: { organizationId, archivedAssetIds, archivedAssetTitles },
+  });
+}
+
+/**
+ * Whether a member may reinstate archived assets (`asset: archive`). Used only
+ * to word a refusal, so a failed lookup answers `false`: the reader is then
+ * told to ask an admin, which is never a dead end.
+ *
+ * @param params.userId - The member to check
+ * @param params.organizationId - The workspace
+ * @returns `true` when the member holds `asset: archive`
+ */
+export async function userCanReinstateAssets({
+  userId,
+  organizationId,
+}: {
+  userId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  try {
+    return await hasPermission({
+      userId,
+      organizationId,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.archive,
     });
+  } catch {
+    return false;
   }
 }
 

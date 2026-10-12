@@ -287,7 +287,6 @@ describe("POST /api/mobile/bookings/fulfil-and-checkout — explicit check-out r
     expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
       assetIds: ["dell-1", "dell-2"],
       organizationId: "org-1",
-      purpose: "booking",
     });
     expect(fulfilAndCheckOut).not.toHaveBeenCalled();
   });

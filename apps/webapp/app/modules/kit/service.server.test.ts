@@ -1287,14 +1287,16 @@ describe("bulkRemoveAssetsFromKits", () => {
 
 /**
  * A `kit.findMany` answer for the bulk custody tests: their kits for every
- * read, except the holder guard's "which of these are checked out" read
- * (the one carrying `OR`), which none of them are unless a test says so.
+ * read, except the two guard reads, which find nothing unless a test says so:
+ * the holder guard's "which of these are checked out" (the one carrying `OR`)
+ * and the "which of these have no active member" (the one filtering on
+ * `assetKits`).
  *
  * @param kits - The kits the bulk action resolves
  */
 function kitsUnlessHolderRead(kits: unknown[]) {
-  return (args?: { where?: { OR?: unknown[] } }) =>
-    Promise.resolve(args?.where?.OR ? [] : kits);
+  return (args?: { where?: { OR?: unknown[]; assetKits?: unknown } }) =>
+    Promise.resolve(args?.where?.OR || args?.where?.assetKits ? [] : kits);
 }
 
 describe("bulkAssignKitCustody", () => {
@@ -1418,6 +1420,46 @@ describe("bulkAssignKitCustody", () => {
       })
     ).rejects.toThrow("Cannot assign custody.");
     expect(db.kitCustody.createMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a kit whose members are all archived, before writing custody", async () => {
+    const archivedOnlyKits = [
+      { id: "kit-1", name: "Kit 1", status: KitStatus.AVAILABLE, assets: [] },
+    ];
+    // why: the no-active-member guard (the read filtering on `assetKits`)
+    // finds kit-1; every other read returns the selection.
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockImplementation(
+      (args?: { where?: { OR?: unknown[]; assetKits?: unknown } }) =>
+        Promise.resolve(
+          args?.where?.assetKits
+            ? [{ id: "kit-1", name: "Kit 1", _count: { assetKits: 1 } }]
+            : args?.where?.OR
+            ? []
+            : archivedOnlyKits
+        )
+    );
+    //@ts-expect-error missing vitest type
+    db.teamMember.findFirst.mockResolvedValue({
+      id: "custodian-1",
+      name: "John Doe",
+      user: { id: "user-1", firstName: "John", lastName: "Doe" },
+    });
+    //@ts-expect-error missing vitest type
+    db.$transaction.mockImplementation((callback) => callback(db));
+
+    await expect(
+      bulkAssignKitCustody({
+        allowedTeamMemberIds: "all" as const,
+        kitIds: ["kit-1"],
+        organizationId: "org-1",
+        custodianId: "custodian-1",
+        custodianName: "John Doe",
+        userId: "user-1",
+      })
+    ).rejects.toThrow('Kit "Kit 1" holds only archived assets');
+    expect(db.kitCustody.createMany).not.toHaveBeenCalled();
+    expect(db.kit.updateMany).not.toHaveBeenCalled();
   });
 
   it("should throw error when kits are not available", async () => {
@@ -1645,6 +1687,64 @@ describe("releaseCustody", () => {
       ...kitWithCustody,
       assets: [{ id: "asset-1", title: "Test Asset" }],
     });
+  });
+});
+
+describe("kit custody release leaves archived members alone", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("releaseCustody reads only active members, so no note or status write reaches an archived one", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findUniqueOrThrow.mockResolvedValue({
+      id: "kit-1",
+      name: "Test Kit",
+      assetKits: [],
+      createdBy: { firstName: "John", lastName: "Doe" },
+      custody: { custodian: { name: "Jane Smith" } },
+    });
+    //@ts-expect-error missing vitest type
+    db.kit.update.mockResolvedValue({});
+
+    await releaseCustody({
+      kitId: "kit-1",
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.kit.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetKits: expect.objectContaining({
+            where: { asset: { archivedAt: null } },
+          }),
+        }),
+      })
+    );
+  });
+
+  it("bulkReleaseKitCustody reads only active members", async () => {
+    //@ts-expect-error missing vitest type
+    db.kit.findMany.mockResolvedValue([]);
+
+    await bulkReleaseKitCustody({
+      kitIds: ["kit-1"],
+      organizationId: "org-1",
+      userId: "user-1",
+      custodyAssign: "anyone" as const,
+      allowedTeamMemberIds: "all" as const,
+    }).catch(() => undefined);
+
+    expect(db.kit.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          assetKits: expect.objectContaining({
+            where: { asset: { archivedAt: null } },
+          }),
+        }),
+      })
+    );
   });
 });
 

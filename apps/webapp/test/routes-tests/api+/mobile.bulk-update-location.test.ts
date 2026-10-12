@@ -183,7 +183,6 @@ describe("POST /api/mobile/bulk-update-location", () => {
     expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
-      purpose: "change",
     });
     expect(bulkUpdateAssetLocation).not.toHaveBeenCalled();
   });

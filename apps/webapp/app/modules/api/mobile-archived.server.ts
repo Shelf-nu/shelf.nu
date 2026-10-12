@@ -2,9 +2,9 @@
  * Archived-Asset Refusals on the Mobile API
  *
  * Archived assets are read-only and cannot be booked (issue #382). The asset
- * and booking services refuse them with `assertAssetsAreNotArchived` or an
- * inline check, but those refuse the whole request and name no asset, and a
- * service's catch block replaces `additionalData` before the route sees it.
+ * and booking services refuse them with `assertAssetsAreNotArchived`, but a
+ * service's catch block replaces `additionalData` before the route sees it, so
+ * the archived ids never reach the response.
  * The companion's Scan tab needs to know WHICH scanned rows are archived, so it
  * can mark those rows and leave the others clean.
  *
@@ -19,34 +19,20 @@
  * `reason` is the machine-readable discriminator the companion branches on
  * (as `"unclaimed"` is on the QR routes); `message` is human copy, which the
  * current app replaces with its own row-level wording and older builds show
- * as is. For a change (custody, location) it is the shared guard's wording,
- * so the phone and the web word the refusal the same way; for a booking it is
- * the booking service's scan refusal. The services keep their own guards; this
- * check only answers earlier and more precisely.
+ * as is. It is built by `archivedAssetsRefusal`, as the shared guard builds
+ * its own, with the fix a scanned list always has: remove the archived rows,
+ * which works for every role. The services keep their own guards; this check
+ * only answers earlier and more precisely.
  *
- * @see {@link file://./../../utils/org-validation.server.ts} assertAssetsAreNotArchived, ARCHIVED_ASSETS_MESSAGE
+ * @see {@link file://./../../utils/org-validation.server.ts} assertAssetsAreNotArchived
  * @see apps/companion/lib/archived-assets.ts the client reader (`archivedIdsFromError`)
  */
 
+import { archivedAssetsRefusal } from "@shelf/labels";
 import { db } from "~/database/db.server";
-import { ARCHIVED_ASSETS_MESSAGE } from "~/utils/org-validation.server";
 
 /** The `reason` the companion branches on for an archived refusal. */
 export const MOBILE_ARCHIVED_ERROR_REASON = "archived";
-
-/**
- * The refusal for archived assets scanned into a booking. Same words as the
- * booking service's own scan refusal (`addScannedAssetsToBookingWithinTx`),
- * which older app builds already show; change both together.
- */
-const ARCHIVED_BOOKING_MESSAGE =
-  "Some scanned assets are archived and can't be added to a booking. Reinstate them first.";
-
-/**
- * What the request does with the assets: change them (custody, location) or
- * put them in a booking. Only the wording differs.
- */
-export type MobileArchivedPurpose = "change" | "booking";
 
 /** The error body a mobile route returns for an archived refusal. */
 export type MobileArchivedRefusal = {
@@ -62,17 +48,14 @@ export type MobileArchivedRefusal = {
  * @param args.assetIds - Asset ids from the request body (deduplicated here)
  * @param args.organizationId - The caller's validated workspace; ids outside it
  *   are ignored, as the service's own org guard refuses them separately
- * @param args.purpose - Whether the request changes the assets or books them
  * @returns The refusal to send, or `null` when none of the assets is archived
  */
 export async function findMobileArchivedRefusal({
   assetIds,
   organizationId,
-  purpose,
 }: {
   assetIds: string[];
   organizationId: string;
-  purpose: MobileArchivedPurpose;
 }): Promise<MobileArchivedRefusal | null> {
   const requested = [...new Set(assetIds)];
   if (requested.length === 0) return null;
@@ -83,18 +66,20 @@ export async function findMobileArchivedRefusal({
       organizationId,
       archivedAt: { not: null },
     },
-    select: { id: true },
+    select: { id: true, title: true },
   });
   if (archived.length === 0) return null;
 
-  const archivedIds = new Set(archived.map((a) => a.id));
-  const archivedAssetIds = requested.filter((id) => archivedIds.has(id));
+  const titleById = new Map(archived.map((a) => [a.id, a.title ?? ""]));
+  const archivedAssetIds = requested.filter((id) => titleById.has(id));
 
   return {
-    message:
-      purpose === "booking"
-        ? ARCHIVED_BOOKING_MESSAGE
-        : ARCHIVED_ASSETS_MESSAGE,
+    message: archivedAssetsRefusal({
+      titles: archivedAssetIds.map((id) => titleById.get(id) ?? ""),
+      fix: "remove-from-list",
+      // Unused by "remove-from-list": dropping the rows needs no permission.
+      canReinstate: false,
+    }),
     reason: MOBILE_ARCHIVED_ERROR_REASON,
     archivedAssetIds,
   };

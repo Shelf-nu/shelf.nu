@@ -50,6 +50,9 @@ vi.mock("~/database/db.server", () => ({
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
     assetKit: { findMany: vi.fn().mockResolvedValue([]) },
     asset: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: resolving kits refuses one with no active member first; every kit
+    // here has one.
+    kit: { findMany: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -557,7 +560,6 @@ describe("POST /api/mobile/bookings/add-scanned-assets: archived assets", () => 
     expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
-      purpose: "booking",
     });
     expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
   });

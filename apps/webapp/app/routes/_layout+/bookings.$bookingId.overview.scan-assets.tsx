@@ -1,3 +1,4 @@
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useSetAtom } from "jotai";
 import type {
   MetaFunction,
@@ -312,17 +313,18 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       (id) => !kitSliceAssetIds.has(id)
     );
 
-    const { addedAssetIds, claimedAssetIds } = await addScannedAssetsToBooking({
-      bookingId,
-      assetIds: standaloneAssetIds,
-      kitIds,
-      organizationId,
-      userId,
-      quantities,
-      kitSlices,
-      // Re-checks the add rule against the locked status inside the write.
-      access,
-    });
+    const { addedAssetIds, claimedAssetIds, archivedKitMembersLeftOut } =
+      await addScannedAssetsToBooking({
+        bookingId,
+        assetIds: standaloneAssetIds,
+        kitIds,
+        organizationId,
+        userId,
+        quantities,
+        kitSlices,
+        // Re-checks the add rule against the locked status inside the write.
+        access,
+      });
 
     /**
      * A scan can legitimately change nothing: every item may already sit on
@@ -333,14 +335,21 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      */
     const addedCount = addedAssetIds.length;
     const claimedCount = claimedAssetIds.length;
+    // Archived members of a scanned kit stay off the booking; say so, rather
+    // than letting the count quietly differ from the kit's size.
+    const leftOutNote =
+      archivedKitMembersLeftOut > 0
+        ? ` ${archivedAssetsLeftOut(archivedKitMembersLeftOut)}`
+        : "";
 
     if (addedCount > 0) {
       sendNotification({
         title: "Assets added",
-        message:
+        message: `${
           addedCount === 1
             ? "The scanned asset was added to the booking."
-            : `${addedCount} scanned assets were added to the booking.`,
+            : `${addedCount} scanned assets were added to the booking.`
+        }${leftOutNote}`,
         icon: { name: "success", variant: "success" },
         senderId: authSession.userId,
       });

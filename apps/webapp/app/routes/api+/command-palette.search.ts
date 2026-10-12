@@ -362,6 +362,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
+                // Archived members are out of service and not counted.
                 _count: KIT_ACTIVE_MEMBER_COUNT,
               },
             })
@@ -394,7 +395,12 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               take: 6,
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
-                _count: { select: { assetLocations: true } },
+                // Archived assets are out of service and not counted.
+                _count: {
+                  select: {
+                    assetLocations: { where: { asset: { archivedAt: null } } },
+                  },
+                },
               },
             })
           : Promise.resolve([]),

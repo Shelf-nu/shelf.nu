@@ -300,7 +300,6 @@ describe("POST /api/mobile/bulk-assign-custody", () => {
     expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
       assetIds: ["asset-1", "asset-2"],
       organizationId: "org-1",
-      purpose: "change",
     });
     expect(bulkCheckOutAssets).not.toHaveBeenCalled();
   });

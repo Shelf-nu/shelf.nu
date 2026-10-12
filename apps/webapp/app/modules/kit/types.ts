@@ -53,7 +53,9 @@ export const GET_KIT_STATIC_INCLUDES = {
 };
 
 export const KITS_INCLUDE_FIELDS = {
-  // Members a user sees counted; archived ones are out of service.
+  // Members per kit (`AssetKit` is unique per asset and kit). Archived members
+  // are out of service and left out of kit custody and bookings, so they are
+  // not counted either.
   _count: KIT_ACTIVE_MEMBER_COUNT,
   // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
   // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so

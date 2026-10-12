@@ -177,7 +177,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const archivedRefusal = await findMobileArchivedRefusal({
       assetIds,
       organizationId,
-      purpose: "booking",
     });
     if (archivedRefusal) {
       return data({ error: archivedRefusal }, { status: 400 });

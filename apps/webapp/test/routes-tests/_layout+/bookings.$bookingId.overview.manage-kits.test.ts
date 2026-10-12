@@ -1,4 +1,5 @@
 import { BookingStatus, KitStatus, OrganizationRoles } from "@prisma/client";
+import { kitsWithoutActiveAssetsRefusal } from "@shelf/labels";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
@@ -10,6 +11,7 @@ import * as noteService from "~/modules/note/service.server";
 import * as userService from "~/modules/user/service.server";
 import * as bookingAssets from "~/utils/booking-assets";
 import * as httpServer from "~/utils/http.server";
+import { ShelfError } from "~/utils/error";
 import * as rolesServer from "~/utils/roles.server";
 
 // Import the action + loader functions
@@ -38,6 +40,8 @@ vi.mock("~/modules/booking/service.server", () => ({
   getDetailedPartialCheckinData: vi.fn(),
   updateBookingAssets: vi.fn(),
   createKitBookingNote: vi.fn(),
+  buildKitSlicesForBooking: vi.fn(),
+  countArchivedKitMembers: vi.fn(),
   // Loader-only — used by the Models-tab loader tests below.
   getBooking: vi.fn(),
   getKitIdsByBookingSlices: vi.fn(),
@@ -201,6 +205,148 @@ describe("manage-kits route validation", () => {
       undefined as any
     );
     vi.mocked(noteService.createNotes).mockResolvedValue({ count: 0 });
+
+    // why: `buildKitSlicesForBooking` reads `AssetKit` rows from the database
+    // and has its own suite (`booking/service.server.test.ts`). This stand-in
+    // resolves the same slices from the kits `db.kit.findMany` is mocked to
+    // return, so each case below states its kits once.
+    vi.mocked(bookingService.buildKitSlicesForBooking).mockImplementation(
+      async ({ kitIds, existingAssetKitIds }) => {
+        const kits = (await db.kit.findMany()) as any[];
+        return kits
+          .filter((kit) => kitIds.includes(kit.id))
+          .flatMap((kit) =>
+            kit.assetKits
+              .filter((ak: any) => !existingAssetKitIds?.has(ak.id))
+              .map((ak: any) => ({
+                assetId: ak.asset.id,
+                assetKitId: ak.id,
+                kitId: kit.id,
+                quantity: ak.quantity,
+              }))
+          );
+      }
+    );
+    // why: a count query over `AssetKit`; no case here has archived members
+    // unless it says so.
+    vi.mocked(bookingService.countArchivedKitMembers).mockResolvedValue(0);
+  });
+
+  describe("archived kit members", () => {
+    it("refuses a joining kit with no active asset and adds nothing", async () => {
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        bookingAssets: [],
+      } as any);
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit-archived"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue([
+        {
+          id: "kit-archived",
+          name: "Archived Kit",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-archived", quantity: 1, asset: { id: "asset-a" } },
+          ],
+        },
+      ] as any);
+      // why: the shared helper owns the refusal; this is the error it throws
+      // for a kit whose members are all archived.
+      vi.mocked(bookingService.buildKitSlicesForBooking).mockRejectedValue(
+        new ShelfError({
+          cause: null,
+          label: "Kit",
+          status: 400,
+          title: "Kit has no active assets",
+          message: kitsWithoutActiveAssetsRefusal({
+            kits: [{ name: "Archived Kit", hasArchivedAssets: true }],
+            action: "booking",
+          }),
+          additionalData: { kitIdsWithoutActiveAssets: ["kit-archived"] },
+          shouldBeCaptured: false,
+        })
+      );
+
+      const response = await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      assertIsDataWithResponseInit(response);
+      expect(response.init?.status).toBe(400);
+      expect(bookingService.buildKitSlicesForBooking).toHaveBeenCalledWith({
+        kitIds: ["kit-archived"],
+        organizationId: "org123",
+        existingAssetKitIds: new Set(),
+        kitIdsOnBooking: new Set(),
+      });
+      expect(bookingService.updateBookingAssets).not.toHaveBeenCalled();
+    });
+
+    it("exempts kits already on the booking and counts archived members of joining kits only", async () => {
+      vi.mocked(db.booking.findUniqueOrThrow).mockResolvedValue({
+        ...mockBooking,
+        status: BookingStatus.DRAFT,
+        bookingAssets: [
+          {
+            asset: { id: "asset1" },
+            assetId: "asset1",
+            quantity: 1,
+            id: "ba1",
+            assetKitId: "ak-on-booking",
+          },
+        ],
+      } as any);
+      vi.mocked(httpServer.parseData).mockReturnValue({
+        kitIds: ["kit-on-booking", "kit-joining"],
+        removedKitIds: [],
+        redirectTo: null,
+      });
+      vi.mocked(db.kit.findMany).mockResolvedValue([
+        {
+          id: "kit-on-booking",
+          name: "Kit On Booking",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-on-booking", quantity: 1, asset: { id: "asset1" } },
+          ],
+        },
+        {
+          id: "kit-joining",
+          name: "Kit Joining",
+          status: KitStatus.AVAILABLE,
+          assetKits: [
+            { id: "ak-joining", quantity: 1, asset: { id: "asset3" } },
+          ],
+        },
+      ] as any);
+
+      await action(
+        createActionArgs({
+          context: mockContext,
+          request: mockRequest,
+          params: mockParams,
+        })
+      );
+
+      expect(bookingService.buildKitSlicesForBooking).toHaveBeenCalledWith({
+        kitIds: ["kit-on-booking", "kit-joining"],
+        organizationId: "org123",
+        existingAssetKitIds: new Set(["ak-on-booking"]),
+        kitIdsOnBooking: new Set(["kit-on-booking"]),
+      });
+      expect(bookingService.countArchivedKitMembers).toHaveBeenCalledWith({
+        kitIds: ["kit-joining"],
+        organizationId: "org123",
+      });
+    });
   });
 
   describe("validation scope - only newly added kits", () => {

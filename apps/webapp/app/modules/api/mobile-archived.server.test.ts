@@ -8,7 +8,7 @@ import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 // why: the module reads the database, and a real Prisma client tries to
 // connect at import. `asset.findMany` finds the archived subset; `asset.count`
 // backs the shared `assertAssetsAreNotArchived` guard, which runs for real so
-// the refusal carries its actual wording.
+// the refusal is compared against its actual wording.
 vi.mock("~/database/db.server", () => ({
   db: {
     asset: { findMany: vi.fn(), count: vi.fn() },
@@ -18,10 +18,10 @@ vi.mock("~/database/db.server", () => ({
 const findManyMock = db.asset.findMany as unknown as Mock;
 const countMock = db.asset.count as unknown as Mock;
 
-/** The archived subset the database holds, keyed by id. */
-function archivedInDb(ids: string[]) {
-  findManyMock.mockResolvedValue(ids.map((id) => ({ id })));
-  countMock.mockResolvedValue(ids.length);
+/** The archived assets the database holds, by id and title. */
+function archivedInDb(rows: { id: string; title: string }[]) {
+  findManyMock.mockResolvedValue(rows);
+  countMock.mockResolvedValue(rows.length);
 }
 
 describe("findMobileArchivedRefusal", () => {
@@ -35,29 +35,26 @@ describe("findMobileArchivedRefusal", () => {
       findMobileArchivedRefusal({
         assetIds: ["asset-1", "asset-2"],
         organizationId: "org-1",
-        purpose: "change",
       })
     ).resolves.toBeNull();
   });
 
   it("does not read the database for an empty list", async () => {
     await expect(
-      findMobileArchivedRefusal({
-        assetIds: [],
-        organizationId: "org-1",
-        purpose: "change",
-      })
+      findMobileArchivedRefusal({ assetIds: [], organizationId: "org-1" })
     ).resolves.toBeNull();
     expect(findManyMock).not.toHaveBeenCalled();
   });
 
   it("names only the archived ids, once each, in request order", async () => {
-    archivedInDb(["asset-3", "asset-1"]);
+    archivedInDb([
+      { id: "asset-3", title: "Tripod" },
+      { id: "asset-1", title: "Old camera" },
+    ]);
 
     const refusal = await findMobileArchivedRefusal({
       assetIds: ["asset-1", "asset-2", "asset-3", "asset-1"],
       organizationId: "org-1",
-      purpose: "change",
     });
 
     expect(refusal?.reason).toBe("archived");
@@ -69,45 +66,31 @@ describe("findMobileArchivedRefusal", () => {
         organizationId: "org-1",
         archivedAt: { not: null },
       },
-      select: { id: true },
+      select: { id: true, title: true },
     });
   });
 
-  it("words a change refusal exactly as the shared archived guard does", async () => {
-    archivedInDb(["asset-1"]);
+  it("words the refusal as the shared guard words a scanned list, in one read", async () => {
+    archivedInDb([{ id: "asset-1", title: "Old camera" }]);
 
     const refusal = await findMobileArchivedRefusal({
       assetIds: ["asset-1"],
       organizationId: "org-1",
-      purpose: "change",
     });
-    // One read: the wording is borrowed, not re-derived by running the guard.
+    // One read: the titles come with the ids, nothing re-runs the guard.
     expect(findManyMock).toHaveBeenCalledTimes(1);
     expect(countMock).not.toHaveBeenCalled();
 
-    // Whatever the guard says for these assets is what the phone is sent.
+    // Whatever the guard says for a scanned list is what the phone is sent.
     const guardMessage = await assertAssetsAreNotArchived({
       assetIds: ["asset-1"],
       organizationId: "org-1",
+      fix: "remove-from-list",
     }).then(
       () => null,
       (cause: Error) => cause.message
     );
-    expect(guardMessage).toBeTruthy();
+    expect(guardMessage).toContain("Old camera");
     expect(refusal?.message).toBe(guardMessage);
-  });
-
-  it("words a booking refusal as the booking service's scan refusal", async () => {
-    archivedInDb(["asset-1"]);
-
-    const refusal = await findMobileArchivedRefusal({
-      assetIds: ["asset-1"],
-      organizationId: "org-1",
-      purpose: "booking",
-    });
-
-    expect(refusal?.message).toBe(
-      "Some scanned assets are archived and can't be added to a booking. Reinstate them first."
-    );
   });
 });
