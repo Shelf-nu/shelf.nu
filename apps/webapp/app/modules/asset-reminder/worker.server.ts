@@ -68,11 +68,25 @@ const ASSET_SCHEDULER_EVENT_HANDLERS: Record<
     }
 
     /**
-     * An archived asset is out of service (issue #382): its reminders stay
-     * quiet, with no email and no "System has sent" note. The reminder row is
-     * kept, and fires as usual if the asset is reinstated before its time.
+     * An archived asset is out of service: its reminders stay quiet, with no
+     * email and no "System has sent" note. The reminder row is kept, and fires
+     * as usual if the asset is reinstated before its time.
+     *
+     * Clearing `activeSchedulerReference` records the skip: no job is left to
+     * deliver this reminder, and the reminders list reads a past-due reminder
+     * with no reference as "Not sent", whatever the asset's state later. The
+     * write is conditioned on this job, so a reminder rescheduled meanwhile
+     * keeps its new job.
      */
     if (reminder.asset.archivedAt) {
+      await db.assetReminder.updateMany({
+        where: {
+          id: reminder.id,
+          organizationId: reminder.organizationId,
+          activeSchedulerReference: job.id,
+        },
+        data: { activeSchedulerReference: null },
+      });
       Logger.info(
         `Asset reminder ${reminder.id} skipped: asset ${reminder.assetId} is archived.`
       );

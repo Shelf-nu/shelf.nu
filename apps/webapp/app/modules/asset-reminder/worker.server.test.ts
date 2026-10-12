@@ -25,6 +25,7 @@ vi.mock("~/database/db.server", () => ({
   db: {
     assetReminder: {
       findFirst: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     user: {
       findFirst: vi.fn(),
@@ -156,6 +157,33 @@ describe("regierAssetWorkers", () => {
     expect(Logger.error).not.toHaveBeenCalled();
   });
 
+  it("records the skip by clearing this job's scheduler reference", async () => {
+    // @ts-expect-error missing vitest type
+    db.assetReminder.findFirst.mockResolvedValue({
+      id: "reminder-1",
+      assetId: "asset-1",
+      organizationId: "org-1",
+      createdById: "user-1",
+      name: "Service check",
+      teamMembers: [],
+      asset: { id: "asset-1", title: "Camera", archivedAt: new Date() },
+      organization: { name: "ACME", customEmailFooter: null },
+    });
+
+    await workerHandler(buildJob({ id: "job-7" }));
+
+    // Conditioned on the job, so a reminder rescheduled meanwhile keeps its
+    // new job reference.
+    expect(db.assetReminder.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "reminder-1",
+        organizationId: "org-1",
+        activeSchedulerReference: "job-7",
+      },
+      data: { activeSchedulerReference: null },
+    });
+  });
+
   it("emails and notes as usual when the reminder's asset is active", async () => {
     // @ts-expect-error missing vitest type
     db.assetReminder.findFirst.mockResolvedValue({
@@ -173,6 +201,7 @@ describe("regierAssetWorkers", () => {
 
     expect(sendEmail).toHaveBeenCalledOnce();
     expect(createNote).toHaveBeenCalledOnce();
+    expect(db.assetReminder.updateMany).not.toHaveBeenCalled();
   });
 
   it("rethrows when the handler fails, so pg-boss retries the job", async () => {

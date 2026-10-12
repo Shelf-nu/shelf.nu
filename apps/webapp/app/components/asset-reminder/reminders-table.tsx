@@ -135,6 +135,7 @@ function ListContent({
 }) {
   const status = getReminderStatus({
     alertDateTime: item.alertDateTime,
+    schedulerReference: item.activeSchedulerReference,
     assetArchivedAt: item.asset.archivedAt,
   });
 

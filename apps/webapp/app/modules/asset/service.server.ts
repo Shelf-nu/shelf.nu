@@ -3662,19 +3662,26 @@ async function writeArchiveStateNotes(
  * is removed or reinstated. The archive success message names them so the
  * archiver knows, instead of the draft's owner finding out at Reserve.
  *
+ * Runs inside the archive transaction, so a failed lookup rolls the archive
+ * back rather than reporting an error for an archive that committed.
+ *
+ * @param tx - The archive transaction
  * @param args.assetIds - The assets just archived
  * @param args.organizationId - The caller's workspace
  * @returns Each draft once, by name
  */
-async function findDraftBookingsHoldingAssets({
-  assetIds,
-  organizationId,
-}: {
-  assetIds: string[];
-  organizationId: string;
-}): Promise<Array<{ id: string; name: string }>> {
+async function findDraftBookingsHoldingAssets(
+  tx: { booking: Pick<typeof db.booking, "findMany"> },
+  {
+    assetIds,
+    organizationId,
+  }: {
+    assetIds: string[];
+    organizationId: string;
+  }
+): Promise<Array<{ id: string; name: string }>> {
   if (assetIds.length === 0) return [];
-  return db.booking.findMany({
+  return tx.booking.findMany({
     where: {
       organizationId,
       status: BookingStatus.DRAFT,
@@ -3936,7 +3943,7 @@ export async function archiveAsset({
 
     const archivedAt = new Date();
 
-    await db.$transaction(async (tx) => {
+    const draftBookings = await db.$transaction(async (tx) => {
       // Serialize against concurrent booking writes. The booking services take
       // this same lock before their archived check, so an archive and a
       // booking-add can no longer both pass their own read and then commit.
@@ -4007,11 +4014,11 @@ export async function archiveAsset({
         actorUserId,
         verb: "archived",
       });
-    });
 
-    const draftBookings = await findDraftBookingsHoldingAssets({
-      assetIds: [id],
-      organizationId,
+      return findDraftBookingsHoldingAssets(tx, {
+        assetIds: [id],
+        organizationId,
+      });
     });
 
     return { id, archivedAt, draftBookings };
@@ -4278,7 +4285,7 @@ export async function bulkArchiveAssets({
      */
     let archivedIds: string[] = [];
 
-    await db.$transaction(async (tx) => {
+    const draftBookings = await db.$transaction(async (tx) => {
       // Same lock the single-asset path and the booking services take, so a
       // booking-add cannot land between this batch's eligibility read and its
       // write. Sorted inside the helper, so overlapping batches can't deadlock.
@@ -4306,7 +4313,7 @@ export async function bulkArchiveAssets({
       });
       archivedIds = written.map((a) => a.id);
 
-      if (archivedIds.length === 0) return;
+      if (archivedIds.length === 0) return [];
 
       // The whole batch is refused (and rolled back) on an unconfirmed
       // shortfall, so the warning names every booking it would affect at once.
@@ -4342,15 +4349,17 @@ export async function bulkArchiveAssets({
         actorUserId,
         verb: "archived",
       });
+
+      return findDraftBookingsHoldingAssets(tx, {
+        assetIds: archivedIds,
+        organizationId,
+      });
     });
 
     return {
       archivedCount: archivedIds.length,
       skippedCount: resolvedIds.length - archivedIds.length,
-      draftBookings: await findDraftBookingsHoldingAssets({
-        assetIds: archivedIds,
-        organizationId,
-      }),
+      draftBookings,
     };
   } catch (cause) {
     // Keep an upstream error's own message (e.g. an invalid advanced filter);

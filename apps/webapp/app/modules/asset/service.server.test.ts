@@ -6231,6 +6231,39 @@ describe("archiveAsset", () => {
     );
   });
 
+  it("looks up the draft bookings inside the archive transaction", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      title: "Camera",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+    let transactionSettled = false;
+    let lookedUpInsideTransaction: boolean | undefined;
+    // why: record when the transaction callback finishes, so the test can
+    // tell a lookup inside it from one after the commit.
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+      async (callback: (tx: unknown) => Promise<unknown>) => {
+        const result = await callback(db);
+        transactionSettled = true;
+        return result;
+      }
+    );
+    // why: capture whether the draft lookup ran before the commit.
+    (
+      db.booking.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementationOnce(() => {
+      lookedUpInsideTransaction = !transactionSettled;
+      return Promise.resolve([]);
+    });
+
+    await archiveAsset({ id: "a1", organizationId: "org-1" });
+
+    expect(lookedUpInsideTransaction).toBe(true);
+  });
+
   it("throws 409 when already archived", async () => {
     mockFindFirst.mockResolvedValue({
       id: "a1",

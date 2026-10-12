@@ -3,8 +3,8 @@
  *
  * The status a reminder row shows on the reminders lists (/reminders and an
  * asset's Reminders tab). The reminder worker sends nothing for an archived
- * asset, so "Reminder sent" is only true when the alert time passed while the
- * asset was active.
+ * asset and clears the reminder's `activeSchedulerReference` when it skips
+ * one, so a past-due reminder without a reference was never delivered.
  *
  * @see {@link file://./reminders-table.tsx}
  * @see {@link file://./../../modules/asset-reminder/worker.server.ts}
@@ -18,33 +18,35 @@ export type ReminderStatus =
   | "Not sent";
 
 /**
- * Resolves a reminder's status from its alert time and its asset's archive
- * state.
+ * Resolves a reminder's status from its alert time, its scheduler reference
+ * and its asset's archive state.
  *
- * - Active asset: "Pending" before the alert time, "Reminder sent" after.
- * - Archived asset, alert still ahead: "Paused". It fires if the asset is
- *   reinstated before then.
- * - Archived asset, alert passed after it was archived: "Not sent".
- * - Archived asset, alert passed before it was archived: "Reminder sent".
+ * - Alert still ahead: "Pending", or "Paused" while the asset is archived (it
+ *   fires if the asset is reinstated before then).
+ * - Alert passed with a scheduler reference: "Reminder sent".
+ * - Alert passed without one: "Not sent". The worker skipped it because the
+ *   asset was archived at the alert time; reinstating the asset afterwards
+ *   does not change that.
  *
  * @param args.alertDateTime - When the reminder is or was due
+ * @param args.schedulerReference - The reminder's `activeSchedulerReference`
  * @param args.assetArchivedAt - The asset's `archivedAt`, null when active
  * @param args.now - The current time (injectable for tests)
  * @returns The status to show
  */
 export function getReminderStatus({
   alertDateTime,
+  schedulerReference,
   assetArchivedAt,
   now = new Date(),
 }: {
   alertDateTime: Date | string;
+  schedulerReference: string | null;
   assetArchivedAt: Date | string | null;
   now?: Date;
 }): ReminderStatus {
-  const alertAt = new Date(alertDateTime);
-  const isDue = alertAt <= now;
+  const isDue = new Date(alertDateTime) <= now;
 
-  if (!assetArchivedAt) return isDue ? "Reminder sent" : "Pending";
-  if (!isDue) return "Paused";
-  return new Date(assetArchivedAt) <= alertAt ? "Not sent" : "Reminder sent";
+  if (!isDue) return assetArchivedAt ? "Paused" : "Pending";
+  return schedulerReference ? "Reminder sent" : "Not sent";
 }

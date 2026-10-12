@@ -11155,22 +11155,20 @@ export async function buildKitSlicesForBooking({
   organizationId: string;
   existingAssetKitIds?: Set<string>;
 }): Promise<KitSliceSpec[]> {
-  // Nothing to resolve — short-circuit so callers can pass an empty list freely.
+  // Nothing to resolve: short-circuit so callers can pass an empty list freely.
   if (kitIds.length === 0) return [];
 
-  // A kit whose members are all archived (or that has none) would join the
-  // booking as nothing at all. Refused by name instead.
-  await assertKitsHaveActiveAssets(db, {
-    kitIds,
-    organizationId,
-    action: "booking",
-  });
-
+  let assetKits: Array<{
+    id: string;
+    assetId: string;
+    quantity: number;
+    kitId: string;
+  }>;
   try {
-    const assetKits = await db.assetKit.findMany({
-      // Archived members are left out (issue #382): the kit is booked with its
-      // active members, the same way kit custody and kit moves skip archived
-      // ones, so one archived member never makes the whole kit unbookable.
+    assetKits = await db.assetKit.findMany({
+      // Archived members are left out: the kit is booked with its active
+      // members, the same way kit custody and kit moves skip archived ones, so
+      // one archived member never makes the whole kit unbookable.
       where: {
         kitId: { in: kitIds },
         organizationId,
@@ -11179,18 +11177,6 @@ export async function buildKitSlicesForBooking({
       // `kitId` is already the filter column, so selecting it costs nothing.
       select: { id: true, assetId: true, quantity: true, kitId: true },
     });
-
-    // One slice per AssetKit membership, skipping memberships already on the
-    // booking so re-adding a kit doesn't duplicate its slices.
-    return assetKits
-      .filter((ak) => !existingAssetKitIds?.has(ak.id))
-      .map((ak) => ({
-        assetId: ak.assetId,
-        assetKitId: ak.id,
-        // Durable provenance — see `BookingAsset.sourceKitId`.
-        kitId: ak.kitId,
-        quantity: ak.quantity,
-      }));
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -11200,6 +11186,36 @@ export async function buildKitSlicesForBooking({
       label,
     });
   }
+
+  // A kit whose members are all archived (or that has none) would join the
+  // booking as nothing at all, so it is refused by name. Decided from the same
+  // read that builds the slices: a separate check could pass a kit whose last
+  // active member is archived before this read, and the kit would then drop
+  // out unnoticed whenever another kit still produced slices. A kit id from
+  // another workspace resolves to no kit and refuses nothing.
+  const kitIdsWithActiveMembers = new Set(assetKits.map((ak) => ak.kitId));
+  const kitIdsWithoutActiveMembers = kitIds.filter(
+    (kitId) => !kitIdsWithActiveMembers.has(kitId)
+  );
+  if (kitIdsWithoutActiveMembers.length > 0) {
+    await assertKitsHaveActiveAssets(db, {
+      kitIds: kitIdsWithoutActiveMembers,
+      organizationId,
+      action: "booking",
+    });
+  }
+
+  // One slice per AssetKit membership, skipping memberships already on the
+  // booking so re-adding a kit doesn't duplicate its slices.
+  return assetKits
+    .filter((ak) => !existingAssetKitIds?.has(ak.id))
+    .map((ak) => ({
+      assetId: ak.assetId,
+      assetKitId: ak.id,
+      // Durable provenance: see `BookingAsset.sourceKitId`.
+      kitId: ak.kitId,
+      quantity: ak.quantity,
+    }));
 }
 
 /**

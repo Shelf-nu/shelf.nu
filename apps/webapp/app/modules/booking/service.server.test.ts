@@ -3585,7 +3585,11 @@ describe("buildKitSlicesForBooking", () => {
     expect(slices).toHaveLength(2);
   });
 
-  it("refuses a kit with no active member, by name, before reading slices", async () => {
+  it("refuses a kit with no active member, by name", async () => {
+    // why: the membership read finds no active member for the kit.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      []
+    );
     const kits = restoreMockImplementationAfterTest(db.kit.findMany);
     // why: the no-active-member guard (the read filtering on `assetKits`)
     // finds the kit; its one member is archived.
@@ -3605,7 +3609,55 @@ describe("buildKitSlicesForBooking", () => {
         'Kit "Shoot Kit" holds only archived assets, so there is nothing to book.'
       ),
     });
-    expect(db.assetKit.findMany).not.toHaveBeenCalled();
+  });
+
+  it("refuses a kit left without active members even when another kit has slices", async () => {
+    // why: the membership read returns active members for kit-2 only; kit-1's
+    // members are all archived by the time it runs.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-9", assetId: "asset-9", quantity: 1, kitId: "kit-2" },
+    ]);
+    const kits = restoreMockImplementationAfterTest(db.kit.findMany);
+    // why: the guard is asked about kit-1 alone and finds it with no active
+    // member.
+    kits.fn.mockImplementation((args?: { where?: { assetKits?: unknown } }) =>
+      Promise.resolve(
+        args?.where?.assetKits
+          ? [{ id: "kit-1", name: "Shoot Kit", _count: { assetKits: 1 } }]
+          : []
+      )
+    );
+
+    await expect(
+      buildKitSlicesForBooking({
+        kitIds: ["kit-1", "kit-2"],
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('Kit "Shoot Kit"'),
+    });
+    expect(kits.fn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: { in: ["kit-1"] } }),
+      })
+    );
+  });
+
+  it("skips the no-active-member check when every kit has slices", async () => {
+    // why: both kits come back with an active member.
+    (db.assetKit.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      { id: "ak-1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+      { id: "ak-2", assetId: "asset-2", quantity: 1, kitId: "kit-2" },
+    ]);
+
+    const slices = await buildKitSlicesForBooking({
+      kitIds: ["kit-1", "kit-2"],
+      organizationId: "org-1",
+    });
+
+    expect(slices).toHaveLength(2);
+    expect(db.kit.findMany).not.toHaveBeenCalled();
   });
 
   it("reads only active members, so a kit with an archived member still books (issue #382)", async () => {

@@ -3,14 +3,25 @@ import { getReminderStatus } from "./reminder-status";
 const now = new Date("2026-10-12T12:00:00Z");
 const past = "2026-10-10T09:00:00Z";
 const future = "2026-10-20T09:00:00Z";
+const archivedAt = "2026-10-01T00:00:00Z";
 
 describe("getReminderStatus", () => {
   it("reads Pending, then Reminder sent, for an active asset", () => {
     expect(
-      getReminderStatus({ alertDateTime: future, assetArchivedAt: null, now })
+      getReminderStatus({
+        alertDateTime: future,
+        schedulerReference: "job-1",
+        assetArchivedAt: null,
+        now,
+      })
     ).toBe("Pending");
     expect(
-      getReminderStatus({ alertDateTime: past, assetArchivedAt: null, now })
+      getReminderStatus({
+        alertDateTime: past,
+        schedulerReference: "job-1",
+        assetArchivedAt: null,
+        now,
+      })
     ).toBe("Reminder sent");
   });
 
@@ -18,17 +29,30 @@ describe("getReminderStatus", () => {
     expect(
       getReminderStatus({
         alertDateTime: future,
-        assetArchivedAt: "2026-10-01T00:00:00Z",
+        schedulerReference: "job-1",
+        assetArchivedAt: archivedAt,
         now,
       })
     ).toBe("Paused");
   });
 
-  it("never claims a send that the archive stopped", () => {
+  it("reads Not sent for a reminder the worker skipped while archived", () => {
     expect(
       getReminderStatus({
         alertDateTime: past,
-        assetArchivedAt: "2026-10-01T00:00:00Z",
+        schedulerReference: null,
+        assetArchivedAt: archivedAt,
+        now,
+      })
+    ).toBe("Not sent");
+  });
+
+  it("keeps Not sent after the asset is reinstated", () => {
+    expect(
+      getReminderStatus({
+        alertDateTime: past,
+        schedulerReference: null,
+        assetArchivedAt: null,
         now,
       })
     ).toBe("Not sent");
@@ -38,6 +62,7 @@ describe("getReminderStatus", () => {
     expect(
       getReminderStatus({
         alertDateTime: past,
+        schedulerReference: "job-1",
         assetArchivedAt: "2026-10-11T00:00:00Z",
         now,
       })
