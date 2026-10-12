@@ -73,7 +73,9 @@ pre-commit:
 commit-msg:
   commands:
     commitlint:
-      run: npx --no -- commitlint --edit {1}
+      # {1} is the absolute path to the message file inside .git. Quoted so a
+      # checkout whose path contains spaces passes it as one argument.
+      run: npx --no -- commitlint --edit "{1}"
       fail_text: |
         Commit message doesn't follow Conventional Commits format
 
