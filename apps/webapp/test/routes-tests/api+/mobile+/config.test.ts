@@ -50,6 +50,11 @@ vi.mock("~/utils/env", () => ({
   },
 }));
 
+// why: the logger writes to the real log transport; the test only needs to see
+// that a bad env value was reported.
+const warn = vi.hoisted(() => vi.fn());
+vi.mock("~/utils/logger", () => ({ Logger: { warn } }));
+
 // why: `ssoEnabled` is derived from `config.disableSSO`, which reads the
 // DISABLE_SSO env var. Pinning it keeps the asserted payload deterministic
 // regardless of the local or CI environment.
@@ -95,6 +100,21 @@ describe("GET /api/mobile/config", () => {
       const body = (await invoke().json()) as Record<string, unknown>;
       // null, not "": the app treats null as "no banner".
       expect(body.latestCompanionVersion).toBeNull();
+    } finally {
+      latestVersion.value = "1.6.0";
+    }
+  });
+
+  it("serves null and warns once for a version the app cannot read", async () => {
+    latestVersion.value = "v1.6.0";
+    try {
+      const first = (await invoke().json()) as Record<string, unknown>;
+      await invoke().json();
+      expect(first.latestCompanionVersion).toBeNull();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain(
+        "LATEST_COMPANION_VERSION"
+      );
     } finally {
       latestVersion.value = "1.6.0";
     }
