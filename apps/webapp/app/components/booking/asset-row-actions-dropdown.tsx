@@ -32,6 +32,7 @@ import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { VerticalDotsIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
+import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import { useSearchParams } from "~/hooks/search-params";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
 import { isQuantityTracked } from "~/modules/asset/utils";
@@ -181,6 +182,8 @@ const ConditionalActionsDropdown = ({
           onClick={() => setOpen(true)}
         />
 
+        <MobileDropdownStyles open={open} />
+
         <PopoverPortal>
           <PopoverContent
             ref={popoverContentRef}
@@ -194,7 +197,7 @@ const ConditionalActionsDropdown = ({
             }}
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[180px] md:rounded-t-[4px]"
           >
-            <div className="order fixed bottom-0 left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
+            <div className="order fixed bottom-0 left-0 max-h-[85dvh] w-screen overflow-y-auto rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:max-h-none md:w-full md:overflow-visible md:rounded-t-[4px]">
               {isQtyTracked ? (
                 <div className="border-b px-0 py-1 md:p-0">
                   <Button

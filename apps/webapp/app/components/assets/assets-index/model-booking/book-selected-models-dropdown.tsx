@@ -196,12 +196,12 @@ function ConditionalActionsDropdown() {
             asChild
             className={tw(
               "z-50 w-screen overflow-y-auto rounded-t border border-gray-300 bg-white text-right shadow-md md:static md:w-56",
-              // `MobileDropdownStyles` strips the popper transform below `sm`,
+              // `MobileDropdownStyles` strips the popper transform below `md`,
               // which detaches the panel from its trigger and turns it into a
               // bottom sheet. Trigger-relative available height no longer
               // describes the room it has, so cap it against the viewport and
               // let it scroll past that.
-              "max-h-[85dvh] sm:max-h-[var(--radix-popover-content-available-height)]",
+              "max-h-[85dvh] md:max-h-[var(--radix-popover-content-available-height)]",
               "animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
             )}
           >

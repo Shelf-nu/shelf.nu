@@ -3,7 +3,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
-import DynamicSelect from "./dynamic-select";
+import DynamicSelect, { MobileStyles } from "./dynamic-select";
+import { SHEET_MEDIA_QUERY } from "../shared/mobile-dropdown-styles";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
 vi.mock("react-router", async () => {
@@ -978,5 +979,19 @@ describe("DynamicSelect", () => {
       expect(describedBy).toBeTruthy();
       expect(screen.getByRole("alert")).toHaveAttribute("id", describedBy);
     });
+  });
+});
+
+describe("MobileStyles", () => {
+  it("lifts the panel above its overlay at every width the overlay shows", () => {
+    const { container } = render(<MobileStyles open />);
+
+    // The overlay shows below `md` and sits above the panel's own z-index, so
+    // the panel rule must cover the same widths. Where it does not, the
+    // overlay covers the options and a tap on one only closes the select.
+    expect(container.querySelector(".extra-overlay")).toHaveClass("md:hidden");
+    expect(container.querySelector("style")?.textContent).toContain(
+      `@media ${SHEET_MEDIA_QUERY} {`
+    );
   });
 });

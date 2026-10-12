@@ -23,6 +23,7 @@ import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import type { IconType } from "../shared/icons-map";
+import { SHEET_MEDIA_QUERY } from "../shared/mobile-dropdown-styles";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -657,12 +658,17 @@ export default function DynamicSelect({
 /**
  * Mobile-specific CSS overrides for the Radix popper used by this select.
  *
+ * Lifts the panel above the dim overlay `MobileStyles` renders and pins it to
+ * the top of the screen. The overlay shows below `md` (`md:hidden`) and sits
+ * above the panel's own z-index, so this rule must cover the same widths
+ * (`SHEET_MEDIA_QUERY`): wherever the overlay shows without it, the overlay
+ * covers the options and a tap on one only closes the select.
+ *
  * Uses React's native `<style>{css}</style>` child form (safe text child)
  * instead of an injected-HTML approach, so there is no XSS concern and the
  * `react/no-danger` rule stays clean.
- * PR history: https://github.com/Shelf-nu/shelf.nu/pull/304
  */
-const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
+const MOBILE_POPPER_CSS = `@media ${SHEET_MEDIA_QUERY} {
   body {
     overflow: hidden;
   }
@@ -679,6 +685,12 @@ const MOBILE_POPPER_CSS = `@media (max-width: 640px) {
   }
 }`;
 
+/**
+ * Dim overlay plus {@link MOBILE_POPPER_CSS}, rendered while a `DynamicSelect`
+ * or `DynamicDropdown` panel is open.
+ *
+ * @param props.open - Whether the panel is open; nothing renders while closed.
+ */
 export const MobileStyles = ({ open }: { open: boolean }) =>
   open && (
     <>
