@@ -10,8 +10,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  archivedAssetReason,
-  archivedAssetsInBookingReason,
   archivedIdsFromError,
   assetBadgeStatus,
   droppedArchivedNote,
@@ -43,39 +41,6 @@ test("the badge says Archived instead of the live status", () => {
   assert.equal(
     assetBadgeStatus({ status: "IN_CUSTODY", archivedAt: null }),
     "IN_CUSTODY"
-  );
-});
-
-test("admins are told to reinstate, everyone else to ask an admin", () => {
-  assert.equal(
-    archivedAssetReason({ canReinstate: true }),
-    "This asset is archived. Reinstate it to make changes."
-  );
-  assert.equal(
-    archivedAssetReason({ canReinstate: false }),
-    "This asset is archived. Ask an admin to reinstate it."
-  );
-});
-
-test("the reserve reason names the archived assets and fits the reader", () => {
-  assert.equal(
-    archivedAssetsInBookingReason(["Old camera"], { canReinstate: true }),
-    '"Old camera" is archived. Remove it from the booking or reinstate it.'
-  );
-  assert.equal(
-    archivedAssetsInBookingReason(["Old camera", "Old lens"], {
-      canReinstate: false,
-    }),
-    '"Old camera" and "Old lens" are archived. Remove them from the booking or ask an admin to reinstate them.'
-  );
-});
-
-test("a long list names three and counts the rest", () => {
-  assert.equal(
-    archivedAssetsInBookingReason(["A", "B", "C", "D", "E"], {
-      canReinstate: true,
-    }),
-    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
   );
 });
 

@@ -1,4 +1,5 @@
 import {
+  archivedAssetsRefusal,
   BOOKING_RESERVE_BLOCKED_LABELS,
   DELETE_CONSEQUENCE_LABELS,
   EXPLICIT_REQUIREMENT_LABELS,
@@ -43,7 +44,6 @@ import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
-  archivedAssetsInBookingReason,
   assetBadgeStatus,
   droppedArchivedNote,
   isArchivedAsset,
@@ -1426,7 +1426,9 @@ export default function BookingDetailScreen() {
     booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
       ? BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
       : archivedAssetTitles.length > 0
-      ? archivedAssetsInBookingReason(archivedAssetTitles, {
+      ? archivedAssetsRefusal({
+          titles: archivedAssetTitles,
+          fix: "remove-from-booking",
           // Reinstating uses the web's archive grant (admins and owners).
           canReinstate: userHasPermission({
             roles: currentOrg?.roles,

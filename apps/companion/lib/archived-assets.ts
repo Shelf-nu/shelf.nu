@@ -14,16 +14,10 @@
  * asset is drawn, matching the web's `ArchivedBadge`: its underlying status
  * ("Available") is true but misleading, because the asset cannot be used.
  *
- * The reasons are role-aware. Members who hold `asset: archive` (admins and
- * owners) can reinstate the asset themselves; everyone else is told to ask an
- * admin, because "reinstate it" names an action they do not have.
- *
- * MIRROR of the web's archived wording, cosmetic only: the reason in
- * `apps/webapp/app/components/assets/actions-dropdown.tsx` ("This asset is
- * archived. Reinstate it to make changes."), made role-aware here, and the
- * web's "remove from booking" refusal. The server enforces every rule on the
- * write. Extraction target: `@shelf/labels` (`archivedAssetBlockedReason`,
- * `archivedAssetsRefusal`), so both apps read one string.
+ * The role-aware reasons both apps show (why an archived asset's actions are
+ * off, why a booking holding one cannot be reserved) come from `@shelf/labels`
+ * (`archivedAssetBlockedReason`, `archivedAssetsRefusal`). This module holds
+ * only the phone's own scan-list and duplicate wording.
  *
  * This module must stay free of React Native, Expo and `@/` imports: its test
  * runs under Node's test runner.
@@ -72,67 +66,6 @@ export function assetBadgeStatus(
   asset: MaybeArchived & { status: string }
 ): string {
   return isArchivedAsset(asset) ? ARCHIVED_BADGE_STATUS : asset.status;
-}
-
-/** Who is reading the reason: can they reinstate the asset themselves? */
-type ArchivedAudience = {
-  /** True for members holding `asset: archive` (admins and owners). */
-  canReinstate: boolean;
-};
-
-/**
- * Why an archived asset's actions are off, for its own screen.
- *
- * @param audience - Whether the reader can reinstate it
- * @returns One sentence for the notice and the disabled actions' hint
- */
-export function archivedAssetReason({ canReinstate }: ArchivedAudience) {
-  return canReinstate
-    ? "This asset is archived. Reinstate it to make changes."
-    : "This asset is archived. Ask an admin to reinstate it.";
-}
-
-/** How many archived assets a reason names before summarising the rest. */
-const NAMED_IN_REASON = 3;
-
-/**
- * Names for a sentence: `"A"`, `"A" and "B"`, `"A", "B", "C" and 2 more`.
- *
- * @param titles - At least one asset title
- * @returns The quoted list
- */
-function quotedTitles(titles: string[]): string {
-  const named = titles.slice(0, NAMED_IN_REASON).map((title) => `"${title}"`);
-  const rest = titles.length - named.length;
-  if (rest > 0) return `${named.join(", ")} and ${rest} more`;
-  if (named.length === 1) return named[0];
-  return `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
-}
-
-/**
- * Why a draft booking that holds archived assets cannot be reserved. Names
- * the assets, so they can be found in a long list.
- *
- * Removing them is always offered: anyone who can edit the booking can do
- * that, while reinstating is for admins only. Same words as the web's
- * "remove from booking" refusal (`archivedAssetsRefusal` with
- * `fix: "remove-from-booking"` in `@shelf/labels`).
- *
- * @param titles - Titles of the archived assets the booking holds
- * @param audience - Whether the reader can reinstate them
- * @returns The reason shown above the disabled Reserve button
- */
-export function archivedAssetsInBookingReason(
-  titles: string[],
-  { canReinstate }: ArchivedAudience
-) {
-  const them = titles.length === 1 ? "it" : "them";
-  const subject = `${quotedTitles(titles)} ${
-    titles.length === 1 ? "is" : "are"
-  } archived.`;
-  return canReinstate
-    ? `${subject} Remove ${them} from the booking or reinstate ${them}.`
-    : `${subject} Remove ${them} from the booking or ask an admin to reinstate ${them}.`;
 }
 
 /**
