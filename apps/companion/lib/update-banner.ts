@@ -88,24 +88,29 @@ export function shouldShowUpdateBanner({
 }
 
 /**
- * The later of two dismissals.
+ * How long a server's answer stays fresh when the app returns to the foreground.
  *
- * A check reads the stored dismissal before its network request and applies
- * both when the request finishes. A tap on X in between must survive that, so
- * the result is merged with the dismissal already in memory, never swapped in.
- *
- * @param a - A dismissed version, or null.
- * @param b - A dismissed version, or null.
- * @returns Whichever is newer; the readable one when only one parses; `a` when
- *   neither does.
+ * Long-lived installs rarely cold-start, so the launch check alone would let a
+ * newly advertised version wait for days. An hour keeps that to one request per
+ * session-ish, not one per app switch.
  */
-export function laterDismissal(
-  a: string | null,
-  b: string | null
-): string | null {
-  if (!a) return b;
-  if (!b) return a;
-  const order = compareAppVersions(a, b);
-  if (order === null) return compareAppVersions(b, b) === null ? a : b;
-  return order >= 0 ? a : b;
+export const UPDATE_BANNER_RECHECK_MS = 60 * 60 * 1000;
+
+/**
+ * Whether returning to the foreground should ask the server again.
+ *
+ * @param answeredAt - When the active server last answered, in epoch ms; `0`
+ *   when it has not answered since the app started or the server changed.
+ * @param now - The current time in epoch ms.
+ * @returns `true` when there is no answer yet (so a failed launch check is
+ *   retried) or the last one is older than `UPDATE_BANNER_RECHECK_MS`.
+ */
+export function isUpdateCheckDue({
+  answeredAt,
+  now,
+}: {
+  answeredAt: number;
+  now: number;
+}): boolean {
+  return answeredAt === 0 || now - answeredAt >= UPDATE_BANNER_RECHECK_MS;
 }

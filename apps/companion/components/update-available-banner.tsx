@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, Text, View } from "react-native";
+import { AppState, Pressable, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -12,10 +12,11 @@ import { createStyles } from "@/lib/create-styles";
 import { getAppVersion, openAppStore } from "@/lib/app-update";
 import {
   fetchLatestCompanionVersion,
+  getActiveServer,
   subscribeToServerChange,
 } from "@/lib/server";
 import {
-  laterDismissal,
+  isUpdateCheckDue,
   shouldShowUpdateBanner,
   UPDATE_BANNER_DISMISSED_KEY,
 } from "@/lib/update-banner";
@@ -80,8 +81,10 @@ async function readDismissedVersion(): Promise<string | null> {
  * children only while it shows would remount the whole navigator and drop the
  * user's place in the app.
  *
- * Checked at launch and after each server switch. Every failure (offline, an
- * old server, an unreadable version) simply shows nothing.
+ * Checked at launch, after each server change, and when the app returns to
+ * the foreground with no fresh answer (see `isUpdateCheckDue`). Every failure
+ * (offline, an old server, an unreadable version) simply shows nothing new: an
+ * answer already shown stays until the same server says otherwise.
  *
  * @see ../lib/update-banner.ts for when it shows
  */
@@ -93,34 +96,59 @@ export function UpdateAvailableBanner({ children }: { children: ReactNode }) {
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    // Only the newest check may write: a slow answer from the server the user
-    // just left must not overwrite the one they switched to.
-    let latestRequest = 0;
+    let mounted = true;
+
+    // Storage is read once. After that, state is the source of truth: `dismiss`
+    // writes both, and a tap on X always names a version newer than anything
+    // stored, because the banner only shows for a version not yet dismissed.
+    void readDismissedVersion().then((stored) => {
+      if (mounted) setDismissedVersion((current) => current ?? stored);
+    });
+
+    // The server the current answer belongs to, and when it gave it (0: none).
+    let answeredBaseUrl = getActiveServer().baseUrl;
+    let answeredAt = 0;
+
     const check = () => {
-      const request = ++latestRequest;
-      // The answer belongs to the server that gave it: drop it while the
-      // active server is asked, so a switch never shows the last one's banner.
-      setLatestVersion(null);
-      void Promise.all([
-        fetchLatestCompanionVersion(),
-        readDismissedVersion(),
-      ]).then(([latest, dismissed]) => {
-        if (request !== latestRequest) return;
+      const { baseUrl } = getActiveServer();
+      if (baseUrl !== answeredBaseUrl) {
+        // A different server: the last answer is not this one's to show.
+        // Credential refreshes and renames keep the URL, and the answer.
+        answeredBaseUrl = baseUrl;
+        answeredAt = 0;
+        setLatestVersion(null);
+      }
+      void fetchLatestCompanionVersion().then((latest) => {
+        // Drop an answer from a server the user has since left, and a failed
+        // request, which says nothing about the version.
+        if (!mounted || latest === undefined) return;
+        if (getActiveServer().baseUrl !== baseUrl) return;
+        answeredAt = Date.now();
         setLatestVersion(latest);
-        // Merge, never replace: the user may have tapped X while this check
-        // was waiting on the network, after it had already read storage.
-        setDismissedVersion((current) => laterDismissal(current, dismissed));
       });
     };
+
     check();
     const unsubscribe = subscribeToServerChange(check);
+    const appState = AppState.addEventListener("change", (state) => {
+      if (
+        state === "active" &&
+        isUpdateCheckDue({ answeredAt, now: Date.now() })
+      )
+        check();
+    });
     return () => {
-      latestRequest += 1;
+      mounted = false;
       unsubscribe();
+      appState.remove();
     };
   }, []);
 
   const visible = shouldShowUpdateBanner({
+    // The running bundle's version, which after an OTA comes from the update.
+    // That is still the binary's version: `scripts/check-version-sync.mjs`
+    // keeps `version` equal to `runtimeVersion`, and an update only reaches
+    // binaries with the same runtime version.
     appVersion: getAppVersion(),
     latestVersion,
     dismissedVersion,

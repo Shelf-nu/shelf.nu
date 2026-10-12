@@ -134,35 +134,52 @@ async function askRegistry(domain: string): Promise<RegistryAnswer> {
   }
 }
 
+/** In-flight `/api/mobile/config` requests, keyed by normalised base URL. */
+const configRequests = new Map<string, Promise<unknown>>();
+
+/**
+ * Fetches a server's raw `/api/mobile/config` body.
+ *
+ * Callers asking the same server at the same time share one request: at launch
+ * the config refresh and the update banner both want this endpoint, and on a
+ * slow VPN each request can take the full timeout.
+ *
+ * @param baseUrl - A normalised base URL.
+ * @returns The parsed JSON, or `undefined` when the server could not be reached
+ *   or answered with an error status. Never rejects.
+ */
+function requestConfigJson(baseUrl: string): Promise<unknown> {
+  const pending = configRequests.get(baseUrl);
+  if (pending) return pending;
+
+  const request = fetchWithTimeout(
+    `${baseUrl}/api/mobile/config`,
+    { method: "GET", headers: { accept: "application/json" } },
+    CONFIG_TIMEOUT_MS,
+    async (response): Promise<unknown> =>
+      response.ok ? await response.json() : undefined
+  )
+    .catch(() => undefined)
+    .finally(() => configRequests.delete(baseUrl));
+  configRequests.set(baseUrl, request);
+  return request;
+}
+
 /**
  * Fetches and validates a server's self-description.
  *
  * @param baseUrl - The candidate server's base URL.
  * @returns The parse result, or `null` when the server could not be contacted
- *   at all — a distinct case from a server that answered with something
+ *   at all. That is a distinct case from a server that answered with something
  *   invalid, and one `decideServerConnection` reports differently.
  */
 async function fetchServerConfig(
   baseUrl: string
 ): Promise<ConfigParseResult | null> {
-  try {
-    return await fetchWithTimeout(
-      `${normalizeBaseUrl(baseUrl)}/api/mobile/config`,
-      { method: "GET", headers: { accept: "application/json" } },
-      CONFIG_TIMEOUT_MS,
-      async (response) => {
-        if (!response.ok) return null;
-        const json: unknown = await response.json();
-        return parseServerConfigResponse(
-          json,
-          normalizeBaseUrl(baseUrl),
-          false
-        );
-      }
-    );
-  } catch {
-    return null;
-  }
+  const normalized = normalizeBaseUrl(baseUrl);
+  const json = await requestConfigJson(normalized);
+  if (json === undefined) return null;
+  return parseServerConfigResponse(json, normalized, false);
 }
 
 /**
@@ -273,23 +290,20 @@ export async function refreshActiveServerConfig(): Promise<void> {
  * purpose, because the banner needs one field and a response that parser
  * rejects can still carry it.
  *
- * @returns The advertised version, or `null` on any failure: offline, an
- *   error status, a body that is not JSON, or a server that predates the field.
+ * @returns The advertised version; `null` when the server answered without one
+ *   (unset, unreadable, or a server that predates the field); `undefined` when
+ *   it could not be asked at all (offline, timeout, an error status). The
+ *   banner keeps its last answer on `undefined`, so a failed retry never hides
+ *   a banner a successful check already found.
  */
-export async function fetchLatestCompanionVersion(): Promise<string | null> {
-  try {
-    return await fetchWithTimeout(
-      `${getActiveServer().baseUrl}/api/mobile/config`,
-      { method: "GET", headers: { accept: "application/json" } },
-      CONFIG_TIMEOUT_MS,
-      async (response) => {
-        if (!response.ok) return null;
-        return parseLatestCompanionVersion(await response.json());
-      }
-    );
-  } catch {
-    return null;
-  }
+export async function fetchLatestCompanionVersion(): Promise<
+  string | null | undefined
+> {
+  const json = await requestConfigJson(
+    normalizeBaseUrl(getActiveServer().baseUrl)
+  );
+  if (json === undefined) return undefined;
+  return parseLatestCompanionVersion(json);
 }
 
 /**
