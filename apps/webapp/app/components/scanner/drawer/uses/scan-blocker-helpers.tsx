@@ -119,6 +119,21 @@ export function kitIdsWithOnlyArchivedAssetsOf(kits: KitFromQr[]): string[] {
 }
 
 /**
+ * Whether a scanned kit holds an active member marked unavailable to book.
+ * Archived members are skipped: bookings leave them out of the kit, so their
+ * own `availableToBook` says nothing about whether the kit can be booked or
+ * checked out.
+ *
+ * @param kit - The scanned kit payload
+ * @returns `true` when some member that would be booked is unavailable
+ */
+export function kitHasUnavailableActiveMember(kit: KitFromQr): boolean {
+  return kit.assetKits.some(
+    (ak) => !ak.asset.archivedAt && !ak.asset.availableToBook
+  );
+}
+
+/**
  * The invalid-code blocker, identical on every drawer.
  *
  * @param errorQrIds - Codes that failed to resolve

@@ -24,6 +24,7 @@ import {
   assetsOf,
   errorQrIdsOf,
   invalidCodesBlocker,
+  kitHasUnavailableActiveMember,
   kitIdsWithOnlyArchivedAssetsOf,
   kitsOf,
   kitsOnlyArchivedBlocker,
@@ -131,9 +132,7 @@ export function buildAddToBookingBlockers({
 
   const qrIdsOfKitsWithUnavailableAssets = qrIdsForKitIds(
     items,
-    kits
-      .filter((kit) => kit.assetKits.some((ak) => !ak.asset.availableToBook))
-      .map((kit) => kit.id)
+    kits.filter(kitHasUnavailableActiveMember).map((kit) => kit.id)
   );
 
   const checkedOutAssetsIds = assets
