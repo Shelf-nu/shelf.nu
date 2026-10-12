@@ -23,6 +23,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createActionArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
   requireMobileAuth,
@@ -53,6 +54,12 @@ vi.mock("~/database/db.server", () => ({
 }));
 
 // why: JWT validation, org-membership resolution and the permission gate are
+// why: the archived pre-check is a database read. These cases are about
+// other rules, so no requested asset is archived unless a test says so.
+vi.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vi.fn().mockResolvedValue(null),
+}));
+
 // out of scope; the rest of the module stays real.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
@@ -527,5 +534,31 @@ describe("POST /api/mobile/bookings/add-scanned-assets: who may add", () => {
     await postAs([OrganizationRoles.SELF_SERVICE]);
 
     expect(serviceCall().assetIds).toEqual(["asset-9"]);
+  });
+});
+
+describe("POST /api/mobile/bookings/add-scanned-assets: archived assets", () => {
+  it("names the archived assets and adds nothing when the scan holds one", async () => {
+    // The phone marks only the rows the server names, so the ids must reach it.
+    assetsExist(["asset-1", "asset-2"]);
+    const refusal = {
+      message:
+        "Some scanned assets are archived and can't be added to a booking. Reinstate them first.",
+      reason: "archived" as const,
+      archivedAssetIds: ["asset-2"],
+    };
+    vi.mocked(findMobileArchivedRefusal).mockResolvedValueOnce(refusal);
+
+    const response = await post({ assetIds: ["asset-1", "asset-2"] });
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(400);
+    expect(response.data).toEqual({ error: refusal });
+    expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      purpose: "booking",
+    });
+    expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
   });
 });

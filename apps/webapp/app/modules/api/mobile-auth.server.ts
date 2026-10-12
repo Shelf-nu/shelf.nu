@@ -467,6 +467,9 @@ export const MOBILE_ASSET_SELECT = {
   ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // Archived assets are read-only and out of service. The companion shows one
+  // "Archived" badge instead of the live status and turns their actions off.
+  archivedAt: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
   // booking's outstanding BookingModelRequests. Without the model id the
   // client cannot tell a matching unit from an off-model one, and can only
@@ -626,6 +629,12 @@ export type MobileAssetResponse = {
    */
   imageSource: AssetImageSource;
   availableToBook: boolean;
+  /**
+   * When the asset was archived, `null` while it is active. Archived assets
+   * are read-only: the companion badges them "Archived" and offers no action
+   * the server would refuse.
+   */
+  archivedAt: Date | null;
   category: { name: string } | null;
   kitId: string | null;
   kit: { id: string; name: string } | null;
@@ -693,6 +702,7 @@ export function shapeMobileAssetResponse(asset: {
   mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
+  archivedAt: Date | null;
   category: { name: string } | null;
   type: AssetType;
   quantity: number | null;

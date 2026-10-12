@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -82,6 +83,29 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       getAuditScans({ auditSessionId: auditId, organizationId }),
     ]);
 
+    // Which of the audit's assets are archived, so the app can badge those
+    // rows. One extra read keyed on ids the two calls above already returned.
+    const auditedAssetIds = [
+      ...new Set([
+        ...expectedAssets.map((a) => a.id),
+        ...scans.flatMap((s) => (s.assetId ? [s.assetId] : [])),
+      ]),
+    ];
+    const archivedAtById = new Map(
+      auditedAssetIds.length === 0
+        ? []
+        : (
+            await db.asset.findMany({
+              where: {
+                id: { in: auditedAssetIds },
+                organizationId,
+                archivedAt: { not: null },
+              },
+              select: { id: true, archivedAt: true },
+            })
+          ).map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
+    );
+
     // why: completing is assignee-gated server-side (requireAuditAssignee in
     // audits.complete.ts): callers who see every audit may complete any
     // audit, everyone else only when assigned. Encode that eligibility in
@@ -141,6 +165,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         locationName: a.locationName ?? null,
         categoryName: a.categoryName ?? null,
         custodianName: a.custodianName ?? null,
+        // The app shows an "Archived" badge on the row. Null while active.
+        archivedAt: archivedAtById.get(a.id) ?? null,
       })),
       existingScans: scans.map((s) => ({
         id: s.id,
@@ -155,6 +181,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // why: lets the app say "deleted" instead of inferring it from an
         // empty title, which is also what a pre-snapshot row looks like.
         assetDeleted: s.assetDeleted,
+        archivedAt: s.assetId ? archivedAtById.get(s.assetId) ?? null : null,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),

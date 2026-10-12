@@ -42,6 +42,12 @@ vi.mock("react-router", async () => {
 });
 
 // why: auth and org access are proven elsewhere; each case here picks the
+// why: the archived pre-check is a database read. These cases are about
+// other rules, so no requested asset is archived unless a test says so.
+vi.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vi.fn().mockResolvedValue(null),
+}));
+
 // caller's roles through `getMobileUserContext`.
 vi.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vi.fn(),

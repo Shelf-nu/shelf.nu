@@ -4,6 +4,7 @@ import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
   getMobileAssetForViewer,
+  MOBILE_ASSET_SELECT,
   requireMobileAuth,
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
@@ -98,6 +99,7 @@ const baseAsset = {
     thumbnailImage: string | null;
   } | null,
   availableToBook: true,
+  archivedAt: null as Date | null,
   category: null,
   type: "INDIVIDUAL" as const,
   quantity: null,
@@ -245,6 +247,21 @@ describe("shapeMobileAssetResponse", () => {
     expect(result.mainImage).toBeNull();
     expect(result.thumbnailImage).toBeNull();
     expect(result.imageSource).toBe("placeholder");
+  });
+
+  // The companion badges an archived asset and turns its actions off; it can
+  // only do that if the stamp survives the shaper.
+  it("passes archivedAt through, null for an active asset", () => {
+    const archivedAt = new Date("2026-10-09T13:44:00.000Z");
+
+    expect(shapeMobileAssetResponse(baseAsset).archivedAt).toBeNull();
+    expect(
+      shapeMobileAssetResponse({ ...baseAsset, archivedAt }).archivedAt
+    ).toEqual(archivedAt);
+  });
+
+  it("selects archivedAt in MOBILE_ASSET_SELECT", () => {
+    expect(MOBILE_ASSET_SELECT).toMatchObject({ archivedAt: true });
   });
 
   it("preserves top-level fields (mainImage, availableToBook, category) via ...rest", () => {

@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -90,6 +91,17 @@ export async function action({ request }: ActionFunctionArgs) {
     }
 
     const { assetIds, custodianId, quantities } = parsed.data;
+
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+      purpose: "change",
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
     const { quantityAssetIds, bulkAssetIds } = splitQuantityAssetIds(
       assetIds,
       quantities

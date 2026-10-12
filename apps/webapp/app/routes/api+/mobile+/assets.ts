@@ -192,6 +192,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
             thumbnailImage: true,
             // why: powers the scan-to-booking "not available to book" blocker.
             availableToBook: true,
+            // Always null here (the list hides archived assets), selected so
+            // every row carries the same shape as `MOBILE_ASSET_SELECT`.
+            archivedAt: true,
             // Quantity fields (additive) — mirror `MOBILE_ASSET_SELECT` so the
             // helper's now-required quantity scalars are satisfied and the
             // companion list can DISPLAY quantity. Null for INDIVIDUAL assets.

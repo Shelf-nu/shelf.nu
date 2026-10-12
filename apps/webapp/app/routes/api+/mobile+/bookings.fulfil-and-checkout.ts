@@ -2,6 +2,7 @@ import { BOOKING_METHOD } from "@shelf/labels";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -137,6 +138,17 @@ export async function action({ request }: ActionFunctionArgs) {
     // booking answers 404. Judged by the caller's access (its effective role),
     // like the loader's `canQuickCheckout`. Under the requirement only the scanned
     // units are checked out.
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+      purpose: "booking",
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
+
     const bookingSettings =
       await getBookingSettingsForOrganization(organizationId);
     const requireExplicitCheckout = isExplicitScanRequired({

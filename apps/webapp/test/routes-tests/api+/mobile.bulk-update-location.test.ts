@@ -26,6 +26,12 @@ vitest.mock("react-router", async () => {
   };
 });
 
+// why: the archived pre-check is a database read. These cases are about
+// other rules, so no requested asset is archived unless a test says so.
+vitest.mock("~/modules/api/mobile-archived.server", () => ({
+  findMobileArchivedRefusal: vitest.fn().mockResolvedValue(null),
+}));
+
 // why: external auth — we don't want to hit Supabase in tests
 vitest.mock("~/modules/api/mobile-auth.server", () => ({
   requireMobileAuth: vitest.fn(),
@@ -66,6 +72,7 @@ import {
   getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { bulkUpdateAssetLocation } from "~/modules/asset/service.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 
 const mockUser = {
   id: "user-1",
@@ -151,5 +158,33 @@ describe("POST /api/mobile/bulk-update-location", () => {
     expect((result as unknown as Response).status).toBe(403);
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("Permission denied");
+  });
+
+  it("names the archived assets and moves nothing when the scan holds one", async () => {
+    // The phone marks only the rows the server names, so the ids must reach it.
+    const refusal = {
+      message:
+        "Archived assets are read-only. Reinstate them before making changes.",
+      reason: "archived" as const,
+      archivedAssetIds: ["asset-2"],
+    };
+    (findMobileArchivedRefusal as any).mockResolvedValueOnce(refusal);
+
+    const request = createBulkUpdateLocationRequest({
+      assetIds: ["asset-1", "asset-2"],
+      locationId: "location-1",
+    });
+    const result = (await action(
+      createActionArgs({ request })
+    )) as unknown as Response;
+
+    expect(result.status).toBe(400);
+    expect(await result.json()).toEqual({ error: refusal });
+    expect(findMobileArchivedRefusal).toHaveBeenCalledWith({
+      assetIds: ["asset-1", "asset-2"],
+      organizationId: "org-1",
+      purpose: "change",
+    });
+    expect(bulkUpdateAssetLocation).not.toHaveBeenCalled();
   });
 });
