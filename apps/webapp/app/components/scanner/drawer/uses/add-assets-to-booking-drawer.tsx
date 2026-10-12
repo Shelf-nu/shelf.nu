@@ -45,6 +45,7 @@ import {
   buildAddToBookingBlockers,
   resolveScannedUnitsAvailable,
 } from "./booking-scan-blockers";
+import { kitHasUnavailableActiveMember } from "./scan-blocker-helpers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
@@ -571,7 +572,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
-      kit.assetKits.some((ak) => !ak.asset.availableToBook)
+      kitHasUnavailableActiveMember(kit)
     ),
     // Custom preset for "already checked out" - only show when booking is checked out
     {

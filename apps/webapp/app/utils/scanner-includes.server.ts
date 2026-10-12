@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import type { AssetImageSource } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 
 /**
  * The custodian fields every scanner row renders a holder with.
@@ -118,9 +119,7 @@ export const KIT_INCLUDE = {
   // The "(N assets)" a scanned kit row shows: active members, since archived
   // ones are left out of kit custody and bookings. `assetKits` below keeps
   // them, so the server can leave them out and say so.
-  _count: {
-    select: { assetKits: { where: { asset: { archivedAt: null } } } },
-  },
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   assetKits: {
     select: {
       // Scanner needs the AssetKit's own id so kit-driven

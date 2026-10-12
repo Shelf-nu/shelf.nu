@@ -43,6 +43,12 @@ import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
 import {
+  archivedAssetsInBookingReason,
+  assetBadgeStatus,
+  droppedArchivedNote,
+  isArchivedAsset,
+} from "@/lib/archived-assets";
+import {
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
   mayRemoveBookingItemsAsCustodian,
@@ -897,6 +903,10 @@ export default function BookingDetailScreen() {
             markBookingsListDirty();
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
+            // Archived assets cannot be booked, so the copy left them out.
+            // Say so instead of letting the copy look complete.
+            const droppedNote = droppedArchivedNote(dup.droppedArchivedCount);
+            if (droppedNote) Alert.alert("Some assets left out", droppedNote);
           },
         },
       ]
@@ -1113,10 +1123,17 @@ export default function BookingDetailScreen() {
               bookingStatus: booking?.status ?? "",
             })
           : null;
-      const badge = qtState
-        ? bookingStatusBadge[qtState.key] ?? fallbackBadge
-        : statusBadge[item.status] ?? fallbackBadge;
-      const stateLabel = qtState ? qtState.label : formatStatus(item.status);
+      // An archived row reads "Archived" whatever its type: it is out of
+      // service, which matters more here than any booking-scoped state.
+      const isArchived = isArchivedAsset(item);
+      const badge =
+        qtState && !isArchived
+          ? bookingStatusBadge[qtState.key] ?? fallbackBadge
+          : statusBadge[assetBadgeStatus(item)] ?? fallbackBadge;
+      const stateLabel =
+        qtState && !isArchived
+          ? qtState.label
+          : formatStatus(assetBadgeStatus(item));
       const isCheckedIn = checkedInAssetIds.includes(item.id);
       // A member of a picked kit reads as selected too, which shows what the
       // kit's one tick covers — in check-in mode, only the members still out.
@@ -1384,26 +1401,39 @@ export default function BookingDetailScreen() {
   } ${describeSelection(selectionCounts)}`;
 
   /**
-   * Why Reserve is unavailable, or null when it is fine. Mirrors all THREE of
-   * the web form's disable rules so the app never offers a tap the server
-   * refuses: a booking with neither assets nor model reservations reserves
-   * nothing, an asset flagged unavailable is unavailable on either surface,
-   * and an asset already booked for this window conflicts on either surface.
+   * Why Reserve is unavailable, or null when it is fine, so the app never
+   * offers a tap the server refuses: a booking with neither assets nor model
+   * reservations reserves nothing; an archived asset (archived after it was
+   * added to this draft) cannot be booked; an asset flagged unavailable is
+   * unavailable on either surface; and an asset already booked for this
+   * window conflicts on either surface.
    *
-   * The first two are decided from rows this screen already holds. The third
-   * cannot be — it needs the overlapping-booking query — so the server sends
-   * it as a flag. `?? false` reads a server that does not send the flag
-   * (rolling deploy) as reporting no conflict, rather than blocking Reserve.
+   * The first three are decided from rows this screen already holds. The last
+   * cannot be: it needs the overlapping-booking query, so the server sends it
+   * as a flag. `?? false` reads a server that does not send the flag (rolling
+   * deploy) as reporting no conflict, rather than blocking Reserve.
    *
-   * All three are enforced server-side too: the first two in
-   * `bookings.reserve.ts`, the third by `reserveBooking`'s race-safe conflict
-   * check, which names the offending assets.
+   * All four are enforced server-side too: the empty and unavailable rules in
+   * `bookings.reserve.ts`, the archived rule by `reserveBooking`'s archived
+   * guard, and the conflict by its race-safe conflict check.
    *
-   * `booking` is non-null here — the early return above already handled it.
+   * `booking` is non-null here: the early return above already handled it.
    */
+  const archivedAssetTitles = booking.assets
+    .filter(isArchivedAsset)
+    .map((asset) => asset.title);
   const reserveBlockedReason: string | null =
     booking.assetCount === 0 && (booking.modelRequestCount ?? 0) === 0
       ? BOOKING_RESERVE_BLOCKED_LABELS.NOTHING_TO_RESERVE
+      : archivedAssetTitles.length > 0
+      ? archivedAssetsInBookingReason(archivedAssetTitles, {
+          // Reinstating uses the web's archive grant (admins and owners).
+          canReinstate: userHasPermission({
+            roles: currentOrg?.roles,
+            entity: "asset",
+            action: "archive",
+          }),
+        })
       : booking.assets.some((a) => a.availableToBook === false)
       ? BOOKING_RESERVE_BLOCKED_LABELS.UNAVAILABLE_ASSETS
       : booking.hasAlreadyBookedAssets ?? false

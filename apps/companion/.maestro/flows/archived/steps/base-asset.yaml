@@ -1,0 +1,34 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: an archived asset seen by a Base member, who can read it but change
+# nothing. The badge and notice say it is archived, and the notice tells them
+# to ask an admin (they cannot reinstate it). No login (see ../02-base.yaml).
+
+- openLink: "shelf://assets/${SHELF_TEST_ARCHIVED_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "This asset is archived. Ask an admin to reinstate it."
+    timeout: 20000
+- assertVisible: "Archived"
+- assertNotVisible: "Available"
+- assertNotVisible: "Reinstate asset"
+- assertNotVisible: "Assign custody of asset"
+- assertNotVisible: "Take custody of asset"
+- takeScreenshot: archived-base-asset
+
+# The scanner's View mode reads it as archived too.
+- openLink: "shelf://scanner"
+- extendedWaitUntil:
+    visible: "Scanner action: View.*"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ARCHIVED_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "This asset is archived. Ask an admin to reinstate it."
+    timeout: 20000

@@ -44,6 +44,7 @@ import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
+import { isArchivedAsset } from "@/lib/archived-assets";
 
 // ── Asset filter pills ──────────────────────────────────
 
@@ -143,6 +144,11 @@ type DisplayAsset = {
   /** Counts from the detail payload — what the row advertises before any fetch. */
   notesCount: number;
   imagesCount: number;
+  /**
+   * The asset is archived (out of service). The row keeps its audit outcome
+   * badge and says "Archived" on its meta line.
+   */
+  archived: boolean;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -565,6 +571,7 @@ function AuditDetailContent() {
         auditAssetId: asset.auditAssetId ?? scan?.auditAssetId ?? null,
         notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
         imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
+        archived: isArchivedAsset(asset),
       });
     }
 
@@ -619,6 +626,7 @@ function AuditDetailContent() {
           auditAssetId: scan.auditAssetId,
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
+          archived: isArchivedAsset(scan),
         });
       }
     }
@@ -668,6 +676,11 @@ function AuditDetailContent() {
         icon: React.ComponentProps<typeof Ionicons>["name"];
         text: string;
       }[] = [];
+      // The audit outcome keeps the badge; that the asset is out of service
+      // leads the meta line, so it is read before where it should be.
+      if (item.archived) {
+        metaParts.push({ icon: "archive-outline", text: "Archived" });
+      }
       if (item.locationName) {
         metaParts.push({ icon: "location-outline", text: item.locationName });
       }

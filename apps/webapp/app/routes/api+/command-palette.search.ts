@@ -16,6 +16,7 @@ import {
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { getPrimaryCustody } from "~/modules/custody/utils";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import {
   redactCustodianForViewer,
   type RowWithCustody,
@@ -363,11 +364,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
               orderBy: [{ updatedAt: "desc" }, { name: "asc" }],
               include: {
                 // Archived members are out of service and not counted.
-                _count: {
-                  select: {
-                    assetKits: { where: { asset: { archivedAt: null } } },
-                  },
-                },
+                _count: KIT_ACTIVE_MEMBER_COUNT,
               },
             })
           : Promise.resolve([]),
