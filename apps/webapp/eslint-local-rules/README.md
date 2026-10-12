@@ -144,6 +144,41 @@ The rule triggers when:
 3. The `where` clause doesn't include a `deletedAt` filter
 4. **Ternary operators**: Both branches of a ternary expression are checked independently
 
+### `require-archived-at-check-on-asset-queries`
+
+**Purpose**: Make every Asset read say which side of the archive it wants.
+
+**Problem**: Archived assets (issue #382) are out of service: hidden from lists, counts, pickers and snapshot reports, and refused by bookings, kits and custody. A query that forgets the filter quietly counts or offers them again, and nothing notices: typecheck passes and the result is still a valid list.
+
+**Solution**: Every `<client>.asset.findMany / findFirst / findUnique / count / aggregate / groupBy` (and the `OrThrow` variants) with a literal `where` must name `archivedAt`. Covers `db`, `tx` and any other client identifier.
+
+#### Examples
+
+❌ **Bad**:
+
+```typescript
+const assets = await db.asset.findMany({ where: { organizationId } });
+const total = await db.asset.count();
+```
+
+✅ **Good**:
+
+```typescript
+// Active assets, the default everywhere
+db.asset.findMany({ where: { organizationId, archivedAt: null } });
+
+// Deliberately archived ones
+db.asset.findMany({ where: { organizationId, archivedAt: { not: null } } });
+
+// The query must reach archived assets too: say why
+// eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail page shows archived assets with a badge
+db.asset.findFirst({ where: { id, organizationId } });
+```
+
+**Reach archived on purpose when** the surface shows assets that are already part of a record or a physical label: the asset's own pages, a booking that holds it, a location or kit page, audits, QR/barcode scan resolution, history reports and the backup export. Also guards that read the archive state, and ID allocation (sequential ids must count archived rows).
+
+**Not checked**: a `where` built elsewhere (a variable or a helper such as `getAssetsWhereInput`, which applies the view itself), spreads inside the literal, and writes (the archived freeze in `updateAsset` and the bulk services guards those).
+
 ### `require-button-type`
 
 **Purpose**: Enforce explicit `type` prop on all `<Button>` components rendering as native buttons.
@@ -213,6 +248,63 @@ import { action } from "~/routes/api+/mobile+/qr.claim";
 ```
 
 The `*.test.server.ts` spelling is banned too — that infix only ever existed to dodge the warmup glob. The error message names the exact destination path to move the file to.
+
+### `no-direct-role-checks`
+
+**Purpose**: Every role decision goes through `@shelf/permissions`.
+
+**Problem**: A role comparison decides for the roles it names and guesses for
+the rest. A deny-list (`role === SELF_SERVICE || role === BASE`) treats any
+other role as an admin; an allow-list (`roles.includes(ADMIN)`) treats it as
+restricted. Both styles compile and pass tests, and they disagree silently as
+soon as a role is added.
+
+**Reports**: a role name (`"OWNER" | "ADMIN" | "SELF_SERVICE" | "BASE" |
+"CUSTODY_MANAGER"` or `OrganizationRoles.X`, including aliases) used as an
+operand of `===`/`!==`/`==`/`!=`, a `case` test, an argument of
+`.includes/.indexOf/.lastIndexOf/.has/.some` (or an element of the array they
+are called on), the value of a Prisma `has`, an element of a Prisma
+`hasSome/hasEvery/in/notIn/equals` array, or one of two or more role keys of an
+object literal; and any `roles[0]`.
+
+**Not reported**: role writes (`roles: [OrganizationRoles.OWNER]`,
+`set: [newRole]`), role names as object values, types.
+
+**Allowed files**: `packages/permissions/**`, parity files, tests, `test/`,
+mocks, factories, fixtures, and the effective-access probes.
+
+#### Examples
+
+❌ **Bad**:
+
+```ts
+if (
+  role === OrganizationRoles.SELF_SERVICE ||
+  role === OrganizationRoles.BASE
+) {
+}
+where: {
+  roles: {
+    hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN];
+  }
+}
+const label = organizationRolesMap[userOrg.roles[0]];
+```
+
+✅ **Good**:
+
+```ts
+if (!access.bookings.writeAll) {
+}
+where: {
+  roles: {
+    hasSome: rolesWhere((p) => p.notifications.orgBookingBroadcasts);
+  }
+}
+const label = ROLE_LABELS[resolveRole(userOrg.roles)];
+```
+
+Also enforced in `apps/companion` (its flat config imports this file).
 
 ### `no-hand-coerced-numeric-transform`
 

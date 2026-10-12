@@ -23,7 +23,7 @@ import {
   readSignupIntent,
   serializeSignupIntent,
 } from "~/modules/signup-intent/cookie.server";
-import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { action } from "~/routes/_auth+/otp";
 
@@ -36,7 +36,7 @@ vi.mock("~/modules/auth/service.server", () => ({
 // it is reached, not what it writes.
 vi.mock("~/modules/user/service.server", () => ({
   createUser: vi.fn(),
-  findUserByEmail: vi.fn(),
+  findUserById: vi.fn(),
 }));
 // why: username generation queries the database for collisions
 vi.mock("~/modules/user/utils.server", () => ({
@@ -102,7 +102,7 @@ describe("otp action — confirming the code", () => {
       userId: USER_ID,
       email: USER_EMAIL,
     } as never);
-    vi.mocked(findUserByEmail).mockResolvedValue(null);
+    vi.mocked(findUserById).mockResolvedValue(null);
     vi.mocked(generateUniqueUsername).mockResolvedValue("new-person");
     vi.mocked(createUser).mockResolvedValue({ id: USER_ID } as never);
     vi.mocked(getSelectedOrganization).mockResolvedValue({
@@ -147,7 +147,7 @@ describe("otp action — confirming the code", () => {
   });
 
   it("sends an onboarded account to the link's in-app redirectTo", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);
@@ -174,7 +174,7 @@ describe("otp action — confirming the code", () => {
   });
 
   it("sends an account that has not onboarded to /assets, whatever the redirectTo", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: false,
     } as never);
@@ -188,7 +188,7 @@ describe("otp action — confirming the code", () => {
   });
 
   it("ignores a leftover intent when the code is for a login", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);
@@ -208,7 +208,7 @@ describe("otp action — confirming the code", () => {
 
   it("never follows a redirectTo off our origin", async () => {
     // Onboarded, so the only thing keeping it on /assets is safeRedirect.
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);

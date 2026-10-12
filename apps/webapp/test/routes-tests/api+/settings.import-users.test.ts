@@ -13,6 +13,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import type { AppLoadContext } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { permissionContext } from "@helpers/role-access";
 import { createActionArgs } from "@mocks/remix";
 
 import { bulkInviteUsers } from "~/modules/invite/service.server";
@@ -84,12 +85,14 @@ describe("settings.import-users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // The route destructures only organizationId; the rest of the permission
-    // payload is irrelevant here, so it is cast to the real return type rather
-    // than reconstructed field by field.
-    vi.mocked(requirePermission).mockResolvedValue({
-      organizationId: "org-1",
-    } as Awaited<ReturnType<typeof requirePermission>>);
+    // An Administrator acting, unless a case says otherwise. The rest of the
+    // permission payload is irrelevant here, so it is cast to the real return
+    // type rather than reconstructed field by field.
+    vi.mocked(requirePermission).mockResolvedValue(
+      permissionContext({ roles: [OrganizationRoles.ADMIN] }) as Awaited<
+        ReturnType<typeof requirePermission>
+      >
+    );
     vi.mocked(assertUserCanInviteUsersToWorkspace).mockResolvedValue(undefined);
     vi.mocked(bulkInviteUsers).mockResolvedValue(
       {} as Awaited<ReturnType<typeof bulkInviteUsers>>
@@ -116,6 +119,28 @@ describe("settings.import-users", () => {
       })
     );
   });
+
+  it.each([
+    [OrganizationRoles.ADMIN, false],
+    [OrganizationRoles.OWNER, true],
+  ])(
+    "tells the service whether a %s caller owns the workspace",
+    async (role, ownsWorkspace) => {
+      vi.mocked(requirePermission).mockResolvedValue(
+        permissionContext({ roles: [role] }) as Awaited<
+          ReturnType<typeof requirePermission>
+        >
+      );
+
+      await runImport([[OrganizationRoles.BASE, "a@example.com", ""]]);
+
+      // The service refuses an owner-only role unless the caller owns the
+      // workspace, so this flag is what stands between an admin and it.
+      expect(bulkInviteUsers).toHaveBeenCalledWith(
+        expect.objectContaining({ actorOwnsWorkspace: ownsWorkspace })
+      );
+    }
+  );
 
   it("answers a refused file with a 400 carrying the row errors", async () => {
     const rowErrors = [
@@ -159,5 +184,15 @@ describe("settings.import-users", () => {
 
     expect(response.init?.status).toBe(400);
     expect(bulkInviteUsers).not.toHaveBeenCalled();
+  });
+
+  it("lets an ADMIN import non-owner-only roles", async () => {
+    const response = await runImport([
+      [OrganizationRoles.BASE, "b@example.com", ""],
+      [OrganizationRoles.SELF_SERVICE, "c@example.com", ""],
+    ]);
+
+    expect(response.init?.status).toBeUndefined();
+    expect(bulkInviteUsers).toHaveBeenCalledTimes(1);
   });
 });

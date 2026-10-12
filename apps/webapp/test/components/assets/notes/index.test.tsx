@@ -65,6 +65,7 @@ vi.mock("~/components/shared/date", () => ({
 // why: avoiding Remix loader context requirements for user data hook
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: vi.fn(() => ({
+    id: "user-carlos",
     firstName: "Carlos",
     lastName: "Virreira",
   })),
@@ -164,6 +165,41 @@ describe("Notes", () => {
     renderNotes();
 
     expect(screen.getByText("Sample")).toBeInTheDocument();
+  });
+
+  it("offers the note menu only on the viewer's own notes", () => {
+    useLoaderDataMock.mockReturnValue(
+      makeLoaderData({
+        items: [
+          {
+            id: "note-own",
+            content: "Mine",
+            type: "COMMENT",
+            createdAt: new Date(),
+            userId: "user-carlos",
+            user: { firstName: "Carlos", lastName: "Virreira" },
+          },
+          {
+            id: "note-other",
+            content: "Someone else's",
+            type: "COMMENT",
+            createdAt: new Date(),
+            userId: "user-other",
+            user: { firstName: "Ana", lastName: "Lopez" },
+          },
+        ],
+        totalItems: 2,
+      })
+    );
+
+    const { container } = renderNotes();
+
+    const menus = container.querySelectorAll('[aria-haspopup="menu"]');
+    expect(menus).toHaveLength(1);
+    const ownNote = screen.getByText("Mine").closest("li");
+    expect(ownNote?.querySelector('[aria-haspopup="menu"]')).not.toBeNull();
+    const otherNote = screen.getByText("Someone else's").closest("li");
+    expect(otherNote?.querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
   it("shows the empty state when the asset has no notes and no active filter", () => {

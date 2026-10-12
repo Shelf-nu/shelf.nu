@@ -12,7 +12,7 @@ import Icon from "~/components/icons/icon";
 import { ChevronRight } from "~/components/icons/library";
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -39,7 +39,7 @@ const ConditionalActionsDropdown = ({
   assetCount,
   fullWidth,
 }: Props) => {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const hasChildLocations = (location.childCount ?? 0) > 0;
   const { ref: popoverContentRef, open, setOpen } = useControlledDropdownMenu();
   const [isStartAuditOpen, setIsStartAuditOpen] = useState(false);

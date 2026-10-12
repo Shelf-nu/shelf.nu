@@ -13,7 +13,7 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
@@ -314,12 +314,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"QR codes on PDFs"}
+          rowLabel={"Code images on PDFs"}
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether the QR image is printed on the booking checklist
-              and the audit receipt.
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
             </p>
           }
         >
@@ -342,16 +342,15 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showQrCodesOnPdfs"
                 className="cursor-pointer text-[14px] font-medium text-gray-700"
               >
-                Print QR codes on PDFs
+                Print code images on PDFs
               </label>
               <p
                 id="showQrCodesOnPdfs-desc"
                 className="text-[14px] text-gray-600"
               >
-                Turn this off when people should scan the label on the item
-                itself. A printed sheet carries the same codes, so it can be
-                scanned instead of walking to the equipment. The code still
-                prints as text either way.
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -586,7 +585,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -748,7 +747,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);

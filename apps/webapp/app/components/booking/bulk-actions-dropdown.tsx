@@ -4,7 +4,8 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isBookingArchivable } from "~/modules/booking/helpers";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -50,8 +51,8 @@ export default function BulkActionsDropdown() {
 function ConditionalDropdown() {
   const selectedBookings = useAtomValue(selectedBulkItemsAtom);
 
-  const someBookingInDraft = selectedBookings.some(
-    (booking) => booking.status === "DRAFT"
+  const everyBookingInDraft = selectedBookings.every(
+    (booking) => booking.status === BookingStatus.DRAFT
   );
 
   /**
@@ -74,7 +75,8 @@ function ConditionalDropdown() {
     ].includes(b.status as any)
   );
 
-  const { isBase, roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
 
   const navigation = useNavigation();
   const isLoading = isFormProcessing(navigation.state);
@@ -89,8 +91,11 @@ function ConditionalDropdown() {
 
   const archiveDisabled = !allBookingsArchivable || !canArchiveBooking;
 
-  /** Base users dont have permissions to delete bookings unless they are draft */
-  const deleteDisabled = (isBase && !someBookingInDraft) || isBase || isLoading;
+  // Members held to drafts may bulk-delete only a selection of drafts; the
+  // server refuses anything else. Loading is handled by the trigger's own
+  // fallback, so this flag carries only the drafts-only reason.
+  const deleteDisabled =
+    roleAccess.policy.bookings.deleteOnlyDrafts && !everyBookingInDraft;
 
   const {
     ref: dropdownRef,

@@ -221,11 +221,11 @@ interface BookingFormSchemaParams {
     maxBookingLengthSkipClosedDays: boolean; // Whether to skip closed days in max booking length calculation
   };
   /**
-   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
-   * This should be set to true for ADMIN and OWNER users who should be able to
-   * create bookings without time restrictions.
+   * When true, buffer-start and maximum-length restrictions are skipped:
+   * `bookings.bypassTimeLimits` of the caller's policy. Working-hours
+   * restrictions still apply.
    */
-  isAdminOrOwner?: boolean;
+  bypassTimeLimits?: boolean;
 }
 
 /**
@@ -239,7 +239,7 @@ interface BookingFormSchemaParams {
  */
 export type BookingDateSchemaParams = Pick<
   BookingFormSchemaParams,
-  "prefs" | "workingHours" | "bookingSettings" | "isAdminOrOwner"
+  "prefs" | "workingHours" | "bookingSettings" | "bypassTimeLimits"
 >;
 
 /**
@@ -252,12 +252,12 @@ export type BookingDateSchemaParams = Pick<
  * the duplicate dialog validates dates with exactly the same rules — same Zod
  * issue codes, messages, and error paths — as the new-booking form.
  *
- * For ADMIN/OWNER callers (`isAdminOrOwner`), the buffer-start and max-length
+ * When `bypassTimeLimits` is set, the buffer-start and max-length
  * restrictions are bypassed; working-hours restrictions still apply when
  * enabled.
  *
  * @param params - The resolved format prefs, raw working hours, booking
- *   settings, and admin/owner flag. See {@link BookingDateSchemaParams}.
+ *   settings, and time-limit bypass flag. See {@link BookingDateSchemaParams}.
  * @returns The `startDateSchema`, `endDateSchema`, and `crossFieldDateValidation`
  *   refinement, ready to compose into a `z.object(...).superRefine(...)`.
  */
@@ -265,15 +265,15 @@ function buildBookingDateSchemas({
   prefs,
   workingHours: rawWorkingHours,
   bookingSettings,
-  isAdminOrOwner = false,
+  bypassTimeLimits = false,
 }: BookingDateSchemaParams) {
   const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
     bookingSettings;
 
-  // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
-  // They can still be restricted by working hours if enabled
-  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
-  const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
+  // When `bypassTimeLimits` is set, the buffer and max length are skipped.
+  // Working hours still restrict the dates when enabled.
+  const effectiveBufferStartTime = bypassTimeLimits ? 0 : bufferStartTime;
+  const effectiveMaxBookingLength = bypassTimeLimits ? null : maxBookingLength;
 
   // Transform and validate working hours data
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -281,7 +281,7 @@ function buildBookingDateSchemas({
   // Create enhanced date schemas with working hours and buffer validation
   const startDateSchema = coerceLocalDate(prefs.timeZone).superRefine(
     (data, ctx) => {
-      // 1. Validate future date with buffer (skipped for ADMIN/OWNER when effectiveBufferStartTime is 0)
+      // 1. Validate future date with buffer (skipped under `bypassTimeLimits`, where effectiveBufferStartTime is 0)
       const futureValidation = validateFutureDate(
         data,
         effectiveBufferStartTime,
@@ -341,7 +341,7 @@ function buildBookingDateSchemas({
       });
     }
 
-    // Validate maximum booking length if configured (skipped for ADMIN/OWNER when effectiveMaxBookingLength is null)
+    // Validate maximum booking length if configured (skipped under `bypassTimeLimits`, where effectiveMaxBookingLength is null)
     if (effectiveMaxBookingLength && data.endDate && data.startDate) {
       const startDate = new Date(data.startDate);
       const endDate = new Date(data.endDate);
@@ -404,8 +404,8 @@ function buildBookingDateSchemas({
  * @param params.workingHours - The org's working-hours config (normalized
  *   internally) used to validate start/end dates.
  * @param params.bookingSettings - Buffer, tag-required, and max-length settings.
- * @param params.isAdminOrOwner - When true, buffer/max-length restrictions are
- *   bypassed (working-hours restrictions still apply).
+ * @param params.bypassTimeLimits - When true, buffer/max-length restrictions
+ *   are bypassed (working-hours restrictions still apply).
  * @returns A Zod schema (with cross-field date refinement) for the booking form,
  *   shaped per the given `action`/`status`.
  */
@@ -415,7 +415,7 @@ export function BookingFormSchema({
   status,
   workingHours: rawWorkingHours,
   bookingSettings,
-  isAdminOrOwner = false,
+  bypassTimeLimits = false,
 }: BookingFormSchemaParams) {
   const { tagsRequired } = bookingSettings;
 
@@ -426,7 +426,7 @@ export function BookingFormSchema({
       prefs,
       workingHours: rawWorkingHours,
       bookingSettings,
-      isAdminOrOwner,
+      bypassTimeLimits,
     });
 
   // Base schema - let TypeScript infer the complex Zod types
@@ -531,7 +531,7 @@ export type BookingFormSchemaType = ReturnType<typeof BookingFormSchema>;
  * produce identical messages and error paths (`startDate` / `endDate`).
  *
  * @param params - The resolved format prefs, raw working hours, booking
- *   settings, and admin/owner flag. See {@link BookingDateSchemaParams}.
+ *   settings, and time-limit bypass flag. See {@link BookingDateSchemaParams}.
  * @returns A `z.object({ startDate, endDate })` schema with the cross-field
  *   refinement applied via `superRefine`.
  */
@@ -539,14 +539,14 @@ export function DuplicateBookingSchema({
   prefs,
   workingHours,
   bookingSettings,
-  isAdminOrOwner = false,
+  bypassTimeLimits = false,
 }: BookingDateSchemaParams) {
   const { startDateSchema, endDateSchema, crossFieldDateValidation } =
     buildBookingDateSchemas({
       prefs,
       workingHours,
       bookingSettings,
-      isAdminOrOwner,
+      bypassTimeLimits,
     });
 
   return z
@@ -566,11 +566,9 @@ interface ExtendBookingSchemaParams {
   workingHours?: any;
   /**
    * The acting user's fully-resolved formatting preferences. Same contract, and
-   * the same reasoning, as {@link BookingFormSchemaParams.prefs} — read that
-   * docblock before changing this type. This was previously an optional
-   * `timeZone?: string`, which let the extend dialog validate in the BROWSER
-   * zone while the server action parsed the submitted date in the PREFERENCE
-   * zone; the two disagreed for every user who had set an explicit timezone.
+   * the same reasoning, as {@link BookingFormSchemaParams.prefs}: read that
+   * docblock before changing this type. The dialog and the server action must
+   * validate in the same preference zone, never the browser's.
    */
   prefs: ResolvedFormatPrefs;
   bookingSettings: Pick<
@@ -578,27 +576,27 @@ interface ExtendBookingSchemaParams {
     "bufferStartTime" | "maxBookingLength" | "maxBookingLengthSkipClosedDays"
   >;
   /**
-   * When true, time restrictions (bufferStartTime and maxBookingLength) are skipped.
-   * This should be set to true for ADMIN and OWNER users who should be able to
-   * extend bookings without time restrictions.
+   * When true, buffer-start and maximum-length restrictions are skipped:
+   * `bookings.bypassTimeLimits` of the caller's policy. Working-hours
+   * restrictions still apply.
    */
-  isAdminOrOwner?: boolean;
+  bypassTimeLimits?: boolean;
 }
 
 export function ExtendBookingSchema({
   workingHours: rawWorkingHours,
   prefs,
   bookingSettings,
-  isAdminOrOwner = false,
+  bypassTimeLimits = false,
 }: ExtendBookingSchemaParams) {
   const { timeZone } = prefs;
   const { bufferStartTime, maxBookingLength, maxBookingLengthSkipClosedDays } =
     bookingSettings;
 
-  // For ADMIN/OWNER users, time restrictions (buffer and max length) are bypassed
-  // They can still be restricted by working hours if enabled
-  const effectiveBufferStartTime = isAdminOrOwner ? 0 : bufferStartTime;
-  const effectiveMaxBookingLength = isAdminOrOwner ? null : maxBookingLength;
+  // When `bypassTimeLimits` is set, the buffer and max length are skipped.
+  // Working hours still restrict the dates when enabled.
+  const effectiveBufferStartTime = bypassTimeLimits ? 0 : bufferStartTime;
+  const effectiveMaxBookingLength = bypassTimeLimits ? null : maxBookingLength;
 
   // Transform and validate working hours data (same as BookingFormSchema)
   const workingHours = normalizeWorkingHoursForValidation(rawWorkingHours);
@@ -611,7 +609,7 @@ export function ExtendBookingSchema({
       // string in the server zone.
       startDate: coerceLocalDate(timeZone),
       endDate: coerceLocalDate(timeZone).superRefine((dateTime, ctx) => {
-        // 1. Validate future date with buffer using existing function (skipped for ADMIN/OWNER)
+        // 1. Validate future date with buffer using existing function (skipped under `bypassTimeLimits`)
         const futureValidation = validateFutureDate(
           dateTime,
           effectiveBufferStartTime,
@@ -642,7 +640,7 @@ export function ExtendBookingSchema({
       }),
     })
     .superRefine((data, ctx) => {
-      // Cross-field validation for maximum booking length (skipped for ADMIN/OWNER)
+      // Cross-field validation for maximum booking length (skipped under `bypassTimeLimits`)
       if (effectiveMaxBookingLength && data.startDate && data.endDate) {
         const { startDate, endDate } = data;
 

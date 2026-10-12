@@ -1,8 +1,5 @@
 import { Currency, OrganizationType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { parseFormData } from "@remix-run/form-data-parser";
 import { useAtomValue } from "jotai";
 import type {
   ActionFunctionArgs,
@@ -35,6 +32,7 @@ import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { isNotFoundError, makeShelfError, ShelfError } from "~/utils/error";
+import { isMaxFileSizeError } from "~/utils/form-data-parse-errors.server";
 import {
   assertIsPost,
   payload,
@@ -297,7 +295,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
           });
         } catch (parseError) {
-          if (parseError instanceof MaxFileSizeExceededError) {
+          if (isMaxFileSizeError(parseError)) {
             const reason = new ShelfError({
               cause: parseError,
               message: `Image size exceeds maximum allowed size of ${

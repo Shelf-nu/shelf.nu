@@ -1,8 +1,5 @@
-import { Currency, OrganizationRoles, OrganizationType } from "@prisma/client";
-import {
-  MaxFileSizeExceededError,
-  parseFormData,
-} from "@remix-run/form-data-parser";
+import { Currency, OrganizationType } from "@prisma/client";
+import { parseFormData } from "@remix-run/form-data-parser";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -41,6 +38,7 @@ import { resolveShowShelfBranding } from "~/utils/branding";
 import { DEFAULT_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { ShelfError, makeShelfError } from "~/utils/error";
+import { isMaxFileSizeError } from "~/utils/form-data-parse-errors.server";
 import { payload, error, parseData } from "~/utils/http.server";
 import {
   PermissionAction,
@@ -210,7 +208,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, role, organizations } =
+    const { organizationId, currentOrganization, access, organizations } =
       await requirePermission({
         userId: authSession.userId,
         request,
@@ -285,6 +283,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -304,7 +303,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             maxFileSize: DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
           });
         } catch (parseError) {
-          if (parseError instanceof MaxFileSizeExceededError) {
+          if (isMaxFileSizeError(parseError)) {
             const reason = new ShelfError({
               cause: parseError,
               message: `Image size exceeds maximum allowed size of ${
@@ -368,6 +367,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -392,12 +392,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
         return redirect("/settings/general");
       }
       case "sso": {
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to edit SSO settings.",
             label: "Settings",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -406,6 +408,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "SSO is not enabled for this organization.",
             label: "Settings",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
         const schema = EditWorkspaceSSOSettingsFormSchema(
@@ -425,6 +429,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "You are not allowed to edit this organization.",
             label: "Organization",
+            status: 403,
             shouldBeCaptured: false,
           });
         }
@@ -452,8 +457,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
         // Defense in depth: the transfer card is hidden from non-owners, but a
         // hand-crafted POST must not be able to transfer the workspace either.
         // `requirePermission` above cannot catch this — ADMIN and OWNER share
-        // every permission, so the role has to be checked explicitly.
-        if (role !== OrganizationRoles.OWNER) {
+        // every permission, so ownership has to be checked explicitly.
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
@@ -501,12 +506,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to manage SCIM tokens.",
             label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 
@@ -515,6 +522,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
             cause: null,
             message: "SSO is not enabled for this organization.",
             label: "SCIM",
+            status: 400,
+            shouldBeCaptured: false,
           });
         }
 
@@ -549,12 +558,14 @@ export async function action({ context, request }: ActionFunctionArgs) {
           });
         }
 
-        if (role !== OrganizationRoles.OWNER) {
+        if (!access.ownsWorkspace) {
           throw new ShelfError({
             cause: null,
             title: "Permission denied",
             message: "You are not allowed to manage SCIM tokens.",
             label: "SCIM",
+            status: 403,
+            shouldBeCaptured: false,
           });
         }
 

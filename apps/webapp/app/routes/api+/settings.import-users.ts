@@ -9,6 +9,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { assertCanAssignRoles } from "~/utils/permissions/role-assignment.server";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanInviteUsersToWorkspace } from "~/utils/subscription.server";
 
@@ -19,7 +20,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const { organizationId } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.teamMember,
@@ -57,6 +58,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
       userId,
       users,
       extraMessage: formData.get("message") as string,
+      actorOwnsWorkspace: access.ownsWorkspace,
     });
 
     if (!response) {

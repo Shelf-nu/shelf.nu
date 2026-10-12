@@ -3,7 +3,7 @@ import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsCountAtom } from "~/atoms/list";
 import When from "~/components/when/when";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
   PermissionAction,
   PermissionEntity,
@@ -44,7 +44,7 @@ export default function BulkActionsDropdown() {
 }
 
 function ConditionalDropdown() {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const selectedLocationsCount = useAtomValue(selectedBulkItemsCountAtom);
 
   const disabled = selectedLocationsCount === 0;

@@ -35,6 +35,7 @@ import {
 import { sendEmail } from "~/emails/mail.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { refreshAccessToken } from "~/modules/auth/service.server";
+import { assertEmailChangeAllowed } from "~/modules/auth/sso-enforcement.server";
 import {
   getUserByID,
   getUserWithContact,
@@ -329,6 +330,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
         if (parsedData.type !== "initiateEmailChange")
           throw new Error("Invalid payload type");
 
+        // A standard account that must sign in with SSO could otherwise move
+        // itself to an address off the SSO domain and regain password login.
+        await assertEmailChangeAllowed({ userId, email });
+
         const ssoDomains = await getConfiguredSSODomains();
         const user = await getUserByID(userId, {
           select: {
@@ -405,6 +410,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           throw new Error("Invalid payload type");
 
         const { otp, email: newEmail } = parsedData;
+
+        // Checked again here: a code issued before the account was refused
+        // must not complete the change.
+        await assertEmailChangeAllowed({ userId, email });
 
         /** Just to make sure the user exists */
         await getUserByID(userId, {

@@ -10,6 +10,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -38,7 +39,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllCustody } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -75,9 +76,17 @@ export async function loader({ context, request }: ActionFunctionArgs) {
            */
           allowedTeamMemberIds: await scopeCustodianFilterIds({
             teamMemberIds: searchParams.getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
+          }),
+          // The Archived / All views are for members who may see archived
+          // assets (`asset: archive`, issue #382); anyone else downloads the
+          // codes of active assets, whatever the URL says.
+          honorArchivedView: roleHasPermission({
+            roles: [access.role],
+            entity: PermissionEntity.asset,
+            action: PermissionAction.archive,
           }),
         })
       : { id: { in: assetIds }, organizationId };

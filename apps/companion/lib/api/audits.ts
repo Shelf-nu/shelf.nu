@@ -187,6 +187,10 @@ export const auditsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+        // why: not retried. Each call records a new note, so a request that
+        // timed out after the server had already written it would leave two
+        // on the audit, and the PDF report shows both.
+        retry: false,
       }
     ),
 

@@ -15,7 +15,7 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
@@ -33,6 +33,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -98,7 +99,19 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  // The bulk menu offers Delete and Create audit.
+  const showBulkActions =
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
+    });
 
   return (
     <>
@@ -125,9 +138,7 @@ export default function LocationsIndexPage() {
           }}
         />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
-          }
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
           customEmptyStateContent={{
             title: "No locations yet",
             text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",

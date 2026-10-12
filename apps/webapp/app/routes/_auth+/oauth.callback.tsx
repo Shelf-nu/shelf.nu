@@ -12,6 +12,7 @@ import { Spinner } from "~/components/shared/spinner";
 import { config } from "~/config/shelf.config";
 import { useSearchParams } from "~/hooks/search-params";
 import { supabaseClient } from "~/integrations/supabase/client";
+import { SsoAccountLinkedNotice } from "~/modules/auth/components/sso-account-linked-notice";
 import { refreshAccessToken } from "~/modules/auth/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import {
@@ -30,38 +31,21 @@ import {
   parseData,
   safeRedirect,
 } from "~/utils/http.server";
-import { resolveUserAndOrgForSsoCallback } from "~/utils/sso.server";
+import {
+  assertSsoAuthenticatedSession,
+  getSsoClaimsForAuthUser,
+  isSsoAccountLinkedError,
+  resolveUserAndOrgForSsoCallback,
+} from "~/utils/sso.server";
 
 /**
- * Schema for handling OAuth callback data with improved groups handling
- * Ensures groups are always an array or empty array, regardless of input format
+ * The fields the browser posts after an SSO sign-in: only the refresh token and
+ * where to land. Every claim the action acts on (groups, names, contact info)
+ * is read server-side with `getSsoClaimsForAuthUser`, never from the form.
  */
 const CallbackSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
-  // Transform groups to either parse JSON string array or return empty array
-  groups: z
-    .union([
-      z.string().transform((str) => {
-        try {
-          const parsed = JSON.parse(str);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
-        }
-      }),
-      z.array(z.string()),
-    ])
-    .default([]),
   refreshToken: z.string().min(1),
   redirectTo: z.string().optional(),
-  // Contact information fields
-  phone: z.string().optional(),
-  streetAddress: z.string().optional(),
-  city: z.string().optional(),
-  stateProvince: z.string().optional(),
-  postalCode: z.string().optional(),
-  country: z.string().optional(),
 });
 
 export async function action({ request, context }: ActionFunctionArgs) {
@@ -87,32 +71,22 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (method) {
       case "POST": {
-        const {
-          refreshToken,
-          redirectTo,
-          firstName,
-          lastName,
-          groups,
-          phone,
-          streetAddress,
-          city,
-          stateProvince,
-          postalCode,
-          country,
-        } = parseData(await request.formData(), CallbackSchema);
+        const { refreshToken, redirectTo } = parseData(
+          await request.formData(),
+          CallbackSchema
+        );
 
         // We should not trust what is sent from the client
         // https://github.com/rphlmr/supa-fly-stack/issues/45
         const authSession = await refreshAccessToken(refreshToken);
-        // Package contact information
-        const contactInfo = {
-          phone,
-          street: streetAddress, // Map to our field name
-          city,
-          stateProvince,
-          zipPostalCode: postalCode, // Map to our field name
-          countryRegion: country, // Map to our field name
-        };
+        // Any Supabase refresh token refreshes, so refuse a session that was
+        // not obtained through SSO before anything is provisioned or synced.
+        await assertSsoAuthenticatedSession(authSession);
+        const { groups, firstName, lastName, contactInfo } =
+          await getSsoClaimsForAuthUser({
+            authUserId: authSession.userId,
+            email: authSession.email,
+          });
 
         /**
          * This resolves the correct org we should redirect the user to
@@ -170,6 +144,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     throw notAllowedMethod(method);
   } catch (cause) {
+    // The account was moved onto SSO and the person must sign in once more:
+    // an outcome to report, not a failure.
+    if (isSsoAccountLinkedError(cause)) {
+      return data(
+        payload({ ssoAccountLinked: true as const, message: cause.message })
+      );
+    }
     const reason = makeShelfError(cause);
     return data(error(reason), { status: reason.status });
   }
@@ -212,11 +193,7 @@ export default function LoginCallback() {
 
         if (!refreshToken) return;
 
-        const formData = createSSOFormData(
-          supabaseSession,
-          refreshToken,
-          redirectTo
-        );
+        const formData = createSSOFormData(refreshToken, redirectTo);
 
         void fetcher.submit(formData, { method: "post" });
       }
@@ -233,9 +210,16 @@ export default function LoginCallback() {
     [data?.error]
   );
 
+  const linkedNotice =
+    data && "ssoAccountLinked" in data && data.ssoAccountLinked
+      ? data.message
+      : null;
+
   return (
     <div className="flex justify-center text-center">
-      {data?.error ? (
+      {linkedNotice ? (
+        <SsoAccountLinkedNotice variant="web" />
+      ) : data?.error ? (
         <div>
           {/* If there are validation errors, we map over those and show them */}
           {validationErrors ? (
