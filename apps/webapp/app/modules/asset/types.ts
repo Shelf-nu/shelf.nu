@@ -268,19 +268,33 @@ export type AdvancedIndexAsset = Pick<
             lastName: string | null;
             displayName: string | null;
             profilePicture: string | null;
-            email: string;
+            /** Optional because the mega-query never selects it — this
+             * surface shows a custodian as a name and picture only, never an
+             * address. Always absent, regardless of which query path
+             * produced the row; a required `string` here was a stale type
+             * that no caller ever populated. */
+            email?: string;
           } | null;
         };
       }[]
     | null;
-  customFields: (AssetCustomFieldValue & {
+  /** One custom-field value + the field definition that renders it. Only the
+   * fields actually read anywhere this type is consumed — `id`, `value`, and
+   * `customField` — neither the mega-query's projection nor the streaming
+   * hydration batch (`CustomFieldValueLite`) ever selects the row's own
+   * `assetId`/`customFieldId`/`createdAt`/`updatedAt`, so this is not a
+   * `Pick` off `AssetCustomFieldValue`: that model's scalar fields describe a
+   * join row nothing on this surface reads. */
+  customFields: Array<{
+    id: string;
+    value: ICustomFieldValueJson;
     customField: Pick<
       CustomField,
       "id" | "name" | "helpText" | "required" | "type" | "options"
     > & {
       categories: Pick<Category, "id" | "name">[] | null;
     };
-  })[];
+  }>;
   upcomingReminder?: Pick<
     AssetReminder,
     "id" | "alertDateTime" | "name" | "message"
