@@ -6,6 +6,10 @@
  * not hold, so BASE is refused both. Delete passes the caller's access to
  * `bulkDeleteBookings`, which applies the drafts-only rule.
  *
+ * The dialogs also post which bookings list they were opened on (a kit's or an
+ * asset's Bookings tab, or the index), which a "Select all" stands for. The
+ * route hands it to the services and refuses a request naming both.
+ *
  * @see {@link file://../../../app/routes/api+/bookings.bulk-actions.ts}
  */
 import { OrganizationRoles } from "@prisma/client";
@@ -75,9 +79,13 @@ function asRole(role: OrganizationRoles) {
   );
 }
 
-/** POSTs `intent` for one selected booking as user-1. */
-function post(intent: string) {
-  const body = new URLSearchParams({ intent, "bookingIds[0]": "booking-1" });
+/** POSTs `intent` for one selected booking as user-1, plus any `fields`. */
+function post(intent: string, fields: Record<string, string> = {}) {
+  const body = new URLSearchParams({
+    intent,
+    "bookingIds[0]": "booking-1",
+    ...fields,
+  });
   return action({
     request: new Request("https://app.shelf.nu/api/bookings/bulk-actions", {
       method: "POST",
@@ -137,4 +145,72 @@ describe("POST /api/bookings/bulk-actions", () => {
       })
     );
   });
+});
+
+describe("POST /api/bookings/bulk-actions: which list a select all stands for", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    asRole(OrganizationRoles.ADMIN);
+  });
+
+  const INTENTS = [
+    ["bulk-delete", bulkDeleteBookings],
+    ["bulk-archive", bulkArchiveBookings],
+    ["bulk-cancel", bulkCancelBookings],
+  ] as const;
+
+  it.each(INTENTS)(
+    "hands %s the kit's bookings when the dialog posts a kitId",
+    async (intent, service) => {
+      const response = await post(intent, { kitId: "kit-1" });
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "kit", kitId: "kit-1" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "hands %s the asset's bookings when the dialog posts an assetId",
+    async (intent, service) => {
+      const response = await post(intent, { assetId: "asset-1" });
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "asset", assetId: "asset-1" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "hands %s the bookings index when the dialog posts neither",
+    async (intent, service) => {
+      const response = await post(intent);
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: { kind: "index" },
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "refuses %s when both a kitId and an assetId are posted",
+    async (intent, service) => {
+      const response = await post(intent, {
+        kitId: "kit-1",
+        assetId: "asset-1",
+      });
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          message:
+            "A bookings list belongs to a kit or to an asset, not to both.",
+        },
+      });
+      expect(service).not.toHaveBeenCalled();
+    }
+  );
 });
