@@ -53,6 +53,26 @@ describe("Input characterLimit", () => {
     expect(screen.getByTestId("character-count")).toHaveClass("text-error-600");
   });
 
+  it("keeps the caller's description and adds the counter to it", () => {
+    render(
+      <>
+        <p id="description-help">Shown on the asset page</p>
+        <Input
+          label="Description"
+          inputType="textarea"
+          name="description"
+          aria-describedby="description-help"
+          characterLimit={5000}
+        />
+      </>
+    );
+
+    expect(screen.getByLabelText("Description")).toHaveAttribute(
+      "aria-describedby",
+      "description-help description-character-count"
+    );
+  });
+
   it("leaves a textarea without a limit at the default 250 maxlength and no counter", () => {
     render(<Input label="Notes" inputType="textarea" name="notes" />);
 

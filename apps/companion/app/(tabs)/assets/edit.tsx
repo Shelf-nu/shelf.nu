@@ -105,7 +105,7 @@ export default function EditAssetScreen() {
   });
 
   const descriptionChanged =
-    form.description.trim() !== (form.originalAsset?.description || "");
+    form.description.trim() !== (form.originalAsset?.description ?? "").trim();
   // why: the payload carries the description only when it changed, and the
   // server checks only a description it receives. A stored description that is
   // already over the limit and left untouched must not block saving the rest.

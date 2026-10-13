@@ -187,7 +187,11 @@ const Input = forwardRef(function Input(
         rows={rest.rows || 8}
         ref={ref as RefObject<HTMLTextAreaElement> | undefined}
         aria-label={label}
-        aria-describedby={characterCountId ?? rest["aria-describedby"]}
+        aria-describedby={
+          [rest["aria-describedby"], characterCountId]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
       />
     );
   }

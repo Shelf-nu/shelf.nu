@@ -31,6 +31,7 @@ export function CharacterCount({ count, max }: { count: number; max: number }) {
     <Text
       style={[styles.count, isOver && styles.countOver]}
       accessibilityLabel={`${countLabel} of ${maxLabel} characters`}
+      accessibilityLiveRegion="polite"
     >
       {countLabel} / {maxLabel}
     </Text>
