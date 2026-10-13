@@ -1,5 +1,6 @@
 import type { Kit, Prisma, Barcode } from "@prisma/client";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
+import { KIT_ACTIVE_MEMBER_COUNT } from "./fields";
 import { LOCATION_WITH_HIERARCHY } from "../asset/fields";
 import { ASSET_MODEL_IMAGE_SELECT } from "../asset/image-select";
 
@@ -55,9 +56,7 @@ export const KITS_INCLUDE_FIELDS = {
   // Members per kit (`AssetKit` is unique per asset and kit). Archived members
   // are out of service and left out of kit custody and bookings, so they are
   // not counted either.
-  _count: {
-    select: { assetKits: { where: { asset: { archivedAt: null } } } },
-  },
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   // Code-resolution relations for the AssetCodeBadge / resolveDisplayCode.
   // Kits are code-bearing entities too (Qr.kitId, Barcode.kitId exist), so
   // every kit-listing surface needs these included to render the chip.

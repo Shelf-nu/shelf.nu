@@ -7,6 +7,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -81,9 +82,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           // relation, then re-key it below to `_count.assets`, the key the
           // companion reads. Archived members are out of service and not
           // counted, matching the kit screen's own count.
-          _count: {
-            select: { assetKits: { where: { asset: { archivedAt: null } } } },
-          },
+          _count: KIT_ACTIVE_MEMBER_COUNT,
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
           custody: {

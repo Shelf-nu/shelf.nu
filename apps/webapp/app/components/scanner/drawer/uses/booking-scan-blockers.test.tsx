@@ -246,6 +246,20 @@ describe("buildAddToBookingBlockers", () => {
     expect(removedBy(built.removeItemsFromList)).toEqual(["qr1"]);
   });
 
+  it("kits-with-unavailable-assets: ignores an unbookable member that is archived", () => {
+    // Bookings leave archived members out of the kit, so only the active
+    // members decide whether it can be booked and checked out.
+    const built = build({
+      qr1: kitItem("k1", {
+        members: [
+          {},
+          { availableToBook: false, archivedAt: "2026-10-01T00:00:00Z" },
+        ],
+      }),
+    });
+    expect(activeIds(built)).toEqual([]);
+  });
+
   it("invalid-codes: a code that resolved to nothing", () => {
     const built = build({ qr1: { error: "No such code" } });
     expect(activeIds(built)).toEqual(["invalid-codes"]);

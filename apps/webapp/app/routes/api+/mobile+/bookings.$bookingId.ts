@@ -196,6 +196,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // spread that builds each row — there is no explicit mapping to
                 // grep for, so do not assume it is unused.
                 availableToBook: true,
+                // A DRAFT booking can hold an asset that was archived after it
+                // was added. The app badges that row "Archived" and greys out
+                // Reserve, which the server refuses for it. Reaches the client
+                // through the same `serializeAssetImage(rest)` spread.
+                archivedAt: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides

@@ -1,6 +1,8 @@
 ---
 description: Bulk actions on index/list pages must clear the multi-select on success via the shared chokepoint, not bespoke per-dialog logic.
-globs: apps/webapp/app/components/**/bulk-*.tsx, apps/webapp/app/components/bulk-update-dialog/*.tsx
+paths:
+  - "apps/webapp/app/components/**/bulk-*.tsx"
+  - "apps/webapp/app/components/bulk-update-dialog/*.tsx"
 ---
 
 # Clear Bulk Selection On Success

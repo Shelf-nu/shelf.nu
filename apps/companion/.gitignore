@@ -24,6 +24,8 @@ web-build/
 
 # Maestro E2E tests
 .maestro/env/test.env
+# Fixture ids written by .maestro/scripts/seed-e2e.sh
+.maestro/env/e2e*.env
 .maestro/results/
 .claude/
 

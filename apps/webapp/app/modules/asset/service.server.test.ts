@@ -4195,6 +4195,50 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     );
   });
 
+  it("refuses the scope before the archived rows when both apply", async () => {
+    // A caller who may not assign to this person at all is told so first;
+    // removing the archived row would only lead to this refusal anyway.
+    const countMock = db.asset.count as ReturnType<typeof vitest.fn>;
+    countMock.mockResolvedValueOnce(1);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Other Person",
+        user: {
+          id: "other-user",
+          firstName: "Other",
+          lastName: "Person",
+          displayName: null,
+        },
+      }
+    );
+
+    await expect(
+      bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: ASSET_INDEX_SETTINGS,
+        custodyAssign: "self",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(countMock).not.toHaveBeenCalled();
+    // Drain the unused Once value and restore the file-wide "nothing archived"
+    // default, which later suites rely on.
+    countMock.mockReset();
+    countMock.mockResolvedValue(0);
+  });
+
   it("allows SELF_SERVICE assigning to a custodian whose user IS the actor", async () => {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
