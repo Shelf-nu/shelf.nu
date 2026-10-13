@@ -50,19 +50,24 @@ fi
 # Build Maestro -e flags from env file
 # Maestro doesn't reliably read shell env vars; use -e flag instead
 MAESTRO_ENV_FLAGS=()
-while IFS='=' read -r key value; do
-  # Skip comments and empty lines
-  [[ -z "$key" || "$key" == \#* ]] && continue
-  # Strip quotes from value
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
-  MAESTRO_ENV_FLAGS+=(-e "$key=$value")
-  # Also export for report generation
-  export "$key=$value"
-done < "$ENV_FILE"
-echo -e "${GREEN}✓ Loaded ${#MAESTRO_ENV_FLAGS[@]} env vars from test.env${NC}"
+# test.env, plus the ids each seed-e2e.sh fixture writes (env/e2e*.env), so
+# fixture flows find their records when the whole suite runs.
+for env_file in "$ENV_FILE" "$MAESTRO_DIR"/env/e2e*.env; do
+  [ -f "$env_file" ] || continue
+  while IFS='=' read -r key value; do
+    # Skip comments and empty lines
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    # Strip quotes from value
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    MAESTRO_ENV_FLAGS+=(-e "$key=$value")
+    # Also export for report generation
+    export "$key=$value"
+  done < "$env_file"
+done
+echo -e "${GREEN}✓ Loaded ${#MAESTRO_ENV_FLAGS[@]} env vars from test.env and fixture env files${NC}"
 
 # ─── Verify Maestro is installed ────────────────────────────────────
 if ! command -v maestro &>/dev/null; then

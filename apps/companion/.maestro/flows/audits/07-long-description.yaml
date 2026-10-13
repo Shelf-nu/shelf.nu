@@ -10,9 +10,9 @@ tags:
 #
 # Needs the long-description fixture:
 #   ./scripts/seed-e2e.sh long-description-up
-#   maestro test -e <each line of env/test.env> -e <each line of env/e2e-long-description.env> flows/audits/07-long-description.yaml
-# (Maestro takes variables as -e KEY=VALUE; scripts/run-suite.sh builds them
-# the same way from a file.)
+#   ./scripts/run-suite.sh audits   # loads env/test.env and env/e2e*.env
+# or one flow on its own:
+#   maestro test -e <each line of both files> flows/audits/07-long-description.yaml
 
 - runFlow: ../../shared/login.yaml
 

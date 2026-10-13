@@ -66,14 +66,18 @@ fi
 
 # Build Maestro -e flags from env file
 MAESTRO_ENV_FLAGS=()
-while IFS='=' read -r key value; do
-  [[ -z "$key" || "$key" == \#* ]] && continue
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
-  MAESTRO_ENV_FLAGS+=(-e "$key=$value")
-done < "$ENV_FILE"
+# test.env, plus the ids each seed-e2e.sh fixture writes (env/e2e*.env).
+for env_file in "$ENV_FILE" "$MAESTRO_DIR"/env/e2e*.env; do
+  [ -f "$env_file" ] || continue
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    MAESTRO_ENV_FLAGS+=(-e "$key=$value")
+  done < "$env_file"
+done
 
 echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME ━━━${NC}"
 echo ""
