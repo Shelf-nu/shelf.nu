@@ -9,6 +9,9 @@ paths:
   - "apps/webapp/app/components/assets/assets-index/**"
   - "apps/webapp/app/modules/organization/**"
   - "apps/webapp/app/routes/**/*booking*"
+  - "packages/database/prisma/schema.prisma"
+  - "apps/webapp/test/**/*booking*"
+  - "apps/webapp/test/**/*working-hours*"
 ---
 
 # Working Hours Are Local To The Physical Location

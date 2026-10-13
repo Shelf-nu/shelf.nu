@@ -5,6 +5,8 @@ paths:
   - "apps/webapp/app/modules/location/**"
   - "apps/webapp/app/modules/asset/**"
   - "apps/webapp/app/routes/**/*kit*"
+  - "packages/database/prisma/migrations/**"
+  - "apps/webapp/test/**/*kit*"
 ---
 
 # A Kit's Location Owns Its Members' Placement

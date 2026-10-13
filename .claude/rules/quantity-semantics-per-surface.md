@@ -3,6 +3,7 @@ description: Four different quantity fields exist; name which one a surface mult
 paths:
   - "apps/webapp/app/**/*.{ts,tsx}"
   - "packages/quantity-control/**"
+  - "apps/webapp/test/**/*.{ts,tsx}"
 ---
 
 # Quantity Semantics Per Surface

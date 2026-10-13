@@ -3,6 +3,7 @@ description: User.displayName replaces firstName lastName everywhere a person is
 paths:
   - "apps/webapp/app/**/*.{ts,tsx}"
   - "apps/companion/**/*.{ts,tsx}"
+  - "apps/webapp/test/**/*.{ts,tsx}"
 ---
 
 # `displayName` Is The User-Facing Name

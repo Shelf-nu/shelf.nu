@@ -2,6 +2,7 @@
 description: Never bind a nullable value to <Button to>; snapshot the referer on mount and use resolveCancelTo
 paths:
   - "apps/webapp/app/**/*.tsx"
+  - "apps/webapp/app/utils/cancel-destination*"
 ---
 
 # Never Bind a Nullable Value Straight to `<Button to>`
