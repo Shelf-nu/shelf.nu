@@ -1,33 +1,37 @@
 /**
- * Bulk booking actions — ownership scope
+ * Bulk booking actions: ownership scope
  *
- * The bookings list scopes a BASE / SELF_SERVICE user to their own bookings,
- * but the bulk where-builder applied only `organizationId` and an optional
- * status. So `bookingIds=["all-selected"]` deleted, archived or cancelled every
- * matching booking in the workspace — other people's included — from a list
- * that had only ever shown the caller their own.
- *
- * The explicit-id branch was equally unscoped, so posting a guessed id worked
- * too. Both branches are covered here.
+ * A caller who may not write every booking (BASE / SELF_SERVICE) may only
+ * delete, archive or cancel bookings they created or hold, whether they post
+ * explicit ids or "Select all". Both branches of the bulk where-builder are
+ * covered here. Which rows "Select all" stands for is covered in
+ * `bulk-select-all-matches-list.server.test.ts`.
  *
  * Regression coverage for detail.dev finding D031.
  *
- * @see {@link file://./utils.server.ts}
+ * @see {@link file://./utils.server.ts} `getBookingOwnershipScope`
+ * @see {@link file://./service.server.ts} `getBulkBookingsWhereInput`
  * @see {@link file://./../../utils/booking-authorization.server.ts} validateBookingOwnership — the singular gate this mirrors
  */
 
-import { OrganizationRoles } from "@prisma/client";
+import { BookingStatus, OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { accessFor } from "@helpers/role-access";
 import { ALL_SELECTED_KEY } from "~/utils/list";
+import { getBulkBookingsWhereInput } from "./service.server";
 import {
   assertBulkSelectionWithinOwnership,
   getBookingOwnershipScope,
-  getBulkBookingsWhereInput,
 } from "./utils.server";
 
 // @vitest-environment node
+
+// why: select-all resolves a restricted caller's custodian scope through
+// `resolveCustodianScope`, which reads their team-member rows.
+vitest.mock("~/database/db.server", () => ({
+  db: { teamMember: { findMany: vitest.fn().mockResolvedValue([]) } },
+}));
 
 const ORG = "org-1";
 const ME = "user-me";
@@ -35,9 +39,17 @@ const ME = "user-me";
 const RESTRICTED = [OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE];
 const UNRESTRICTED = [OrganizationRoles.ADMIN, OrganizationRoles.OWNER];
 
+/** Bookings that are not drafts, plus the caller's own drafts. */
+const ONLY_MY_DRAFTS = {
+  OR: [
+    { status: { not: BookingStatus.DRAFT } },
+    { AND: [{ status: BookingStatus.DRAFT }, { creatorId: ME }] },
+  ],
+};
+
 /** Every ownership predicate the clause ended up matching on */
 function ownershipBranches(
-  where: ReturnType<typeof getBulkBookingsWhereInput>
+  where: Awaited<ReturnType<typeof getBulkBookingsWhereInput>>
 ) {
   const and = (where.AND ?? []) as Array<{ OR?: unknown[] }>;
   const scope = [and].flat().find((clause) => clause?.OR);
@@ -97,9 +109,9 @@ describe("getBookingOwnershipScope", () => {
   );
 });
 
-describe("getBulkBookingsWhereInput — select all", () => {
-  it.each(RESTRICTED)("scopes %s to their own bookings", (role) => {
-    const where = getBulkBookingsWhereInput({
+describe("getBulkBookingsWhereInput: select all", () => {
+  it.each(RESTRICTED)("scopes %s to their own bookings", async (role) => {
+    const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
@@ -107,16 +119,21 @@ describe("getBulkBookingsWhereInput — select all", () => {
       userId: ME,
     });
 
-    expect(ownershipBranches(where)).toEqual([
-      { creatorId: ME },
-      { custodianUserId: ME },
-    ]);
-    // The list filter still applies — this narrows, it does not replace
-    expect(JSON.stringify(where)).toContain("DRAFT");
+    // The list's own rows, narrowed to the ones the caller may write
+    expect(where).toEqual({
+      AND: [
+        {
+          organizationId: ORG,
+          AND: [ONLY_MY_DRAFTS, { custodianUserId: ME }],
+          status: { in: [BookingStatus.DRAFT] },
+        },
+        { OR: [{ creatorId: ME }, { custodianUserId: ME }] },
+      ],
+    });
   });
 
-  it.each(UNRESTRICTED)("leaves %s unscoped", (role) => {
-    const where = getBulkBookingsWhereInput({
+  it.each(UNRESTRICTED)("leaves %s to the list's own rows", async (role) => {
+    const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
@@ -124,31 +141,37 @@ describe("getBulkBookingsWhereInput — select all", () => {
       userId: ME,
     });
 
-    expect(where.AND).toBeUndefined();
-    expect(where.organizationId).toBe(ORG);
+    expect(where).toEqual({
+      organizationId: ORG,
+      AND: [ONLY_MY_DRAFTS],
+      status: { in: [BookingStatus.DRAFT] },
+    });
   });
 });
 
-describe("getBulkBookingsWhereInput — explicit ids", () => {
-  it.each(RESTRICTED)("scopes %s even when ids are posted directly", (role) => {
-    // Guessing another user's booking id must not be enough — the list never
-    // showed it, but the id alone used to be sufficient.
-    const where = getBulkBookingsWhereInput({
-      bookingIds: ["someone-elses-booking"],
-      organizationId: ORG,
-      access: accessFor([role]),
-      userId: ME,
-    });
+describe("getBulkBookingsWhereInput: explicit ids", () => {
+  it.each(RESTRICTED)(
+    "scopes %s even when ids are posted directly",
+    async (role) => {
+      // Guessing another user's booking id must not be enough: the list never
+      // showed it.
+      const where = await getBulkBookingsWhereInput({
+        bookingIds: ["someone-elses-booking"],
+        organizationId: ORG,
+        access: accessFor([role]),
+        userId: ME,
+      });
 
-    expect(ownershipBranches(where)).toEqual([
-      { creatorId: ME },
-      { custodianUserId: ME },
-    ]);
-    expect(JSON.stringify(where)).toContain("someone-elses-booking");
-  });
+      expect(ownershipBranches(where)).toEqual([
+        { creatorId: ME },
+        { custodianUserId: ME },
+      ]);
+      expect(JSON.stringify(where)).toContain("someone-elses-booking");
+    }
+  );
 
-  it.each(UNRESTRICTED)("leaves %s unscoped", (role) => {
-    const where = getBulkBookingsWhereInput({
+  it.each(UNRESTRICTED)("leaves %s unscoped", async (role) => {
+    const where = await getBulkBookingsWhereInput({
       bookingIds: ["bk-1", "bk-2"],
       organizationId: ORG,
       access: accessFor([role]),
@@ -162,20 +185,25 @@ describe("getBulkBookingsWhereInput — explicit ids", () => {
   });
 });
 
-describe("getBulkBookingsWhereInput — composition", () => {
-  it("intersects rather than unions the ownership clause", () => {
-    // A spread-merge would put ownership into the same OR as the filters,
-    // widening a destructive query instead of narrowing it.
-    const where = getBulkBookingsWhereInput({
+describe("getBulkBookingsWhereInput: composition", () => {
+  it("intersects rather than unions the ownership clause", async () => {
+    // A search puts an OR on the list's own clause. A spread-merge would put
+    // ownership into that same slot, widening a destructive query instead of
+    // narrowing it.
+    const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
       organizationId: ORG,
-      currentSearchParams: "status=DRAFT",
+      currentSearchParams: "s=camera",
       access: accessFor([OrganizationRoles.SELF_SERVICE]),
       userId: ME,
     });
 
-    expect(Array.isArray(where.AND)).toBe(true);
-    expect(where.OR).toBeUndefined();
+    expect(where).toEqual({
+      AND: [
+        expect.objectContaining({ OR: [expect.anything()] }),
+        { OR: [{ creatorId: ME }, { custodianUserId: ME }] },
+      ],
+    });
   });
 });
 

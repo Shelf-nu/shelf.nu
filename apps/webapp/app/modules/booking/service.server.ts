@@ -144,7 +144,7 @@ import {
   getCurrentSearchParams,
   parseData,
 } from "~/utils/http.server";
-import { getParamsValues } from "~/utils/list";
+import { ALL_SELECTED_KEY, getParamsValues } from "~/utils/list";
 import { Logger } from "~/utils/logger";
 import {
   wrapAssetWithCountForNote,
@@ -256,7 +256,7 @@ import {
   assertBulkSelectionWithinOwnership,
   createBookingConflictConditions,
   lockBookingForStatusCheck,
-  getBulkBookingsWhereInput,
+  getBookingOwnershipScope,
   isBookingExpired,
 } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
@@ -13241,12 +13241,13 @@ export async function getMinimalBookings(params: {
   }
 }
 
-export async function getBookings(params: {
+/**
+ * The filters and restrictions that decide WHICH bookings a list holds, as
+ * opposed to which page of them is fetched or what each row carries. Read by
+ * {@link buildBookingsWhere}.
+ */
+export type BookingsWhereParams = {
   organizationId: Organization["id"];
-  /** Page number. Starts at 1 */
-  page: number;
-  /** Assets to be loaded per page */
-  perPage?: number;
   search?: string | null;
   statuses?: Booking["status"][] | null;
   assetIds?: Asset["id"][] | null;
@@ -13258,19 +13259,20 @@ export async function getBookings(params: {
    * Both halves identify the SAME person: a booking is theirs if custody sits on
    * their user link OR on their team-member link (legacy rows where
    * `custodianUserId` was never backfilled). Those halves are OR-ed with each
-   * other, then the whole thing is AND-ed into the query as ONE clause — so this
+   * other, then the whole thing is AND-ed into the query as ONE clause, so this
    * ALWAYS narrows and can never be widened away by a user-supplied filter.
    * That AND-ing is the security contract; do not move it into a top-level `OR`.
    *
    * Usually the caller themselves (self-service/base users restricted to their
    * own bookings). NOT always: the team-member profile route scopes to the
    * profile BEING VIEWED, having already gated access with a
-   * `teamMemberProfile.read` permission check. Hence the neutral name — pass
+   * `teamMemberProfile.read` permission check. Hence the neutral name: pass
    * whichever person the caller has proven the viewer may see.
    *
    * Distinct from `custodianTeamMemberIds`, which is a user-facing FILTER built
-   * from unvalidated search params. Conflating the two was a privilege
-   * escalation: `?teamMember=<victim-id>` OR-ed the restriction away.
+   * from unvalidated search params. Never feed a filter value into this
+   * restriction: `?teamMember=<victim-id>` would then reach someone else's
+   * bookings.
    */
   custodianScope?: {
     /** The person whose bookings the results are scoped to. */
@@ -13279,7 +13281,7 @@ export async function getBookings(params: {
     teamMemberIds?: string[];
   } | null;
   /**
-   * User-facing FILTER — "show me this person's bookings" — built from
+   * User-facing FILTER ("show me this person's bookings") built from
    * unvalidated `?teamMember=` search params, so the values are
    * attacker-controlled. It is NEVER a restriction: it is always AND-ed, so it
    * can only narrow what the caller is already allowed to see. To restrict a
@@ -13289,7 +13291,7 @@ export async function getBookings(params: {
    */
   custodianTeamMemberIds?: string[] | null;
   /**
-   * RESTRICTION scoping results to bookings this person may MUTATE — see
+   * RESTRICTION scoping results to bookings this person may MUTATE. See
    * {@link bookingWriteScopeClause}. Set only by pickers whose selection feeds
    * an action gated by `validateBookingOwnership`; omit for read-only lists.
    *
@@ -13302,55 +13304,272 @@ export async function getBookings(params: {
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
-  extraInclude?: Prisma.BookingInclude;
-  /** Controls whether entries should be paginated or not */
-  takeAll?: boolean;
-  orderBy?: string;
-  orderDirection?: SortingDirection;
   kitId?: string;
   tags?: Tag["id"][];
-  /**
-   * Skip the `db.booking.count` companion query and return `bookingCount: 0`.
-   * For callers that only need the rows and never read the total (e.g. the
-   * iCal feed), this avoids a wasted aggregate on every call. Defaults to
-   * `false`, so paginated callers are unaffected.
-   */
-  skipCount?: boolean;
-  /**
-   * Attach the `bookingAssets` payload — by far the heaviest part of this
-   * query. Callers that render no asset data (the calendar, the dashboard
-   * widgets, the bookings-list surfaces whose drawer fetches on open) pass
-   * `false`, which omits the key from the Prisma include entirely. Defaults
-   * to `true`, so existing callers are unaffected.
-   */
-  includeAssets?: boolean;
-  /**
-   * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
-   * fetch one bounded set in a single query rather than a page of it. Unlike
-   * `takeAll` the query stays bounded; ignored when `takeAll` is set.
-   */
-  takeCap?: number;
-}) {
+};
+
+/**
+ * Builds the Prisma `where` that defines a bookings list: its filters, its
+ * default status set, the rule that a draft is visible to its creator only, and
+ * any restriction the caller applies.
+ *
+ * {@link getBookings} queries and counts with it, and "Select all" on the
+ * bookings index resolves its selection with it (see
+ * {@link getBulkBookingsWhereInput}), so a bulk action reaches exactly the rows
+ * the list counted. Change which bookings a list holds here, never at a caller.
+ *
+ * @param params - The list's filters and restrictions
+ * @returns A `Prisma.BookingWhereInput` scoped to the organization
+ */
+export function buildBookingsWhere(
+  params: BookingsWhereParams
+): Prisma.BookingWhereInput {
   const {
     organizationId,
-    page = 1,
-    perPage = 8,
+    userId,
     search,
     statuses,
     custodianScope,
     custodianTeamMemberIds,
     writableBy,
     assetIds,
-    bookingTo,
     excludeBookingIds,
     bookingFrom,
-    userId,
+    bookingTo,
+    kitId,
+    tags,
+  } = params;
+
+  /** Default value of where. Takes the bookings belonging to the current org */
+  const where: Prisma.BookingWhereInput = { organizationId };
+
+  /**
+   * Clauses that must NARROW the result set. Everything AND-ed here composes:
+   * no clause can widen another away.
+   *
+   * The idea is that only the creator of a draft booking can see it
+   * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
+   */
+  const andClauses: Prisma.BookingWhereInput[] = [
+    bookingDraftVisibilityClause(userId),
+  ];
+
+  /** If the search string exists, add it to the where object */
+  if (search?.trim()?.length) {
+    const searchTerms = search
+      .toLowerCase()
+      .trim()
+      .split(",")
+      .map((term) => term.trim())
+      .filter(Boolean);
+
+    where.OR = searchTerms.map((term) => ({
+      OR: [
+        // Search in booking fields
+        { name: { contains: term, mode: "insensitive" } },
+        { description: { contains: term, mode: "insensitive" } },
+        // Search in tags
+        { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
+        // Search in custodian team member name
+        {
+          custodianTeamMember: {
+            name: { contains: term, mode: "insensitive" },
+          },
+        },
+        // Search in custodian user names. `displayName` is one of them: it
+        // replaces first/last name in the UI for users who set one, so it is
+        // the name a searcher can actually see on the booking row.
+        {
+          custodianUser: {
+            OR: [
+              { firstName: { contains: term, mode: "insensitive" } },
+              { lastName: { contains: term, mode: "insensitive" } },
+              { displayName: { contains: term, mode: "insensitive" } },
+            ],
+          },
+        },
+        // Search in asset titles, QR codes, and barcodes
+        {
+          bookingAssets: {
+            some: {
+              asset: {
+                // The workspace on the asset itself, not only on the
+                // booking: without it Postgres evaluates the OR below
+                // against every workspace's assets before joining back to
+                // these bookings. With it, the match starts from this
+                // workspace's asset index.
+                organizationId,
+                OR: [
+                  { title: { contains: term, mode: "insensitive" } },
+                  {
+                    qrCodes: {
+                      some: { id: { contains: term, mode: "insensitive" } },
+                    },
+                  },
+                  {
+                    barcodes: {
+                      some: {
+                        value: { contains: term, mode: "insensitive" },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    }));
+  }
+
+  /**
+   * The restriction: AND-ed as ONE clause whose internal OR matches either
+   * custody link. Nesting the OR inside a single AND member is what keeps it
+   * un-widenable: a top-level `where.OR` is a single slot that the search
+   * block also writes, so the two would overwrite each other.
+   */
+  if (custodianScope) {
+    andClauses.push(custodianScopeClause(custodianScope));
+  }
+
+  /**
+   * A SECOND, independent restriction: the caller may only be offered
+   * bookings they are allowed to WRITE to. Set by mutation-target pickers
+   * (the "Add to existing booking" dialogs), never by read-only lists.
+   *
+   * Scalars rather than a where-input, so a call site cannot hand this a
+   * request-controlled predicate: the clause itself is fixed by
+   * {@link bookingWriteScopeClause}. AND-ed alongside `custodianScope`, so
+   * the two intersect and neither can widen the other.
+   */
+  if (writableBy) {
+    const writeScope = bookingWriteScopeClause(writableBy);
+
+    if (writeScope) {
+      andClauses.push(writeScope);
+    }
+
+    // The picker also offers only the statuses the add action accepts.
+    const addableStatus = bookingAddableStatusClause({
+      access: writableBy.access,
+    });
+
+    if (addableStatus) {
+      andClauses.push(addableStatus);
+    }
+  }
+
+  /** The filter: independent, always AND-ed, never a restriction. */
+  if (custodianTeamMemberIds?.length) {
+    andClauses.push({
+      custodianTeamMemberId: { in: custodianTeamMemberIds },
+    });
+  }
+
+  where.AND = andClauses;
+
+  if (statuses?.length) {
+    where.status = {
+      in: statuses,
+    };
+  } else {
+    where.status = {
+      notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED], // By default we dont show archived & cancelled bookings
+    };
+  }
+
+  if (assetIds?.length) {
+    where.bookingAssets = {
+      some: {
+        assetId: {
+          in: assetIds,
+        },
+      },
+    };
+  }
+
+  if (excludeBookingIds?.length) {
+    where.id = { notIn: excludeBookingIds };
+  }
+
+  if (bookingFrom && bookingTo) {
+    // Add date filtering to AND clause instead of overriding OR clause
+    // to preserve search conditions
+    if (!where.AND) {
+      where.AND = [];
+    }
+    where.AND.push({
+      OR: [
+        {
+          from: { lte: bookingTo },
+          to: { gte: bookingFrom },
+        },
+        {
+          from: { gte: bookingFrom },
+          to: { lte: bookingTo },
+        },
+      ],
+    });
+  }
+
+  if (kitId) {
+    where.bookingAssets = {
+      some: { asset: { assetKits: { some: { kitId } } } },
+    };
+  }
+
+  if (tags?.length) {
+    if (tags.includes("untagged")) {
+      where.tags = { none: {} };
+    } else {
+      where.tags = { some: { id: { in: tags } } };
+    }
+  }
+
+  return where;
+}
+
+export async function getBookings(
+  params: BookingsWhereParams & {
+    /** Page number. Starts at 1 */
+    page: number;
+    /** Assets to be loaded per page */
+    perPage?: number;
+    extraInclude?: Prisma.BookingInclude;
+    /** Controls whether entries should be paginated or not */
+    takeAll?: boolean;
+    orderBy?: string;
+    orderDirection?: SortingDirection;
+    /**
+     * Skip the `db.booking.count` companion query and return `bookingCount: 0`.
+     * For callers that only need the rows and never read the total (e.g. the
+     * iCal feed), this avoids a wasted aggregate on every call. Defaults to
+     * `false`, so paginated callers are unaffected.
+     */
+    skipCount?: boolean;
+    /**
+     * Attach the `bookingAssets` payload, by far the heaviest part of this
+     * query. Callers that render no asset data (the calendar, the dashboard
+     * widgets, the bookings-list surfaces whose drawer fetches on open) pass
+     * `false`, which omits the key from the Prisma include entirely. Defaults
+     * to `true`, so existing callers are unaffected.
+     */
+    includeAssets?: boolean;
+    /**
+     * Hard row cap, bypassing the `perPage` ≤ 100 clamp below. For callers that
+     * fetch one bounded set in a single query rather than a page of it. Unlike
+     * `takeAll` the query stays bounded; ignored when `takeAll` is set.
+     */
+    takeCap?: number;
+  }
+) {
+  const {
+    page = 1,
+    perPage = 8,
     extraInclude,
     takeAll = false,
     orderBy = "from",
     orderDirection = "asc",
-    kitId,
-    tags,
     skipCount = false,
     includeAssets = true,
     takeCap,
@@ -13360,191 +13579,7 @@ export async function getBookings(params: {
     const skip = page > 1 ? (page - 1) * perPage : 0;
     const take = perPage >= 1 && perPage <= 100 ? perPage : 20; // min 1 and max 25 per page
 
-    /** Default value of where. Takes the assetss belonging to current org */
-    const where: Prisma.BookingWhereInput = { organizationId };
-
-    /**
-     * Clauses that must NARROW the result set. Everything AND-ed here composes:
-     * no clause can widen another away.
-     *
-     * The idea is that only the creator of a draft booking can see it
-     * This condition will fetch all bookings that are not in 'DRAFT' status, and also the bookings that are in 'DRAFT' status but only if their creatorId is the same as the userId
-     */
-    const andClauses: Prisma.BookingWhereInput[] = [
-      bookingDraftVisibilityClause(userId),
-    ];
-
-    /** If the search string exists, add it to the where object */
-    if (search?.trim()?.length) {
-      const searchTerms = search
-        .toLowerCase()
-        .trim()
-        .split(",")
-        .map((term) => term.trim())
-        .filter(Boolean);
-
-      where.OR = searchTerms.map((term) => ({
-        OR: [
-          // Search in booking fields
-          { name: { contains: term, mode: "insensitive" } },
-          { description: { contains: term, mode: "insensitive" } },
-          // Search in tags
-          { tags: { some: { name: { contains: term, mode: "insensitive" } } } },
-          // Search in custodian team member name
-          {
-            custodianTeamMember: {
-              name: { contains: term, mode: "insensitive" },
-            },
-          },
-          // Search in custodian user names. `displayName` is one of them: it
-          // replaces first/last name in the UI for users who set one, so it is
-          // the name a searcher can actually see on the booking row.
-          {
-            custodianUser: {
-              OR: [
-                { firstName: { contains: term, mode: "insensitive" } },
-                { lastName: { contains: term, mode: "insensitive" } },
-                { displayName: { contains: term, mode: "insensitive" } },
-              ],
-            },
-          },
-          // Search in asset titles, QR codes, and barcodes
-          {
-            bookingAssets: {
-              some: {
-                asset: {
-                  // The workspace on the asset itself, not only on the
-                  // booking: without it Postgres evaluates the OR below
-                  // against every workspace's assets before joining back to
-                  // these bookings. With it, the match starts from this
-                  // workspace's asset index.
-                  organizationId,
-                  OR: [
-                    { title: { contains: term, mode: "insensitive" } },
-                    {
-                      qrCodes: {
-                        some: { id: { contains: term, mode: "insensitive" } },
-                      },
-                    },
-                    {
-                      barcodes: {
-                        some: {
-                          value: { contains: term, mode: "insensitive" },
-                        },
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-          },
-        ],
-      }));
-    }
-
-    /**
-     * The restriction: AND-ed as ONE clause whose internal OR matches either
-     * custody link. Nesting the OR inside a single AND member is what keeps it
-     * un-widenable — a top-level `where.OR` is a single slot that the search
-     * block also writes, so whichever ran last silently dropped the other.
-     */
-    if (custodianScope) {
-      andClauses.push(custodianScopeClause(custodianScope));
-    }
-
-    /**
-     * A SECOND, independent restriction: the caller may only be offered
-     * bookings they are allowed to WRITE to. Set by mutation-target pickers
-     * (the "Add to existing booking" dialogs), never by read-only lists.
-     *
-     * Scalars rather than a where-input, so a call site cannot hand this a
-     * request-controlled predicate — the clause itself is fixed by
-     * {@link bookingWriteScopeClause}. AND-ed alongside `custodianScope`, so
-     * the two intersect and neither can widen the other.
-     */
-    if (writableBy) {
-      const writeScope = bookingWriteScopeClause(writableBy);
-
-      if (writeScope) {
-        andClauses.push(writeScope);
-      }
-
-      // The picker also offers only the statuses the add action accepts.
-      const addableStatus = bookingAddableStatusClause({
-        access: writableBy.access,
-      });
-
-      if (addableStatus) {
-        andClauses.push(addableStatus);
-      }
-    }
-
-    /** The filter: independent, always AND-ed, never a restriction. */
-    if (custodianTeamMemberIds?.length) {
-      andClauses.push({
-        custodianTeamMemberId: { in: custodianTeamMemberIds },
-      });
-    }
-
-    where.AND = andClauses;
-
-    if (statuses?.length) {
-      where.status = {
-        in: statuses,
-      };
-    } else {
-      where.status = {
-        notIn: [BookingStatus.ARCHIVED, BookingStatus.CANCELLED], // By default we dont show archived & cancelled bookings
-      };
-    }
-
-    if (assetIds?.length) {
-      where.bookingAssets = {
-        some: {
-          assetId: {
-            in: assetIds,
-          },
-        },
-      };
-    }
-
-    if (excludeBookingIds?.length) {
-      where.id = { notIn: excludeBookingIds };
-    }
-
-    if (bookingFrom && bookingTo) {
-      // Add date filtering to AND clause instead of overriding OR clause
-      // to preserve search conditions
-      if (!where.AND) {
-        where.AND = [];
-      }
-      where.AND.push({
-        OR: [
-          {
-            from: { lte: bookingTo },
-            to: { gte: bookingFrom },
-          },
-          {
-            from: { gte: bookingFrom },
-            to: { lte: bookingTo },
-          },
-        ],
-      });
-    }
-
-    if (kitId) {
-      where.bookingAssets = {
-        some: { asset: { assetKits: { some: { kitId } } } },
-      };
-    }
-
-    if (tags?.length) {
-      if (tags.includes("untagged")) {
-        where.tags = { none: {} };
-      } else {
-        where.tags = { some: { id: { in: tags } } };
-      }
-    }
+    const where = buildBookingsWhere(params);
 
     const [bookings, bookingCount] = await Promise.all([
       db.booking.findMany({
@@ -15533,12 +15568,127 @@ export async function getBookingFlags(
 }
 
 /**
+ * Builds the complete `where` for a bulk booking action.
+ *
+ * Shared by `bulkDeleteBookings`, `bulkArchiveBookings` and
+ * `bulkCancelBookings` so the three resolve a selection the same way, and so
+ * the ownership scope cannot be forgotten on one of them.
+ *
+ * - **Explicit ids**: those bookings, in the caller's workspace.
+ * - **Select all** (`bookingIds` holds {@link ALL_SELECTED_KEY}): the bookings
+ *   the index shows at `currentSearchParams`, see {@link getBookingsIndexWhere}.
+ *
+ * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
+ * only to "select all" would still let a restricted caller act on someone
+ * else's booking by posting its id directly.
+ *
+ * @param params.bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.currentSearchParams - The bookings index URL params, for select-all
+ * @param params.access - The caller's access
+ * @param params.userId - The caller
+ * @returns A `Prisma.BookingWhereInput` scoped to org, selection and ownership
+ * @throws {ShelfError} when a restricted caller, or a select-all, has no user to scope to
+ */
+export async function getBulkBookingsWhereInput({
+  bookingIds,
+  organizationId,
+  currentSearchParams,
+  access,
+  userId,
+}: {
+  bookingIds: Booking["id"][];
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  access: RoleAccess;
+  /** Absent for system-initiated calls, which have no acting user */
+  userId?: User["id"];
+}): Promise<Prisma.BookingWhereInput> {
+  const ownership = getBookingOwnershipScope({ access, userId });
+
+  const base: Prisma.BookingWhereInput = bookingIds.includes(ALL_SELECTED_KEY)
+    ? await getBookingsIndexWhere({
+        currentSearchParams,
+        organizationId,
+        access,
+        userId,
+      })
+    : { id: { in: bookingIds }, organizationId };
+
+  if (!ownership) {
+    return base;
+  }
+
+  // AND rather than a spread: `base` may carry its own OR, and merging the two
+  // would union them, widening a destructive action instead of narrowing it.
+  return { AND: [base, ownership] };
+}
+
+/**
+ * The `where` of the bookings index at the given URL params, for this viewer:
+ * the rows "Select all N entries" stands for.
+ *
+ * Reads the params the way the index loader
+ * (`routes/_layout+/bookings._index.tsx`) does and builds with
+ * {@link buildBookingsWhere}, the builder {@link getBookings} uses. A viewer
+ * who may not see every booking gets the same custodian scope the index
+ * applies through {@link getBookingsFilterData}. Change the two together:
+ * `bulk-select-all-matches-list.server.test.ts` compares them URL by URL.
+ *
+ * @param params.currentSearchParams - The bookings index URL params
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.access - The viewer's access, for the custodian scope
+ * @param params.userId - The viewer, for draft visibility and the custodian scope
+ * @returns The `where` the index lists and counts with
+ * @throws {ShelfError} when there is no viewer, since drafts are visible to their creator only
+ */
+async function getBookingsIndexWhere({
+  currentSearchParams,
+  organizationId,
+  access,
+  userId,
+}: {
+  currentSearchParams?: string | null;
+  organizationId: Organization["id"];
+  access: RoleAccess;
+  userId?: User["id"];
+}): Promise<Prisma.BookingWhereInput> {
+  if (!userId) {
+    // Without a viewer the draft rule has nobody to match, and leaving it out
+    // would reach every draft in the workspace. Fail closed.
+    throw new ShelfError({
+      cause: null,
+      message:
+        "Cannot resolve which bookings this list shows. Please contact support.",
+      additionalData: { organizationId },
+      label,
+    });
+  }
+
+  const { search, status, teamMemberIds, tags } = getParamsValues(
+    new URLSearchParams(currentSearchParams ?? "")
+  );
+
+  return buildBookingsWhere({
+    organizationId,
+    userId,
+    search,
+    statuses: status ? [status] : null,
+    custodianTeamMemberIds: teamMemberIds,
+    tags,
+    custodianScope: access.bookings.seeAll
+      ? null
+      : await resolveCustodianScope({ userId, organizationId }),
+  });
+}
+
+/**
  * Deletes a selection of bookings in one request.
  *
- * The selection is the explicit ids, or with select-all every booking matching
- * the list's status filter (the only filter select-all carries), and in both
- * cases only the bookings the caller may act on. Roles whose policy limits
- * delete to drafts are refused the whole
+ * The selection is the explicit ids, or with select-all every booking the
+ * bookings index shows for its filters, and in both cases only the bookings
+ * the caller may act on (see {@link getBulkBookingsWhereInput}). Roles whose
+ * policy limits delete to drafts are refused the whole
  * request when the selection contains any non-draft booking, the same rule
  * `assertCanDeleteBooking` applies to a single delete.
  *
@@ -15578,7 +15728,7 @@ export async function bulkDeleteBookings({
      * allowed to act on. Without the ownership half, a restricted caller could
      * delete every booking in the workspace with one request.
      */
-    const where = getBulkBookingsWhereInput({
+    const where = await getBulkBookingsWhereInput({
       bookingIds,
       organizationId,
       currentSearchParams,
@@ -15838,7 +15988,7 @@ export async function bulkArchiveBookings({
      * allowed to act on. Without the ownership half, a restricted caller could
      * delete every booking in the workspace with one request.
      */
-    const where = getBulkBookingsWhereInput({
+    const where = await getBulkBookingsWhereInput({
       bookingIds,
       organizationId,
       currentSearchParams,
@@ -16059,7 +16209,7 @@ export async function bulkCancelBookings({
      * allowed to act on. Without the ownership half, a restricted caller could
      * delete every booking in the workspace with one request.
      */
-    const where = getBulkBookingsWhereInput({
+    const where = await getBulkBookingsWhereInput({
       bookingIds,
       organizationId,
       currentSearchParams,
