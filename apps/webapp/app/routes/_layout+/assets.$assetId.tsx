@@ -17,9 +17,11 @@ import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { draftBookingsNote } from "~/modules/asset/archive-messages";
 import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
@@ -31,7 +33,6 @@ import {
   archiveAsset,
   assertAssetDeleteConfirmed,
   deleteAsset,
-  deleteOtherImages,
   getAsset,
   relinkAssetQrCode,
   unarchiveAsset,
@@ -338,34 +339,23 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       intent === "set-reminder" ||
       intent === "add-barcode"
     ) {
-      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+      await assertAssetsAreNotArchived({
+        assetIds: [id],
+        organizationId,
+        actorUserId: userId,
+      });
     }
 
     switch (intent) {
       case "delete": {
-        const { mainImageUrl, confirmation } = parseData(
-          formData,
-          z
-            .object({ mainImageUrl: z.string().optional() })
-            .merge(DeleteConfirmationSchema)
-        );
+        const { confirmation } = parseData(formData, DeleteConfirmationSchema);
 
         // The dialog asks for the asset's title; refuse a request that skipped it.
         await assertAssetDeleteConfirmed({ id, organizationId, confirmation });
 
         // Name the actor, or the activity event records the deletion as
-        // "System" — the mobile delete route already passes it, so the same
-        // action read differently depending on where it was performed.
+        // "System". `deleteAsset` also removes the stored image files.
         await deleteAsset({ organizationId, id, actorUserId: userId });
-
-        if (mainImageUrl) {
-          // as it is deletion operation giving hardcoded path(to make sure all the images were deleted)
-          await deleteOtherImages({
-            userId,
-            assetId: id,
-            data: { path: `main-image-${id}.jpg` },
-          });
-        }
 
         sendNotification({
           title: "Asset deleted",
@@ -378,7 +368,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "archive": {
-        await archiveAsset({
+        const { draftBookings } = await archiveAsset({
           id,
           organizationId,
           actorUserId: userId,
@@ -389,8 +379,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Asset archived",
-          message:
-            "The asset is hidden from your lists and can't be booked. You can reinstate it any time.",
+          message: `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
+            draftBookings
+          )}`,
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -399,11 +390,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "reinstate": {
-        await unarchiveAsset({ id, organizationId, actorUserId: userId });
+        const { availableToBook } = await unarchiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+        });
 
         sendNotification({
           title: "Asset reinstated",
-          message: "The asset is active again and available to book.",
+          // Archiving never changed availability, so an asset marked
+          // unavailable before it was archived is still unavailable now.
+          message: availableToBook
+            ? "The asset is active again and available to book."
+            : "The asset is active again. It is still marked as unavailable for bookings.",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -618,7 +617,7 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <AssetStatusBadge
               id={asset.id}
               status={asset.status}
@@ -626,6 +625,12 @@ export default function AssetDetailsPage() {
               asset={asset}
               isArchived={!!asset.archivedAt}
             />
+            {/* When it left service; who did it is on the Activity tab. */}
+            {asset.archivedAt ? (
+              <span className="text-sm text-gray-600">
+                Archived on <DateS date={asset.archivedAt} />
+              </span>
+            ) : null}
           </div>
         }
       >

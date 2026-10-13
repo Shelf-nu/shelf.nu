@@ -24,7 +24,13 @@ import { accessFor } from "@helpers/role-access";
 // initialization calls `db.$connect()`; without this the test attempts a real
 // PostgreSQL connection.
 vi.mock("~/database/db.server", () => ({
-  db: { $connect: vi.fn(), $transaction: vi.fn() },
+  db: {
+    $connect: vi.fn(),
+    $transaction: vi.fn(),
+    // why: the loader counts the kit's archived members for its empty-kit
+    // reasons; none here.
+    assetKit: { count: vi.fn().mockResolvedValue(0) },
+  },
 }));
 
 const { mockRequirePermission } = vi.hoisted(() => ({
@@ -54,7 +60,6 @@ vi.mock("~/modules/kit/service.server", async (importOriginal) => {
   return {
     getKit: mockGetKit,
     deleteKit: vi.fn(),
-    deleteKitImage: vi.fn(),
     getKitCurrentBooking: actual.getKitCurrentBooking,
   };
 });

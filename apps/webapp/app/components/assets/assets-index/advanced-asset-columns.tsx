@@ -291,7 +291,18 @@ export function AdvancedIndexColumn({
       return <CustodyColumn custody={item.custody} />;
 
     case "availableToBook":
-      return <TextColumn value={item.availableToBook ? "Yes" : "No"} />;
+      // An archived asset can't be booked, whatever its stored setting.
+      return (
+        <TextColumn
+          value={
+            item.archivedAt
+              ? "No (archived)"
+              : item.availableToBook
+              ? "Yes"
+              : "No"
+          }
+        />
+      );
 
     case "upcomingReminder":
       return (

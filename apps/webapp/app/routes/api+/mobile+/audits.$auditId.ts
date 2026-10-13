@@ -1,5 +1,6 @@
 import { data, type LoaderFunctionArgs } from "react-router";
 import { z } from "zod";
+import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -72,15 +73,33 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       assignedOnly: !canSeeAllAudits,
     });
 
-    // Fetch session details and scans in parallel
-    const [{ session, expectedAssets }, scans] = await Promise.all([
-      getAuditSessionDetails({
-        id: auditId,
-        organizationId,
-        refreshExpectedAssetImages: true,
-      }),
-      getAuditScans({ auditSessionId: auditId, organizationId }),
-    ]);
+    // Session details, scans, and which of the audit's assets are archived
+    // (so the app can badge those rows), all in parallel. The archived read is
+    // scoped through the audit's own relations, so it needs no id list: an
+    // asset belongs to the audit when it is expected in it or was scanned in it.
+    const [{ session, expectedAssets }, scans, archivedAssets] =
+      await Promise.all([
+        getAuditSessionDetails({
+          id: auditId,
+          organizationId,
+          refreshExpectedAssetImages: true,
+        }),
+        getAuditScans({ auditSessionId: auditId, organizationId }),
+        db.asset.findMany({
+          where: {
+            organizationId,
+            archivedAt: { not: null },
+            OR: [
+              { auditEntries: { some: { auditSessionId: auditId } } },
+              { auditScans: { some: { auditSessionId: auditId } } },
+            ],
+          },
+          select: { id: true, archivedAt: true },
+        }),
+      ]);
+    const archivedAtById = new Map(
+      archivedAssets.map((a) => [a.id, a.archivedAt?.toISOString() ?? null])
+    );
 
     // why: completing is assignee-gated server-side (requireAuditAssignee in
     // audits.complete.ts): callers who see every audit may complete any
@@ -141,6 +160,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         locationName: a.locationName ?? null,
         categoryName: a.categoryName ?? null,
         custodianName: a.custodianName ?? null,
+        // The app shows an "Archived" badge on the row. Null while active.
+        archivedAt: archivedAtById.get(a.id) ?? null,
       })),
       existingScans: scans.map((s) => ({
         id: s.id,
@@ -155,6 +176,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // why: lets the app say "deleted" instead of inferring it from an
         // empty title, which is also what a pre-snapshot row looks like.
         assetDeleted: s.assetDeleted,
+        archivedAt: s.assetId ? archivedAtById.get(s.assetId) ?? null : null,
         auditNotesCount: s.auditNotesCount,
         auditImagesCount: s.auditImagesCount,
       })),

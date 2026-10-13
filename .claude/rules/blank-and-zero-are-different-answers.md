@@ -1,6 +1,8 @@
 ---
 description: A blank numeric input coerces to 0 in JavaScript and in z.coerce.number(), so emptiness must be rejected or mapped to null BEFORE coercion; build numeric string fields with optionalNumberFromString / requiredNumberFromString and keep every bound at the call site
-globs: ["apps/webapp/app/**/*.ts", "apps/webapp/app/**/*.tsx"]
+paths:
+  - "apps/webapp/app/**/*.ts"
+  - "apps/webapp/app/**/*.tsx"
 ---
 
 # A Blank Field And A Zero Are Different Answers

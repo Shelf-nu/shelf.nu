@@ -19,6 +19,7 @@ import {
   createSsoRequiredError,
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -467,6 +468,9 @@ export const MOBILE_ASSET_SELECT = {
   ...ASSET_MODEL_IMAGE_SELECT,
   // why: powers the scan-to-booking "not available to book" blocker.
   availableToBook: true,
+  // Archived assets are read-only and out of service. The companion shows one
+  // "Archived" badge instead of the live status and turns their actions off.
+  archivedAt: true,
   // why: the fulfil-and-check-out scanner matches each scan against the
   // booking's outstanding BookingModelRequests. Without the model id the
   // client cannot tell a matching unit from an off-model one, and can only
@@ -535,11 +539,16 @@ export const MOBILE_KIT_SELECT = {
   name: true,
   status: true,
   image: true,
-  _count: { select: { assetKits: true } },
+  // The scanner's "Kit • N assets"; archived members are not counted.
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
-  // blocker — both mirror the web scanner drawers.
+  // blocker, both mirroring the web scanner drawers. Archived members are left
+  // out, as the count above leaves them out: the server books, hands over and
+  // moves a kit with its active members only, so an archived member must not
+  // block the kit on the phone either.
   assetKits: {
+    where: KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where,
     select: {
       asset: { select: { id: true, status: true, availableToBook: true } },
     },
@@ -626,6 +635,12 @@ export type MobileAssetResponse = {
    */
   imageSource: AssetImageSource;
   availableToBook: boolean;
+  /**
+   * When the asset was archived, `null` while it is active. Archived assets
+   * are read-only: the companion badges them "Archived" and offers no action
+   * the server would refuse.
+   */
+  archivedAt: Date | null;
   category: { name: string } | null;
   kitId: string | null;
   kit: { id: string; name: string } | null;
@@ -693,6 +708,7 @@ export function shapeMobileAssetResponse(asset: {
   mainImageExpiration?: Date | null;
   assetModel: { image: string | null; thumbnailImage: string | null } | null;
   availableToBook: boolean;
+  archivedAt: Date | null;
   category: { name: string } | null;
   type: AssetType;
   quantity: number | null;

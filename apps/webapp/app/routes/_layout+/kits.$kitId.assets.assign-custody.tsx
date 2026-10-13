@@ -5,6 +5,7 @@ import {
   KitStatus,
   NoteType,
 } from "@prisma/client";
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 import {
   data,
@@ -25,7 +26,10 @@ import { db } from "~/database/db.server";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { recordEvents } from "~/modules/activity-event/service.server";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
-import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
+import {
+  assertKitsCustodyAssignable,
+  assertKitsHaveActiveAssets,
+} from "~/modules/booking/kit-holds.server";
 import { AssignCustodySchema } from "~/modules/custody/schema";
 import {
   buildKitCustodyInheritData,
@@ -95,6 +99,9 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                 // status is IN_CUSTODY only because *some* units are
                 // operator-allocated (Option B handles that on assign).
                 type: true,
+                // Archived members are left out of kit custody, so a kit with
+                // no active member has nothing to hand over.
+                archivedAt: true,
                 bookingAssets: {
                   where: {
                     booking: {
@@ -120,6 +127,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     if (kit.custody) {
+      return redirect(`/kits/${kitId}`);
+    }
+
+    if (!kit.assetKits.some((ak) => !ak.asset.archivedAt)) {
+      sendNotification({
+        title: "Cannot assign custody at this time.",
+        message: kitWithoutActiveAssetsReason({
+          hasArchivedAssets: kit.assetKits.length > 0,
+          action: "custody",
+        }),
+        icon: { name: "trash", variant: "error" },
+        senderId: userId,
+      });
+
       return redirect(`/kits/${kitId}`);
     }
 
@@ -339,6 +360,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       // The helper's own read then skips any member archived in between.
       const memberIds = updatedKit.assetKits.map((ak) => ak.asset.id);
       await lockAssetsForArchiveGuard(tx, memberIds, organizationId);
+      // A kit whose members are all archived (or that has none) would be in
+      // custody while nothing in it is. Read under the lock above.
+      await assertKitsHaveActiveAssets(tx, {
+        kitIds: [kitId],
+        organizationId,
+        action: "custody",
+      });
       const inheritData = await buildKitCustodyInheritData({
         tx,
         kitId: updatedKit.id,

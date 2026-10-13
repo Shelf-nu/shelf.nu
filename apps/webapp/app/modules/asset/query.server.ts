@@ -9,6 +9,8 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
+import { bookableListScopeSql } from "./list-scope.server";
+import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
 import { buildAssetSearchUnion } from "./search-union.server";
 import { splitAssetSearchTerms } from "./search.server";
@@ -50,7 +52,8 @@ const BOOKING_CUSTODIAN_NAME = Prisma.sql`CASE
  * @param search - Optional search string
  * @param filters - Array of filter objects
  * @param assetIds - Optional array of specific asset IDs to include
- * @param availableToBookOnly - Restrict to assets with `availableToBook = true`
+ * @param bookableScope - The caller's list scope: assets available to book plus
+ *   the ones they hold. `null` lists every asset (see {@link BookableListScope})
  * @param timeZone - IANA timezone name the acting user displays dates in.
  *   Used only by built-in date-column filters so their day truncation matches
  *   what the user sees (see {@link addDateFilter}). Defaults to `"UTC"` to
@@ -64,7 +67,7 @@ export function generateWhereClause(
   search: string | null,
   filters: Filter[],
   assetIds?: string[],
-  availableToBookOnly = false,
+  bookableScope: BookableListScope | null = null,
   timeZone: string = "UTC",
   lowStockOnly = false,
   /**
@@ -84,8 +87,10 @@ export function generateWhereClause(
     whereClause = Prisma.sql`${whereClause} AND a."archivedAt" IS NOT NULL`;
   }
 
-  if (availableToBookOnly) {
-    whereClause = Prisma.sql`${whereClause} AND a."availableToBook" = true`;
+  if (bookableScope) {
+    whereClause = Prisma.sql`${whereClause} AND ${bookableListScopeSql(
+      bookableScope
+    )}`;
   }
 
   if (lowStockOnly) {
