@@ -112,7 +112,7 @@ export function QuantityCustodyDialog({
   const [selectedTeamMemberId, setSelectedTeamMemberId] = useState<
     string | null
   >(null);
-  const fetcher = useFetcher({ key: "assign-quantity-custody" });
+  const fetcher = useFetcher({ key: `assign-quantity-custody-${assetId}` });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
 

@@ -24,8 +24,12 @@
 
 import { useState } from "react";
 
-/** The part of a fetcher these hooks read. */
-type FetcherWithData = { data?: unknown };
+/** The parts of a fetcher these hooks read. */
+type FetcherWithData = {
+  data?: unknown;
+  /** Back to `"idle"` only once the loaders the action invalidated have run. */
+  state: "idle" | "submitting" | "loading";
+};
 
 /**
  * The server's answer to the current opening of a dialog.
@@ -93,15 +97,24 @@ export function useFetcherOutcomeSinceOpen(
     if (open) setDataAtOpen(fetcher.data);
   }
 
-  // A fetcher clears its data when the next submission starts, so an absent
-  // response is pending and never an acceptance.
+  // A fetcher keyed on an entity is replaced when that entity changes, and the
+  // replacement carries no data until it answers. That is pending: it is not an
+  // answer to this opening, and the snapshot describes the entity before it.
   if (!open || fetcher.data === undefined || fetcher.data === dataAtOpen) {
     return PENDING;
   }
 
-  return isRejection(fetcher.data)
-    ? { status: "rejected", message: errorMessageOf(fetcher.data) }
-    : ACCEPTED;
+  // A refusal is reported the moment it lands. Nothing behind the dialog has
+  // changed, so there is nothing to wait for.
+  if (isRejection(fetcher.data)) {
+    return { status: "rejected", message: errorMessageOf(fetcher.data) };
+  }
+
+  // Acceptance waits for idle. A fetcher carries its action's result while the
+  // loaders that result invalidated are still running, so the response arrives
+  // before the page behind the dialog reflects it, and the updated figure there
+  // is the operator's confirmation that the write landed.
+  return fetcher.state === "idle" ? ACCEPTED : PENDING;
 }
 
 /**
