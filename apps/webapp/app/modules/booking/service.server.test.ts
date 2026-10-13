@@ -15552,6 +15552,7 @@ describe("bulkDeleteBookings", () => {
     await expect(
       bulkDeleteBookings({
         bookingIds: [ALL_SELECTED_KEY],
+        list: { kind: "index" },
         currentSearchParams: "status=ALL",
         organizationId: "org-1",
         userId: "user-1",

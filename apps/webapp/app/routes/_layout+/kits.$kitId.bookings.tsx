@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -7,6 +6,7 @@ import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
+  getBookingsListWhereParams,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
@@ -32,14 +32,6 @@ import BookingsIndexPage, {
   bookingsSearchFieldTooltipText,
 } from "./bookings._index";
 
-const BOOKING_STATUS_TO_SHOW = [
-  BookingStatus.DRAFT,
-  BookingStatus.COMPLETE,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-  BookingStatus.RESERVED,
-];
-
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
@@ -57,14 +49,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
 
     const searchParams = getCurrentSearchParams(request);
-    const {
-      page,
-      perPageParam,
-      search,
-      status,
-      teamMemberIds,
-      tags: filterTags,
-    } = getParamsValues(searchParams);
+    const { page, perPageParam, search, teamMemberIds } =
+      getParamsValues(searchParams);
 
     const { perPage } = await updateCookieWithPerPage(request, perPageParam);
 
@@ -73,21 +59,20 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     // linked bookings aren't hidden while showing on the index.
     const custodianScope = !access.bookings.seeAll
       ? await resolveCustodianScope({ userId, organizationId })
-      : undefined;
+      : null;
 
     const [{ bookings, bookingCount }, teamMembersData, tagsData, kit] =
       await Promise.all([
         getBookings({
-          organizationId,
+          ...getBookingsListWhereParams({
+            list: { kind: "kit", kitId },
+            searchParams,
+            organizationId,
+            userId,
+            custodianScope,
+          }),
           page,
           perPage,
-          search,
-          userId,
-          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-          ...(custodianScope && { custodianScope }),
-          custodianTeamMemberIds: teamMemberIds,
-          kitId,
-          tags: filterTags,
           // PERF: the list renders booking-level fields plus an asset COUNT. The
           // per-booking `bookingAssets` payload existed only for the assets
           // drawer, which now fetches it from
