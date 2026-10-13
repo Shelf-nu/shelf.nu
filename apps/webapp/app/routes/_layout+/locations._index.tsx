@@ -98,41 +98,6 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
 ];
 
-/**
- * Whether the member gets any per-row location action. Every button in
- * `LocationQuickActions` needs `location: update` or `location: delete`, so
- * without either the Actions column would render empty.
- */
-function useShowLocationRowActions() {
-  const roles = useOrganizationRoles();
-  return (
-    userHasPermission({
-      roles,
-      entity: PermissionEntity.location,
-      action: PermissionAction.update,
-    }) ||
-    userHasPermission({
-      roles,
-      entity: PermissionEntity.location,
-      action: PermissionAction.delete,
-    })
-  );
-}
-
-/** The row's Actions cell, rendered only when the header column is. */
-function LocationActionsCell({
-  location,
-}: {
-  location: { id: string; name: string; childCount: number };
-}) {
-  const showRowActions = useShowLocationRowActions();
-  return showRowActions ? (
-    <Td>
-      <LocationQuickActions location={location} />
-    </Td>
-  ) : null;
-}
-
 export default function LocationsIndexPage() {
   const roles = useOrganizationRoles();
   const showRowActions = useShowLocationRowActions();
@@ -274,3 +239,38 @@ const ListItemContent = ({
     />
   </>
 );
+
+/**
+ * Whether the member gets any per-row location action. Every button in
+ * `LocationQuickActions` needs `location: update` or `location: delete`, so
+ * without either the Actions column would render empty.
+ */
+function useShowLocationRowActions() {
+  const roles = useOrganizationRoles();
+  return (
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    })
+  );
+}
+
+/** The row's Actions cell, rendered only when the header column is. */
+function LocationActionsCell({
+  location,
+}: {
+  location: { id: string; name: string; childCount: number };
+}) {
+  const showRowActions = useShowLocationRowActions();
+  return showRowActions ? (
+    <Td>
+      <LocationQuickActions location={location} />
+    </Td>
+  ) : null;
+}
