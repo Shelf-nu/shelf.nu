@@ -190,7 +190,7 @@ type SelectAllArgs = {
   userId: string;
   access: RoleAccess;
   currentSearchParams: string;
-  list?: ListPage["list"];
+  list?: ListPage["list"] | null;
 };
 
 const HINTS = { timeZone: "UTC", locale: "en-US" };
@@ -371,13 +371,28 @@ describe("select all with no filters", () => {
     });
   });
 
-  it("treats a request that names no list as the bookings index", async () => {
-    expect(await selectAllWhere({ list: undefined }, "", ADMIN)).toEqual({
-      organizationId: ORG,
-      AND: [ONLY_MY_DRAFTS],
-      status: HIDE_ARCHIVED_AND_CANCELLED,
-    });
-  });
+  it.each(Object.keys(BULK_ACTIONS) as Array<keyof typeof BULK_ACTIONS>)(
+    "refuses a %s select all that names no list, before reading any booking",
+    async (action) => {
+      findManyMock.mockClear();
+
+      await expect(
+        BULK_ACTIONS[action]({
+          bookingIds: [ALL_SELECTED_KEY],
+          organizationId: ORG,
+          userId: ME,
+          access: ADMIN,
+          currentSearchParams: "",
+          list: null,
+        })
+      ).rejects.toMatchObject({
+        status: 400,
+        message:
+          "This page is out of date. Reload it and select the bookings again. Nothing was changed.",
+      });
+      expect(findManyMock).not.toHaveBeenCalled();
+    }
+  );
 });
 
 describe.each(Object.keys(BULK_ACTIONS) as Array<keyof typeof BULK_ACTIONS>)(
@@ -484,6 +499,7 @@ it("refuses select all when there is no user whose list it stands for", async ()
       organizationId: ORG,
       access: ADMIN,
       currentSearchParams: "",
+      list: { kind: "index" },
     })
   ).rejects.toThrow(
     "Cannot resolve which bookings this list shows. Please contact support."

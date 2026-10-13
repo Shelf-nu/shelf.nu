@@ -4,7 +4,9 @@
  * Delete, archive and cancel open from `/bookings`, a kit's Bookings tab and an
  * asset's Bookings tab. On "Select all" the server resolves the selection from
  * the posted list and URL params, so each dialog's form must say which list it
- * is: `kitId` on a kit's tab, `assetId` on an asset's tab, neither on the index.
+ * is: `bookingsList` always (`index`, `kit` or `asset`), plus `kitId` on a kit's
+ * tab and `assetId` on an asset's tab. A form that names no list is one loaded
+ * before lists were posted, and the server refuses its "Select all".
  * `/api/bookings/bulk-actions` reads those field names (pinned on that side in
  * `test/routes-tests/api+/bookings.bulk-actions.test.ts`).
  *
@@ -62,19 +64,19 @@ const PAGES = [
     name: "/bookings",
     path: "/bookings",
     url: "/bookings",
-    posts: {},
+    posts: { bookingsList: "index" },
   },
   {
     name: "a kit's Bookings tab",
     path: "/kits/:kitId/bookings",
     url: "/kits/kit-1/bookings",
-    posts: { kitId: "kit-1" },
+    posts: { bookingsList: "kit", kitId: "kit-1" },
   },
   {
     name: "an asset's Bookings tab",
     path: "/assets/:assetId/bookings",
     url: "/assets/asset-1/bookings",
-    posts: { assetId: "asset-1" },
+    posts: { bookingsList: "asset", assetId: "asset-1" },
   },
 ];
 
@@ -123,6 +125,9 @@ describe.each(DIALOGS)("bulk $name of bookings", (dialog) => {
     const fields = await postedFields(dialog, page);
 
     expect({
+      ...(fields.bookingsList !== undefined && {
+        bookingsList: fields.bookingsList,
+      }),
       ...(fields.kitId !== undefined && { kitId: fields.kitId }),
       ...(fields.assetId !== undefined && { assetId: fields.assetId }),
     }).toEqual(page.posts);

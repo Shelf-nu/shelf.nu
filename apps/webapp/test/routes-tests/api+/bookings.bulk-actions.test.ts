@@ -162,7 +162,10 @@ describe("POST /api/bookings/bulk-actions: which list a select all stands for", 
   it.each(INTENTS)(
     "hands %s the kit's bookings when the dialog posts a kitId",
     async (intent, service) => {
-      const response = await post(intent, { kitId: "kit-1" });
+      const response = await post(intent, {
+        bookingsList: "kit",
+        kitId: "kit-1",
+      });
 
       expect(response.status).toBe(200);
       expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
@@ -174,7 +177,10 @@ describe("POST /api/bookings/bulk-actions: which list a select all stands for", 
   it.each(INTENTS)(
     "hands %s the asset's bookings when the dialog posts an assetId",
     async (intent, service) => {
-      const response = await post(intent, { assetId: "asset-1" });
+      const response = await post(intent, {
+        bookingsList: "asset",
+        assetId: "asset-1",
+      });
 
       expect(response.status).toBe(200);
       expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
@@ -184,9 +190,9 @@ describe("POST /api/bookings/bulk-actions: which list a select all stands for", 
   );
 
   it.each(INTENTS)(
-    "hands %s the bookings index when the dialog posts neither",
+    "hands %s the bookings index when the dialog posts bookingsList=index",
     async (intent, service) => {
-      const response = await post(intent);
+      const response = await post(intent, { bookingsList: "index" });
 
       expect(response.status).toBe(200);
       expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
@@ -196,9 +202,32 @@ describe("POST /api/bookings/bulk-actions: which list a select all stands for", 
   );
 
   it.each(INTENTS)(
+    "hands %s no list when the form names none, so select all can refuse it",
+    async (intent, service) => {
+      const response = await post(intent);
+
+      expect(response.status).toBe(200);
+      expect(vi.mocked(service).mock.calls[0][0]).toMatchObject({
+        list: null,
+      });
+    }
+  );
+
+  it.each(INTENTS)(
+    "refuses %s when a kit's list posts no kitId",
+    async (intent, service) => {
+      const response = await post(intent, { bookingsList: "kit" });
+
+      expect(response.status).toBe(400);
+      expect(service).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(INTENTS)(
     "refuses %s when both a kitId and an assetId are posted",
     async (intent, service) => {
       const response = await post(intent, {
+        bookingsList: "kit",
         kitId: "kit-1",
         assetId: "asset-1",
       });
