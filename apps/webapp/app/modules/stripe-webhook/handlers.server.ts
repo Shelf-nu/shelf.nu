@@ -377,9 +377,10 @@ async function applyPlanDowngrade({
  * Raises the user's tier when an update moved an active subscription to a
  * higher plan than the user is on, for instance Plus to Team.
  *
- * The event only suggests the raise. The tier it sets is the highest plan the
- * customer's live subscriptions grant as Stripe holds them now, and nothing
- * changes unless that is still higher than the user's tier. Plan updates can
+ * The event only suggests the raise. The user is raised to the event's tier,
+ * and only while the customer's live subscriptions, as Stripe holds them now,
+ * still grant that tier or a higher one. The raise never goes past the event's
+ * tier: a higher live plan reaches the user through its own events. Plan updates can
  * arrive out of order: a Plus to Team event delivered after the Team to Plus
  * that followed it describes a plan the customer no longer pays for.
  *
@@ -411,24 +412,24 @@ async function applyPlanUpgrade({
   if (!isTierId(tierId) || !isHigherTier(tierId, user.tierId)) return;
 
   const liveTierId = liveTierOf(await loadSubscriptions());
-  if (!isHigherTier(liveTierId, user.tierId)) return;
+  if (!isHigherOrEqualTier(liveTierId, tierId)) return;
 
   await db.user
     .update({
       where: { customerId },
-      data: { tierId: liveTierId },
+      data: { tierId },
       select: { id: true },
     })
     .catch((cause) => {
       throw new ShelfError({
         cause,
         message: "Failed to update user tier",
-        additionalData: { customerId, tierId: liveTierId },
+        additionalData: { customerId, tierId, liveTierId },
         label: "Stripe webhook",
         status: 500,
       });
     });
-  return liveTierId;
+  return tierId;
 }
 
 /**

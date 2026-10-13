@@ -884,6 +884,35 @@ describe("handleSubscriptionUpdated", () => {
       });
     });
 
+    it("raises the plan no further than the event's tier", async () => {
+      customerHolds(liveSubscription(TEAM_PRODUCT), {
+        id: "sub_custom",
+        status: "active",
+        metadata: {},
+        items: {
+          data: [
+            {
+              price: {
+                product: {
+                  id: "prod_custom",
+                  metadata: { shelf_tier: "custom" },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      await handleSubscriptionUpdated(
+        planSwitchEvent({ from: PLUS_PRODUCT, to: TEAM_PRODUCT }),
+        { ...user, tierId: TierId.tier_1 }
+      );
+
+      expect(mockUserUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { tierId: TierId.tier_2 } })
+      );
+    });
+
     it("ignores a late Plus to Team event once the subscription is back on Plus", async () => {
       customerHolds(liveSubscription(PLUS_PRODUCT));
 
