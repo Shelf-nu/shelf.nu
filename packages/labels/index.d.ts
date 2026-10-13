@@ -404,16 +404,32 @@ export type ClientDeclaredBookingMethod =
 /** Name of the form field that carries a typed delete confirmation. */
 export declare const DELETE_CONFIRMATION_FIELD: "confirmation";
 
+/** The word a delete asks for when the item has no name to type. */
+export declare const DELETE_CONFIRMATION_FALLBACK: "delete";
+
 /**
  * Reduces a typed delete confirmation to the form it is compared in: NFC,
+ * format characters (zero-width space, joiners, byte order mark) removed,
  * trimmed, whitespace collapsed, lower-cased. `""` for null or undefined.
  */
 export declare function normalizeDeleteConfirmation(value: unknown): string;
 
 /**
+ * What the user must type to confirm a delete: the item's name or count, or
+ * {@link DELETE_CONFIRMATION_FALLBACK} when the name is blank once normalized.
+ * Every surface shows this in its instruction.
+ *
+ * @param expected - the item's name, or the number of selected items
+ */
+export declare function deleteConfirmationTarget(
+  expected: string | number
+): string;
+
+/**
  * Whether a typed confirmation unlocks a delete. Shared by the webapp dialogs,
- * the server guard on bulk deletes and the companion's delete sheets. A blank
- * expected value never matches.
+ * the server guards and the companion's delete sheets. Compares against
+ * {@link deleteConfirmationTarget}, which is never blank, so an empty input
+ * confirms nothing.
  *
  * @param typed - what the user typed
  * @param expected - the item's name, or the number of selected items
