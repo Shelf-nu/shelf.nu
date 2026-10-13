@@ -12,8 +12,8 @@ import { test } from "node:test";
 import {
   archivedIdsFromError,
   assetBadgeStatus,
-  droppedArchivedNote,
   isArchivedAsset,
+  kitAssignCustodyBlockedReason,
   markArchivedRows,
 } from "./archived-assets";
 
@@ -41,19 +41,6 @@ test("the badge says Archived instead of the live status", () => {
   assert.equal(
     assetBadgeStatus({ status: "IN_CUSTODY", archivedAt: null }),
     "IN_CUSTODY"
-  );
-});
-
-test("a duplicate that dropped nothing says nothing", () => {
-  assert.equal(droppedArchivedNote(0), null);
-  assert.equal(droppedArchivedNote(undefined), null);
-  assert.equal(
-    droppedArchivedNote(1),
-    "1 archived asset was left out of the copy. Archived assets can't be booked."
-  );
-  assert.equal(
-    droppedArchivedNote(3),
-    "3 archived assets were left out of the copy. Archived assets can't be booked."
   );
 });
 
@@ -115,4 +102,26 @@ test("an archived refusal clears the errors an earlier submit left on the other 
 test("a refusal that names no archived rows leaves the list as it was", () => {
   const rows = [{ type: "asset" as const, targetId: "asset-1" }];
   assert.equal(markArchivedRows(rows, []), rows);
+});
+
+test("a kit with an active member can be put in custody", () => {
+  assert.equal(
+    kitAssignCustodyBlockedReason([
+      { archivedAt: "2026-10-09T13:44:00.000Z" },
+      { archivedAt: null },
+    ]),
+    undefined
+  );
+});
+
+test("a kit holding only archived assets says so, and so does an empty one", () => {
+  // Kit custody leaves archived members out, so the server refuses both.
+  assert.equal(
+    kitAssignCustodyBlockedReason([{ archivedAt: "2026-10-09T13:44:00.000Z" }]),
+    "This kit holds only archived assets. Add an active asset to assign custody."
+  );
+  assert.equal(
+    kitAssignCustodyBlockedReason([]),
+    "This kit has no assets. Add assets to assign custody."
+  );
 });

@@ -1,4 +1,5 @@
 import {
+  archivedAssetsLeftOut,
   archivedAssetsRefusal,
   BOOKING_RESERVE_BLOCKED_LABELS,
   DELETE_CONSEQUENCE_LABELS,
@@ -43,11 +44,12 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
+import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
 import {
-  assetBadgeStatus,
-  droppedArchivedNote,
-  isArchivedAsset,
-} from "@/lib/archived-assets";
+  MODEL_SHORTFALL_NOTICE,
+  modelShortfallLabel,
+  shortfallsByModelId,
+} from "@/lib/model-reservation-shortfall";
 import {
   canAddItemsToBooking,
   canRemoveItemsFromBooking,
@@ -904,9 +906,11 @@ export default function BookingDetailScreen() {
             // Open the new draft's edit screen so the user can adjust dates etc.
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
             // Archived assets cannot be booked, so the copy left them out.
-            // Say so instead of letting the copy look complete.
-            const droppedNote = droppedArchivedNote(dup.droppedArchivedCount);
-            if (droppedNote) Alert.alert("Some assets left out", droppedNote);
+            // Say so, as the web does, instead of letting it look complete.
+            const dropped = dup.droppedArchivedCount ?? 0;
+            if (dropped > 0) {
+              Alert.alert("Booking duplicated", archivedAssetsLeftOut(dropped));
+            }
           },
         },
       ]
@@ -1482,6 +1486,11 @@ export default function BookingDetailScreen() {
   // to offer the scan-to-assign CTA below, and a check-out that takes the
   // booking out of RESERVED confirms them before going ahead.
   const hasOutstandingModelRequests = outstandingModelRequests.length > 0;
+  // Reservations the dates can no longer fill (sent only while units can
+  // still be assigned): one notice for the section, a chip on each short row.
+  const shortfallByModelId = shortfallsByModelId(
+    booking.modelReservationShortfalls
+  );
 
   // Progressive check-out stays available while the booking is active AND still
   // holds never-checked-out assets. The server (`partialCheckoutBooking`) accepts
@@ -2275,8 +2284,17 @@ export default function BookingDetailScreen() {
                     to assign. Scan or browse to add matching assets.
                   </Text>
                 )}
+                {shortfallByModelId.size > 0 && (
+                  <Text style={styles.modelsShortfallNotice}>
+                    {MODEL_SHORTFALL_NOTICE}
+                  </Text>
+                )}
                 {outstandingModelRequests.map((mr) => {
                   const remaining = mr.outstandingQuantity;
+                  const shortfall = shortfallByModelId.get(mr.assetModelId);
+                  const shortfallLabel = shortfall
+                    ? modelShortfallLabel(shortfall)
+                    : null;
                   const row = (
                     <>
                       <View
@@ -2315,6 +2333,23 @@ export default function BookingDetailScreen() {
                             {mr.fulfilledQuantity} of {mr.quantity} assigned
                           </Text>
                         )}
+                        {shortfallLabel ? (
+                          <View
+                            style={[
+                              styles.modelBadge,
+                              { backgroundColor: colors.errorBg },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.modelBadgeText,
+                                { color: colors.errorText },
+                              ]}
+                            >
+                              {shortfallLabel}
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                       <Text style={styles.modelQty}>× {remaining}</Text>
                       {canManageModels && (
@@ -2332,7 +2367,11 @@ export default function BookingDetailScreen() {
                       style={styles.modelCard}
                       onPress={openModelManager}
                       accessibilityRole="button"
-                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment. Tap to manage.`}
+                      accessibilityLabel={`${
+                        mr.assetModelName
+                      }, ${remaining} reserved and awaiting assignment${
+                        shortfallLabel ? `, ${shortfallLabel}` : ""
+                      }. Tap to manage.`}
                     >
                       {row}
                     </TouchableOpacity>
@@ -2340,7 +2379,11 @@ export default function BookingDetailScreen() {
                     <View
                       key={mr.id}
                       style={styles.modelCard}
-                      accessibilityLabel={`${mr.assetModelName}, ${remaining} reserved and awaiting assignment`}
+                      accessibilityLabel={`${
+                        mr.assetModelName
+                      }, ${remaining} reserved and awaiting assignment${
+                        shortfallLabel ? `, ${shortfallLabel}` : ""
+                      }`}
                     >
                       {row}
                     </View>
@@ -2944,6 +2987,12 @@ const useStyles = createStyles((colors, shadows) => ({
   modelsSubtitle: {
     fontSize: fontSize.xs,
     color: colors.muted,
+    lineHeight: 16,
+  },
+  modelsShortfallNotice: {
+    fontSize: fontSize.xs,
+    fontWeight: "600",
+    color: colors.errorText,
     lineHeight: 16,
   },
   modelCard: {

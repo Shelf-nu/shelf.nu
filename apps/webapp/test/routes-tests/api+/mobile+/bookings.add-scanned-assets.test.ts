@@ -48,7 +48,12 @@ vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     bookingAsset: { findMany: vi.fn().mockResolvedValue([]) },
-    assetKit: { findMany: vi.fn().mockResolvedValue([]) },
+    // why: `count` backs the archived-members count a kit add reports; no
+    // scanned kit has an archived member unless a test says so.
+    assetKit: {
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+    },
     asset: { findMany: vi.fn().mockResolvedValue([]) },
     // why: resolving kits refuses one with no active member first; every kit
     // here has one.
@@ -185,6 +190,7 @@ function successBody(response: unknown) {
     success: boolean;
     added: { assets: number; kitSlices: number; kits: number };
     skipped: { assets: number; kits: number };
+    archivedKitMembersLeftOut: number;
   };
 }
 
@@ -391,6 +397,7 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
       success: true,
       added: { assets: 1, kitSlices: 2, kits: 1 },
       skipped: { assets: 0, kits: 0 },
+      archivedKitMembersLeftOut: 0,
     });
   });
 
@@ -411,6 +418,7 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
       success: true,
       added: { assets: 0, kitSlices: 0, kits: 0 },
       skipped: { assets: 1, kits: 1 },
+      archivedKitMembersLeftOut: 0,
     });
   });
 
@@ -427,6 +435,28 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
     const body = successBody(response);
     expect(body.added).toEqual({ assets: 0, kitSlices: 1, kits: 1 });
     expect(body.skipped).toEqual({ assets: 0, kits: 0 });
+  });
+  it("says how many archived members of the scanned kits it left out", async () => {
+    // The kit is booked with its active members; the phone tells the user
+    // the rest stayed out rather than let the booked count look short.
+    bookingHoldsKitMemberships(["ak-on-booking"]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+    ] as never);
+    vi.mocked(db.assetKit.count).mockResolvedValueOnce(2);
+
+    const response = await post({ kitIds: ["kit-1"] });
+
+    expect(successBody(response).archivedKitMembersLeftOut).toBe(2);
+    // Org-scoped, limited to the scanned kits, and not counting memberships
+    // the booking already holds: this add did not leave those out.
+    expect(db.assetKit.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: { notIn: ["ak-on-booking"] },
+        kitId: { in: ["kit-1"] },
+        organizationId: "org-1",
+      }),
+    });
   });
 });
 

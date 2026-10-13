@@ -9,6 +9,7 @@ import {
   requireMobileAuth,
   resignAndShapeMobileAsset,
   shapeMobileAssetResponse,
+  shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
@@ -136,12 +137,51 @@ function custodyRow(
 }
 
 describe("MOBILE_KIT_SELECT", () => {
-  it("sends the same members it counts: archived ones are left out of both", () => {
+  it("lists only active members and counts the archived ones apart", () => {
     // The phone derives the kit's blockers from these members. An archived
     // member the server would not book must not refuse the kit on the phone.
     const activeOnly = { asset: { archivedAt: null } };
     expect(MOBILE_KIT_SELECT.assetKits.where).toEqual(activeOnly);
     expect(KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where).toEqual(activeOnly);
+    expect(MOBILE_KIT_SELECT._count.select.assetKits.where).toEqual({
+      asset: { archivedAt: { not: null } },
+    });
+  });
+});
+
+describe("shapeMobileKitResponse", () => {
+  const member = { id: "asset-1", status: "AVAILABLE", availableToBook: true };
+  const kit = {
+    id: "kit-1",
+    name: "Camera kit",
+    status: "AVAILABLE",
+    image: null,
+  };
+
+  it("counts the listed members and reports the archived ones apart", () => {
+    // A row selected with MOBILE_KIT_SELECT: one active member listed, two
+    // archived members counted.
+    const shaped = shapeMobileKitResponse({
+      ...kit,
+      _count: { assetKits: 2 },
+      assetKits: [{ asset: member }],
+    });
+
+    expect(shaped?._count).toEqual({ assets: 1 });
+    expect(shaped?.archivedAssetCount).toBe(2);
+    expect(shaped?.assets).toEqual([member]);
+  });
+
+  it("reads a kit holding only archived assets as no active members", () => {
+    // What the phone's "kit holds only archived assets" blocker keys on.
+    const shaped = shapeMobileKitResponse({
+      ...kit,
+      _count: { assetKits: 3 },
+      assetKits: [],
+    });
+
+    expect(shaped?._count.assets).toBe(0);
+    expect(shaped?.archivedAssetCount).toBe(3);
   });
 });
 

@@ -533,20 +533,27 @@ export const MOBILE_ASSET_SELECT = {
  * so the existing mobile clients in the App Store don't break. Mobile
  * endpoints fetch this select shape and then call
  * `shapeMobileKitResponse` to flatten the pivot rows.
+ *
+ * Read a row only through `shapeMobileKitResponse`: its `_count.assetKits`
+ * counts the ARCHIVED members, unlike `KIT_ACTIVE_MEMBER_COUNT` elsewhere.
  */
 export const MOBILE_KIT_SELECT = {
   id: true,
   name: true,
   status: true,
   image: true,
-  // The scanner's "Kit • N assets"; archived members are not counted.
-  _count: KIT_ACTIVE_MEMBER_COUNT,
+  // The archived members, counted but not listed: a kit holding only archived
+  // assets has nothing to book or hand over, and the phone flags it before
+  // submit. Its active member count is the length of `assetKits` below.
+  _count: {
+    select: { assetKits: { where: { asset: { archivedAt: { not: null } } } } },
+  },
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
   // blocker, both mirroring the web scanner drawers. Archived members are left
-  // out, as the count above leaves them out: the server books, hands over and
-  // moves a kit with its active members only, so an archived member must not
-  // block the kit on the phone either.
+  // out (the count above reports them): the server books, hands over and moves
+  // a kit with its active members only, so an archived member must not block
+  // the kit on the phone either.
   assetKits: {
     where: KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where,
     select: {
@@ -565,7 +572,13 @@ export type MobileKitResponse = {
   name: string;
   status: string;
   image: string | null;
+  /** Active members: the scanner's "Kit • N assets". */
   _count: { assets: number };
+  /**
+   * Archived members, left out of `assets` and `_count`. A kit with archived
+   * members and no active one holds nothing to book or hand over.
+   */
+  archivedAssetCount: number;
   assets: Array<{
     id: string;
     status: string;
@@ -578,6 +591,10 @@ export type MobileKitResponse = {
  * `assetKits` pivot) into the legacy `{ assets, _count: { assets } }` shape
  * expected by the companion app's scanner. Returns `null` if the input is
  * `null` so callers can pass through directly.
+ *
+ * `assetKits` holds the active members only and `AssetKit` is unique per
+ * asset and kit, so its length is the active member count; the row's
+ * `_count.assetKits` is the archived member count.
  *
  * @param kit Kit row selected via `MOBILE_KIT_SELECT`, or `null`
  * @returns The legacy mobile response shape, or `null`
@@ -600,7 +617,8 @@ export function shapeMobileKitResponse(
     name: kit.name,
     status: kit.status,
     image: kit.image,
-    _count: { assets: kit._count.assetKits },
+    _count: { assets: kit.assetKits.length },
+    archivedAssetCount: kit._count.assetKits,
     assets: kit.assetKits.map((ak) => ak.asset),
   };
 }

@@ -17,7 +17,7 @@
  * The role-aware reasons both apps show (why an archived asset's actions are
  * off, why a booking holding one cannot be reserved) come from `@shelf/labels`
  * (`archivedAssetBlockedReason`, `archivedAssetsRefusal`). This module holds
- * only the phone's own scan-list and duplicate wording.
+ * only the phone's own scan-list wording.
  *
  * This module must stay free of React Native, Expo and `@/` imports: its test
  * runs under Node's test runner.
@@ -26,6 +26,7 @@
  * @see {@link file://./batch-blockers.ts} the scanner's "asset-archived" blocker
  */
 
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import type { BatchScanAction } from "./batch-blockers";
 
 /** The badge key an archived asset shows instead of its status. */
@@ -66,6 +67,26 @@ export function assetBadgeStatus(
   asset: MaybeArchived & { status: string }
 ): string {
   return isArchivedAsset(asset) ? ARCHIVED_BADGE_STATUS : asset.status;
+}
+
+/**
+ * Why a kit's Assign Custody is off, or `undefined` while it can be assigned.
+ *
+ * Kit custody leaves archived members out, so a kit with no active member
+ * (only archived ones, or none at all) has nothing to hand over and the server
+ * refuses it. The web kit page turns the action off with the same words.
+ *
+ * @param members - Every member of the kit, archived ones included
+ * @returns The reason from `@shelf/labels`, or `undefined`
+ */
+export function kitAssignCustodyBlockedReason(
+  members: readonly MaybeArchived[]
+): string | undefined {
+  if (members.some((member) => !isArchivedAsset(member))) return undefined;
+  return kitWithoutActiveAssetsReason({
+    hasArchivedAssets: members.length > 0,
+    action: "custody",
+  });
 }
 
 /**
@@ -129,20 +150,6 @@ export function markArchivedRows<T extends MarkableRow>(
       ? { ...row, submitError: undefined }
       : row
   );
-}
-
-/**
- * The sentence shown after a duplicate when the server left archived assets
- * out of the copy.
- *
- * @param count - `droppedArchivedCount` from the duplicate response
- * @returns The note, or `null` when nothing was left out
- */
-export function droppedArchivedNote(count: number | undefined): string | null {
-  if (!count || count <= 0) return null;
-  return count === 1
-    ? "1 archived asset was left out of the copy. Archived assets can't be booked."
-    : `${count} archived assets were left out of the copy. Archived assets can't be booked.`;
 }
 
 /**

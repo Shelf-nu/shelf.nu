@@ -15,6 +15,7 @@
  * @see {@link file://./[id].tsx} the booking detail that launches this.
  */
 
+import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -339,7 +340,7 @@ export default function AddBookingAssetsScreen() {
   const handleAdd = async () => {
     if (!currentOrg || !bookingId || totalSelected === 0) return;
     setIsSubmitting(true);
-    const { error: err } = await api.addScannedToBooking(
+    const { data, error: err } = await api.addScannedToBooking(
       currentOrg.id,
       bookingId,
       Array.from(selectedAssetIds),
@@ -353,6 +354,12 @@ export default function AddBookingAssetsScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     markBookingDirty(bookingId);
     router.back();
+    // A kit is booked with its active members; say how many archived ones
+    // stayed out, as the web does, so the booking does not look short.
+    const leftOut = data?.archivedKitMembersLeftOut ?? 0;
+    if (leftOut > 0) {
+      Alert.alert("Added to booking", archivedAssetsLeftOut(leftOut));
+    }
   };
 
   // ── Book-by-model reserve / edit / remove ────────────────────────────────

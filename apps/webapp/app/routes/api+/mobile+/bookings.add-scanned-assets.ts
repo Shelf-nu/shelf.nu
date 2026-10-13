@@ -14,6 +14,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
 } from "~/modules/booking/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -48,7 +49,11 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *       success: true,
  *       added:   { assets: number, kitSlices: number, kits: number },
  *       skipped: { assets: number, kits: number },
+ *       archivedKitMembersLeftOut: number,
  *     }
+ *
+ * `archivedKitMembersLeftOut` counts the scanned kits' archived members, which
+ * a kit add leaves out of the booking (memberships already on it excepted).
  *
  * A scan can legitimately put nothing on the booking — every item scanned may
  * already be there — so `added` and `skipped` are what tell a client whether
@@ -198,15 +203,17 @@ export async function action({ request }: ActionFunctionArgs) {
      * memberships. The mobile client sends kit ids only — the web drawer
      * resolves the same slices in the browser and posts them.
      */
-    const resolvedKitSlices = await buildKitSlicesForBooking({
-      kitIds,
-      organizationId,
-      existingAssetKitIds: new Set(
-        booking.bookingAssets
-          .map((row) => row.assetKitId)
-          .filter((id): id is string => id !== null)
-      ),
-    });
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((row) => row.assetKitId)
+        .filter((id): id is string => id !== null)
+    );
+    const [resolvedKitSlices, archivedKitMembersLeftOut] = await Promise.all([
+      buildKitSlicesForBooking({ kitIds, organizationId, existingAssetKitIds }),
+      // The scanned kits' archived members stay out of the booking; the
+      // phone's success message says how many, as the web's does.
+      countArchivedKitMembers({ kitIds, organizationId, existingAssetKitIds }),
+    ]);
 
     /**
      * Every asset this scan touches: the ids scanned directly, plus each
@@ -343,6 +350,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assets: skippedAssetIds.size,
         kits: skippedKitIds.size,
       },
+      archivedKitMembersLeftOut,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
