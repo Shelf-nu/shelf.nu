@@ -5,22 +5,31 @@
  * The route writes the new signed URL back onto the kit, and deleting a kit
  * removes the file that stored URL names. So the file to sign comes from the
  * kit row (scoped to the caller's organization), never from the request: an
- * `image` field in the body is ignored.
+ * `image` field in the body is ignored. A stored URL naming a file outside the
+ * kit's own folder (`<uploader>/<kitId>/...`) is not signed either.
+ *
+ * The real kit service runs here (`refreshKitImage`, `updateKit`); only the
+ * database, storage, activity events and the auth gate are mocked.
  *
  * @see {@link file://./../../../app/routes/api+/kit.refresh-image.ts}
+ * @see {@link file://./../../../app/modules/kit/service.server.ts}
  */
 
-const { mockKitFindFirst, mockCreateSignedUrl, mockUpdateKit } = vi.hoisted(
+const { mockKitFindFirst, mockKitUpdate, mockCreateSignedUrl } = vi.hoisted(
   () => ({
     mockKitFindFirst: vi.fn(),
+    mockKitUpdate: vi.fn(),
     mockCreateSignedUrl: vi.fn(),
-    mockUpdateKit: vi.fn(),
   })
 );
 
-// why: the stored kit image is read with Prisma; no real database in tests.
+// why: the stored kit image is read, and the new URL written, with Prisma;
+// no real database in tests.
 vi.mock("~/database/db.server", () => ({
-  db: { $connect: vi.fn(), kit: { findFirst: mockKitFindFirst } },
+  db: {
+    $connect: vi.fn(),
+    kit: { findFirst: mockKitFindFirst, update: mockKitUpdate },
+  },
 }));
 
 // why: signing a URL calls Supabase Storage, an external service. The
@@ -29,10 +38,10 @@ vi.mock("~/utils/storage.server", () => ({
   createSignedUrl: mockCreateSignedUrl,
 }));
 
-// why: persisting the new URL (and its activity event) is not under test;
-// only what the route asks it to store.
-vi.mock("~/modules/kit/service.server", () => ({
-  updateKit: mockUpdateKit,
+// why: the activity event the update records is not under test.
+vi.mock("~/modules/activity-event/service.server", () => ({
+  recordEvent: vi.fn(),
+  recordEvents: vi.fn(),
 }));
 
 // why: the RBAC gate is not under test; it must pass with the caller's org.
@@ -74,7 +83,7 @@ describe("kit image refresh action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCreateSignedUrl.mockResolvedValue(signedKitUrl(OWN_PATH));
-    mockUpdateKit.mockResolvedValue({ id: KIT_ID });
+    mockKitUpdate.mockResolvedValue({ id: KIT_ID });
   });
 
   it("re-signs the kit's stored image and ignores an image URL in the request", async () => {
@@ -96,13 +105,13 @@ describe("kit image refresh action", () => {
       filename: OWN_PATH,
       bucketName: "kits",
     });
-    expect(mockUpdateKit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: KIT_ID,
-        organizationId: "org-1",
+    expect(mockKitUpdate).toHaveBeenCalledWith({
+      where: { id: KIT_ID, organizationId: "org-1" },
+      data: expect.objectContaining({
         image: signedKitUrl(OWN_PATH),
-      })
-    );
+        imageExpiration: expect.any(Date),
+      }),
+    });
   });
 
   it("signs nothing for a kit outside the caller's organization", async () => {
@@ -119,6 +128,18 @@ describe("kit image refresh action", () => {
 
     expect(response.init?.status).toBe(404);
     expect(mockCreateSignedUrl).not.toHaveBeenCalled();
-    expect(mockUpdateKit).not.toHaveBeenCalled();
+    expect(mockKitUpdate).not.toHaveBeenCalled();
+  });
+
+  it("signs nothing when the stored image lies outside the kit's own folder", async () => {
+    mockKitFindFirst.mockResolvedValue({ image: signedKitUrl(OTHER_PATH) });
+
+    const response = await action(
+      actionArgs(refreshRequest({ kitId: KIT_ID }))
+    );
+
+    expect(response.init?.status).toBe(404);
+    expect(mockCreateSignedUrl).not.toHaveBeenCalled();
+    expect(mockKitUpdate).not.toHaveBeenCalled();
   });
 });

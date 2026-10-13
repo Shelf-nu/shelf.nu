@@ -137,6 +137,10 @@ describe("kit detail action: delete removes only the kit's own image", () => {
     vi.spyOn(Logger, "error").mockImplementation(() => {});
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("deletes the stored image and ignores an image URL sent with the request", async () => {
     storedKit(signedKitUrl(OWN_PATH));
 
@@ -150,6 +154,15 @@ describe("kit detail action: delete removes only the kit's own image", () => {
     });
     expect(mockFrom).toHaveBeenCalledWith("kits");
     expect(removedPaths()).toEqual([OWN_PATH]);
+  });
+
+  it("deletes an own image whose file name has an underscore and a long extension", async () => {
+    const path = `${UPLOADER_ID}/${KIT_ID}/kit_photo.jpeg2`;
+    storedKit(signedKitUrl(path));
+
+    await action(actionArgs(deleteRequest({})));
+
+    expect(removedPaths()).toEqual([path]);
   });
 
   it("keeps a stored image that lies outside the kit's own folder", async () => {
