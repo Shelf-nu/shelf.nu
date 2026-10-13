@@ -651,21 +651,23 @@ const INVISIBLE_FORMAT_CHARACTERS =
 /**
  * Reduces a typed delete confirmation to the form it is compared in.
  *
- * Unicode NFC first: a macOS keyboard can emit a decomposed "é" while the
- * stored name holds the composed one, and the two would never match. Then
- * drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
- * order mark and the like): the instruction cannot show them, so they are
- * never asked for. Then trims, collapses runs of whitespace (a title with a
- * double space must not demand one) and lower-cases. The point of the field is a deliberate act, not a
- * spelling test.
+ * Drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
+ * order mark and the like) first: the instruction cannot show them, so they
+ * are never asked for. Then Unicode NFC, after the drop so a letter and an
+ * accent that sat on either side of an invisible character still compose: a
+ * macOS keyboard can emit a decomposed "é" while the stored name holds the
+ * composed one, and the two would never match. Then trims, collapses runs of
+ * whitespace (a title with a double space must not demand one) and
+ * lower-cases. The point of the field is a deliberate act, not a spelling
+ * test.
  *
  * @param {unknown} value - what the user typed, or the expected name or count
  * @returns {string} the comparable form; "" for null or undefined
  */
 export function normalizeDeleteConfirmation(value) {
   return String(value ?? "")
-    .normalize("NFC")
     .replace(INVISIBLE_FORMAT_CHARACTERS, "")
+    .normalize("NFC")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();

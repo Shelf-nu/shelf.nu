@@ -408,8 +408,8 @@ export declare const DELETE_CONFIRMATION_FIELD: "confirmation";
 export declare const DELETE_CONFIRMATION_FALLBACK: "delete";
 
 /**
- * Reduces a typed delete confirmation to the form it is compared in: NFC,
- * format characters (zero-width space, joiners, byte order mark) removed,
+ * Reduces a typed delete confirmation to the form it is compared in: format
+ * characters (zero-width space, joiners, byte order mark) removed, then NFC,
  * trimmed, whitespace collapsed, lower-cased. `""` for null or undefined.
  */
 export declare function normalizeDeleteConfirmation(value: unknown): string;
