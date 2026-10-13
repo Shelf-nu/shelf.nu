@@ -113,6 +113,7 @@ describe("getBulkBookingsWhereInput: select all", () => {
   it.each(RESTRICTED)("scopes %s to their own bookings", async (role) => {
     const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
+      list: { kind: "index" },
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
       access: accessFor([role]),
@@ -135,6 +136,7 @@ describe("getBulkBookingsWhereInput: select all", () => {
   it.each(UNRESTRICTED)("leaves %s to the list's own rows", async (role) => {
     const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
+      list: { kind: "index" },
       organizationId: ORG,
       currentSearchParams: "status=DRAFT",
       access: accessFor([role]),
@@ -192,6 +194,7 @@ describe("getBulkBookingsWhereInput: composition", () => {
     // narrowing it.
     const where = await getBulkBookingsWhereInput({
       bookingIds: [ALL_SELECTED_KEY],
+      list: { kind: "index" },
       organizationId: ORG,
       currentSearchParams: "s=camera",
       access: accessFor([OrganizationRoles.SELF_SERVICE]),

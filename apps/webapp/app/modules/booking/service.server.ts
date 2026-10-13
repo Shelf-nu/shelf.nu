@@ -15658,6 +15658,9 @@ export async function getBookingFlags(
  *   read.
  * - **Select all** (`bookingIds` holds {@link ALL_SELECTED_KEY}): the bookings
  *   `list` shows at `currentSearchParams`, see {@link getBookingsListWhere}.
+ *   Refused when `list` is missing: the request came from a page that does not
+ *   say which list the user saw, and guessing could reach bookings they never
+ *   saw.
  *
  * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
  * only to "select all" would still let a restricted caller act on someone
@@ -15666,39 +15669,55 @@ export async function getBookingFlags(
  * @param params.bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
  * @param params.organizationId - The caller's (validated) organization
  * @param params.currentSearchParams - The list page's URL params, for select-all
- * @param params.list - The list select-all stands for; the index when absent
+ * @param params.list - The list select-all stands for; `null` when the form named none
  * @param params.access - The caller's access
  * @param params.userId - The caller
  * @returns A `Prisma.BookingWhereInput` scoped to org, selection and ownership
  * @throws {ShelfError} when a restricted caller, or a select-all, has no user to scope to
+ * @throws {ShelfError} 400 when a select-all names no list
  */
 export async function getBulkBookingsWhereInput({
   bookingIds,
   organizationId,
   currentSearchParams,
-  list = { kind: "index" },
+  list,
   access,
   userId,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
-  list?: BookingsList;
+  list?: BookingsList | null;
   access: RoleAccess;
   /** Absent for system-initiated calls, which have no acting user */
   userId?: User["id"];
 }): Promise<Prisma.BookingWhereInput> {
   const ownership = getBookingOwnershipScope({ access, userId });
+  const selectAll = bookingIds.includes(ALL_SELECTED_KEY);
 
-  const base: Prisma.BookingWhereInput = bookingIds.includes(ALL_SELECTED_KEY)
-    ? await getBookingsListWhere({
-        list,
-        currentSearchParams,
-        organizationId,
-        access,
-        userId,
-      })
-    : { id: { in: bookingIds }, organizationId };
+  if (selectAll && !list) {
+    throw new ShelfError({
+      cause: null,
+      title: "Nothing was changed",
+      message:
+        "This page is out of date. Reload it and select the bookings again. Nothing was changed.",
+      additionalData: { organizationId },
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const base: Prisma.BookingWhereInput =
+    selectAll && list
+      ? await getBookingsListWhere({
+          list,
+          currentSearchParams,
+          organizationId,
+          access,
+          userId,
+        })
+      : { id: { in: bookingIds }, organizationId };
 
   if (!ownership) {
     return base;
@@ -15784,7 +15803,7 @@ async function getBookingsListWhere({
  * @param params.userId - The caller
  * @param params.hints - Client hints for the notification emails
  * @param params.currentSearchParams - The list filters, used with select-all
- * @param params.list - The list select-all stands for; the index when absent
+ * @param params.list - The list select-all stands for; `null` when the form named none
  * @param params.access - The caller's access
  * @throws {ShelfError} 403 when the caller may not delete every selected booking
  */
@@ -15803,8 +15822,8 @@ export async function bulkDeleteBookings({
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** The list a select-all stands for; the bookings index when absent */
-  list?: BookingsList;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
   /**
@@ -16072,8 +16091,8 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
-  /** The list a select-all stands for; the bookings index when absent */
-  list?: BookingsList;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
 }) {
@@ -16297,8 +16316,8 @@ export async function bulkCancelBookings({
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
-  /** The list a select-all stands for; the bookings index when absent */
-  list?: BookingsList;
+  /** The list a select-all stands for; `null` when the form named none, which a select-all refuses */
+  list?: BookingsList | null;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
 }) {

@@ -7,8 +7,11 @@
  * params and this list, so it reaches exactly the rows that page's loader
  * counted.
  *
- * The list travels as form fields named after the route params: `kitId` on a
- * kit's tab, `assetId` on an asset's tab, neither on the index.
+ * The list travels as form fields: `bookingsList` (`index`, `kit` or `asset`)
+ * on every page, plus the route param that names it, `kitId` on a kit's tab
+ * and `assetId` on an asset's tab. A form without `bookingsList` was loaded
+ * before lists were posted; it parses to `null` and the server refuses its
+ * "Select all", since it cannot tell which list the user saw.
  *
  * @see {@link file://./../../routes/api+/bookings.bulk-actions.ts} parses it
  * @see {@link file://./../../modules/booking/service.server.ts} `getBookingsListWhereParams`
@@ -26,11 +29,13 @@ export type BookingsList =
   | { kind: "asset"; assetId: string };
 
 /**
- * Parses the list a bulk dialog posts. Neither field means the index; both
- * fields is refused, since one list cannot belong to a kit and an asset.
+ * Parses the list a bulk dialog posts. `null` when the form names no list (a
+ * page loaded before lists were posted). A kit's list needs its `kitId`, an
+ * asset's its `assetId`, and the index neither.
  */
 export const BookingsListSchema = z
   .object({
+    bookingsList: z.enum(["index", "kit", "asset"]).optional(),
     kitId: z.string().min(1).optional(),
     assetId: z.string().min(1).optional(),
   })
@@ -38,14 +43,29 @@ export const BookingsListSchema = z
     message: "A bookings list belongs to a kit or to an asset, not to both.",
     path: ["assetId"],
   })
-  .transform(({ kitId, assetId }): BookingsList => {
-    if (kitId) {
+  .refine(
+    ({ bookingsList, kitId, assetId }) =>
+      bookingsList === "kit"
+        ? Boolean(kitId)
+        : bookingsList === "asset"
+        ? Boolean(assetId)
+        : !kitId && !assetId,
+    {
+      message: "The bookings list does not match the kit or asset posted.",
+      path: ["bookingsList"],
+    }
+  )
+  .transform(({ bookingsList, kitId, assetId }): BookingsList | null => {
+    if (bookingsList === "kit" && kitId) {
       return { kind: "kit", kitId };
     }
-    if (assetId) {
+    if (bookingsList === "asset" && assetId) {
       return { kind: "asset", assetId };
     }
-    return { kind: "index" };
+    if (bookingsList === "index") {
+      return { kind: "index" };
+    }
+    return null;
   });
 
 /**
@@ -55,8 +75,11 @@ export const BookingsListSchema = z
 export function BookingsListFields() {
   const { kitId, assetId } = useParams();
 
+  const bookingsList = kitId ? "kit" : assetId ? "asset" : "index";
+
   return (
     <>
+      <input type="hidden" name="bookingsList" value={bookingsList} />
       {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
       {assetId ? <input type="hidden" name="assetId" value={assetId} /> : null}
     </>
