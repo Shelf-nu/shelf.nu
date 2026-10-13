@@ -34,6 +34,9 @@ import { createUpdate } from "./service.server";
  */
 export const UPDATE_DRAFTS_MIN_KEY_LENGTH = 32;
 
+/** The short-key warning is logged once per process, not once per request. */
+let hasWarnedShortKey = false;
+
 /**
  * An absolute `https://` URL. The update timeline renders `url` as a link and
  * `imageUrl` as an `<img>` on an https page, so other schemes are refused.
@@ -112,7 +115,8 @@ export function assertUpdateDraftsKey(request: Request): void {
     getEnv("UPDATE_DRAFTS_API_KEY", { isRequired: false }) ?? "";
 
   if (configuredKey.length < UPDATE_DRAFTS_MIN_KEY_LENGTH) {
-    if (configuredKey.length > 0) {
+    if (configuredKey.length > 0 && !hasWarnedShortKey) {
+      hasWarnedShortKey = true;
       Logger.warn(
         `UPDATE_DRAFTS_API_KEY is shorter than ${UPDATE_DRAFTS_MIN_KEY_LENGTH} characters, so /api/update-drafts stays off`
       );
@@ -126,10 +130,10 @@ export function assertUpdateDraftsKey(request: Request): void {
     });
   }
 
-  const authorization = request.headers.get("Authorization") ?? "";
-  const presentedKey = authorization.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : "";
+  // The auth scheme is case-insensitive (RFC 7235), so "bearer" is accepted.
+  const presentedKey =
+    /^bearer (.+)$/i.exec(request.headers.get("Authorization") ?? "")?.[1] ??
+    "";
 
   if (!presentedKey || !secretsMatch(presentedKey, configuredKey)) {
     throw new ShelfError({

@@ -130,6 +130,14 @@ describe("POST /api/update-drafts", () => {
     expect(data.publishDate).toBeInstanceOf(Date);
   });
 
+  it("accepts the Bearer scheme in any letter case", async () => {
+    const { status } = await post(validBody, {
+      Authorization: `bearer ${KEY}`,
+    });
+
+    expect(status).toBe(201);
+  });
+
   it("stores no link or image, and targets every role, when those are omitted", async () => {
     const { status } = await post({
       title: validBody.title,
