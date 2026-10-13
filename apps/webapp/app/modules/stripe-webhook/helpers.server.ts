@@ -18,7 +18,11 @@ export type WebhookUser = UserNameFields & {
   email: string;
   tierId: TierId;
   warnForNoPaymentMethod: boolean;
-  /** Support manages this user's plan by hand; billing events leave it alone. */
+  /**
+   * Support manages this user's plan by hand, so billing events never take a
+   * plan away. A plan the user goes on to pay for that is higher than theirs
+   * still applies.
+   */
   skipSubscriptionCheck: boolean;
 };
 
