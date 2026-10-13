@@ -248,7 +248,7 @@ export function AdjustBookingAssetQuantityDialog({
                   <p className="text-xs text-gray-500">
                     {windowFrom && windowTo ? (
                       <>
-                        for <DateS date={windowFrom} /> –{" "}
+                        for <DateS date={windowFrom} /> to{" "}
                         <DateS date={windowTo} />
                       </>
                     ) : (

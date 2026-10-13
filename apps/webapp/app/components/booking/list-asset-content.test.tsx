@@ -1157,11 +1157,15 @@ describe("ListAssetContent", () => {
       status,
       custodian,
       partOfKit = false,
+      isKitAsset = false,
     }: {
       roles: OrganizationRoles[];
       status: string;
       custodian: boolean;
+      /** The asset belongs to a kit somewhere in the workspace. */
       partOfKit?: boolean;
+      /** THIS row is one the kit drives, rendered under its kit. */
+      isKitAsset?: boolean;
     }) => {
       mockUseOrganizationRoles.mockReturnValue(roles);
       mockRoles = roles;
@@ -1187,6 +1191,7 @@ describe("ListAssetContent", () => {
             <tr>
               <ListAssetContent
                 item={item}
+                isKitAsset={isKitAsset}
                 partialCheckinDetails={basePartialDetails}
                 shouldShowCheckinColumns={false}
                 partialCheckoutDetails={{}}
@@ -1228,9 +1233,26 @@ describe("ListAssetContent", () => {
         status: "DRAFT",
         custodian: true,
         partOfKit: true,
+        isKitAsset: true,
       });
 
       expect(screen.queryByTestId("asset-actions")).not.toBeInTheDocument();
+    });
+
+    it("shows it on a standalone row whose asset belongs to a kit elsewhere", () => {
+      // A quantity-tracked asset can hold a free-pool row and kit-driven rows
+      // on one booking. The free-pool row is the operator's to adjust and
+      // remove: what the kit owns is its own slices, not every row naming an
+      // asset that happens to be a member.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: false,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).toBeInTheDocument();
     });
   });
 });

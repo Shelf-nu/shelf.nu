@@ -146,12 +146,13 @@ export default function ListAssetContent({
     );
   }, [item, booking.id, booking.bookingAssets, booking.status]);
 
-  const isPartOfKit = (item.assetKits ?? []).length > 0;
-
   // New logic for determining if actions dropdown should be shown
   const canSeeActions = useMemo(() => {
-    // Never show actions if asset is part of a kit
-    if (isPartOfKit) return false;
+    // A kit-driven row belongs to its kit, which owns adjusting and removing
+    // its slices. Keyed on THIS row rather than on the asset's memberships: a
+    // quantity-tracked asset can hold a free-pool row alongside kit-driven
+    // ones, and that free-pool row is the operator's to act on.
+    if (isKitAsset) return false;
 
     // Members who write every booking see the menu on every row; others only
     // on a booking they hold, within their removable statuses.
@@ -174,7 +175,7 @@ export default function ListAssetContent({
       access: roleAccess,
       bookingStatus: booking.status,
     });
-  }, [isPartOfKit, booking, user?.id, roles, roleAccess]);
+  }, [isKitAsset, booking, user?.id, roles, roleAccess]);
 
   /**
    * Qty-tracked partial dispositioning.
