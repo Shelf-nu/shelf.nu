@@ -63,7 +63,10 @@ export const ExpandableText = memo(function ExpandableText({
       >
         {text}
       </Text>
-      {/* Reports again whenever its lines change: new text or a new width. */}
+      {/* Reports again whenever its lines change: new text or a new width.
+          Trailing whitespace is left out: Android can lay out a final line
+          break as an empty extra line, which would ask for a toggle that
+          reveals nothing. */}
       <View
         style={styles.measure}
         pointerEvents="none"
@@ -71,7 +74,7 @@ export const ExpandableText = memo(function ExpandableText({
         importantForAccessibility="no-hide-descendants"
       >
         <Text style={style} onTextLayout={handleMeasure}>
-          {text}
+          {text.trimEnd()}
         </Text>
       </View>
       {lineCount > numberOfLines ? (
