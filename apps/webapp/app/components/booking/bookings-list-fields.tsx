@@ -7,10 +7,10 @@
  * params and this list, so it reaches exactly the rows that page's loader
  * counted.
  *
- * The list travels as form fields: `bookingsList` (`index`, `kit` or `asset`)
- * on every page, plus the route param that names it, `kitId` on a kit's tab
- * and `assetId` on an asset's tab. A form without `bookingsList` was loaded
- * before lists were posted; it parses to `null` and the server refuses its
+ * The list travels as form fields (or URL params, for the CSV export):
+ * `bookingsList` (`index`, `kit` or `asset`) on every page, plus the route
+ * param that names it, `kitId` on a kit's tab and `assetId` on an asset's tab.
+ * A request without `bookingsList` parses to `null`, and the server refuses its
  * "Select all", since it cannot tell which list the user saw.
  *
  * @see {@link file://./../../routes/api+/bookings.bulk-actions.ts} parses it
@@ -29,9 +29,9 @@ export type BookingsList =
   | { kind: "asset"; assetId: string };
 
 /**
- * Parses the list a bulk dialog posts. `null` when the form names no list (a
- * page loaded before lists were posted). A kit's list needs its `kitId`, an
- * asset's its `assetId`, and the index neither.
+ * Parses the list a bulk dialog posts or the export requests. `null` when the
+ * request names no list. A kit's list needs its `kitId`, an asset's its
+ * `assetId`, and the index neither.
  */
 export const BookingsListSchema = z
   .object({
@@ -69,19 +69,58 @@ export const BookingsListSchema = z
   });
 
 /**
- * Hidden inputs that post the bookings list the current page shows, read from
- * the route params. Render it inside every booking bulk dialog's form.
+ * The bookings list the current page shows, read from the route params.
+ *
+ * @returns The list: a kit's tab, an asset's tab, or the index
  */
-export function BookingsListFields() {
+export function useBookingsList(): BookingsList {
   const { kitId, assetId } = useParams();
 
-  const bookingsList = kitId ? "kit" : assetId ? "asset" : "index";
+  if (kitId) {
+    return { kind: "kit", kitId };
+  }
+  if (assetId) {
+    return { kind: "asset", assetId };
+  }
+  return { kind: "index" };
+}
+
+/**
+ * The name/value pairs that name a bookings list, in the shape
+ * {@link BookingsListSchema} parses: `bookingsList`, plus `kitId` or `assetId`.
+ *
+ * @param list - The list to name
+ * @returns The pairs to post as form fields or append as URL params
+ */
+export function bookingsListEntries(list: BookingsList): [string, string][] {
+  switch (list.kind) {
+    case "index":
+      return [["bookingsList", "index"]];
+    case "kit":
+      return [
+        ["bookingsList", "kit"],
+        ["kitId", list.kitId],
+      ];
+    case "asset":
+      return [
+        ["bookingsList", "asset"],
+        ["assetId", list.assetId],
+      ];
+  }
+}
+
+/**
+ * Hidden inputs that post the bookings list the current page shows. Render it
+ * inside every booking bulk dialog's form.
+ */
+export function BookingsListFields() {
+  const list = useBookingsList();
 
   return (
     <>
-      <input type="hidden" name="bookingsList" value={bookingsList} />
-      {kitId ? <input type="hidden" name="kitId" value={kitId} /> : null}
-      {assetId ? <input type="hidden" name="assetId" value={assetId} /> : null}
+      {bookingsListEntries(list).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
     </>
   );
 }

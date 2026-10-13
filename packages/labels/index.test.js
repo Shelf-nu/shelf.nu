@@ -535,6 +535,10 @@ test("invisible format characters in a stored name need not be typed", () => {
     true
   );
   assert.equal(deleteConfirmationMatches("Camera", "Camera\u200BKit"), false);
+  // Soft hyphen, word joiner and a left-to-right mark are invisible too.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u00ADKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u2060Kit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "\u200ECameraKit"), true);
 });
 
 test("the confirmation field name is the one the bulk endpoints read", () => {

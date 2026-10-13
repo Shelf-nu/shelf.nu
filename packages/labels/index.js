@@ -636,14 +636,27 @@ export const DELETE_CONFIRMATION_FIELD = "confirmation";
 export const DELETE_CONFIRMATION_FALLBACK = "delete";
 
 /**
+ * The invisible format characters a delete confirmation ignores: soft hyphen,
+ * Arabic letter mark, Mongolian vowel separator, zero-width space, joiners and
+ * direction marks, bidi embeddings and isolates, word joiner and invisible
+ * operators, byte order mark, and interlinear annotation marks.
+ *
+ * Spelled out rather than written as `\p{Cf}`: the companion bundles this
+ * package for Hermes, and an explicit class compiles on every engine both apps
+ * support.
+ */
+const INVISIBLE_FORMAT_CHARACTERS =
+  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g;
+
+/**
  * Reduces a typed delete confirmation to the form it is compared in.
  *
  * Unicode NFC first: a macOS keyboard can emit a decomposed "é" while the
  * stored name holds the composed one, and the two would never match. Then
- * drops format characters (zero-width space, joiners, byte order mark): the
- * instruction cannot show them, so they are never asked for. Then trims,
- * collapses runs of whitespace (a title with a double space must not demand
- * one) and lower-cases. The point of the field is a deliberate act, not a
+ * drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
+ * order mark and the like): the instruction cannot show them, so they are
+ * never asked for. Then trims, collapses runs of whitespace (a title with a
+ * double space must not demand one) and lower-cases. The point of the field is a deliberate act, not a
  * spelling test.
  *
  * @param {unknown} value - what the user typed, or the expected name or count
@@ -652,7 +665,7 @@ export const DELETE_CONFIRMATION_FALLBACK = "delete";
 export function normalizeDeleteConfirmation(value) {
   return String(value ?? "")
     .normalize("NFC")
-    .replace(/\p{Cf}/gu, "")
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();

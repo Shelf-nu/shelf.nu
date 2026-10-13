@@ -506,3 +506,69 @@ it("refuses select all when there is no user whose list it stands for", async ()
   );
   expect(findManyMock).not.toHaveBeenCalled();
 });
+
+describe.each(Object.keys(BULK_ACTIONS) as Array<keyof typeof BULK_ACTIONS>)(
+  "a %s select all on a list showing bookings the caller may not write",
+  (action) => {
+    const countMock = vitest.mocked(db.booking.count);
+    // BASE with the workspace see-toggle on: the list shows every booking,
+    // but bulk actions reach only the ones the user created or holds.
+    const SEES_ALL_WRITES_OWN = accessFor([OrganizationRoles.BASE], {
+      baseUserCanSeeBookings: true,
+    });
+
+    afterEach(() => {
+      countMock.mockResolvedValue(0);
+      findManyMock.mockResolvedValue([]);
+    });
+
+    it("is refused whole rather than acting on the caller's share of it", async () => {
+      // The list holds 2 bookings; only 1 of them is the caller's.
+      countMock.mockResolvedValue(2);
+      findManyMock.mockResolvedValue([
+        { id: "b-mine", status: BookingStatus.RESERVED, creatorId: ME },
+      ]);
+
+      await expect(
+        BULK_ACTIONS[action]({
+          bookingIds: [ALL_SELECTED_KEY],
+          organizationId: ORG,
+          userId: ME,
+          access: SEES_ALL_WRITES_OWN,
+          currentSearchParams: "",
+          list: { kind: "index" },
+        })
+      ).rejects.toMatchObject({
+        status: 403,
+        message: expect.stringContaining(
+          `You can only ${action} bookings you created or hold`
+        ),
+      });
+      // Counted on the list's own rows, without the ownership scope.
+      expect(countMock).toHaveBeenCalledWith({
+        where: {
+          organizationId: ORG,
+          AND: [ONLY_MY_DRAFTS],
+          status: HIDE_ARCHIVED_AND_CANCELLED,
+        },
+      });
+    });
+
+    it("is not checked for a caller who writes every booking", async () => {
+      findManyMock.mockResolvedValue([]);
+
+      await BULK_ACTIONS[action]({
+        bookingIds: [ALL_SELECTED_KEY],
+        organizationId: ORG,
+        userId: ME,
+        access: ADMIN,
+        currentSearchParams: "",
+        list: { kind: "index" },
+      }).catch(() => {
+        // An empty selection may be refused further on; only the count matters.
+      });
+
+      expect(countMock).not.toHaveBeenCalled();
+    });
+  }
+);

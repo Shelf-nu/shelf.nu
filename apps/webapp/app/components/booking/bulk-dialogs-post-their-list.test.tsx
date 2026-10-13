@@ -5,8 +5,8 @@
  * asset's Bookings tab. On "Select all" the server resolves the selection from
  * the posted list and URL params, so each dialog's form must say which list it
  * is: `bookingsList` always (`index`, `kit` or `asset`), plus `kitId` on a kit's
- * tab and `assetId` on an asset's tab. A form that names no list is one loaded
- * before lists were posted, and the server refuses its "Select all".
+ * tab and `assetId` on an asset's tab. The server refuses a "Select all" from a
+ * form that names no list.
  * `/api/bookings/bulk-actions` reads those field names (pinned on that side in
  * `test/routes-tests/api+/bookings.bulk-actions.test.ts`).
  *

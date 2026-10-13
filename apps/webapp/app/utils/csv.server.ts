@@ -13,6 +13,8 @@ import { parseFormData } from "@remix-run/form-data-parser";
 import chardet from "chardet";
 import { CsvError, parse } from "csv-parse";
 import iconv from "iconv-lite";
+import type { BookingsList } from "~/components/booking/bookings-list-fields";
+import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
 import { serializeBackupPlacements } from "~/modules/asset/backup-placements";
 import {
@@ -37,7 +39,7 @@ import { BOOKING_COMMON_INCLUDE } from "~/modules/booking/constants";
 import {
   bookingDraftVisibilityClause,
   getBookings,
-  getBookingsFilterData,
+  getBookingsListWhereParams,
   resolveCustodianScope,
 } from "~/modules/booking/service.server";
 import type { BookingWithCustodians } from "~/modules/booking/types";
@@ -57,6 +59,7 @@ import { resolveUserFormatPrefsById } from "./date-format.server";
 import { SERVER_URL } from "./env";
 import { isLikeShelfError, ShelfError } from "./error";
 import { isMaxFileSizeError } from "./form-data-parse-errors.server";
+import { getCurrentSearchParams } from "./http.server";
 import {
   buildImportReadyCsvFromAssets,
   type ColumnScope,
@@ -908,10 +911,10 @@ const formatCustomFieldForCsv = (
  * `custodianTeamMemberId` with a null `custodianUserId` — for example a booking
  * assigned while no user was attached to the team member, the two being linked
  * only later when the invite was accepted. The bookings index matches those
- * rows (see `getBookingsFilterData`, which resolves the same team-member ids
- * into `getBookings`' `custodianScope`), so restricting the export to the user
- * link alone would silently drop rows the user can see on screen and selected
- * for export.
+ * rows (the loaders resolve the same team-member ids with
+ * `resolveCustodianScope` into `getBookings`' `custodianScope`), so
+ * restricting the export to the user link alone would silently drop rows the
+ * user can see on screen and selected for export.
  *
  * This never widens access: `teamMemberIds` are resolved server-side from the
  * authenticated `userId`, never from request input, so both halves describe the
@@ -950,10 +953,12 @@ async function buildExportCustodyScopeClause({
 /**
  * Builds the bookings CSV string for the export route.
  *
- * Resolves which bookings to export — either the explicit `bookingsIds`, or,
- * when the select-all sentinel is present, every booking matching the index's
- * current filters — then enriches them with batched partial check-in state and
- * delegates row construction to {@link buildCsvExportDataFromBookings}.
+ * Resolves which bookings to export, then enriches them with batched partial
+ * check-in state and delegates row construction to
+ * {@link buildCsvExportDataFromBookings}. The bookings are either the explicit
+ * `bookingsIds`, or with the select-all sentinel every booking `list` holds at
+ * the request's filters, resolved with {@link getBookingsListWhereParams} like
+ * that list's loader.
  *
  * @param request - The incoming request (carries filters, locale, timezone)
  * @param userId - The acting user; scopes custody and DRAFT visibility on both
@@ -962,7 +967,9 @@ async function buildExportCustodyScopeClause({
  * @param bookingsIds - Selected booking IDs, or `[ALL_SELECTED_KEY]` for all
  * @param canSeeAllBookings - Whether the user may export bookings they don't own
  * @param organizationId - The active workspace; scopes every booking read
+ * @param list - The list select-all stands for; `null` when the request named none
  * @returns The CSV body as a single CRLF-joined string
+ * @throws {ShelfError} 400 when a select-all names no list
  * @throws {ShelfError} If fetching bookings or building rows fails
  */
 export async function exportBookingsFromIndexToCsv({
@@ -971,12 +978,14 @@ export async function exportBookingsFromIndexToCsv({
   bookingsIds,
   canSeeAllBookings,
   organizationId,
+  list,
 }: {
   request: Request;
   userId: string;
   bookingsIds: string[];
   canSeeAllBookings: boolean;
   organizationId: string;
+  list: BookingsList | null;
 }) {
   try {
     const hasSelectAll = bookingsIds.includes(ALL_SELECTED_KEY);
@@ -984,36 +993,38 @@ export async function exportBookingsFromIndexToCsv({
     /** If all are selected in the list, then we have to consider filter to get the entries */
     let bookings;
     if (hasSelectAll) {
-      // Here we need to use the getBookings the same way as in the index with all filters and everything
-      const {
-        page,
-        search,
-        status,
-        teamMemberIds,
-        orderBy,
-        orderDirection,
-        selfServiceData,
-      } = await getBookingsFilterData({
-        request,
-        canSeeAllBookings,
-        organizationId,
-        userId,
-      });
+      if (!list) {
+        // Without the list, guessing could export bookings the user never saw.
+        throw new ShelfError({
+          cause: null,
+          title: "Nothing was exported",
+          message:
+            "This page is out of date. Reload it and select the bookings again.",
+          additionalData: { organizationId },
+          label: "Booking",
+          status: 400,
+          shouldBeCaptured: false,
+        });
+      }
 
+      const searchParams = getCurrentSearchParams(request);
       const bookingsData = await getBookings({
-        page,
-        takeAll: true,
-        organizationId,
-        search,
-        userId,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
+        ...getBookingsListWhereParams({
+          list,
+          searchParams,
+          organizationId,
+          userId,
+          custodianScope: canSeeAllBookings
+            ? null
+            : await resolveCustodianScope({ userId, organizationId }),
         }),
-        custodianTeamMemberIds: teamMemberIds,
-        ...selfServiceData,
-        orderBy,
-        orderDirection,
+        page: 1,
+        takeAll: true,
+        // The export never reads the total.
+        skipCount: true,
+        orderBy: searchParams.get("orderBy") ?? "from",
+        orderDirection: (searchParams.get("orderDirection") ??
+          "asc") as SortingDirection,
         extraInclude: { tags: { select: { name: true } } },
       });
       bookings = bookingsData.bookings;
@@ -1029,8 +1040,8 @@ export async function exportBookingsFromIndexToCsv({
            * `booking.export`) can export any booking in the organization by
            * supplying its id.
            *
-           * Mirrors the restriction the index applies via
-           * {@link getBookingsFilterData} + {@link getBookings}, so a user can
+           * Mirrors the restriction the bookings lists apply via
+           * {@link getBookingsListWhereParams} + {@link getBookings}, so a user can
            * export exactly the rows they can see — no more, and no fewer.
            */
           AND: [

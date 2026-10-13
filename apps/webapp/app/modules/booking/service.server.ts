@@ -13004,6 +13004,23 @@ export async function resolveCustodianScope({
   return { userId, teamMemberIds: teamMembers.map((tm) => tm.id) };
 }
 
+/**
+ * The page-level values a bookings list loader needs besides its rows: page,
+ * per-page cookie, sort, the search and team-member values the filter UI
+ * shows, the saved-filters cookie, and a restricted viewer's custodian scope.
+ *
+ * Which bookings the list holds is not decided here: the loaders build that
+ * with {@link getBookingsListWhereParams} from the same URL params, so the
+ * query and a "Select all" on it share one definition.
+ *
+ * @param params.request - The list page request (URL params and cookies)
+ * @param params.userId - The viewer
+ * @param params.canSeeAllBookings - Whether the viewer may see every booking
+ * @param params.organizationId - The viewer's (validated) organization
+ * @returns The page-level values, plus `selfServiceData.custodianScope` for a
+ *   restricted viewer (otherwise `null`)
+ * @throws {ShelfError} when a restricted viewer has no team member in the workspace
+ */
 export async function getBookingsFilterData({
   request,
   userId,
@@ -13025,7 +13042,7 @@ export async function getBookingsFilterData({
   });
 
   const searchParams = getCurrentSearchParams(request);
-  const { page, perPageParam, search, status, teamMemberIds, tags } =
+  const { page, perPageParam, search, teamMemberIds } =
     getParamsValues(searchParams);
 
   const cookie = await updateCookieWithPerPage(request, perPageParam);
@@ -13045,11 +13062,8 @@ export async function getBookingsFilterData({
    * normally happen (accepting an invite now links them), but it is kept as a
    * safety net for rows that pre-date that fix.
    *
-   * This fallback is live: `custodianScope.teamMemberIds` is read by
-   * {@link getBookings}, which ORs it with the user link inside a single AND-ed
-   * clause. It previously returned a singular `custodianTeamMemberId` that
-   * `getBookings` never declared, so callers spreading this object had the key
-   * silently dropped and the fallback never actually fired.
+   * `custodianScope.teamMemberIds` is read by {@link buildBookingsWhere}, which
+   * ORs it with the user link inside a single AND-ed clause.
    */
   let selfServiceData = null;
 
@@ -13083,7 +13097,6 @@ export async function getBookingsFilterData({
     page,
     perPage,
     search,
-    status,
     teamMemberIds,
     orderBy,
     orderDirection,
@@ -13091,7 +13104,6 @@ export async function getBookingsFilterData({
     filtersCookie,
     filters,
     redirectNeeded,
-    tags,
   };
 }
 
@@ -13609,6 +13621,19 @@ export function getBookingsListWhereParams({
   }
 }
 
+/**
+ * Lists one page of bookings, and counts every booking the list holds.
+ *
+ * `params` has two halves. The {@link BookingsWhereParams} decide WHICH
+ * bookings the list holds and go through {@link buildBookingsWhere} (bookings
+ * lists build them with {@link getBookingsListWhereParams}). The rest decide
+ * which page is fetched, its order and what each row carries.
+ *
+ * @param params - The list's filters and restrictions, plus pagination, sort
+ *   and include options
+ * @returns `{ bookings, bookingCount }`; `bookingCount` is 0 with `skipCount`
+ * @throws {ShelfError} If the query fails
+ */
 export async function getBookings(
   params: BookingsWhereParams & {
     /** Page number. Starts at 1 */
@@ -14842,13 +14867,12 @@ export async function getBookingsForCalendar(params: {
     canSeeAllCustody,
   } = params;
 
-  const { searchParams, search, status, teamMemberIds, tags, selfServiceData } =
-    await getBookingsFilterData({
-      request,
-      canSeeAllBookings,
-      organizationId,
-      userId,
-    });
+  const { searchParams, selfServiceData } = await getBookingsFilterData({
+    request,
+    canSeeAllBookings,
+    organizationId,
+    userId,
+  });
 
   const start = searchParams.get("start") as string;
   const end = searchParams.get("end") as string;
@@ -14869,19 +14893,17 @@ export async function getBookingsForCalendar(params: {
 
   try {
     const { bookings } = await getBookings({
-      organizationId,
-      page: 1,
-      search,
-      userId,
-      ...(status && {
-        // If status is in the params, we filter based on it
-        statuses: [status],
+      // The bookings index's filters, narrowed to the visible date range.
+      ...getBookingsListWhereParams({
+        list: { kind: "index" },
+        searchParams,
+        organizationId,
+        userId,
+        custodianScope: selfServiceData?.custodianScope ?? null,
       }),
+      page: 1,
       bookingFrom: startDate,
       bookingTo: endDate,
-      custodianTeamMemberIds: teamMemberIds,
-      ...selfServiceData,
-      tags,
       // Calendar events carry no asset data — the mapping below projects
       // booking scalars, two names and the tags — so the per-booking asset
       // subtree is pure transfer cost here.
@@ -15789,6 +15811,79 @@ async function getBookingsListWhere({
 }
 
 /**
+ * Refuses a "Select all" whose list holds bookings the caller may not act on.
+ *
+ * A restricted caller can be shown more bookings than they may write: the
+ * workspace see-toggles widen what a list shows, never what its bulk actions
+ * reach (see `getBookingOwnershipScope`). {@link getBulkBookingsWhereInput}
+ * narrows the selection to the caller's own rows, so without this check the
+ * action would quietly reach a subset of the "N entries" the user selected.
+ * The whole request is refused instead, the same rule
+ * `assertBulkSelectionWithinOwnership` applies to explicit ids.
+ *
+ * @param params.bookingIds - The submitted ids, or `[ALL_SELECTED_KEY]`
+ * @param params.matchedCount - How many rows the ownership-scoped selection matched
+ * @param params.organizationId - The caller's (validated) organization
+ * @param params.currentSearchParams - The list page's URL params
+ * @param params.list - The list select-all stands for
+ * @param params.access - The caller's access
+ * @param params.userId - The caller
+ * @param params.action - Verb for the refusal message ("delete", "archive", ...)
+ * @throws {ShelfError} 403 when the list holds bookings outside the caller's ownership scope
+ */
+async function assertSelectAllWithinOwnership({
+  bookingIds,
+  matchedCount,
+  organizationId,
+  currentSearchParams,
+  list,
+  access,
+  userId,
+  action,
+}: {
+  bookingIds: Booking["id"][];
+  matchedCount: number;
+  organizationId: Organization["id"];
+  currentSearchParams?: string | null;
+  list?: BookingsList | null;
+  access: RoleAccess;
+  userId?: User["id"];
+  action: string;
+}): Promise<void> {
+  if (
+    access.bookings.writeAll ||
+    !list ||
+    !bookingIds.includes(ALL_SELECTED_KEY)
+  ) {
+    return;
+  }
+
+  const listCount = await db.booking.count({
+    where: await getBookingsListWhere({
+      list,
+      currentSearchParams,
+      organizationId,
+      access,
+      userId,
+    }),
+  });
+
+  if (listCount === matchedCount) {
+    return;
+  }
+
+  throw new ShelfError({
+    cause: null,
+    title: "Nothing was changed",
+    message: `You can only ${action} bookings you created or hold, and this list also shows other bookings. Select your bookings one by one instead. Nothing was changed.`,
+    additionalData: { organizationId, listCount, matchedCount },
+    label,
+    status: 403,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
  * Deletes a selection of bookings in one request.
  *
  * The selection is the explicit ids, or with select-all every booking the
@@ -15883,6 +15978,16 @@ export async function bulkDeleteBookings({
       bookingIds,
       foundIds: bookings.map((booking) => booking.id),
       access,
+      action: "delete",
+    });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: bookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
       action: "delete",
     });
 
@@ -16132,6 +16237,16 @@ export async function bulkArchiveBookings({
       access,
       action: "archive",
     });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: selectedBookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
+      action: "archive",
+    });
 
     // A booking that is already archived needs nothing more, so archiving is
     // idempotent: a repeat click, or a list still showing rows an earlier
@@ -16372,6 +16487,16 @@ export async function bulkCancelBookings({
       bookingIds,
       foundIds: bookings.map((booking) => booking.id),
       access,
+      action: "cancel",
+    });
+    await assertSelectAllWithinOwnership({
+      bookingIds,
+      matchedCount: bookings.length,
+      organizationId,
+      currentSearchParams,
+      list,
+      access,
+      userId,
       action: "cancel",
     });
 
