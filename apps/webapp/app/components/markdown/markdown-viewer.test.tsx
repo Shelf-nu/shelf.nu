@@ -98,4 +98,26 @@ describe("MarkdownViewer", () => {
       expect(container.querySelector("img")).toBeNull();
     });
   });
+
+  describe("tag attributes with line breaks", () => {
+    it("shows both texts of a multi-line description change", () => {
+      const { container } = renderNote(
+        '{% link to="/settings/team/users/u1" text="Jane Doe" /%} updated the asset description {% description oldText="aa" newText="first line\r\nsecond line" /%}.'
+      );
+
+      expect(container.textContent).toContain(
+        "updated the asset description aa to first line\nsecond line."
+      );
+    });
+
+    it("shows a user link whose name has a backslash", () => {
+      const { container } = renderNote(
+        '{% link to="/settings/team/users/u2" text="Customer\\Barbara" /%} checked out the asset.'
+      );
+
+      expect(container.querySelector("a")).toHaveTextContent(
+        "Customer\\Barbara"
+      );
+    });
+  });
 });

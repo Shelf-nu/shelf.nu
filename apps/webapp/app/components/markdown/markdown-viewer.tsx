@@ -2,6 +2,7 @@ import React from "react";
 import type { ComponentProps, ComponentType } from "react";
 import type { RenderableTreeNodes } from "@markdoc/markdoc";
 import { renderers } from "@markdoc/markdoc";
+import { encodeRawTagAttributeValues } from "~/utils/markdoc-tag-strings";
 import { markdocConfig } from "~/utils/markdoc.config";
 import { parseMarkdownToReact } from "~/utils/md";
 import { sanitizeMarkdocTree } from "~/utils/sanitize-markdoc-tree";
@@ -111,13 +112,19 @@ export const MarkdownViewer = ({
   // ordinary Markdown link/image syntax into NATIVE `a`/`img` nodes that never
   // reach our custom tag components, so `[x](https://evil.example)` inside a
   // stored note would otherwise render as a working anchor and an image would
-  // fire an off-origin request on load. Sanitizing here — rather than during
-  // parsing — also covers pre-parsed `RenderableTreeNodes` passed straight in,
+  // fire an off-origin request on load. Sanitizing here, rather than during
+  // parsing, also covers pre-parsed `RenderableTreeNodes` passed straight in,
   // and protects notes already stored in the database.
+  //
+  // String content is stored note text, whose tag attributes hold raw line
+  // breaks and backslashes; they are encoded first so those tags parse.
   const parsedContent = React.useMemo(() => {
     const tree =
       typeof content === "string"
-        ? parseMarkdownToReact(content, markdocConfig)
+        ? parseMarkdownToReact(
+            encodeRawTagAttributeValues(content),
+            markdocConfig
+          )
         : content;
 
     return sanitizeMarkdocTree(tree, { allowExternalLinks });

@@ -10,7 +10,9 @@ import { Button } from "~/components/shared/button";
  * DescriptionComponent for Markdoc
  *
  * This component renders truncated descriptions that show full content
- * in a popover when clicked. Used for booking description changes in activity notes.
+ * in a popover when clicked. Used for asset, booking and location description
+ * changes in activity notes. The popover keeps the description's line breaks;
+ * the inline text runs them together.
  *
  * Usage in markdown content:
  * {% description oldText="long text..." newText="updated text..." /%}
@@ -60,7 +62,9 @@ export function DescriptionComponent({
         >
           <div className="text-sm">
             <div className="font-semibold text-gray-900">Full Description:</div>
-            <div className="mt-1 text-gray-700">{oldText}</div>
+            <div className="mt-1 whitespace-pre-line text-gray-700">
+              {oldText}
+            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -92,7 +96,9 @@ export function DescriptionComponent({
         >
           <div className="text-sm">
             <div className="font-semibold text-gray-900">Full Description:</div>
-            <div className="mt-1 text-gray-700">{newText}</div>
+            <div className="mt-1 whitespace-pre-line text-gray-700">
+              {newText}
+            </div>
           </div>
         </PopoverContent>
       </Popover>
@@ -127,7 +133,9 @@ export function DescriptionComponent({
                 <div className="font-semibold text-gray-900">
                   Previous Description:
                 </div>
-                <div className="mt-1 text-gray-700">{oldText}</div>
+                <div className="mt-1 whitespace-pre-line text-gray-700">
+                  {oldText}
+                </div>
               </div>
             </PopoverContent>
           </Popover>
@@ -158,7 +166,9 @@ export function DescriptionComponent({
                 <div className="font-semibold text-gray-900">
                   New Description:
                 </div>
-                <div className="mt-1 text-gray-700">{newText}</div>
+                <div className="mt-1 whitespace-pre-line text-gray-700">
+                  {newText}
+                </div>
               </div>
             </PopoverContent>
           </Popover>
