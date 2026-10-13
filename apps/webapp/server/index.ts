@@ -276,6 +276,11 @@ export default createHonoServer<ServerEnv>({
           // route only — cookie-authed routes like /api/calendar-subscription
           // stay OUT of this prefix.
           "/api/calendar/feed/*path",
+          // why: auth-bypassed. The content automation that drafts in-app
+          // updates has no session; the route checks its own Bearer key
+          // (UPDATE_DRAFTS_API_KEY), answers 404 while that key is unset, and
+          // can only create DRAFT updates.
+          "/api/update-drafts",
           // why: auth-bypassed. An error worth reporting often happens before
           // anyone has signed in, and the auth redirect answers those reports
           // with a 302 to /login that the browser silently discards, so they

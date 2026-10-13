@@ -317,6 +317,8 @@ export function getAllUpdatesForAdmin(): Promise<UpdateWithRelations[]> {
 
 /**
  * Create a new update
+ *
+ * @returns The id of the created update
  */
 export async function createUpdate({
   title,
@@ -336,9 +338,9 @@ export async function createUpdate({
   status?: UpdateStatus;
   targetRoles?: OrganizationRoles[];
   createdById: string;
-}): Promise<void> {
+}): Promise<{ id: string }> {
   try {
-    await db.update.create({
+    return await db.update.create({
       data: {
         title,
         content,
@@ -349,6 +351,7 @@ export async function createUpdate({
         targetRoles,
         createdById,
       },
+      select: { id: true },
     });
   } catch (cause) {
     throw new ShelfError({
