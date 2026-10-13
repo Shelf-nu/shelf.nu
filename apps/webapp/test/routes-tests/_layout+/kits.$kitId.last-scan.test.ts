@@ -71,7 +71,6 @@ vi.mock("~/modules/kit/service.server", () => ({
     barcodes: [],
   }),
   deleteKit: vi.fn(),
-  deleteKitImage: vi.fn(),
   // why: called immediately after the scan lookup. Omitting it made the loader
   // throw a missing-export error right past the assertions, which the removed
   // `.catch()` then swallowed — so the tests passed without the loader ever
