@@ -517,6 +517,15 @@ test("what to type is the name or count, or the word delete for a nameless item"
   }
 });
 
+test("an invisible character between a letter and its accent still matches the composed letter", () => {
+  // "Cafe" + zero-width space + combining acute, shown as "Café"
+  assert.equal(
+    deleteConfirmationMatches("Caf\u00E9", "Cafe\u200B\u0301"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Cafe\u0301", "Caf\u00E9"), true);
+});
+
 test("invisible format characters in a stored name need not be typed", () => {
   // Zero-width space, non-joiner and joiner, and a byte order mark: none can
   // be seen in the instruction, so none is asked for.
