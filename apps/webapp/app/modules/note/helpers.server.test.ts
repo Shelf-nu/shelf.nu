@@ -221,6 +221,19 @@ describe("buildDescriptionChangeNote", () => {
     );
   });
 
+  it("keeps both descriptions whole at the 5,000 character limit", () => {
+    const previous = `${"a".repeat(4999)}"`;
+    const next = "b".repeat(5000);
+
+    const result = buildDescriptionChangeNote({ userLink, previous, next });
+    const attributes = [...Markdoc.parse(result ?? "").walk()].find(
+      (node) => node.type === "tag" && node.tag === "description"
+    )?.attributes;
+
+    expect(attributes?.oldText).toBe(`${"a".repeat(4999)}&quot;`);
+    expect(attributes?.newText).toBe(next);
+  });
+
   it("treats whitespace-only as no description", () => {
     const result = buildDescriptionChangeNote({
       userLink,

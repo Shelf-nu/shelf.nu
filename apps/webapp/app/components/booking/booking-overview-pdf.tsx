@@ -11,6 +11,7 @@ import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
@@ -32,6 +33,12 @@ type PdfApiResponse = { pdfMeta: PdfDbResult };
  * its column instead. The Code column's share is shared with the server, which
  * refuses a barcode picture wider than that cell.
  */
+/**
+ * The most description characters printed under each asset row. The booking
+ * sheet is a hand-out, so a long description is cut instead of filling pages.
+ */
+const PDF_DESCRIPTION_MAX_LENGTH = 300;
+
 const ASSET_TABLE_COLUMNS = [
   { name: "number", percent: 5 },
   { name: "image", percent: 10 },
@@ -501,7 +508,10 @@ export const BookingPDFPreview = ({
                       <div className="flex items-start gap-4 bg-gray-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">
-                          {asset.description}
+                          {truncateText(
+                            asset.description ?? "",
+                            PDF_DESCRIPTION_MAX_LENGTH
+                          )}
                         </div>
                       </div>
                     </td>
