@@ -195,13 +195,13 @@ describe("resolveOnboardingDestination", () => {
     ).toBe("/welcome");
   });
 
-  it("invited users land in their workspace whatever the link said", () => {
+  it("invited users land on their role's page whatever the link said", () => {
     expect(
       resolveOnboardingDestination({
         redirectViaInvite: true,
         signupIntent: { plan: "team", trial: true },
         premiumFeaturesEnabled: true,
       })
-    ).toBe("/assets");
+    ).toBe("/");
   });
 });
