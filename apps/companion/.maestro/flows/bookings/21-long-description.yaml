@@ -1,0 +1,44 @@
+appId: com.shelf.companion.carlos
+name: "Bookings - long description can be read in full"
+tags:
+  - bookings
+  - fixture
+
+---
+# Test: a booking description taller than the collapsed three lines shows
+# "Show more", expands to the full text, and collapses again.
+#
+# Needs the long-description fixture:
+#   ./scripts/seed-e2e.sh long-description-up
+#   maestro test -e <each line of env/test.env> -e <each line of env/e2e-long-description.env> flows/bookings/21-long-description.yaml
+# (Maestro takes variables as -e KEY=VALUE; scripts/run-suite.sh builds them
+# the same way from a file.)
+
+- runFlow: ../../shared/login.yaml
+
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://bookings/${SHELF_TEST_LONG_DESCRIPTION_BOOKING_ID}"
+
+- extendedWaitUntil:
+    visible: "E2E Long Description"
+    timeout: 20000
+
+- scrollUntilVisible:
+    element:
+      id: "booking-description-toggle"
+    direction: DOWN
+- assertVisible: "Show more description"
+- takeScreenshot: booking-long-description-collapsed
+
+- tapOn:
+    id: "booking-description-toggle"
+- extendedWaitUntil:
+    visible: "Show less description"
+    timeout: 5000
+- takeScreenshot: booking-long-description-expanded
+
+- tapOn:
+    id: "booking-description-toggle"
+- assertVisible: "Show more description"
