@@ -80,6 +80,7 @@ import {
 } from "@/lib/booking-reservation-checkout";
 import { BookingAssetsSearch } from "@/components/bookings/booking-assets-search";
 import { BookingKitHeader } from "@/components/bookings/booking-kit-header";
+import { ExpandableText } from "@/components/shared/expandable-text";
 import {
   bookingRowKey,
   buildBookingRows,
@@ -1634,9 +1635,13 @@ export default function BookingDetailScreen() {
               </View>
 
               {booking.description ? (
-                <Text style={styles.description} numberOfLines={3}>
-                  {booking.description}
-                </Text>
+                <ExpandableText
+                  key={booking.id}
+                  text={booking.description}
+                  numberOfLines={3}
+                  style={styles.description}
+                  testID="booking-description"
+                />
               ) : null}
 
               <View style={styles.infoRows}>

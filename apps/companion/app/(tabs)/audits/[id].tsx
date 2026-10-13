@@ -42,6 +42,7 @@ import {
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { ExpandableText } from "@/components/shared/expandable-text";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
 import { isArchivedAsset } from "@/lib/archived-assets";
@@ -983,9 +984,13 @@ function AuditDetailContent() {
               </View>
 
               {audit.description ? (
-                <Text style={styles.description} numberOfLines={3}>
-                  {audit.description}
-                </Text>
+                <ExpandableText
+                  key={audit.id}
+                  text={audit.description}
+                  numberOfLines={3}
+                  style={styles.description}
+                  testID="audit-description"
+                />
               ) : null}
 
               <View style={styles.infoRows}>
