@@ -12,7 +12,10 @@
  * `Customer\Barbara`.
  *
  * Stored content keeps the raw form, and this module converts it into valid
- * Markdoc right before parsing. Raw is the one encoding every reader of
+ * Markdoc right before parsing, for system-generated notes only
+ * (`MarkdownViewer`'s `encodeRawTagAttributes`). Author-written content is
+ * left alone: it never carries these tags, and a Markdoc example in a code
+ * span must show exactly as typed. Raw is the one encoding every reader of
  * stored notes already understands: the CSV/PDF export
  * (`~/utils/note-sanitizer.server`) and the companion app's activity list
  * read attribute values with plain regexes, so writing Markdoc escapes
@@ -23,7 +26,8 @@
  * attribute value is one the user typed and is encoded as a literal backslash.
  *
  * @see {@link file://./markdoc-wrappers.ts} the writers
- * @see {@link file://./../components/markdown/markdown-viewer.tsx} the caller
+ * @see {@link file://./../components/markdown/markdown-viewer.tsx} the caller,
+ *   opted into by the system-note renderers
  */
 
 const OPEN = "{%";

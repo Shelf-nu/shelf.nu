@@ -55,7 +55,7 @@ const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
       <Tag>
         <DateS date={note.createdAt} includeTime />
       </Tag>{" "}
-      <MarkdownViewer content={note.content} />
+      <MarkdownViewer content={note.content} encodeRawTagAttributes />
     </div>
   </div>
 );

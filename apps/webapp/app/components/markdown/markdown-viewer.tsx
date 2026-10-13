@@ -49,6 +49,16 @@ interface Props {
    * Dangerous schemes and off-origin images are blocked regardless.
    */
   allowExternalLinks?: boolean;
+  /**
+   * Content is a system-generated note, assembled by the wrappers in
+   * `~/utils/markdoc-wrappers`. Those store user text in tag attributes raw,
+   * line breaks and backslashes included, which Markdoc cannot parse; this
+   * encodes them first so the tags render.
+   *
+   * Leave it off for author-written content (comments, announcements): there
+   * the text must show exactly as typed, Markdoc examples in code included.
+   */
+  encodeRawTagAttributes?: boolean;
 }
 
 // Default components map including our custom components
@@ -88,6 +98,7 @@ export const MarkdownViewer = ({
   className,
   disablePortal,
   allowExternalLinks = false,
+  encodeRawTagAttributes = false,
 }: Props) => {
   const styles = tw("pm-doc", className);
 
@@ -115,20 +126,19 @@ export const MarkdownViewer = ({
   // fire an off-origin request on load. Sanitizing here, rather than during
   // parsing, also covers pre-parsed `RenderableTreeNodes` passed straight in,
   // and protects notes already stored in the database.
-  //
-  // String content is stored note text, whose tag attributes hold raw line
-  // breaks and backslashes; they are encoded first so those tags parse.
   const parsedContent = React.useMemo(() => {
     const tree =
       typeof content === "string"
         ? parseMarkdownToReact(
-            encodeRawTagAttributeValues(content),
+            encodeRawTagAttributes
+              ? encodeRawTagAttributeValues(content)
+              : content,
             markdocConfig
           )
         : content;
 
     return sanitizeMarkdocTree(tree, { allowExternalLinks });
-  }, [content, allowExternalLinks]);
+  }, [content, allowExternalLinks, encodeRawTagAttributes]);
 
   return (
     <div className={styles}>

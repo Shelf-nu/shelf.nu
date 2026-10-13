@@ -99,9 +99,18 @@ describe("MarkdownViewer", () => {
     });
   });
 
-  describe("tag attributes with line breaks", () => {
+  describe("system notes with raw tag attributes", () => {
+    // why: system notes store user text raw inside tag attributes; the
+    // renderers that show them opt into encoding it.
+    const renderSystemNote = (content: string) =>
+      render(
+        <MemoryRouter>
+          <MarkdownViewer content={content} encodeRawTagAttributes />
+        </MemoryRouter>
+      );
+
     it("shows both texts of a multi-line description change", () => {
-      const { container } = renderNote(
+      const { container } = renderSystemNote(
         '{% link to="/settings/team/users/u1" text="Jane Doe" /%} updated the asset description {% description oldText="aa" newText="first line\r\nsecond line" /%}.'
       );
 
@@ -111,7 +120,7 @@ describe("MarkdownViewer", () => {
     });
 
     it("shows a user link whose name has a backslash", () => {
-      const { container } = renderNote(
+      const { container } = renderSystemNote(
         '{% link to="/settings/team/users/u2" text="Customer\\Barbara" /%} checked out the asset.'
       );
 
@@ -119,5 +128,16 @@ describe("MarkdownViewer", () => {
         "Customer\\Barbara"
       );
     });
+  });
+
+  it("shows a Markdoc example in an author's code span exactly as typed", () => {
+    const { container } = renderNote(
+      'Use `{% link to="C:\\tmp" text="x" /%}` here.',
+      true
+    );
+
+    expect(container.querySelector("code")).toHaveTextContent(
+      '{% link to="C:\\tmp" text="x" /%}'
+    );
   });
 });

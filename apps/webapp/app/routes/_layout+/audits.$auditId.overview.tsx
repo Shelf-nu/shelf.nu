@@ -630,7 +630,10 @@ export default function AuditOverview() {
                         only notes a person authored through the editor may
                         link off-origin. */}
                     <div className="text-sm text-gray-900">
-                      <MarkdownViewer content={note.content} />
+                      <MarkdownViewer
+                        content={note.content}
+                        encodeRawTagAttributes
+                      />
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
                       {resolveUserDisplayName(note.user) || "Unknown"} &middot;{" "}

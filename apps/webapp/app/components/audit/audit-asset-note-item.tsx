@@ -152,6 +152,7 @@ export function AuditAssetNoteItem({
               content={note.content}
               disablePortal={true}
               allowExternalLinks={isAuthorWritten}
+              encodeRawTagAttributes={!isAuthorWritten}
             />
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
