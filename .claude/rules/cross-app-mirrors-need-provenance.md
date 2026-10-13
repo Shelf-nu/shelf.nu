@@ -1,6 +1,7 @@
 ---
 description: Hand-copied webapp logic in the companion must be marked as a mirror, point at its source, and prefer extraction to packages/*. Companion is the only secondary app today — extend the glob when another appears.
-globs: apps/companion/**
+paths:
+  - "apps/companion/**"
 ---
 
 # Cross-App Mirrors Need Provenance
