@@ -1,12 +1,10 @@
 ---
 description: User-supplied strings placed into note content (booking, audit, asset — anything rendered through Markdoc) must be sanitized against Markdoc-tag injection. Sanitize at write time.
-globs:
-  [
-    "apps/webapp/app/modules/**/service.server.ts",
-    "apps/webapp/app/modules/booking-note/**",
-    "apps/webapp/app/modules/audit/note-content.server.ts",
-    "apps/webapp/app/utils/markdoc-wrappers.ts",
-  ]
+paths:
+  - "apps/webapp/app/modules/**/service.server.ts"
+  - "apps/webapp/app/modules/booking-note/**"
+  - "apps/webapp/app/modules/audit/note-content.server.ts"
+  - "apps/webapp/app/utils/markdoc-wrappers.ts"
 ---
 
 # Sanitize User Input in Markdoc-Rendered Notes

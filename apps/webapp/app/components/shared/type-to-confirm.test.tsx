@@ -87,7 +87,7 @@ const SURFACES: Surface[] = [
     name: "asset",
     element: (
       <DeleteAsset
-        asset={{ id: "a1", title: "Camera Kit", mainImage: null }}
+        asset={{ id: "a1", title: "Camera Kit" }}
         trigger={openButton}
       />
     ),
