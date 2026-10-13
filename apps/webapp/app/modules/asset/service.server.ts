@@ -3600,8 +3600,8 @@ export async function deleteAsset({
       return deleted;
     });
 
-    // Not awaited: it scans storage and the asset table, and never rejects.
-    void removeImageFilesOfDeletedAssets([id]);
+    // Not awaited: it reads storage and the workspace's assets, never rejects.
+    void removeImageFilesOfDeletedAssets({ assetIds: [id], organizationId });
 
     // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
@@ -5204,7 +5204,7 @@ function extractMainImageName(path: string): string | null {
  *
  * Only for a replaced photo. A deleted asset's files go through
  * {@link removeImageFilesOfDeletedAssets}, which covers every uploader's
- * folder and keeps files another asset still shows.
+ * folder and keeps files another asset of the workspace still shows.
  *
  * @param params.userId - The user who uploaded the current photo, which names
  *   the folder that is cleaned
@@ -7708,8 +7708,11 @@ export async function bulkDeleteAssets({
         { timeout: 15000 }
       );
 
-      // Not awaited: it scans storage and the asset table, and never rejects.
-      void removeImageFilesOfDeletedAssets(assets.map((asset) => asset.id));
+      // Not awaited: it reads storage and the workspace's assets, never rejects.
+      void removeImageFilesOfDeletedAssets({
+        assetIds: assets.map((asset) => asset.id),
+        organizationId,
+      });
     } catch (cause) {
       throw new ShelfError({
         cause,

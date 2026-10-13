@@ -18,8 +18,10 @@
  */
 import { vi } from "vitest";
 
-/** The `Asset` image columns the reference check reads. */
+/** The `Asset` columns the reference check reads and filters on. */
 type AssetImageRow = {
+  /** The workspace of the asset; the reference check reads only one. */
+  organizationId: string;
   mainImage: string | null;
   thumbnailImage: string | null;
 };
@@ -47,6 +49,15 @@ function idsParam(values: unknown[]): string[] {
     throw new Error("expected an id array parameter");
   }
   return ids as string[];
+}
+
+/** The workspace id a raw query was given, its only string parameter. */
+function organizationIdParam(values: unknown[]): string {
+  const organizationId = values.find((value) => typeof value === "string");
+  if (typeof organizationId !== "string") {
+    throw new Error("expected an organization id parameter");
+  }
+  return organizationId;
 }
 
 function createAssetImageStorage() {
@@ -83,11 +94,18 @@ function createAssetImageStorage() {
 
       if (sql.includes('FROM "Asset"')) {
         const folderIds = idsParam(values);
-        return remainingAssets.filter((asset) =>
-          [asset.mainImage, asset.thumbnailImage].some((url) =>
-            folderIds.includes(folderAssetIdOfUrl(url) ?? "")
+        const organizationId = organizationIdParam(values);
+        return remainingAssets
+          .filter((asset) => asset.organizationId === organizationId)
+          .filter((asset) =>
+            [asset.mainImage, asset.thumbnailImage].some((url) =>
+              folderIds.includes(folderAssetIdOfUrl(url) ?? "")
+            )
           )
-        );
+          .map(({ mainImage, thumbnailImage }) => ({
+            mainImage,
+            thumbnailImage,
+          }));
       }
 
       throw new Error(`unexpected raw query: ${sql}`);

@@ -19,6 +19,9 @@ vi.mock("~/integrations/supabase/client", async () => ({
     .assetImageStorage.getSupabaseAdmin,
 }));
 
+/** The workspace the assets are deleted from. */
+const ORG = "org-1";
+
 // why: Logger.error writes to the console and Sentry; spy on it to assert a
 // failure is logged without producing output
 let loggerErrorSpy: ReturnType<typeof vi.spyOn>;
@@ -41,12 +44,16 @@ describe("removeImageFilesOfDeletedAssets", () => {
     );
     assetImageStorage.setRemainingAssets([
       {
+        organizationId: ORG,
         mainImage: signedAssetUrl("uploader-a/asset-2/main-image-300.jpg"),
         thumbnailImage: null,
       },
     ]);
 
-    await removeImageFilesOfDeletedAssets(["asset-1"]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
 
     expect(assetImageStorage.storedFiles()).toEqual([
       "uploader-a/asset-2/main-image-300.jpg",
@@ -66,6 +73,7 @@ describe("removeImageFilesOfDeletedAssets", () => {
     );
     assetImageStorage.setRemainingAssets([
       {
+        organizationId: ORG,
         mainImage: signedAssetUrl("uploader-a/asset-1/main-image-101.jpg"),
         thumbnailImage: signedAssetUrl(
           "uploader-a/asset-1/main-image-101-thumbnail.jpg"
@@ -73,7 +81,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
       },
     ]);
 
-    await removeImageFilesOfDeletedAssets(["asset-1"]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
 
     expect(assetImageStorage.storedFiles()).toEqual([
       "uploader-a/asset-1/main-image-101-thumbnail.jpg",
@@ -84,7 +95,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
   it("does nothing for an asset with no stored files", async () => {
     assetImageStorage.upload("uploader-a/asset-2/main-image-300.jpg");
 
-    await removeImageFilesOfDeletedAssets(["asset-1"]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
 
     expect(assetImageStorage.remove).not.toHaveBeenCalled();
     // No files found, so the asset table is not read either.
@@ -95,7 +109,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
   });
 
   it("does nothing for an empty list", async () => {
-    await removeImageFilesOfDeletedAssets([]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: [],
+      organizationId: ORG,
+    });
 
     expect(assetImageStorage.queryRaw).not.toHaveBeenCalled();
     expect(assetImageStorage.remove).not.toHaveBeenCalled();
@@ -113,7 +130,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
     } as never);
 
     await expect(
-      removeImageFilesOfDeletedAssets(paths.map((path) => path.split("/")[1]))
+      removeImageFilesOfDeletedAssets({
+        assetIds: paths.map((path) => path.split("/")[1]),
+        organizationId: ORG,
+      })
     ).resolves.toBeUndefined();
 
     expect(
@@ -134,7 +154,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
     assetImageStorage.remove.mockRejectedValueOnce(new Error("socket hang up"));
 
     await expect(
-      removeImageFilesOfDeletedAssets(["asset-1"])
+      removeImageFilesOfDeletedAssets({
+        assetIds: ["asset-1"],
+        organizationId: ORG,
+      })
     ).resolves.toBeUndefined();
 
     expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
@@ -146,7 +169,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
     );
 
     await expect(
-      removeImageFilesOfDeletedAssets(["asset-1"])
+      removeImageFilesOfDeletedAssets({
+        assetIds: ["asset-1"],
+        organizationId: ORG,
+      })
     ).resolves.toBeUndefined();
 
     expect(assetImageStorage.remove).not.toHaveBeenCalled();
@@ -156,7 +182,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
   it("reads the asset image columns by their database names", async () => {
     assetImageStorage.upload("uploader-a/asset-1/main-image-100.jpg");
 
-    await removeImageFilesOfDeletedAssets(["asset-1"]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
 
     const sqlTexts = assetImageStorage.queryRaw.mock.calls.map(([strings]) =>
       strings.join("?")
@@ -170,7 +199,10 @@ describe("removeImageFilesOfDeletedAssets", () => {
   it("lets archived assets keep the files they show", async () => {
     assetImageStorage.upload("uploader-a/asset-1/main-image-100.jpg");
 
-    await removeImageFilesOfDeletedAssets(["asset-1"]);
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
 
     // An archived asset can be reinstated with its photo, so the reference
     // check must read every remaining asset, archived or not.
@@ -179,5 +211,30 @@ describe("removeImageFilesOfDeletedAssets", () => {
       .find((sql) => sql.includes('FROM "Asset"'));
     expect(assetQuery).toBeDefined();
     expect(assetQuery).not.toMatch(/archivedAt/i);
+  });
+
+  it("checks only the workspace the assets were deleted from", async () => {
+    assetImageStorage.upload("uploader-a/asset-1/main-image-100.jpg");
+    // An asset in another workspace showing the same file, as a backup
+    // restore into that workspace can leave behind. Rare enough that the
+    // check does not scan every workspace's assets for it.
+    assetImageStorage.setRemainingAssets([
+      {
+        organizationId: "org-2",
+        mainImage: signedAssetUrl("uploader-a/asset-1/main-image-100.jpg"),
+        thumbnailImage: null,
+      },
+    ]);
+
+    await removeImageFilesOfDeletedAssets({
+      assetIds: ["asset-1"],
+      organizationId: ORG,
+    });
+
+    expect(assetImageStorage.storedFiles()).toEqual([]);
+    const assetQuery = assetImageStorage.queryRaw.mock.calls
+      .map(([strings]) => strings.join("?"))
+      .find((sql) => sql.includes('FROM "Asset"'));
+    expect(assetQuery).toMatch(/"organizationId" = \?/);
   });
 });

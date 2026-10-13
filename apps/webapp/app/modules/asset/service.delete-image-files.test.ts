@@ -93,6 +93,7 @@ describe("deleteAsset", () => {
     );
     assetImageStorage.setRemainingAssets([
       {
+        organizationId: "org-1",
         mainImage: signedAssetUrl("uploader-1/asset-1/main-image-101.jpg"),
         thumbnailImage: null,
       },

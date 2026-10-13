@@ -9,9 +9,13 @@
  * uploader, not after the person deleting, so the files are found by the
  * asset id segment of the path.
  *
- * A file is kept while any remaining asset's `mainImage` or `thumbnailImage`
- * still points at it: some assets show a photo stored in another asset's
- * folder, and removing it would break that asset's image.
+ * A file is kept while a remaining asset of the same workspace still points
+ * at it through `mainImage` or `thumbnailImage`: some assets show a photo
+ * stored in another asset's folder, and removing it would break that asset's
+ * image. Only the workspace the assets were deleted from is checked, so the
+ * lookup reads that workspace's assets instead of every asset in the
+ * database. An asset in another workspace showing the file (as a backup
+ * restored into that workspace can leave behind) loses its photo.
  *
  * Every asset delete path (web single delete, bulk delete, the companion's
  * delete) runs this after its transaction commits.
@@ -21,7 +25,7 @@
  *   replaced photo while keeping the current one
  */
 
-import type { Asset } from "@prisma/client";
+import type { Asset, Organization } from "@prisma/client";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
@@ -39,7 +43,7 @@ const MAX_FILES_PER_REMOVE = 1000;
 
 /**
  * Removes every stored image file of the given deleted assets, whoever
- * uploaded it, except files a remaining asset still shows.
+ * uploaded it, except files a remaining asset of the workspace still shows.
  *
  * Call this only after the asset rows are deleted: a file is protected by the
  * assets that still exist, so an asset that is still in the database protects
@@ -47,15 +51,20 @@ const MAX_FILES_PER_REMOVE = 1000;
  * never rejects, because the delete has already happened and a stale file can
  * be cleaned up later.
  *
- * Costs one scan of the bucket's object list and, when any files are found,
- * one scan of the asset table, whatever the number of assets. Callers run it
- * without awaiting so the delete response does not wait for it.
+ * Costs one read of the bucket's object list and, when any files are found,
+ * one read of the workspace's assets, whatever the number of assets. Callers
+ * run it without awaiting so the delete response does not wait for it.
  *
- * @param assetIds - Ids of assets whose rows were deleted
+ * @param params.assetIds - Ids of assets whose rows were deleted
+ * @param params.organizationId - The workspace they were deleted from
  */
-export async function removeImageFilesOfDeletedAssets(
-  assetIds: Asset["id"][]
-): Promise<void> {
+export async function removeImageFilesOfDeletedAssets({
+  assetIds,
+  organizationId,
+}: {
+  assetIds: Asset["id"][];
+  organizationId: Organization["id"];
+}): Promise<void> {
   const uniqueAssetIds = [...new Set(assetIds)];
   if (uniqueAssetIds.length === 0) {
     return;
@@ -63,13 +72,13 @@ export async function removeImageFilesOfDeletedAssets(
 
   let paths: string[];
   try {
-    paths = await findUnreferencedImageFiles(uniqueAssetIds);
+    paths = await findUnreferencedImageFiles(uniqueAssetIds, organizationId);
   } catch (cause) {
     Logger.error(
       new ShelfError({
         cause,
         message: "Failed to look up the image files of deleted assets",
-        additionalData: { assetIds: uniqueAssetIds },
+        additionalData: { assetIds: uniqueAssetIds, organizationId },
         label,
       })
     );
@@ -93,7 +102,10 @@ export async function removeImageFilesOfDeletedAssets(
           cause,
           message: "Failed to remove image files of deleted assets",
           // The asset ids trace the files without logging the object keys.
-          additionalData: { assetIds: assetIdsOfPaths(chunk) },
+          additionalData: {
+            assetIds: assetIdsOfPaths(chunk),
+            organizationId,
+          },
           label,
         })
       );
@@ -103,14 +115,16 @@ export async function removeImageFilesOfDeletedAssets(
 
 /**
  * Lists the stored files in the folders of the given assets that no remaining
- * asset points at.
+ * asset of the workspace points at.
  *
  * @param assetIds - Ids of deleted assets, without duplicates
+ * @param organizationId - The workspace whose assets may still show a file
  * @returns Object paths in the `assets` bucket, safe to remove
  * @throws When either database read fails
  */
 async function findUnreferencedImageFiles(
-  assetIds: Asset["id"][]
+  assetIds: Asset["id"][],
+  organizationId: Organization["id"]
 ): Promise<string[]> {
   // Supabase records every stored object in `storage.objects`. The path's
   // second segment is the asset id; the first is whoever uploaded the file.
@@ -125,21 +139,25 @@ async function findUnreferencedImageFiles(
     return [];
   }
 
-  // Assets whose photo or thumbnail URL points into one of these folders.
-  // The URL path after `/assets/` is the object path, so its second segment
-  // is the folder's asset id, the same as above. There is no `archivedAt`
-  // filter on purpose: an archived asset keeps its photo and can be
-  // reinstated, so the files it shows must stay.
+  // The workspace's assets whose photo or thumbnail URL points into one of
+  // these folders. The URL path after `/assets/` is the object path, so its
+  // second segment is the folder's asset id, the same as above. The
+  // `organizationId` filter keeps this on the workspace's index instead of
+  // the whole table. There is no `archivedAt` filter on purpose: an archived
+  // asset keeps its photo and can be reinstated, so the files it shows stay.
   const folderIds = assetIdsOfPaths(storedFiles.map((file) => file.name));
   const referencingAssets = await db.$queryRaw<
     { mainImage: string | null; thumbnailImage: string | null }[]
   >`
     SELECT "mainImage", "thumbnailImage"
     FROM "Asset"
-    WHERE split_part(split_part("mainImage", '/assets/', 2), '/', 2)
-            IN (SELECT unnest(${folderIds}::text[]))
-       OR split_part(split_part("thumbnailImage", '/assets/', 2), '/', 2)
-            IN (SELECT unnest(${folderIds}::text[]))
+    WHERE "organizationId" = ${organizationId}
+      AND (
+        split_part(split_part("mainImage", '/assets/', 2), '/', 2)
+          IN (SELECT unnest(${folderIds}::text[]))
+        OR split_part(split_part("thumbnailImage", '/assets/', 2), '/', 2)
+          IN (SELECT unnest(${folderIds}::text[]))
+      )
   `;
 
   const referencedPaths = new Set(
