@@ -52,6 +52,7 @@ import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import z from "zod";
 import type { AuthSession } from "@server/session";
+import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import { CheckinIntentEnum } from "~/components/booking/checkin-dialog";
 import { CheckoutIntentEnum } from "~/components/booking/checkout-dialog";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -13250,6 +13251,7 @@ export type BookingsWhereParams = {
   organizationId: Organization["id"];
   search?: string | null;
   statuses?: Booking["status"][] | null;
+  /** Bookings holding any of these assets. Set this or `kitId`, not both. */
   assetIds?: Asset["id"][] | null;
   /**
    * A RESTRICTION scoping results to the bookings of ONE person, matched via
@@ -13304,6 +13306,10 @@ export type BookingsWhereParams = {
   bookingFrom?: Booking["from"] | null;
   bookingTo?: Booking["to"] | null;
   userId: Booking["creatorId"];
+  /**
+   * Bookings holding a member of this kit. Set this or `assetIds`, not both:
+   * each is a condition on `bookingAssets`, and the `where` keeps only this one.
+   */
   kitId?: string;
   tags?: Tag["id"][];
 };
@@ -13313,8 +13319,8 @@ export type BookingsWhereParams = {
  * default status set, the rule that a draft is visible to its creator only, and
  * any restriction the caller applies.
  *
- * {@link getBookings} queries and counts with it, and "Select all" on the
- * bookings index resolves its selection with it (see
+ * {@link getBookings} queries and counts with it, and "Select all" on a
+ * bookings list resolves its selection with it (see
  * {@link getBulkBookingsWhereInput}), so a bulk action reaches exactly the rows
  * the list counted. Change which bookings a list holds here, never at a caller.
  *
@@ -13527,6 +13533,80 @@ export function buildBookingsWhere(
   }
 
   return where;
+}
+
+/**
+ * The statuses a kit's or an asset's Bookings tab lists when the user has not
+ * picked one: every status but ARCHIVED and CANCELLED.
+ */
+const BOOKINGS_TAB_DEFAULT_STATUSES: BookingStatus[] = [
+  BookingStatus.DRAFT,
+  BookingStatus.COMPLETE,
+  BookingStatus.ONGOING,
+  BookingStatus.OVERDUE,
+  BookingStatus.RESERVED,
+];
+
+/**
+ * The {@link buildBookingsWhere} params for one bookings list at the given URL
+ * params, for one viewer: the list's search, status, team-member and tag
+ * filters, its default statuses, and its kit or asset.
+ *
+ * Each list's loader (`bookings._index`, `kits.$kitId.bookings`,
+ * `assets.$assetId.bookings`) builds its rows with this, and "Select all" on
+ * that list resolves its selection with it (see
+ * {@link getBulkBookingsWhereInput}), so the two reach the same bookings.
+ * Change what a list holds here.
+ *
+ * @param params.list - Which list: the index, a kit's tab or an asset's tab
+ * @param params.searchParams - The list page's URL params
+ * @param params.organizationId - The viewer's (validated) organization
+ * @param params.userId - The viewer, whose own drafts the list shows
+ * @param params.custodianScope - The viewer's custodian scope when they may
+ *   see only their own bookings, otherwise null
+ * @returns The params that decide which bookings the list holds
+ */
+export function getBookingsListWhereParams({
+  list,
+  searchParams,
+  organizationId,
+  userId,
+  custodianScope,
+}: {
+  list: BookingsList;
+  searchParams: URLSearchParams;
+  organizationId: Organization["id"];
+  userId: User["id"];
+  custodianScope: BookingsWhereParams["custodianScope"];
+}): BookingsWhereParams {
+  const { search, status, teamMemberIds, tags } = getParamsValues(searchParams);
+
+  const filters = {
+    organizationId,
+    userId,
+    search,
+    custodianScope,
+    custodianTeamMemberIds: teamMemberIds,
+    tags,
+  };
+
+  switch (list.kind) {
+    case "index":
+      // No status picked: buildBookingsWhere's default applies.
+      return { ...filters, statuses: status ? [status] : null };
+    case "kit":
+      return {
+        ...filters,
+        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        kitId: list.kitId,
+      };
+    case "asset":
+      return {
+        ...filters,
+        statuses: status ? [status] : BOOKINGS_TAB_DEFAULT_STATUSES,
+        assetIds: [list.assetId],
+      };
+  }
 }
 
 export async function getBookings(
@@ -15574,9 +15654,10 @@ export async function getBookingFlags(
  * `bulkCancelBookings` so the three resolve a selection the same way, and so
  * the ownership scope cannot be forgotten on one of them.
  *
- * - **Explicit ids**: those bookings, in the caller's workspace.
+ * - **Explicit ids**: those bookings, in the caller's workspace. `list` is not
+ *   read.
  * - **Select all** (`bookingIds` holds {@link ALL_SELECTED_KEY}): the bookings
- *   the index shows at `currentSearchParams`, see {@link getBookingsIndexWhere}.
+ *   `list` shows at `currentSearchParams`, see {@link getBookingsListWhere}.
  *
  * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
  * only to "select all" would still let a restricted caller act on someone
@@ -15584,7 +15665,8 @@ export async function getBookingFlags(
  *
  * @param params.bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
  * @param params.organizationId - The caller's (validated) organization
- * @param params.currentSearchParams - The bookings index URL params, for select-all
+ * @param params.currentSearchParams - The list page's URL params, for select-all
+ * @param params.list - The list select-all stands for; the index when absent
  * @param params.access - The caller's access
  * @param params.userId - The caller
  * @returns A `Prisma.BookingWhereInput` scoped to org, selection and ownership
@@ -15594,12 +15676,14 @@ export async function getBulkBookingsWhereInput({
   bookingIds,
   organizationId,
   currentSearchParams,
+  list = { kind: "index" },
   access,
   userId,
 }: {
   bookingIds: Booking["id"][];
   organizationId: Organization["id"];
   currentSearchParams?: string | null;
+  list?: BookingsList;
   access: RoleAccess;
   /** Absent for system-initiated calls, which have no acting user */
   userId?: User["id"];
@@ -15607,7 +15691,8 @@ export async function getBulkBookingsWhereInput({
   const ownership = getBookingOwnershipScope({ access, userId });
 
   const base: Prisma.BookingWhereInput = bookingIds.includes(ALL_SELECTED_KEY)
-    ? await getBookingsIndexWhere({
+    ? await getBookingsListWhere({
+        list,
         currentSearchParams,
         organizationId,
         access,
@@ -15625,29 +15710,35 @@ export async function getBulkBookingsWhereInput({
 }
 
 /**
- * The `where` of the bookings index at the given URL params, for this viewer:
+ * The `where` of one bookings list at the given URL params, for this viewer:
  * the rows "Select all N entries" stands for.
  *
- * Reads the params the way the index loader
- * (`routes/_layout+/bookings._index.tsx`) does and builds with
- * {@link buildBookingsWhere}, the builder {@link getBookings} uses. A viewer
- * who may not see every booking gets the same custodian scope the index
- * applies through {@link getBookingsFilterData}. Change the two together:
- * `bulk-select-all-matches-list.server.test.ts` compares them URL by URL.
+ * Builds with {@link getBookingsListWhereParams}, which that list's loader
+ * also builds with, and {@link buildBookingsWhere}, which {@link getBookings}
+ * queries with. A viewer who may not see every booking gets the custodian
+ * scope the loaders apply. `bulk-select-all-matches-list.server.test.ts`
+ * compares each list with its loader URL by URL.
  *
- * @param params.currentSearchParams - The bookings index URL params
+ * A posted `list` only narrows: its kit or asset is AND-ed with the caller's
+ * organization, so an id from another workspace cannot reach that
+ * workspace's bookings.
+ *
+ * @param params.list - The list select-all stands for
+ * @param params.currentSearchParams - The list page's URL params
  * @param params.organizationId - The caller's (validated) organization
  * @param params.access - The viewer's access, for the custodian scope
  * @param params.userId - The viewer, for draft visibility and the custodian scope
- * @returns The `where` the index lists and counts with
+ * @returns The `where` the list's loader lists and counts with
  * @throws {ShelfError} when there is no viewer, since drafts are visible to their creator only
  */
-async function getBookingsIndexWhere({
+async function getBookingsListWhere({
+  list,
   currentSearchParams,
   organizationId,
   access,
   userId,
 }: {
+  list: BookingsList;
   currentSearchParams?: string | null;
   organizationId: Organization["id"];
   access: RoleAccess;
@@ -15665,29 +15756,25 @@ async function getBookingsIndexWhere({
     });
   }
 
-  const { search, status, teamMemberIds, tags } = getParamsValues(
-    new URLSearchParams(currentSearchParams ?? "")
+  return buildBookingsWhere(
+    getBookingsListWhereParams({
+      list,
+      searchParams: new URLSearchParams(currentSearchParams ?? ""),
+      organizationId,
+      userId,
+      custodianScope: access.bookings.seeAll
+        ? null
+        : await resolveCustodianScope({ userId, organizationId }),
+    })
   );
-
-  return buildBookingsWhere({
-    organizationId,
-    userId,
-    search,
-    statuses: status ? [status] : null,
-    custodianTeamMemberIds: teamMemberIds,
-    tags,
-    custodianScope: access.bookings.seeAll
-      ? null
-      : await resolveCustodianScope({ userId, organizationId }),
-  });
 }
 
 /**
  * Deletes a selection of bookings in one request.
  *
  * The selection is the explicit ids, or with select-all every booking the
- * bookings index shows for its filters, and in both cases only the bookings
- * the caller may act on (see {@link getBulkBookingsWhereInput}). Roles whose
+ * list shows for its filters, and in both cases only the bookings the caller
+ * may act on (see {@link getBulkBookingsWhereInput}). Roles whose
  * policy limits delete to drafts are refused the whole
  * request when the selection contains any non-draft booking, the same rule
  * `assertCanDeleteBooking` applies to a single delete.
@@ -15697,6 +15784,7 @@ async function getBookingsIndexWhere({
  * @param params.userId - The caller
  * @param params.hints - Client hints for the notification emails
  * @param params.currentSearchParams - The list filters, used with select-all
+ * @param params.list - The list select-all stands for; the index when absent
  * @param params.access - The caller's access
  * @throws {ShelfError} 403 when the caller may not delete every selected booking
  */
@@ -15706,6 +15794,7 @@ export async function bulkDeleteBookings({
   userId,
   hints,
   currentSearchParams,
+  list,
   access,
   confirmation,
 }: {
@@ -15714,6 +15803,8 @@ export async function bulkDeleteBookings({
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; the bookings index when absent */
+  list?: BookingsList;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
   /**
@@ -15732,6 +15823,7 @@ export async function bulkDeleteBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
+      list,
       access,
       userId,
     });
@@ -15967,6 +16059,7 @@ export async function bulkArchiveBookings({
   organizationId,
   userId,
   currentSearchParams,
+  list,
   access,
 }: {
   bookingIds: Booking["id"][];
@@ -15979,6 +16072,8 @@ export async function bulkArchiveBookings({
    */
   userId?: User["id"];
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; the bookings index when absent */
+  list?: BookingsList;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
 }) {
@@ -15992,6 +16087,7 @@ export async function bulkArchiveBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
+      list,
       access,
       userId,
     });
@@ -16193,6 +16289,7 @@ export async function bulkCancelBookings({
   userId,
   hints,
   currentSearchParams,
+  list,
   access,
 }: {
   bookingIds: Booking["id"][];
@@ -16200,6 +16297,8 @@ export async function bulkCancelBookings({
   userId: User["id"];
   hints: ClientHint;
   currentSearchParams?: string | null;
+  /** The list a select-all stands for; the bookings index when absent */
+  list?: BookingsList;
   /** Caller's access, which decides whether ownership scoping applies */
   access: RoleAccess;
 }) {
@@ -16213,6 +16312,7 @@ export async function bulkCancelBookings({
       bookingIds,
       organizationId,
       currentSearchParams,
+      list,
       access,
       userId,
     });
