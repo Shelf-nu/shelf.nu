@@ -227,6 +227,35 @@ describe.each(SURFACES)("typed confirm on the $name delete", (surface) => {
   });
 });
 
+describe("typed confirm on an item with no name", () => {
+  it("asks for the word delete and enables Delete once it is typed", async () => {
+    const { user, dialog } = await openDialog({
+      name: "asset with a blank title",
+      element: (
+        <DeleteAsset asset={{ id: "a2", title: "" }} trigger={openButton} />
+      ),
+      expected: "delete",
+      confirmLabel: /^delete$/i,
+      trigger: /open/i,
+    });
+    const confirm = within(dialog).getByRole("button", { name: /^delete$/i });
+    const field = within(dialog).getByRole("textbox", {
+      name: "Confirmation",
+    });
+
+    expect(dialog).toHaveTextContent("To confirm, type delete below.");
+    expect(field).toHaveAccessibleDescription("To confirm, type delete below.");
+    expect(confirm).toBeDisabled();
+
+    await user.type(field, "   ");
+    expect(confirm).toBeDisabled();
+
+    await user.clear(field);
+    await user.type(field, "Delete ");
+    expect(confirm).toBeEnabled();
+  });
+});
+
 describe("a dialog reopened after a typed attempt", () => {
   it("starts empty with the button off", async () => {
     const { user, dialog } = await openDialog(SURFACES[0]);
