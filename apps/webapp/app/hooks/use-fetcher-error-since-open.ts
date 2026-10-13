@@ -23,6 +23,7 @@
  */
 
 import { useState } from "react";
+import { isFormProcessing } from "~/utils/form";
 
 /** The parts of a fetcher these hooks read. */
 type FetcherWithData = {
@@ -44,6 +45,16 @@ export type FetcherOutcomeSinceOpen =
   | { status: "pending"; message: null }
   | { status: "rejected"; message: string | null }
   | { status: "accepted"; message: null };
+
+/** What one opening of a dialog started from. */
+type OpeningSnapshot = {
+  /** The `open` this snapshot was taken for, to notice the next flip. */
+  open: boolean;
+  /** The response the fetcher held, which is not an answer to this opening. */
+  data: unknown;
+  /** Whether a submission from an earlier opening was still in flight. */
+  inheritedSubmission: boolean;
+};
 
 const PENDING: FetcherOutcomeSinceOpen = { status: "pending", message: null };
 const ACCEPTED: FetcherOutcomeSinceOpen = { status: "accepted", message: null };
@@ -82,25 +93,57 @@ export function useFetcherOutcomeSinceOpen(
   fetcher: FetcherWithData,
   open: boolean
 ): FetcherOutcomeSinceOpen {
-  const [wasOpen, setWasOpen] = useState(open);
-  // Snapshot whatever the fetcher is already holding, whether or not the
-  // dialog starts open. A dialog rendered only while open is mounted fresh on
-  // each opening, so its first render IS an opening, and a response that
-  // predates this instance was never an answer to it.
-  const [dataAtOpen, setDataAtOpen] = useState<unknown>(fetcher.data);
+  // One snapshot of what this opening started from. The three move together on
+  // every opening, so they are held as one value rather than three states that
+  // can disagree.
+  const [snapshot, setSnapshot] = useState<OpeningSnapshot>(() => ({
+    open,
+    // Whatever the fetcher is already holding, whether or not the dialog starts
+    // open. A dialog rendered only while open is mounted fresh on each opening,
+    // so its first render IS an opening, and a response that predates this
+    // instance was never an answer to it.
+    data: fetcher.data,
+    inheritedSubmission: isFormProcessing(fetcher.state),
+  }));
 
   // Adjusting state while rendering, React's documented pattern for state
-  // derived from a prop change: the stale response is recorded in the same
-  // render that opens the dialog, so it never flashes.
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setDataAtOpen(fetcher.data);
+  // derived from a prop change: what this opening started from is recorded in
+  // the same render that opens the dialog, so nothing stale flashes.
+  let current = snapshot;
+
+  if (open !== current.open) {
+    current = open
+      ? {
+          open,
+          data: fetcher.data,
+          inheritedSubmission: isFormProcessing(fetcher.state),
+        }
+      : { ...current, open };
+    setSnapshot(current);
+  }
+
+  // The inherited submission has answered. That answer belongs to the opening
+  // that started it, so it becomes this opening's baseline instead.
+  if (current.inheritedSubmission && !isFormProcessing(fetcher.state)) {
+    current = { ...current, data: fetcher.data, inheritedSubmission: false };
+    setSnapshot(current);
+  }
+
+  if (!open) {
+    return PENDING;
+  }
+
+  // Dismissing a dialog does not abort its write, so an opening can begin while
+  // an earlier submission is still in flight. Its answer is not this opening's,
+  // and the operator is looking at a fresh form.
+  if (current.inheritedSubmission) {
+    return PENDING;
   }
 
   // A fetcher keyed on an entity is replaced when that entity changes, and the
   // replacement carries no data until it answers. That is pending: it is not an
   // answer to this opening, and the snapshot describes the entity before it.
-  if (!open || fetcher.data === undefined || fetcher.data === dataAtOpen) {
+  if (fetcher.data === undefined || fetcher.data === current.data) {
     return PENDING;
   }
 
@@ -114,7 +157,7 @@ export function useFetcherOutcomeSinceOpen(
   // loaders that result invalidated are still running, so the response arrives
   // before the page behind the dialog reflects it, and the updated figure there
   // is the operator's confirmation that the write landed.
-  return fetcher.state === "idle" ? ACCEPTED : PENDING;
+  return isFormProcessing(fetcher.state) ? PENDING : ACCEPTED;
 }
 
 /**

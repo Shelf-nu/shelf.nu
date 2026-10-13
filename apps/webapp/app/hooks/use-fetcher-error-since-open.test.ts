@@ -207,6 +207,67 @@ describe("useFetcherErrorSinceOpen", () => {
       expect(result.current.message).toBe("Only 2 units are free.");
     });
 
+    it("discards the answer to a submission that was already in flight", () => {
+      // Dismissing the dialog does not abort the write, and reopening before it
+      // answers must not credit that answer to the new opening: the operator is
+      // looking at a fresh form.
+      const { result, rerender } = setupOutcome({
+        fetcher: { state: "idle" },
+        open: true,
+      });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+
+      // Dismissed mid-flight, then opened again while still submitting.
+      rerender({ fetcher: { state: "submitting" }, open: false });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+
+      rerender({ fetcher: { state: "loading", data: SUCCESS }, open: true });
+      expect(result.current.status).toBe("pending");
+      rerender({ fetcher: { state: "idle", data: SUCCESS }, open: true });
+
+      expect(result.current.status).toBe("pending");
+    });
+
+    it("keeps a refusal from an inherited submission off a fresh form", () => {
+      const { result, rerender } = setupOutcome({
+        fetcher: { state: "idle" },
+        open: true,
+      });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+      rerender({ fetcher: { state: "submitting" }, open: false });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+
+      // A refused action still revalidates, so its response is readable while
+      // the fetcher is `loading`, before it settles.
+      rerender({ fetcher: { state: "loading", data: REFUSAL }, open: true });
+      expect(result.current.status).toBe("pending");
+      expect(result.current.message).toBeNull();
+
+      rerender({ fetcher: { state: "idle", data: REFUSAL }, open: true });
+
+      expect(result.current.status).toBe("pending");
+      expect(result.current.message).toBeNull();
+    });
+
+    it("reports the next submission made from this opening", () => {
+      const { result, rerender } = setupOutcome({
+        fetcher: { state: "idle" },
+        open: true,
+      });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+      rerender({ fetcher: { state: "submitting" }, open: false });
+      rerender({ fetcher: { state: "submitting" }, open: true });
+      rerender({ fetcher: { state: "idle", data: SUCCESS }, open: true });
+      expect(result.current.status).toBe("pending");
+
+      // The operator submits again, and this one is theirs.
+      rerender({ fetcher: { state: "submitting", data: SUCCESS }, open: true });
+      rerender({ fetcher: { state: "idle", data: REFUSAL }, open: true });
+
+      expect(result.current.status).toBe("rejected");
+      expect(result.current.message).toBe("Only 2 units are free.");
+    });
+
     it("stays pending when the keyed fetcher is replaced and has not answered", () => {
       // Navigating to another entity swaps in that entity's fetcher, which
       // carries no data while the snapshot still describes the previous one.
