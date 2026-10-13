@@ -113,6 +113,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assetKits: {
+            // Archived members are out of service and left out of kit custody
+            // and kit bookings (issue #382), so the page's availability badge,
+            // Book and custody actions read the active members only. They
+            // never sit on a live booking either, so the current booking and
+            // the custody card lose nothing. `archivedMemberCount` below says
+            // how many are hidden.
+            where: { asset: { archivedAt: null } },
             select: {
               // The membership id is the kit-slice discriminator booked rows
               // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
@@ -248,8 +255,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    /** Members left out of `kit.assetKits` above because they are archived. */
+    const archivedMemberCount = await db.assetKit.count({
+      where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
+    });
+
     return payload({
       kit: redactedKit,
+      archivedMemberCount,
       currentBooking,
       header,
       modelName,

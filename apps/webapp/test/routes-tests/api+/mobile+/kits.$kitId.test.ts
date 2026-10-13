@@ -225,6 +225,67 @@ describe("GET /api/mobile/kits/:kitId", () => {
     expect(body.kit.totalValue).toBe(70);
   });
 
+  it("lists an archived member with its stamp but leaves it out of the value", async () => {
+    // An archived member is out of service: the app badges it "Archived" and
+    // it adds nothing to what the kit is worth.
+    const member = (
+      id: string,
+      valuation: number,
+      archivedAt: Date | null
+    ) => ({
+      quantity: 1,
+      asset: {
+        id,
+        title: id,
+        status: "AVAILABLE",
+        archivedAt,
+        valuation,
+        quantity: null,
+        unitOfMeasure: null,
+        type: "INDIVIDUAL",
+        mainImage: null,
+        thumbnailImage: null,
+        category: null,
+        assetLocations: [],
+      },
+    });
+    const archivedAt = new Date("2026-10-09T13:44:00.000Z");
+    findFirstMock.mockResolvedValueOnce(
+      buildKitFixture([
+        member("asset-active", 200, null),
+        member("asset-archived", 500, archivedAt),
+      ]) as never
+    );
+
+    const response = await loader(
+      createLoaderArgs({
+        request: new Request(
+          `http://localhost:3000/api/mobile/kits/kit-1?orgId=${FAKE_ORG_ID}`
+        ),
+        params: { kitId: "kit-1" },
+      })
+    );
+    assertIsDataWithResponseInit(response);
+    const body = response.data as {
+      kit: {
+        totalValue: number;
+        assets: Array<{ id: string; archivedAt: Date | null }>;
+      };
+    };
+
+    expect(body.kit.assets.map((a) => [a.id, a.archivedAt])).toEqual([
+      ["asset-active", null],
+      ["asset-archived", archivedAt],
+    ]);
+    expect(body.kit.totalValue).toBe(200);
+    // The select asks for the stamp, so the app can badge the row.
+    expect(findFirstMock.mock.calls[0][0]).toMatchObject({
+      select: {
+        assetKits: { select: { asset: { select: { archivedAt: true } } } },
+      },
+    });
+  });
+
   it("does not send the image expiry that steers the member photo re-sign", async () => {
     // The loader selects `mainImageExpiration` only to decide whether a
     // member's signed photo URL has lapsed. A member row must keep the shape

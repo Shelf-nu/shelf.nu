@@ -312,6 +312,12 @@ export type AssetDetail = {
   mainImage: string | null;
   thumbnailImage: string | null;
   availableToBook: boolean;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. An archived
+   * asset is read-only and cannot be booked; the app badges it "Archived".
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
   valuation: number | null;
   createdAt: string;
   updatedAt: string;
@@ -497,6 +503,12 @@ export type QrResponse = {
           /** Drives the scan-to-booking "not available to book" blocker */
           availableToBook: boolean;
           /**
+           * When the asset was archived (ISO), `null` while active. Drives the
+           * scanner's "Archived" badge and its archived blocker. Absent on
+           * servers that predate archiving.
+           */
+          archivedAt?: string | null;
+          /**
            * Model this asset belongs to, or null. The fulfil-and-check-out scanner
            * matches it against the booking's outstanding reservations so it can
            * count only units that actually fulfil one. Absent on older servers.
@@ -562,6 +574,12 @@ export type BarcodeResponse = {
           /** Drives the scan-to-booking "not available to book" blocker */
           availableToBook: boolean;
           /**
+           * When the asset was archived (ISO), `null` while active. Drives the
+           * scanner's "Archived" badge and its archived blocker. Absent on
+           * servers that predate archiving.
+           */
+          archivedAt?: string | null;
+          /**
            * Model this asset belongs to, or null. Lets the fulfil scanner tell a
            * unit that fulfils a reservation from one that does not. Absent on
            * older servers.
@@ -604,6 +622,13 @@ export type KitDetailAsset = {
   id: string;
   title: string;
   status: string;
+  /**
+   * When the member was archived (ISO), `null` while it is active. Archived
+   * members stay listed with an "Archived" badge but count toward nothing:
+   * the server leaves them out of `totalValue`. Absent on servers that
+   * predate archiving.
+   */
+  archivedAt?: string | null;
   valuation: number | null;
   mainImage: string | null;
   thumbnailImage: string | null;
@@ -892,6 +917,13 @@ export type BookingAsset = {
   status: string;
   /** False when the asset is flagged unavailable for bookings. */
   availableToBook?: boolean;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. A DRAFT
+   * booking can hold an asset archived after it was added; the row shows
+   * "Archived" and the booking cannot be reserved until it is removed.
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
   mainImage: string | null;
   kitId: string | null;
   category: { id: string; name: string; color: string } | null;
@@ -1204,6 +1236,12 @@ export type BookingMutationResponse = {
     name: string;
     status: BookingStatus;
   };
+  /**
+   * Duplicate only: how many archived assets the server left out of the copy
+   * (archived assets cannot be booked). Absent on other mutations and on
+   * servers that predate archiving.
+   */
+  droppedArchivedCount?: number;
 };
 
 /**
@@ -1414,6 +1452,11 @@ export type AuditExpectedAsset = {
    * location (someone has it on loan).
    */
   custodianName: string | null;
+  /**
+   * When the asset was archived (ISO), `null` while it is active. The row
+   * shows an "Archived" badge. Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
 };
 
 export type AuditScanData = {
@@ -1440,6 +1483,11 @@ export type AuditScanData = {
    * `assetId` fallback rather than trusting this alone.
    */
   assetDeleted?: boolean;
+  /**
+   * When the scanned asset was archived (ISO), `null` while it is active.
+   * Absent on servers that predate archiving.
+   */
+  archivedAt?: string | null;
 };
 
 export type AuditDetailResponse = {
@@ -1768,6 +1816,11 @@ export type UpdateAssetResponse = {
 
 export type DeleteAssetResponse = {
   success: boolean;
+};
+
+/** Response of `POST /api/mobile/asset/reinstate`. */
+export type ReinstateAssetResponse = {
+  asset: { id: string; archivedAt: null };
 };
 
 export type DashboardKPIs = {

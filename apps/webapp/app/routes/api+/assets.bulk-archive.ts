@@ -12,6 +12,7 @@
 
 import { data, type ActionFunctionArgs } from "react-router";
 import { BulkArchiveSchema } from "~/components/assets/bulk-archive-dialog";
+import { bulkArchiveResultMessage } from "~/modules/asset/archive-messages";
 import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
@@ -71,27 +72,31 @@ export async function action({ context, request }: ActionFunctionArgs) {
     );
 
     if (type === "archive") {
-      const { archivedCount, skippedCount } = await bulkArchiveAssets({
-        organizationId,
-        assetIds,
-        currentSearchParams,
-        settings,
-        actorUserId: userId,
-        timeZone,
-        // Set by the dialog's "Archive anyway" after the shortfall warning.
-        confirmModelShortfall:
-          formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
-      });
+      const { archivedCount, skippedCount, draftBookings } =
+        await bulkArchiveAssets({
+          organizationId,
+          assetIds,
+          currentSearchParams,
+          settings,
+          actorUserId: userId,
+          timeZone,
+          // Set by the dialog's "Archive anyway" after the shortfall warning.
+          confirmModelShortfall:
+            formData.get(CONFIRM_MODEL_SHORTFALL_FIELD) === "true",
+        });
 
+      const result = bulkArchiveResultMessage({
+        action: "archive",
+        changed: archivedCount,
+        skipped: skippedCount,
+        draftBookings,
+      });
       sendNotification({
-        title: "Assets archived",
-        message:
-          skippedCount > 0
-            ? `${archivedCount} archived, ${skippedCount} skipped (checked out, in custody, in a reserved or checked-out booking, quantity-tracked, or already archived).`
-            : `${archivedCount} ${
-                archivedCount === 1 ? "asset" : "assets"
-              } archived.`,
-        icon: { name: "success", variant: "success" },
+        title: result.title,
+        message: result.message,
+        icon: result.success
+          ? { name: "success", variant: "success" }
+          : { name: "archive", variant: "gray" },
         senderId: userId,
       });
     } else {
@@ -104,15 +109,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
         timeZone,
       });
 
+      const result = bulkArchiveResultMessage({
+        action: "reinstate",
+        changed: unarchivedCount,
+        skipped: skippedCount,
+      });
       sendNotification({
-        title: "Assets reinstated",
-        message:
-          skippedCount > 0
-            ? `${unarchivedCount} reinstated, ${skippedCount} skipped (not archived, or in a kit that is in custody or checked out).`
-            : `${unarchivedCount} ${
-                unarchivedCount === 1 ? "asset" : "assets"
-              } reinstated.`,
-        icon: { name: "success", variant: "success" },
+        title: result.title,
+        message: result.message,
+        icon: result.success
+          ? { name: "success", variant: "success" }
+          : { name: "reinstate", variant: "gray" },
         senderId: userId,
       });
     }

@@ -8,6 +8,7 @@ import {
   removeScannedItemAtom,
   scannedItemsAtom,
   removeMultipleScannedItemsAtom,
+  removeScannedItemsByAssetIdAtom,
   scannedItemIdsAtom,
 } from "~/atoms/qr-scanner";
 import { BulkLocationUpdateSchema } from "~/components/assets/bulk-location-update-dialog";
@@ -34,7 +35,10 @@ import type {
 import { ShelfError } from "~/utils/error";
 import { objectToFormData } from "~/utils/object-to-form-data";
 import { tw } from "~/utils/tw";
-import { createAvailabilityLabels } from "../availability-label-factory";
+import {
+  createAvailabilityLabels,
+  assetLabelPresets,
+} from "../availability-label-factory";
 import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import {
@@ -42,6 +46,7 @@ import {
   DefaultLoadingState,
   TextLoader,
 } from "../generic-item-row";
+import { buildUpdateLocationBlockers } from "./location-scan-blockers";
 
 type LocationState = {
   status: "processing" | "success" | "error";
@@ -67,24 +72,13 @@ export default function UpdateLocationDrawer({
   const clearList = useSetAtom(clearScannedItemsAtom);
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  const { blockerConfigs } = buildUpdateLocationBlockers({
+    items,
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
@@ -277,6 +271,7 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
 
   // Use predefined presets to create label configurations for asset rows
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     ...(primaryLocation
       ? [
           {

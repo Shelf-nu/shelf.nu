@@ -1,11 +1,9 @@
 ---
 description: Visual consistency standards for the Reports module
-globs:
-  [
-    "apps/webapp/app/routes/_layout+/reports*.tsx",
-    "apps/webapp/app/components/reports/**/*.tsx",
-    "apps/webapp/app/modules/reports/**/*.ts",
-  ]
+paths:
+  - "apps/webapp/app/routes/_layout+/reports*.tsx"
+  - "apps/webapp/app/components/reports/**/*.tsx"
+  - "apps/webapp/app/modules/reports/**/*.ts"
 ---
 
 # Reports Module Styling Standards
