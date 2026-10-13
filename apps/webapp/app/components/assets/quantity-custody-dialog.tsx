@@ -36,7 +36,7 @@ import {
   AlertDialogTrigger,
 } from "~/components/shared/modal";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useFetcherErrorSinceOpen } from "~/hooks/use-fetcher-error-since-open";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import { defaultAssignSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
@@ -148,19 +148,27 @@ export function QuantityCustodyDialog({
       : Math.min(availableQuantity ?? sourceLeft, sourceLeft);
 
   /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+
+  /**
    * Server-side refusal, shown above the form: the source may have fewer
    * units left than asked for, or custody moved while the dialog was open.
    */
-  const serverErrorMessage = useFetcherErrorSinceOpen(fetcher, open);
+  const serverErrorMessage = outcome.message;
 
-  /** Close the dialog and reset state after a successful submission */
+  /** Close once this opening's assignment has been accepted. */
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setSelectedTeamMemberId(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   return (
     <AlertDialog
