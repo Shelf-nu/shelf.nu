@@ -7,6 +7,7 @@ import type {
   CompleteAuditResponse,
   CreateAuditNoteResponse,
   UploadAuditImageResponse,
+  RemoveScanResponse,
 } from "./types";
 
 export const auditsApi = {
@@ -118,6 +119,32 @@ export const auditsApi = {
       }
     ),
 
+  /**
+   * Remove a recorded scan from a live audit — the undo for a mis-scan.
+   *
+   * Idempotent: removing a scan that is already gone answers `removed: false`
+   * rather than failing. The response carries the recomputed session counts,
+   * which the caller should adopt wholesale.
+   *
+   * @param orgId Active organization ID
+   * @param payload.auditSessionId The audit the scan belongs to
+   * @param payload.assetId The asset whose scan is being undone
+   */
+  removeAuditScan: (
+    orgId: string,
+    payload: {
+      auditSessionId: string;
+      assetId: string;
+    }
+  ) =>
+    apiFetch<RemoveScanResponse>(
+      `/api/mobile/audits/remove-scan?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+
   /** Complete an audit session */
   completeAudit: (
     orgId: string,
@@ -160,6 +187,10 @@ export const auditsApi = {
       {
         method: "POST",
         body: JSON.stringify(payload),
+        // why: not retried. Each call records a new note, so a request that
+        // timed out after the server had already written it would leave two
+        // on the audit, and the PDF report shows both.
+        retry: false,
       }
     ),
 

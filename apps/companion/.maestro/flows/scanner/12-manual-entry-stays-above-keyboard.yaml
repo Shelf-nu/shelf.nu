@@ -1,0 +1,113 @@
+# Scanner — manual code entry opens in the top strip, above the keyboard
+#
+# "Enter code" opens the text field under the status bar, focused, so the
+# keyboard rising from the bottom never covers it. The lookup still runs on
+# Enter. Then, in a batch action, four typed codes grow the drawer until the
+# bottom strip has no room, and the closed pill moves to the top strip.
+#
+# Fixture: SAM-0001..SAM-0004 exist in GRANULAR WORKSPACE.
+# No login step: runs against the session already on the simulator.
+appId: com.shelf.companion.carlos
+---
+# Bring the already signed-in app to the front without clearing its state.
+- launchApp:
+    appId: com.shelf.companion.carlos
+    stopApp: false
+# The Scan tab keeps its last parameters, so a booking-mode scanner left by an
+# earlier flow would come back. The deep link opens the plain scanner.
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Open"
+    optional: true
+- tapOn: "Scan"
+- tapOn:
+    text: "Allow"
+    optional: true
+# Leftovers from an earlier run on the same session: a result card hides the
+# manual entry, and an open manual-entry row replaces the "Enter code" pill.
+- tapOn:
+    text: ".*Tap to dismiss.*"
+    optional: true
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Resume camera"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 15000
+
+# ── 1. Open manual entry: field visible with the keyboard up ──
+- tapOn:
+    id: "dev-scan-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-input"
+    timeout: 5000
+- takeScreenshot: manual-entry-open-above-keyboard
+- inputText: "SAM-9999"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ".*SAM ID doesn't exist.*"
+    timeout: 15000
+- takeScreenshot: manual-entry-lookup-ran
+# The result card hides the manual entry while it is shown; dismiss it first.
+- tapOn: ".*Tap to dismiss.*"
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-input"
+    timeout: 5000
+- tapOn: "Close manual entry"
+
+# ── 2. Batch mode: four scanned items push the pill to the top strip ──
+# The pill's label carries a state suffix once selected, and an earlier run
+# may have left items in the drawer.
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    text: "Switch"
+    optional: true
+- tapOn:
+    text: "Clear all.*"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: "dev-scan-toggle"
+    timeout: 5000
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0001"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0002"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0003"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "3 items scanned"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+- inputText: "SAM-0004"
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "4 items scanned"
+    timeout: 15000
+- tapOn: "Close manual entry"
+# With four items the drawer leaves no room in the bottom strip, so the
+# closed pill sits in the top strip and stays reachable.
+- assertVisible:
+    id: "dev-scan-toggle"
+- takeScreenshot: manual-entry-pill-in-top-strip-with-drawer

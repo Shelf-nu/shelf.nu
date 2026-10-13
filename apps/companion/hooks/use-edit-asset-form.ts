@@ -23,6 +23,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Alert } from "react-native";
+import { valuationToInput } from "@/lib/asset-valuation";
 import {
   api,
   type AssetDetail,
@@ -262,9 +263,7 @@ export function useEditAssetForm(
           if (a.tags?.length) {
             setSelectedTags(a.tags.map((t) => ({ id: t.id, name: t.name })));
           }
-          if (a.valuation != null && a.valuation > 0) {
-            setValuation(String(a.valuation));
-          }
+          setValuation(valuationToInput(a.valuation));
           // why: custom-field state is now derived from `customFieldDefs`
           // (the org's full active set, filtered by the asset's category)
           // joined with the asset's saved values. Population happens in the

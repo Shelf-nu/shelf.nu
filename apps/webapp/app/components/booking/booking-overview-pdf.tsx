@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Fragment, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { Asset, Booking } from "@prisma/client";
 import { useFetcher } from "react-router";
 import { useReactToPrint } from "react-to-print";
@@ -7,19 +7,41 @@ import { Button } from "~/components/shared/button";
 import { Image } from "~/components/shared/image";
 
 import { useSearchParams } from "~/hooks/search-params";
+import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
-import { AssetImage } from "../assets/asset-image/component";
+import { AssetCodePrintImage } from "../assets/asset-code-print-image";
+import { AssetCodePrintText } from "../assets/asset-code-print-text";
+import { AssetPrintImage } from "../assets/asset-print-image";
 import { Dialog, DialogPortal } from "../layout/dialog";
 import { DateS } from "../shared/date";
 import { GrayBadge } from "../shared/gray-badge";
+import { PrintColGroup, PrintTableStyles } from "../shared/print-table";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type PdfApiResponse = { pdfMeta: PdfDbResult };
+
+/**
+ * Widths of the asset table's columns, in percent, in column order. They sum
+ * to 100 and the table is `table-fixed`, so the table is exactly the printable
+ * width and no cell's content can push it off the page; long text wraps inside
+ * its column instead. The Code column's share is shared with the server, which
+ * refuses a barcode picture wider than that cell.
+ */
+const ASSET_TABLE_COLUMNS = [
+  { name: "number", percent: 5 },
+  { name: "image", percent: 10 },
+  { name: "name", percent: 16 },
+  { name: "quantity", percent: 6 },
+  { name: "kit", percent: 10 },
+  { name: "category", percent: 13 },
+  { name: "location", percent: 13 },
+  { name: "code", percent: PDF_CODE_COLUMN_PERCENT },
+] as const;
 
 export const BookingOverviewPDF = ({
   booking,
@@ -161,7 +183,20 @@ export const BookingOverviewPDF = ({
   );
 };
 
-const BookingPDFPreview = ({
+/**
+ * The printable body of the booking checklist: the sheet `react-to-print`
+ * copies to paper, and what the dialog shows as its preview.
+ *
+ * Exported so it can be rendered on its own. {@link BookingOverviewPDF}, the
+ * dialog around it, needs a router for the fetcher that loads `pdfMeta`.
+ *
+ * @param props.componentRef - Ref `react-to-print` prints from. Pass
+ *   `{ current: null }` to render the sheet without printing it.
+ * @param props.pdfMeta - Everything the sheet renders, as returned by
+ *   `fetchAllPdfRelatedData`. Renders nothing until it arrives.
+ * @returns The checklist, or `null` while `pdfMeta` is still loading.
+ */
+export const BookingPDFPreview = ({
   componentRef,
   pdfMeta,
 }: {
@@ -174,10 +209,16 @@ const BookingPDFPreview = ({
     booking,
     organization,
     assets,
-    assetIdToQrCodeMap,
+    assetIdToCodeImageMap,
+    assetIdToDisplayCodeMap,
     totalValue,
     modelRequests,
   } = pdfMeta;
+
+  // Workspaces that want people scanning the label on the item, not the sheet,
+  // turn the code pictures off. The text code prints either way, so the row is
+  // still matchable by eye.
+  const showCodeImages = organization.showQrCodesOnPdfs ?? true;
 
   // Phase 3d (Book-by-Model): defensively re-filter here so a caller
   // that feeds pre-computed `PdfDbResult` with stale rows (e.g. after a
@@ -202,38 +243,16 @@ const BookingPDFPreview = ({
   const isPeriodDifferentFromOriginal =
     isFromDifferentFromOriginal || isToDifferentFromOriginal;
 
+  /** An empty Description row is noise on paper, so it prints only with text. */
+  const hasDescription = !!booking.description?.trim();
+
   return (
     <div className="border bg-gray-200 py-4">
-      <style>
-        {`@media print {
-          @page {
-            margin: 10mm;  /* Adjust margin size as needed */
-            size: A4;
-          }
-          .pdf-wrapper {
-            margin: 0;
-            padding: 0;
-          }
-          .booking-assets-table {
-            border-collapse: separate !important;
-            border-spacing: 0 !important;
-          }
-          .booking-assets-table th,
-          .booking-assets-table td {
-            border-right: 1px solid #d1d5db !important;
-            border-bottom: 1px solid #d1d5db !important;
-          }
-          .booking-assets-table thead th {
-            border-top: 1px solid #d1d5db !important;
-          }
-          .booking-assets-table th:first-child,
-          .booking-assets-table td:first-child {
-            border-left: 1px solid #d1d5db !important;
-          }
-        }`}
-      </style>
+      <PrintTableStyles tableClassName="booking-assets-table" />
       <div
-        className="pdf-wrapper mx-auto w-[200mm] bg-white p-[10mm] font-inter"
+        // On screen the sheet is an A4 page with its 10mm margins as padding,
+        // so the preview's table is the same 190mm wide as the printed one.
+        className="pdf-wrapper mx-auto w-[210mm] bg-white p-[10mm] font-inter"
         ref={componentRef}
       >
         <div className="mb-5 flex justify-between">
@@ -292,14 +311,16 @@ const BookingPDFPreview = ({
             </div>
           </When>
 
-          <div className="flex border-b border-gray-300 p-2">
-            <span className="min-w-[150px] text-sm font-medium">
-              Description
-            </span>
-            <span className="grow whitespace-pre-wrap text-gray-600">
-              {booking?.description}
-            </span>
-          </div>
+          <When truthy={hasDescription}>
+            <div className="flex border-b border-gray-300 p-2">
+              <span className="min-w-[150px] text-sm font-medium">
+                Description
+              </span>
+              <span className="grow whitespace-pre-wrap text-gray-600">
+                {booking.description}
+              </span>
+            </div>
+          </When>
 
           <div className="flex p-2">
             <span className="min-w-[150px] text-sm font-medium">
@@ -323,72 +344,83 @@ const BookingPDFPreview = ({
           </When>
         </section>
 
-        <table className="booking-assets-table w-full border border-gray-300">
+        <table className="booking-assets-table w-full table-fixed border border-gray-300">
+          <PrintColGroup columns={ASSET_TABLE_COLUMNS} />
           <thead>
             <tr>
-              <th className="w-10 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                 #
               </th>
-              <th className="w-20 min-w-[76px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1.5 py-2.5 text-left text-xs font-medium">
                 Image
               </th>
-              <th className="w-[30%] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Name
               </th>
-              <th className="w-12 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-1 py-2.5 text-left text-xs font-medium">
                 Qty
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Kit
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Category
               </th>
-              <th className="w-24 border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              <th className="border-b border-r border-gray-300 px-2 py-2.5 text-left text-xs font-medium">
                 Location
               </th>
-              <th className="min-w-[120px] border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
+              {/* Wide enough for the tick box and code line, and for an
+                  11-character Code 128 picture at 0.25mm per bar. The code
+                  text wraps on `break-all`. */}
+              <th className="border-b border-r border-gray-300 p-2.5 text-left text-xs font-medium">
                 Code
               </th>
             </tr>
           </thead>
-          <tbody>
-            {assets.map((asset, index) => (
-              // Per-slice rows: a QT asset booked standalone + via multiple
-              // kits appears once per slice, so key on the unique
-              // `bookingAssetId` (asset.id would collide across slices).
-              <Fragment key={asset.bookingAssetId}>
+          {assets.map((asset, index) => {
+            const codeImage = showCodeImages
+              ? assetIdToCodeImageMap[asset.id]
+              : undefined;
+            // A code too wide or dense to scan inside the Code cell prints on
+            // its own full-width line under the row instead.
+            const printsCodeOnLine = codeImage?.placement === "line";
+
+            return (
+              // One row group per asset, so its row, its code line and its
+              // description row print on the same page. Per-slice rows: a QT
+              // asset booked standalone + via multiple kits appears once per
+              // slice, so key on the unique `bookingAssetId` (asset.id would
+              // collide across slices).
+              <tbody key={asset.bookingAssetId}>
                 <tr
-                  key={asset.bookingAssetId}
                   className={tw(
                     "align-top",
-                    !asset.description && "border-b border-gray-300"
+                    !asset.description &&
+                      !printsCodeOnLine &&
+                      "border-b border-gray-300"
                   )}
                 >
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="border-r border-gray-300 px-1 py-2.5 text-sm text-gray-600">
                     {index + 1}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <AssetImage
-                      asset={{
-                        id: asset.id,
-                        mainImage: asset.mainImage,
-                        thumbnailImage: asset.thumbnailImage,
-                        mainImageExpiration: asset.mainImageExpiration,
-                        assetModel: asset.assetModel ?? null,
-                      }}
+                  <td className="border-r border-gray-300 px-1.5 py-2.5 text-sm text-gray-600">
+                    <AssetPrintImage
+                      asset={asset}
                       alt={`Image of ${asset.title}`}
-                      className="!size-14 object-cover"
+                      className="size-14"
                     />
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
                     {asset?.title}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-center text-sm text-gray-600">
+                  <td className="break-words border-r border-gray-300 px-1 py-2.5 text-center text-sm text-gray-600">
                     {/* THIS slice's booked units; INDIVIDUAL slices are qty 1. */}
                     {asset.quantity ?? 1}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
+                    {/* why: out of this rule: the checklist prints the kit's
+                        name only. Kits carry no `sequentialId`, so a SAM_ID
+                        workspace has no kit code to print here. */}
                     {asset?.kit?.name}
                     {/* Print-medium equivalent of the overview's
                         "Removed from kit" badge — a tooltip can't exist on
@@ -400,31 +432,72 @@ const BookingPDFPreview = ({
                         rows too and may never have gone out. */}
                     <When truthy={!!asset.isRemovedFromKit}>
                       <span className="mt-1 block text-xs text-gray-500">
-                        Removed from kit — kept as a record of what was booked
+                        Removed from kit, kept as a record of what was booked
                       </span>
                     </When>
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
                     {asset?.category?.name}
                   </td>
-                  <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
+                  <td className="break-words border-r border-gray-300 px-2 py-2.5 text-sm text-gray-600">
                     {asset?.location?.name}
                   </td>
                   <td className="border-r border-gray-300 p-2.5 text-sm text-gray-600">
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={assetIdToQrCodeMap[asset.id] || ""}
-                        alt="QR Code"
-                        className="size-14 object-cover"
-                      />
-                      <input type="checkbox" className="block size-5 border" />
+                    <div className="flex flex-col items-start gap-1">
+                      {/* The picture is optional; the tick box and the code are
+                          not. Keeping the picture on its own line means the cell
+                          reads the same with it and without it, and gives the
+                          code the whole cell to wrap in. */}
+                      <When truthy={!printsCodeOnLine}>
+                        <AssetCodePrintImage
+                          image={codeImage}
+                          alt={`Code of ${asset.title}`}
+                          squareClassName="size-14"
+                        />
+                      </When>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          aria-label={`Mark ${asset.title} as picked`}
+                          className="block size-5 border"
+                        />
+                        {/* Printed even when there is no picture: the code is
+                            the part a picker matches against the physical
+                            label. */}
+                        <AssetCodePrintText
+                          displayCode={assetIdToDisplayCodeMap[asset.id]}
+                        />
+                      </div>
                     </div>
                   </td>
                 </tr>
 
+                <When truthy={printsCodeOnLine}>
+                  <tr
+                    className={tw(
+                      "align-top",
+                      !asset.description && "border-b border-gray-300"
+                    )}
+                  >
+                    <td
+                      colSpan={ASSET_TABLE_COLUMNS.length}
+                      className="p-2.5 text-left"
+                    >
+                      <AssetCodePrintImage
+                        image={codeImage}
+                        alt={`Code of ${asset.title}`}
+                        squareClassName="size-14"
+                      />
+                    </td>
+                  </tr>
+                </When>
+
                 <When truthy={!!asset.description}>
                   <tr className="border-b border-gray-300 align-top">
-                    <td colSpan={8} className="m-2 p-2">
+                    <td
+                      colSpan={ASSET_TABLE_COLUMNS.length}
+                      className="m-2 p-2"
+                    >
                       <div className="flex items-start gap-4 bg-gray-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">
@@ -434,9 +507,9 @@ const BookingPDFPreview = ({
                     </td>
                   </tr>
                 </When>
-              </Fragment>
-            ))}
-          </tbody>
+              </tbody>
+            );
+          })}
         </table>
 
         {/*

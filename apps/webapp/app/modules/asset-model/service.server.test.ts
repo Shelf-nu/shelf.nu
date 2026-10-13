@@ -1,11 +1,14 @@
 import { describe, expect, it, vitest, beforeEach } from "vitest";
 import { createAssetModel as createAssetModelFactory } from "@factories";
 import { db } from "~/database/db.server";
+import { recordEvents } from "~/modules/activity-event/service.server";
+import { createNotes } from "~/modules/note/service.server";
 import { ShelfError } from "~/utils/error";
 import { parseFileFormData } from "~/utils/storage.server";
 import {
   createAssetModel,
   createAssetModelsIfNotExists,
+  resolveImportedAssetModel,
   getAssetModels,
   getAssetModel,
   updateAssetModel,
@@ -30,7 +33,24 @@ vitest.mock("~/database/db.server", () => ({
     asset: {
       findMany: vitest.fn(),
       updateMany: vitest.fn(),
+      // why: the list counts each model's archived assets to show active ones.
+      groupBy: vitest.fn().mockResolvedValue([]),
     },
+    // why: `createLoadUserForNotes` is NOT mocked, so the real memoized loader
+    // runs and reads this stub to build the note's author link.
+    user: {
+      findFirst: vitest.fn(),
+    },
+    // why: the delete paths write their activity trail in the same transaction
+    // as the delete. Running the callback with `db` keeps the assertions on the
+    // mocked models above.
+    $transaction: vitest
+      .fn()
+      .mockImplementation((callbackOrArray: unknown) =>
+        typeof callbackOrArray === "function"
+          ? (callbackOrArray as (tx: unknown) => unknown)(db)
+          : Promise.all(callbackOrArray as Promise<unknown>[])
+      ),
     // why: `~/utils/org-validation.server` is NOT mocked here, so
     // `assertCategoryBelongsToOrg` runs for real against this stub whenever a
     // `defaultCategoryId` is supplied.
@@ -38,6 +58,19 @@ vitest.mock("~/database/db.server", () => ({
       findFirst: vitest.fn(),
     },
   },
+}));
+
+// why: note persistence is exercised in `note/service.server.test.ts`; here the
+// question is only which assets get a note and what it says, so the writer is
+// stubbed and its arguments asserted.
+vitest.mock("~/modules/note/service.server", () => ({
+  createNotes: vitest.fn().mockResolvedValue({}),
+}));
+
+// why: event persistence is exercised in the activity-event suite. Stubbing it
+// keeps the assertion on the emitted payload rather than on Prisma plumbing.
+vitest.mock("~/modules/activity-event/service.server", () => ({
+  recordEvents: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: parseFileFormData streams a multipart body to Supabase storage — a
@@ -204,13 +237,24 @@ describe("getAssetModels", () => {
 
   it("returns paginated asset models with asset counts", async () => {
     const mockModels = [
-      createAssetModelFactory({ id: "model-1", name: "Model A" }),
-      createAssetModelFactory({ id: "model-2", name: "Model B" }),
+      {
+        ...createAssetModelFactory({ id: "model-1", name: "Model A" }),
+        _count: { assets: 3 },
+      },
+      {
+        ...createAssetModelFactory({ id: "model-2", name: "Model B" }),
+        _count: { assets: 2 },
+      },
     ];
     // @ts-expect-error mock setup
     db.assetModel.findMany.mockResolvedValue(mockModels);
     // @ts-expect-error mock setup
     db.assetModel.count.mockResolvedValue(2);
+    // why: one of model-1's three assets is archived.
+    // @ts-expect-error mock setup
+    db.asset.groupBy.mockResolvedValueOnce([
+      { assetModelId: "model-1", _count: { _all: 1 } },
+    ]);
 
     const result = await getAssetModels({
       organizationId: "org-123",
@@ -218,7 +262,20 @@ describe("getAssetModels", () => {
       perPage: 10,
     });
 
-    expect(result.assetModels).toEqual(mockModels);
+    // `_count.assets` keeps every linked asset (the delete warning needs
+    // them all); `activeAssetCount` is what the list shows.
+    expect(result.assetModels).toEqual([
+      { ...mockModels[0], activeAssetCount: 2 },
+      { ...mockModels[1], activeAssetCount: 2 },
+    ]);
+    expect(db.asset.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-123",
+          archivedAt: { not: null },
+        }),
+      })
+    );
     expect(result.totalAssetModels).toBe(2);
     expect(db.assetModel.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -410,8 +467,14 @@ describe("updateAssetModel", () => {
 describe("deleteAssetModel", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
-    // @ts-expect-error mock setup — no inheriting assets unless a test says so
+    // @ts-expect-error mock setup — no linked assets unless a test says so
     db.asset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.user.findFirst.mockResolvedValue({
+      firstName: "Dana",
+      lastName: "Ray",
+      displayName: null,
+    });
   });
 
   it("deletes an asset model scoped to organization", async () => {
@@ -421,10 +484,84 @@ describe("deleteAssetModel", () => {
     await deleteAssetModel({
       id: "asset-model-123",
       organizationId: "org-123",
+      userId: "user-1",
     });
 
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
       where: { id: "asset-model-123", organizationId: "org-123" },
+    });
+  });
+
+  it("records the unlink on every asset the deleted model held", async () => {
+    // Deleting a model is `ON DELETE SET NULL` on every asset that held it, so
+    // the field changes with no other write to hang the history off. Without
+    // this the asset's model silently disappears and its activity tab stays
+    // empty — the same trail gap a plain removal already avoids.
+    // @ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+      { id: "asset-2", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          action: "ASSET_MODEL_CHANGED",
+          assetId: "asset-1",
+          field: "assetModelId",
+          fromValue: "model-1",
+          toValue: null,
+        }),
+        expect.objectContaining({ assetId: "asset-2", toValue: null }),
+      ],
+      expect.anything()
+    );
+
+    const note = (createNotes as ReturnType<typeof vitest.fn>).mock.calls[0][0];
+    expect(note.assetIds).toEqual(["asset-1", "asset-2"]);
+    expect(note.content).toContain("deleted the asset model");
+    expect(note.content).toContain("Sony PXW-Z190");
+  });
+
+  it("writes no trail when the model held no assets", async () => {
+    // Nothing changed on any asset, so inventing a note would be noise. This is
+    // also the create-rollback path, where the model is seconds old.
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(recordEvents).not.toHaveBeenCalled();
+    expect(createNotes).not.toHaveBeenCalled();
+  });
+
+  it("raises the transaction timeout, because one model can hold many assets", async () => {
+    // The trail is one event and one note per asset held, all inside the delete
+    // transaction. Prisma's 5s interactive default has already aborted two
+    // other bulk asset writes in production with P2028.
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 1 });
+
+    await deleteAssetModel({
+      id: "model-1",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
     });
   });
 
@@ -436,6 +573,7 @@ describe("deleteAssetModel", () => {
       deleteAssetModel({
         id: "asset-model-123",
         organizationId: "org-123",
+        userId: "user-1",
       })
     ).rejects.toThrow(ShelfError);
   });
@@ -541,15 +679,32 @@ describe("createAssetModelsIfNotExists", () => {
 describe("bulkDeleteAssetModels", () => {
   beforeEach(() => {
     vitest.clearAllMocks();
+    // @ts-expect-error mock setup — no linked assets unless a test says so
+    db.asset.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([]);
+    // @ts-expect-error mock setup
+    db.user.findFirst.mockResolvedValue({
+      firstName: "Dana",
+      lastName: "Ray",
+      displayName: null,
+    });
   });
 
   it("deletes specific asset models by IDs", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
     // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
       organizationId: "org-123",
+      userId: "user-1",
     });
 
     expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
@@ -562,18 +717,142 @@ describe("bulkDeleteAssetModels", () => {
 
   it("deletes all asset models when ALL_SELECTED key is present", async () => {
     // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+      { id: "model-3" },
+    ]);
+    // @ts-expect-error mock setup
     db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
 
     await bulkDeleteAssetModels({
       assetModelIds: ["all-selected"],
       organizationId: "org-123",
+      userId: "user-1",
+      confirmation: "3",
     });
 
     // why: the assets of a deleted model need no image cleanup — they never
     // stored a copy, so ON DELETE SET NULL alone drops them to the placeholder.
     expect(db.asset.updateMany).not.toHaveBeenCalled();
-    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
       where: { organizationId: "org-123" },
+      select: { id: true },
+    });
+    // The write is the rows read, so the confirmed count is the count removed.
+    expect(db.assetModel.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["model-1", "model-2", "model-3"] },
+        organizationId: "org-123",
+      },
+    });
+  });
+
+  it("scopes a select-all to the index search, read from the `s` param", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([{ id: "model-1" }]);
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["all-selected"],
+      organizationId: "org-123",
+      userId: "user-1",
+      currentSearchParams: "s=sony&page=2",
+      confirmation: "1",
+    });
+
+    expect(db.assetModel.findMany).toHaveBeenCalledWith({
+      where: {
+        organizationId: "org-123",
+        OR: [
+          { name: { contains: "sony", mode: "insensitive" } },
+          { description: { contains: "sony", mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
+    });
+  });
+
+  it("refuses a select-all whose typed count is not what it matches", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1" },
+      { id: "model-2" },
+    ]);
+
+    await expect(
+      bulkDeleteAssetModels({
+        assetModelIds: ["all-selected"],
+        organizationId: "org-123",
+        userId: "user-1",
+        confirmation: "1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      additionalData: { expectedConfirmation: 2 },
+    });
+    expect(db.assetModel.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("records the unlink per asset, grouped by the model each one left", async () => {
+    // A bulk delete unlinks assets across several models at once. The note
+    // names the model an asset actually left, so the grouping is what keeps a
+    // large batch to one statement per model rather than one per asset.
+    // @ts-expect-error mock setup
+    db.assetModel.findMany.mockResolvedValue([
+      { id: "model-1", name: "Sony PXW-Z190" },
+      { id: "model-2", name: "Panasonic PT-VZ580" },
+    ]);
+    // @ts-expect-error mock setup
+    db.asset.findMany.mockResolvedValue([
+      { id: "asset-1", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+      {
+        id: "asset-2",
+        assetModel: { id: "model-2", name: "Panasonic PT-VZ580" },
+      },
+      { id: "asset-3", assetModel: { id: "model-1", name: "Sony PXW-Z190" } },
+    ]);
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 2 });
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["model-1", "model-2"],
+      confirmation: "2",
+      organizationId: "org-123",
+      userId: "user-1",
+    });
+
+    // One event per asset, each naming the model it actually left.
+    expect(recordEvents as ReturnType<typeof vitest.fn>).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ assetId: "asset-1", fromValue: "model-1" }),
+        expect.objectContaining({ assetId: "asset-2", fromValue: "model-2" }),
+        expect.objectContaining({ assetId: "asset-3", fromValue: "model-1" }),
+      ],
+      expect.anything()
+    );
+
+    const calls = (createNotes as ReturnType<typeof vitest.fn>).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].assetIds).toEqual(["asset-1", "asset-3"]);
+    expect(calls[0][0].content).toContain("Sony PXW-Z190");
+    expect(calls[1][0].assetIds).toEqual(["asset-2"]);
+    expect(calls[1][0].content).toContain("Panasonic PT-VZ580");
+  });
+
+  it("raises the transaction timeout, because select-all can span the workspace", async () => {
+    // @ts-expect-error mock setup
+    db.assetModel.deleteMany.mockResolvedValue({ count: 3 });
+
+    await bulkDeleteAssetModels({
+      assetModelIds: ["all-selected"],
+      organizationId: "org-123",
+      userId: "user-1",
+      // The suite's read resolves to no models.
+      confirmation: "0",
+    });
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
     });
   });
 });
@@ -645,5 +924,63 @@ describe("updateAssetModelImage", () => {
         thumbnailImage: null,
       },
     });
+  });
+});
+
+/**
+ * Reading back what `createAssetModelsIfNotExists` resolved.
+ *
+ * That builder keys its result by the ORIGINAL cell, padding included, which the
+ * test above pins. A consumer that trims before looking up therefore misses every
+ * padded row, and the import fails telling the operator their CSV is wrong. The
+ * two halves have to agree on the key, so they live in one file.
+ */
+describe("resolveImportedAssetModel", () => {
+  it("finds a model whose cell was padded", () => {
+    const resolved = resolveImportedAssetModel({
+      cell: "  Brand X  ",
+      models: { "  Brand X  ": "model-1" },
+    });
+
+    expect(resolved).toEqual({ name: "Brand X", id: "model-1" });
+  });
+
+  it("finds a model whose cell had no padding", () => {
+    const resolved = resolveImportedAssetModel({
+      cell: "Brand X",
+      models: { "Brand X": "model-1" },
+    });
+
+    expect(resolved).toEqual({ name: "Brand X", id: "model-1" });
+  });
+
+  it("reports no model when the row named none", () => {
+    expect(resolveImportedAssetModel({ cell: undefined, models: {} })).toEqual({
+      name: null,
+      id: undefined,
+    });
+  });
+
+  it("reports no model for a whitespace-only cell", () => {
+    // The builder maps a blank cell to an empty id on purpose: the row named no
+    // model, so this is not an unresolved lookup and must not raise one.
+    expect(
+      resolveImportedAssetModel({ cell: "   ", models: { "   ": "" } })
+    ).toEqual({ name: null, id: undefined });
+  });
+
+  it("reports the name but no id when the pre-resolve missed the row", () => {
+    // The shape the caller turns into an error: a real model name that nothing
+    // resolved, which means the upstream step failed rather than the CSV.
+    expect(resolveImportedAssetModel({ cell: "Brand X", models: {} })).toEqual({
+      name: "Brand X",
+      id: undefined,
+    });
+  });
+
+  it("survives a missing resolved-models map", () => {
+    expect(
+      resolveImportedAssetModel({ cell: "Brand X", models: undefined })
+    ).toEqual({ name: "Brand X", id: undefined });
   });
 });

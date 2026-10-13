@@ -13,11 +13,14 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 
 import { getTag, updateTag } from "~/modules/tag/service.server";
+import {
+  selectedTagUseForOptions,
+  tagUseForOptions,
+} from "~/modules/tag/use-for-options";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
-import { formatEnum } from "~/utils/misc";
 
 import {
   PermissionAction,
@@ -69,10 +72,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       header,
       tag,
       colorFromServer: tag.color ?? undefined,
-      tagUseFor: Object.values(TagUseFor).map((useFor) => ({
-        label: formatEnum(useFor),
-        value: useFor,
-      })),
+      tagUseFor: tagUseForOptions(),
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, id });
@@ -176,10 +176,7 @@ export default function EditTag() {
             </div>
 
             <MultiSelect
-              defaultSelected={tag.useFor.map((useFor) => ({
-                label: useFor,
-                value: useFor,
-              }))}
+              defaultSelected={selectedTagUseForOptions(tag.useFor)}
               name="useFor"
               items={tagUseFor}
               labelKey="label"

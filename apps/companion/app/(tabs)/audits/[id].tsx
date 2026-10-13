@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Alert,
   Animated,
+  type AccessibilityActionEvent,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -26,6 +27,7 @@ import {
   type AuditEvidenceImage,
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
+import { assetDetailHref } from "@/lib/asset-routes";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { EvidenceViewer } from "@/components/audit/evidence-viewer";
@@ -34,6 +36,7 @@ import {
   AUDIT_STATUS_LABELS,
   AUDIT_UNASSIGNED_LABELS,
   auditAssetStatusLabel,
+  auditDeletedAssetLabel,
   isAuditCompleted,
 } from "@shelf/labels";
 import { useTheme } from "@/lib/theme-context";
@@ -41,6 +44,7 @@ import { createStyles } from "@/lib/create-styles";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditDetailSkeleton } from "@/components/skeleton-loader";
 import { useReducedMotion, announce } from "@/lib/a11y";
+import { isArchivedAsset } from "@/lib/archived-assets";
 
 // ── Asset filter pills ──────────────────────────────────
 
@@ -105,11 +109,21 @@ function isAssetFilterVisible(
 
 type DisplayAsset = {
   id: string; // assetId or auditAssetId
+  /**
+   * The live asset this row opens. Null for a deleted asset: the scan still
+   * lists it, but there is no asset detail left to navigate to.
+   */
+  assetId: string | null;
   name: string;
   mainImage: string | null;
   status: AuditAssetStatus;
-  isExpected: boolean;
   scannedAt: string | null;
+  /**
+   * The code that was scanned. Kept for rows whose asset has been deleted:
+   * with the asset gone this and the snapshotted title are all that survive,
+   * and the code is what matches a physical label. Null for ordinary rows.
+   */
+  scannedCode: string | null;
   /**
    * Context the field worker needs DURING the audit. All nullable —
    * server may omit when unknown (e.g. asset has no location set, asset
@@ -130,6 +144,11 @@ type DisplayAsset = {
   /** Counts from the detail payload — what the row advertises before any fetch. */
   notesCount: number;
   imagesCount: number;
+  /**
+   * The asset is archived (out of service). The row keeps its audit outcome
+   * badge and says "Archived" on its meta line.
+   */
+  archived: boolean;
 };
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
@@ -347,17 +366,34 @@ function AuditDetailContent() {
   // Stale-while-revalidate — skip refetch if data is fresh (< 60s old)
   const hasFetched = useRef(false);
   const lastFetchedAt = useRef(0);
+  // Set when a row opens its asset. The asset can be edited or deleted there,
+  // so coming back refetches even inside the 60s window: otherwise the row
+  // would show the details from before the fix the auditor just made.
+  const returningFromAsset = useRef(false);
+  // Each fetch takes the next number, and only the newest one may write
+  // state. A pull-to-refresh can still be in flight when a row opens its
+  // asset; its answer must not overwrite the reload made on the way back.
+  const latestRequestId = useRef(0);
 
   // ── Fetch ──────────────────────────────────────────────
 
-  const fetchAudit = useCallback(async () => {
-    if (!id || !currentOrg) return;
+  /**
+   * Loads the audit and writes it into state.
+   *
+   * @returns true when this was the newest request, so the caller may record
+   *   it as the latest load; false when it was cancelled or superseded
+   */
+  const fetchAudit = useCallback(async (): Promise<boolean> => {
+    if (!id || !currentOrg) return false;
+    const requestId = ++latestRequestId.current;
     const { data, error: fetchErr } = await api.audit(id, currentOrg.id);
-    // Request cancelled (navigation) — ignore
-    if (!data && !fetchErr) return;
+    // A newer fetch started while this one was in flight: its answer wins.
+    if (requestId !== latestRequestId.current) return false;
+    // Request cancelled (navigation): ignore
+    if (!data && !fetchErr) return false;
     if (fetchErr || !data) {
       setError(fetchErr || "Failed to load audit");
-      return;
+      return true;
     }
     setError(null);
     setAudit(data.audit);
@@ -382,6 +418,7 @@ function AuditDetailContent() {
         useNativeDriver: false,
       }).start();
     }
+    return true;
     // why: reduceMotion is captured by closure but only read on initial render path;
     // rebuilding fetchAudit when reduceMotion toggles would re-fire focus refetches
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -390,16 +427,24 @@ function AuditDetailContent() {
   useFocusEffect(
     useCallback(() => {
       if (!currentOrg) return;
-      if (hasFetched.current && Date.now() - lastFetchedAt.current < 60_000)
+      if (
+        hasFetched.current &&
+        !returningFromAsset.current &&
+        Date.now() - lastFetchedAt.current < 60_000
+      )
         return;
+      returningFromAsset.current = false;
       if (!hasFetched.current) {
         setIsLoading(true);
       }
-      fetchAudit().finally(() => {
-        setIsLoading(false);
-        lastFetchedAt.current = Date.now();
-        hasFetched.current = true;
-      });
+      fetchAudit()
+        .then((isNewest) => {
+          // A superseded fetch must not stamp the cache: the newer one owns it.
+          if (!isNewest) return;
+          lastFetchedAt.current = Date.now();
+          hasFetched.current = true;
+        })
+        .finally(() => setIsLoading(false));
       // why: depend on org id (not full object) to avoid re-runs on identity-only changes
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentOrg?.id, fetchAudit])
@@ -478,7 +523,10 @@ function AuditDetailContent() {
 
   // ── Build display assets list ─────────────────────────
 
-  const displayAssets = useCallback((): DisplayAsset[] => {
+  // Memoised rather than a callback: both the list and the header count read
+  // this every render, so a function would rebuild the whole expected+scan
+  // merge twice per keystroke, filter tap and refresh tick.
+  const displayAssets = useMemo((): DisplayAsset[] => {
     if (!audit) return [];
 
     // Build a map of scanned assets by assetId
@@ -506,11 +554,12 @@ function AuditDetailContent() {
       const scan = scanMap.get(asset.id);
       items.push({
         id: asset.id,
+        assetId: asset.id,
         name: asset.name,
         mainImage: asset.thumbnailImage || asset.mainImage,
         status: scan ? "FOUND" : notFoundStatus,
-        isExpected: true,
         scannedAt: scan?.scannedAt || null,
+        scannedCode: null,
         locationName: asset.locationName ?? null,
         categoryName: asset.categoryName ?? null,
         custodianName: asset.custodianName ?? null,
@@ -522,6 +571,7 @@ function AuditDetailContent() {
         auditAssetId: asset.auditAssetId ?? scan?.auditAssetId ?? null,
         notesCount: asset.auditNotesCount ?? scan?.auditNotesCount ?? 0,
         imagesCount: asset.auditImagesCount ?? scan?.auditImagesCount ?? 0,
+        archived: isArchivedAsset(asset),
       });
     }
 
@@ -529,13 +579,43 @@ function AuditDetailContent() {
     const expectedIds = new Set(expectedAssets.map((a) => a.id));
     for (const scan of existingScans) {
       if (!expectedIds.has(scan.assetId)) {
+        /**
+         * A scan with no matching expected row: either an asset that is not
+         * part of the audit, or one that has since been DELETED.
+         *
+         * Deleting an asset cascades away its AuditAsset row and SetNulls the
+         * scan's asset, so the scan survives pointing at nothing and can never
+         * match the expected list. `assetDeleted` is what tells the two apart —
+         * an empty title cannot, because a scan recorded before the title was
+         * captured by value looks the same. Older servers omit the flag, so an
+         * empty `assetId` stands in for it.
+         */
+        const isDeletedAsset = scan.assetDeleted || !scan.assetId;
+        const snapshotTitle = scan.assetTitle?.trim();
         items.push({
-          id: scan.assetId,
-          name: scan.assetTitle,
+          // A deleted asset's `assetId` is empty, so every such row would share
+          // one key and collide in the list's keyExtractor. The scan ROW id is
+          // the identity that survives the asset; `code` is nullable and
+          // non-unique and `scannedAt` can collide, so they are a last resort
+          // for servers that do not send the id. `||`, not `??`: the server
+          // flattens a null code to "", which is not nullish and would swallow
+          // the remaining fallback.
+          id: isDeletedAsset
+            ? `deleted:${scan.id || scan.code || scan.scannedAt}`
+            : scan.assetId,
+          assetId: isDeletedAsset ? null : scan.assetId,
+          name: isDeletedAsset
+            ? auditDeletedAssetLabel(snapshotTitle)
+            : snapshotTitle || "Untitled asset",
           mainImage: null,
-          status: "UNEXPECTED",
-          isExpected: false,
+          // Expectedness comes from the server, never from membership of the
+          // expected list: a deleted asset always lands in this branch, and the
+          // server restores whether it belonged to the audit from the scan's
+          // own snapshot. Deciding it here would report every deleted asset as
+          // unexpected, contradicting the activity feed.
+          status: scan.isExpected ? "FOUND" : "UNEXPECTED",
           scannedAt: scan.scannedAt,
+          scannedCode: isDeletedAsset ? scan.code || null : null,
           // why: the scan payload carries the asset's location
           // (getAuditScans selects asset.location.name). Category and
           // custody are not fetched for scan records, so they stay null —
@@ -546,6 +626,7 @@ function AuditDetailContent() {
           auditAssetId: scan.auditAssetId,
           notesCount: scan.auditNotesCount,
           imagesCount: scan.auditImagesCount,
+          archived: isArchivedAsset(scan),
         });
       }
     }
@@ -553,14 +634,25 @@ function AuditDetailContent() {
     return items;
   }, [audit, expectedAssets, existingScans]);
 
-  const filteredAssets = useCallback((): DisplayAsset[] => {
-    const all = displayAssets();
-    if (effectiveFilter === "ALL") return all;
-    // Statuses are now computed correctly per audit state (PENDING while
-    // active, MISSING once completed), so a direct match is unambiguous —
-    // no more Pending/Missing aliasing.
-    return all.filter((a) => a.status === effectiveFilter);
+  const filteredAssets = useMemo((): DisplayAsset[] => {
+    if (effectiveFilter === "ALL") return displayAssets;
+    // Status encodes the audit state (PENDING while active, MISSING once
+    // completed), so a direct match is unambiguous.
+    return displayAssets.filter((a) => a.status === effectiveFilter);
   }, [displayAssets, effectiveFilter]);
+
+  // Pushes the asset detail onto THIS stack (the Audits-mounted copy of the
+  // Assets tab's screen), so the header back button, the iOS swipe and the
+  // Android back button all pop straight back to this audit, with its filter
+  // and scroll intact. The Assets tab's route would switch tabs instead, and
+  // back would land on the Assets list. See lib/asset-routes.ts.
+  const openAsset = useCallback(
+    (assetId: string) => {
+      returningFromAsset.current = true;
+      router.push(assetDetailHref("audits", assetId));
+    },
+    [router]
+  );
 
   // ── Render functions ──────────────────────────────────
 
@@ -584,6 +676,11 @@ function AuditDetailContent() {
         icon: React.ComponentProps<typeof Ionicons>["name"];
         text: string;
       }[] = [];
+      // The audit outcome keeps the badge; that the asset is out of service
+      // leads the meta line, so it is read before where it should be.
+      if (item.archived) {
+        metaParts.push({ icon: "archive-outline", text: "Archived" });
+      }
       if (item.locationName) {
         metaParts.push({ icon: "location-outline", text: item.locationName });
       }
@@ -596,10 +693,13 @@ function AuditDetailContent() {
           text: `with ${item.custodianName}`,
         });
       }
+      // why: a deleted asset has no location, category or custodian left. The
+      // scanned code is what matches a physical label or finds the row in the
+      // activity feed, so it takes the meta line those would have used.
+      if (item.scannedCode) {
+        metaParts.push({ icon: "qr-code-outline", text: item.scannedCode });
+      }
 
-      // why: evidence is the ONE thing on this card worth opening. Everything
-      // else (image, name, location, category, custodian, status) is already
-      // shown, which is why the card is otherwise inert — see the note below.
       // why two numbers and not their sum: see scanned-items-list.tsx. The
       // sum changes for identical evidence depending on whether the auditor
       // typed a caption, so it cannot be compared between rows.
@@ -617,18 +717,26 @@ function AuditDetailContent() {
       ]
         .filter(Boolean)
         .join(", ");
-      const Card = hasEvidence ? TouchableOpacity : View;
+      // The card opens the asset, matching the web audit row where the title
+      // links to the asset page: a field worker who finds a missing or
+      // unexpected asset updates it from here. A deleted asset has no detail
+      // left to open, so that row stays an inert summary and only its
+      // evidence chip (below) is tappable.
+      const assetId = item.assetId;
+      const opensAsset = assetId !== null;
+      const Card = opensAsset ? TouchableOpacity : View;
+      const openEvidence = () =>
+        onEvidencePress({
+          auditAssetId: item.auditAssetId as string,
+          name: item.name,
+        });
 
       return (
         <Card
           style={styles.assetCard}
-          {...(hasEvidence
+          {...(opensAsset
             ? {
-                onPress: () =>
-                  onEvidencePress({
-                    auditAssetId: item.auditAssetId as string,
-                    name: item.name,
-                  }),
+                onPress: () => openAsset(assetId),
                 activeOpacity: 0.7,
                 accessibilityRole: "button" as const,
               }
@@ -643,21 +751,27 @@ function AuditDetailContent() {
             item.name,
             statusLabel,
             ...metaParts.map((p) => p.text),
-            hasEvidence ? `${evidenceLabel}, tap to view` : null,
+            hasEvidence ? evidenceLabel : null,
+            opensAsset ? "tap to open asset" : null,
           ]
             .filter(Boolean)
             .join(", ")}
+          // `accessible` folds the chip into the card for a screen reader, so
+          // the evidence viewer is also exposed as a custom action (VoiceOver
+          // rotor / TalkBack actions menu) on every row that has evidence.
+          {...(hasEvidence
+            ? {
+                accessibilityActions: [
+                  { name: "viewEvidence", label: "View evidence" },
+                ],
+                onAccessibilityAction: (event: AccessibilityActionEvent) => {
+                  if (event.nativeEvent.actionName === "viewEvidence") {
+                    openEvidence();
+                  }
+                },
+              }
+            : {})}
         >
-          {/*
-            why: the previous `router.push('/(tabs)/assets/...)' from
-            inside the Audits tab polluted the Assets tab's stack — the
-            Assets tab kept showing the asset detail until the user
-            manually navigated back. Removed the cross-tab navigation
-            entirely; the field worker has everything they need on this
-            card (image, name, location, category, custodian, status).
-            Full asset detail remains reachable from the Assets tab,
-            which is the correct surface for browsing.
-          */}
           {item.mainImage ? (
             <Image
               source={{ uri: item.mainImage }}
@@ -707,7 +821,16 @@ function AuditDetailContent() {
               </Text>
             </View>
             {hasEvidence ? (
-              <View style={styles.evidenceChip}>
+              <TouchableOpacity
+                style={styles.evidenceChip}
+                onPress={openEvidence}
+                activeOpacity={0.7}
+                // The chip is small; slop keeps it easy to hit without
+                // growing it visually or stealing the card's tap.
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`${evidenceLabel}, tap to view`}
+              >
                 {noteCount > 0 ? (
                   <>
                     <Ionicons
@@ -728,13 +851,20 @@ function AuditDetailContent() {
                     <Text style={styles.evidenceChipText}>{photoCount}</Text>
                   </>
                 ) : null}
-              </View>
+              </TouchableOpacity>
             ) : null}
           </View>
         </Card>
       );
     },
-    [colors, auditAssetStatusBadge, styles, formatDateTime, onEvidencePress]
+    [
+      colors,
+      auditAssetStatusBadge,
+      styles,
+      formatDateTime,
+      onEvidencePress,
+      openAsset,
+    ]
   );
 
   // ── Loading / Error states ────────────────────────────
@@ -805,7 +935,7 @@ function AuditDetailContent() {
     AUDIT_STATUS_LABELS[audit.status as keyof typeof AUDIT_STATUS_LABELS] ??
     audit.status;
 
-  const assets = filteredAssets();
+  const assets = filteredAssets;
 
   // ── Render ────────────────────────────────────────────
 
@@ -1154,7 +1284,7 @@ function AuditDetailContent() {
             {/* Asset filter pills */}
             <View style={styles.assetFilterSection}>
               <Text style={styles.sectionTitle}>
-                Assets ({displayAssets().length})
+                Assets ({displayAssets.length})
               </Text>
               <View style={styles.filterRow} accessibilityRole="tablist">
                 {visibleFilters.map((f) => (

@@ -1,19 +1,3 @@
-import { data, type ActionFunctionArgs } from "react-router";
-import { z } from "zod";
-import {
-  requireMobileAuth,
-  requireMobilePermission,
-  requireOrganizationAccess,
-} from "~/modules/api/mobile-auth.server";
-import { createTag } from "~/modules/tag/service.server";
-import { makeShelfError } from "~/utils/error";
-import { getRandomColor } from "~/utils/get-random-color";
-import { parseData } from "~/utils/http.server";
-import {
-  PermissionAction,
-  PermissionEntity,
-} from "~/utils/permissions/permission.data";
-
 /**
  * POST /api/mobile/tags/create
  *
@@ -34,6 +18,21 @@ import {
  * @see {@link file://./tags.ts} the picker read (returns `canCreate` for UI gating).
  * @see {@link file://../../_layout+/tags.new.tsx} the web equivalent this mirrors.
  */
+import { data, type ActionFunctionArgs } from "react-router";
+import { z } from "zod";
+import {
+  requireMobileAuth,
+  requireMobilePermission,
+  requireOrganizationAccess,
+} from "~/modules/api/mobile-auth.server";
+import { parseMobileBody } from "~/modules/api/mobile-body.server";
+import { createTag } from "~/modules/tag/service.server";
+import { makeShelfError } from "~/utils/error";
+import { getRandomColor } from "~/utils/get-random-color";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
 
 /** Mirrors the web `NewTagFormSchema.name` rule (min 3 chars). */
 const CreateTagSchema = z.object({
@@ -52,14 +51,9 @@ export async function action({ request }: ActionFunctionArgs) {
       action: PermissionAction.create,
     });
 
-    const body = await request.json();
-    // parseData maps validation failures to a 400 ShelfError (a bare
-    // schema.parse would throw ZodError -> generic 500 + Sentry capture).
-    const { name } = parseData(body, CreateTagSchema, {
-      // Expected user-input validation, not a server fault.
-      shouldBeCaptured: false,
-      additionalData: { userId: user.id, organizationId },
-    });
+    // Unreadable JSON and a schema violation are both the caller's input, so
+    // both answer 400 rather than reaching the generic 500 branch.
+    const { name } = await parseMobileBody(CreateTagSchema, request, "Tag");
 
     const tag = await createTag({
       name,

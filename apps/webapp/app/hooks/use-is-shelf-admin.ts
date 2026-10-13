@@ -6,7 +6,7 @@ import type { loader } from "~/routes/_layout+/_layout";
  * `Roles.ADMIN` on the User record).
  *
  * Not to be confused with the per-workspace `OrganizationRoles.ADMIN` that
- * `useUserRoleHelper` reports — a workspace admin is an ordinary customer.
+ * `useOrganizationRoles` reports: a workspace admin is an ordinary customer.
  *
  * Reads the value the `_layout` loader already derives, so the role check
  * itself lives in exactly one place.

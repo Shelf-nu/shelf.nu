@@ -2,6 +2,7 @@ import type { ReactElement, ReactNode } from "react";
 import React from "react";
 import { useLoaderData } from "react-router";
 
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
 import { tw } from "~/utils/tw";
@@ -75,6 +76,16 @@ export type ListProps = {
   customPagination?: ReactElement;
   /** Any extra content to the right in Header */
   headerExtraContent?: ReactNode;
+  /**
+   * Replaces the plain title text, for a title that is itself a control.
+   *
+   * For controls that change WHICH SET the list is showing (the asset lists'
+   * Active / Archived / All menu): the title and the count under it describe
+   * that set, so the switch belongs on the title. It also stays on screen when
+   * the chosen set is empty, so a member is never left in an empty view with
+   * no way back.
+   */
+  titleContent?: ReactNode;
   /** Any extra props directly passed to ItemComponent */
   extraItemComponentProps?: Record<string, unknown>;
 
@@ -82,6 +93,29 @@ export type ListProps = {
    * This should be used in those cases
    */
   disableSelectAllItems?: boolean;
+
+  /**
+   * Rows to render. Defaults to the loader's `items` — pass this only when a
+   * view renders rows the loader supplies under a different key.
+   *
+   * These rows are also what the header's select-all checkbox ticks and what
+   * the title counts, so they must be the rows actually on screen. A list
+   * rendering one set while those two read `loaderData.items` gets a checkbox
+   * that selects rows nobody can see.
+   */
+  items?: ListItemData[];
+
+  /**
+   * Overrides the count line under the title.
+   *
+   * For a list whose rendered rows are not all instances of the thing the
+   * title names: the model view renders a "No model" bucket alongside the
+   * models, so the row count and the model count are different numbers.
+   */
+  countLabel?: () => ReactNode;
+
+  /** Whether `countLabel` already states the total; see `ListTitle`. */
+  countLabelIsTotal?: boolean;
 };
 
 /**
@@ -92,6 +126,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     title,
     ItemComponent,
     headerChildren,
+    titleContent,
     hideFirstHeaderColumn = false,
     navigate,
     className,
@@ -102,14 +137,21 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
     headerExtraContent,
     extraItemComponentProps,
     disableSelectAllItems,
+    items: itemsProp,
+    countLabel,
+    countLabelIsTotal,
   }: ListProps,
   ref
 ) {
-  const { items } = useLoaderData<IndexResponse>();
+  const { items: loaderItems } = useLoaderData<IndexResponse>();
+  const items = itemsProp ?? loaderItems;
   const totalIncomingItems = items?.length;
   const hasItems = totalIncomingItems > 0;
 
   const { modeIsAdvanced } = useAssetIndexViewState();
+  // The export button ships ASSET rows. The model view lists models, so it
+  // has nothing to export and no selectable rows to export from.
+  const { isModelView } = useAssetIndexView();
 
   const isUserPage = useIsUserAssetsPage();
 
@@ -123,10 +165,17 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
       )}
     >
       {!hasItems ? (
-        <EmptyState
-          className={emptyStateClassName}
-          customContent={customEmptyStateContent}
-        />
+        <>
+          {titleContent ? (
+            <div className="border-b p-4 pb-2 text-left text-text-sm">
+              {titleContent}
+            </div>
+          ) : null}
+          <EmptyState
+            className={emptyStateClassName}
+            customContent={customEmptyStateContent}
+          />
+        </>
       ) : (
         <>
           {/* The title and the total number of items. This basically acts like a fake table row */}
@@ -136,16 +185,20 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
               "flex justify-between border-b md:items-center "
             )}
           >
-            <div>
+            <div className="flex items-center gap-3">
               <ListTitle
                 title={title}
                 disableSelectAllItems={disableSelectAllItems}
                 hasBulkActions={!!bulkActions}
+                items={items}
+                countLabel={countLabel}
+                countLabelIsTotal={countLabelIsTotal}
+                titleContent={titleContent}
               />
             </div>
             <div className="flex items-center justify-end gap-2">
               <When truthy={!!headerExtraContent}>{headerExtraContent}</When>
-              <When truthy={modeIsAdvanced}>
+              <When truthy={modeIsAdvanced && !isModelView}>
                 <ExportAssetsButton />
               </When>
               <When truthy={!!bulkActions}>{bulkActions}</When>
@@ -156,6 +209,7 @@ export const List = React.forwardRef<HTMLDivElement, ListProps>(function List(
           >
             <ListHeader
               bulkActions={bulkActions}
+              items={items}
               hideFirstColumn={hideFirstHeaderColumn}
             >
               {headerChildren}

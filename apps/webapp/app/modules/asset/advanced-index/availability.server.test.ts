@@ -7,8 +7,8 @@ import type { CriticalRow } from "./types";
 // test controls what bookings/barcodes come back (or throws) without a
 // database.
 const hydrateHeavyMock = vi.hoisted(() => ({
-  fetchBookingsBatch: vi.fn(async () => new Map()),
-  fetchBarcodesBatch: vi.fn(async () => new Map()),
+  fetchBookingsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchBarcodesBatch: vi.fn(() => Promise.resolve(new Map())),
 }));
 vi.mock("./hydrate-heavy.server", () => hydrateHeavyMock);
 
@@ -55,6 +55,7 @@ function makeCriticalRow(overrides: Partial<CriticalRow> = {}): CriticalRow {
     minQuantity: null,
     consumptionType: null,
     availableToBook: true,
+    archivedAt: null,
     sequentialId: null,
     qrId: "qr-1",
     assetModel: null,

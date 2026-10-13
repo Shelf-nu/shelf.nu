@@ -23,6 +23,7 @@ import type {
   ICustomFieldValueJson,
   UpdateAssetPayload,
 } from "~/modules/asset/types";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { buildCustomFieldValue } from "~/utils/custom-fields";
 import { ShelfError, isLikeShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
@@ -422,11 +423,7 @@ export async function applyBulkUpdatesFromImport({
       if (col.internalKey === "category") allCategoryNames.add(change.newValue);
       if (col.internalKey === "location") allLocationNames.add(change.newValue);
       if (col.internalKey === "tags") {
-        change.newValue
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean)
-          .forEach((t) => allTagNames.add(t));
+        decodeCsvListCell(change.newValue).forEach((t) => allTagNames.add(t));
       }
     }
   }
@@ -762,10 +759,7 @@ export async function applyBulkUpdatesFromImport({
               // Clear all tags
               tags = { set: [] };
             } else {
-              const tagNames = change.newValue
-                .split(",")
-                .map((t) => t.trim())
-                .filter(Boolean);
+              const tagNames = decodeCsvListCell(change.newValue);
               const tagIds = tagNames
                 .map((n) => tagNameMap.get(n.toLowerCase()))
                 .filter((id): id is string => !!id)

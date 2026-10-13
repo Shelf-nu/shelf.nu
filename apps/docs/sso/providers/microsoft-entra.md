@@ -156,7 +156,7 @@ Once confirmed you should end up with a setup similar to this:
 > [!NOTE]
 > You can only complete this step, once you have received confirmation from your contact person at Shelf that the setup has been completed.
 >
-> Keep in mind that the OWNER of the workspace in shelf, cannot be an SSO user. The workspace needs to be created by a normal user. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
+> Keep in mind that the workspace in Shelf needs to be created by a normal (non-SSO) user, who becomes its OWNER and maps the groups. We recommend that this owner keeps standard login as an administrative fallback; converting the owner to SSO later is optional and done on request. If you are having trouble with this, please feel free to contact your account manager to help it get resolved.
 
 Once you have the groups ready, you need to add their **IDs** in the workspace settings inside Shelf. If you have multiple workspaces, you will need to map each one.
 
@@ -168,3 +168,7 @@ Each field also accepts **more than one Object ID, separated by commas** — any
 > Enter each Object ID exactly as it appears in Microsoft Entra. Matching ignores letter case and surrounding spaces, but copying the exact value is the safest way to avoid a mismatch.
 
 ![Shelf workspace SSO group mapping](../../img/google-workspace-step-9.png)
+
+## Moving existing Shelf users to SSO [#](#moving-existing-shelf-users-to-sso)
+
+If people on your domain already have standard (email/password) Shelf accounts, they do not need to be deleted or recreated. Shelf converts them to SSO, keeping their data and workspace memberships. The first SSO sign-in after conversion lands the user in their existing account, with all their data and workspaces, and no NameID change is needed. The one exception is a user who tried to sign in with SSO before their account was converted: their first SSO sign-in after conversion shows "Your account is now on single sign-on" and asks them to sign in with SSO once more. After that they sign in once, as usual. Convert accounts before announcing SSO to your team to avoid this extra step. Map your groups (Step 11) before the accounts are converted, because a converted user whose groups map to no role loses access to the workspace at their first SSO login (the workspace owner keeps their Owner role and access). See [Existing standard accounts on your domain](../index.md#existing-standard-accounts-on-your-domain) for the full rules.

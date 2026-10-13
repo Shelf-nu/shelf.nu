@@ -14,11 +14,24 @@
  * out in custody/bookings) with the web dialog's error copy; the server
  * enforces the real cap either way. Adding has no upper bound.
  *
+ * Add and Remove do not close the sheet. The caller sends the request with the
+ * sheet still open and passes `isSubmitting` while it runs; the inputs lock,
+ * the tapped action shows a spinner, and the sheet cannot be dismissed until
+ * the request settles. It closes only once the server accepts the adjustment,
+ * so a refusal keeps the quantity and note.
+ *
  * @see {@link file://../app/(tabs)/assets/[id].tsx} the consumer
  * @see {@link file://./quantity-input-sheet.tsx} the modal contract this mirrors
  */
 import { useEffect, useRef, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  Modal,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
@@ -37,16 +50,25 @@ type Props = {
   /** Display unit echoed in copy (e.g. "pcs"); null/undefined falls back to "units". */
   unitOfMeasure?: string | null;
   /**
+   * True while the adjustment request runs. Locks the inputs, shows a spinner
+   * on the tapped action, and blocks dismissal until the request settles.
+   */
+  isSubmitting?: boolean;
+  /**
    * Called with the confirmed adjustment. `direction` maps to the
    * ConsumptionLog category exactly like the web dialog: add→RESTOCK,
-   * subtract→LOSS.
+   * subtract→LOSS. The caller performs the request with the sheet still open
+   * and closes it only once the server accepts the adjustment.
    */
   onSubmit: (args: {
     direction: "add" | "subtract";
     quantity: number;
     note?: string;
   }) => void;
-  /** Called when the user dismisses the sheet without confirming. */
+  /**
+   * Called when the user dismisses the sheet without confirming. Never called
+   * while `isSubmitting`.
+   */
   onClose: () => void;
 };
 
@@ -65,6 +87,7 @@ export function AdjustQuantitySheet({
   visible,
   availableQuantity,
   unitOfMeasure,
+  isSubmitting = false,
   onSubmit,
   onClose,
 }: Props) {
@@ -75,6 +98,13 @@ export function AdjustQuantitySheet({
   const [note, setNote] = useState("");
   /** Set when the user attempts a Remove above the available cap. */
   const [removeError, setRemoveError] = useState<string | null>(null);
+  /**
+   * The action most recently sent, which carries the spinner while
+   * `isSubmitting`. Read only during a submit this sheet started.
+   */
+  const [submittedDirection, setSubmittedDirection] = useState<
+    "add" | "subtract" | null
+  >(null);
   const inputRef = useRef<TextInput>(null);
 
   // Re-seed the inputs every time the sheet opens: each open is a fresh
@@ -90,6 +120,8 @@ export function AdjustQuantitySheet({
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const isValid = hasValue && parsed >= 1;
+  const canSubmit = isValid && !isSubmitting;
+  const canDecrease = !isSubmitting && hasValue && parsed > 1;
 
   const unitLabel = unitOfMeasure || "units";
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
@@ -106,7 +138,7 @@ export function AdjustQuantitySheet({
   };
 
   const submit = (direction: "add" | "subtract") => {
-    if (!isValid) return;
+    if (!canSubmit) return;
 
     // Client-side guard mirroring the web dialog: can't remove more than
     // available (the server enforces the row-locked real cap regardless).
@@ -118,6 +150,7 @@ export function AdjustQuantitySheet({
     }
 
     setRemoveError(null);
+    setSubmittedDirection(direction);
     onSubmit({
       direction,
       quantity: parsed,
@@ -125,12 +158,22 @@ export function AdjustQuantitySheet({
     });
   };
 
+  /**
+   * Every dismissal path goes through here. An adjustment in flight decides
+   * whether the sheet closes, and a refusal must find the inputs still on
+   * screen, so dismissal waits for it to settle.
+   */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       // why: imperative focus once the sheet has actually presented — an
       // autoFocus prop fires before the modal animation and misses the
       // keyboard (and jsx-a11y/no-autofocus flags it).
@@ -141,10 +184,12 @@ export function AdjustQuantitySheet({
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Adjust Quantity</Text>
           <TouchableOpacity
-            onPress={onClose}
-            style={styles.closeButton}
+            onPress={requestClose}
+            disabled={isSubmitting}
+            style={[styles.closeButton, isSubmitting && styles.dismissDisabled]}
             accessibilityLabel="Close adjust quantity"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Ionicons name="close" size={24} color={colors.foreground} />
           </TouchableOpacity>
@@ -161,14 +206,14 @@ export function AdjustQuantitySheet({
             <TouchableOpacity
               style={[
                 styles.stepButton,
-                (!hasValue || parsed <= 1) && styles.stepButtonDisabled,
+                !canDecrease && styles.stepButtonDisabled,
               ]}
               onPress={() => step(-1)}
-              disabled={!hasValue || parsed <= 1}
+              disabled={!canDecrease}
               activeOpacity={0.7}
               accessibilityLabel="Decrease quantity"
               accessibilityRole="button"
-              accessibilityState={{ disabled: !hasValue || parsed <= 1 }}
+              accessibilityState={{ disabled: !canDecrease }}
             >
               <Ionicons name="remove" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -184,16 +229,22 @@ export function AdjustQuantitySheet({
               }}
               placeholder="Enter quantity"
               placeholderTextColor={colors.placeholderText}
+              editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
               accessibilityLabel="Quantity to adjust"
             />
             <TouchableOpacity
-              style={styles.stepButton}
+              style={[
+                styles.stepButton,
+                isSubmitting && styles.stepButtonDisabled,
+              ]}
               onPress={() => step(1)}
+              disabled={isSubmitting}
               activeOpacity={0.7}
               accessibilityLabel="Increase quantity"
               accessibilityRole="button"
+              accessibilityState={{ disabled: isSubmitting }}
             >
               <Ionicons name="add" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -217,6 +268,7 @@ export function AdjustQuantitySheet({
               onChangeText={setNote}
               placeholder="Reason for adjustment..."
               placeholderTextColor={colors.placeholderText}
+              editable={!isSubmitting}
               multiline
               numberOfLines={3}
               textAlignVertical="top"
@@ -226,30 +278,58 @@ export function AdjustQuantitySheet({
 
           {/* Add (restock) */}
           <TouchableOpacity
-            style={[styles.confirmPrimary, !isValid && styles.confirmDisabled]}
+            style={[
+              styles.confirmPrimary,
+              !canSubmit && styles.confirmDisabled,
+            ]}
             onPress={() => submit("add")}
-            disabled={!isValid}
+            disabled={!canSubmit}
             activeOpacity={0.7}
             accessibilityLabel={`Add ${echo ?? "quantity"} to stock`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !isValid }}
+            accessibilityState={{
+              disabled: !canSubmit,
+              busy: isSubmitting && submittedDirection === "add",
+            }}
           >
-            <Ionicons name="add" size={20} color={colors.primaryForeground} />
-            <Text style={styles.confirmText}>Add</Text>
+            {isSubmitting && submittedDirection === "add" ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <>
+                <Ionicons
+                  name="add"
+                  size={20}
+                  color={colors.primaryForeground}
+                />
+                <Text style={styles.confirmText}>Add</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           {/* Remove (loss) */}
           <TouchableOpacity
-            style={[styles.removeButton, !isValid && styles.confirmDisabled]}
+            style={[styles.removeButton, !canSubmit && styles.confirmDisabled]}
             onPress={() => submit("subtract")}
-            disabled={!isValid}
+            disabled={!canSubmit}
             activeOpacity={0.7}
             accessibilityLabel={`Remove ${echo ?? "quantity"} from stock`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !isValid }}
+            accessibilityState={{
+              disabled: !canSubmit,
+              busy: isSubmitting && submittedDirection === "subtract",
+            }}
           >
-            <Ionicons name="remove" size={20} color={colors.foreground} />
-            <Text style={styles.removeText}>Remove</Text>
+            {isSubmitting && submittedDirection === "subtract" ? (
+              <ActivityIndicator size="small" color={colors.foreground} />
+            ) : (
+              <>
+                <Ionicons name="remove" size={20} color={colors.foreground} />
+                <Text style={styles.removeText}>Remove</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -278,6 +358,9 @@ const useStyles = createStyles((colors, shadows) => ({
   },
   closeButton: {
     padding: spacing.xs,
+  },
+  dismissDisabled: {
+    opacity: 0.5,
   },
   body: {
     paddingHorizontal: spacing.lg,

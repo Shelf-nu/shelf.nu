@@ -11,8 +11,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  canDuplicateAsset,
   getPrimaryKit,
   getPrimaryLocation,
+  getRowKitStatus,
   isDirectBookingBlockedByKit,
   isQuantityTracked,
 } from "./utils";
@@ -111,5 +113,48 @@ describe("isDirectBookingBlockedByKit", () => {
   it("never blocks when there is no asset to inspect", () => {
     expect(isDirectBookingBlockedByKit(null)).toBe(false);
     expect(isDirectBookingBlockedByKit(undefined)).toBe(false);
+  });
+});
+
+describe("canDuplicateAsset", () => {
+  it("allows an individual asset whatever its quantity", () => {
+    expect(canDuplicateAsset({ type: "INDIVIDUAL", quantity: null })).toBe(
+      true
+    );
+  });
+
+  it("allows a quantity-tracked asset with units in stock", () => {
+    expect(canDuplicateAsset({ type: "QUANTITY_TRACKED", quantity: 1 })).toBe(
+      true
+    );
+  });
+
+  it.each([0, null])(
+    "refuses a quantity-tracked asset with %s units in stock",
+    (quantity) => {
+      expect(canDuplicateAsset({ type: "QUANTITY_TRACKED", quantity })).toBe(
+        false
+      );
+    }
+  );
+});
+
+describe("getRowKitStatus", () => {
+  it("reads the kit from a simple-mode row's assetKits", () => {
+    expect(
+      getRowKitStatus({ assetKits: [{ kit: { status: "IN_CUSTODY" } }] })
+    ).toBe("IN_CUSTODY");
+  });
+
+  it("reads the kit from an advanced-mode row's flattened kit", () => {
+    expect(getRowKitStatus({ kit: { status: "CHECKED_OUT" } })).toBe(
+      "CHECKED_OUT"
+    );
+  });
+
+  it("answers null for a row in no kit, in either shape", () => {
+    expect(getRowKitStatus({ assetKits: [] })).toBeNull();
+    expect(getRowKitStatus({ kit: null })).toBeNull();
+    expect(getRowKitStatus(null)).toBeNull();
   });
 });

@@ -32,6 +32,12 @@ export default function AuditsLayout() {
         name="scan"
         options={{ title: "Audit Scanner", headerShown: false }}
       />
+      {/* The Assets tab's asset screens, mounted here too so an asset opened
+          from an audit row sits on top of the audit and every back path
+          returns to it. See lib/asset-routes.ts. */}
+      <Stack.Screen name="asset/[id]" options={{ title: "Asset Details" }} />
+      <Stack.Screen name="asset/edit" options={{ title: "Edit Asset" }} />
+      <Stack.Screen name="kit/[id]" options={{ title: "Kit Details" }} />
     </Stack>
   );
 }

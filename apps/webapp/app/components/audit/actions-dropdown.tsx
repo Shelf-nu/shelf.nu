@@ -55,7 +55,7 @@ function dialogReducer(
 }
 
 const ConditionalActionsDropdown = () => {
-  const { session, isAdminOrOwner, teamMembers } =
+  const { session, canManageOthersAudits, teamMembers } =
     useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const user = useUserData();
@@ -76,27 +76,27 @@ const ConditionalActionsDropdown = () => {
   const isCreator = session.createdById === user?.id;
   const receiptRequested = searchParams.get("receipt") === "1";
 
-  // Only admin/owner can edit audit details
+  // Only callers who manage others' audits can edit audit details
   const canEditAudit =
-    isAdminOrOwner && !isCompleted && !isCancelled && !isArchived;
+    canManageOthersAudits && !isCompleted && !isCancelled && !isArchived;
 
-  // Admin/owner can archive completed or cancelled audits
+  // Callers who manage others' audits can archive completed or cancelled audits
   const canArchiveAudit =
-    isAdminOrOwner && (isCompleted || isCancelled) && !isArchived;
+    canManageOthersAudits && (isCompleted || isCancelled) && !isArchived;
 
-  // Admin/owner can delete archived audits (archive-first safety contract).
-  const canDeleteAudit = isAdminOrOwner && isArchived;
+  // They can delete archived audits (archive-first safety contract).
+  const canDeleteAudit = canManageOthersAudits && isArchived;
 
-  // Admin/owner can duplicate completed, cancelled, or archived audits — i.e.
-  // any terminal state. Pending/active audits should be edited instead.
+  // They can duplicate completed, cancelled, or archived audits, i.e. any
+  // terminal state. Pending/active audits should be edited instead.
   const canDuplicateAudit =
-    isAdminOrOwner && (isCompleted || isCancelled || isArchived);
+    canManageOthersAudits && (isCompleted || isCancelled || isArchived);
 
-  // The audit's creator can always cancel it. Workspace admins/owners can
-  // also cancel any audit in the org so team-managed audits don't get stuck
-  // when the creator is unavailable — matches archive/delete permissions.
+  // The audit's creator can always cancel it. Callers who manage others'
+  // audits can also cancel any audit in the workspace so team-managed audits
+  // don't get stuck when the creator is unavailable, matching archive/delete.
   const canCancelAudit =
-    (isCreator || isAdminOrOwner) &&
+    (isCreator || canManageOthersAudits) &&
     !isCompleted &&
     !isCancelled &&
     !isArchived;

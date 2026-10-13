@@ -37,18 +37,18 @@ const criticalQueryMock = vi.hoisted(() => ({
 vi.mock("./critical-query.server", () => criticalQueryMock);
 
 const hydrateSimpleMock = vi.hoisted(() => ({
-  fetchTagsBatch: vi.fn(async () => new Map()),
-  fetchLocationsBatch: vi.fn(async () => new Map()),
-  fetchKitsBatch: vi.fn(async () => new Map()),
-  fetchCustomFieldsBatch: vi.fn(async () => new Map()),
-  fetchRemindersBatch: vi.fn(async () => new Map()),
+  fetchTagsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchLocationsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchKitsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchCustomFieldsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchRemindersBatch: vi.fn(() => Promise.resolve(new Map())),
 }));
 vi.mock("./hydrate-simple.server", () => hydrateSimpleMock);
 
 const hydrateHeavyMock = vi.hoisted(() => ({
-  fetchCustodyBatch: vi.fn(async () => new Map()),
-  fetchBookingsBatch: vi.fn(async () => new Map()),
-  fetchBarcodesBatch: vi.fn(async () => new Map()),
+  fetchCustodyBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchBookingsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchBarcodesBatch: vi.fn(() => Promise.resolve(new Map())),
 }));
 vi.mock("./hydrate-heavy.server", () => hydrateHeavyMock);
 
@@ -141,6 +141,7 @@ function makeCriticalRow(id: string): CriticalRow {
     minQuantity: null,
     consumptionType: null,
     availableToBook: true,
+    archivedAt: null,
     sequentialId: null,
     qrId: `qr-${id}`,
     assetModelId: null,
@@ -312,9 +313,9 @@ describe("getAdvancedAssetsForExport", () => {
     // Aborts as a side effect of the FIRST window's critical read settling —
     // the second window (ids 500..599) must never be requested.
     criticalQueryMock.getAdvancedAssetCriticalPage.mockImplementationOnce(
-      async () => {
+      () => {
         controller.abort();
-        return { items: window1.map(makeCriticalRow) };
+        return Promise.resolve({ items: window1.map(makeCriticalRow) });
       }
     );
 

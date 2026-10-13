@@ -69,11 +69,6 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
           },
           orderBy: { asset: { title: "asc" } },
         },
-        _count: {
-          select: {
-            assetKits: true,
-          },
-        },
       },
       orderBy: {
         name: "asc",
@@ -81,18 +76,19 @@ export async function loader({ request, context }: LoaderFunctionArgs) {
     });
 
     /**
-     * Resolve each member asset's image cascade server-side so the note's kit
-     * popover shows the model's cover image for assets without one of their
-     * own. See `serializeAssetImage`.
+     * Kit membership is stored as `AssetKit` pivot rows, but the popover only
+     * ever needs the member assets themselves — so the pivot is flattened away
+     * here and the wire shape stays a plain `assets` array. Each asset's image
+     * cascade is resolved server-side too, so the popover shows the model's
+     * cover image for assets without one of their own (`serializeAssetImage`).
      */
     return data(
       payload({
-        kits: kits.map((kit) => ({
+        kits: kits.map(({ assetKits, ...kit }) => ({
           ...kit,
-          assetKits: kit.assetKits.map((assetKit) => ({
-            ...assetKit,
-            asset: serializeAssetImage(assetKit.asset),
-          })),
+          assets: assetKits.map((assetKit) =>
+            serializeAssetImage(assetKit.asset)
+          ),
         })),
       })
     );

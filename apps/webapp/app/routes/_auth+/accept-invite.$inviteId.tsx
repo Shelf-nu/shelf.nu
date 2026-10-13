@@ -13,7 +13,14 @@ import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { signInWithEmail } from "~/modules/auth/service.server";
-import { generateRandomCode } from "~/modules/invite/helpers";
+import {
+  createSsoRequiredError,
+  getLegacyLoginDecision,
+} from "~/modules/auth/sso-enforcement.server";
+import {
+  generateRandomCode,
+  normalizeInviteEmail,
+} from "~/modules/invite/helpers";
 import {
   checkUserAndInviteMatch,
   updateInviteStatus,
@@ -144,6 +151,31 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
         shouldBeCaptured: false,
       });
     }
+    /**
+     * Accepting creates an email/password account for an invitee who has none,
+     * then signs in with it. On an SSO domain that account could never be used:
+     * every legacy sign-in on the domain is refused. So an address the decision
+     * refuses for its domain is told to use SSO before anything is created, and
+     * the invite stays pending.
+     *
+     * An `sso_account` refusal is not a reason to stop: an SSO user accepting
+     * an invite is only attached to the workspace (no account is created), and
+     * then signs in with SSO.
+     */
+    const invite = await db.invite.findFirst({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: pre-org invite-acceptance flow; the id comes from the invite JWT verified above and matched to the URL, and there is no caller organizationId to scope by
+      where: { id: decodedInvite.id },
+      select: { inviteeEmail: true },
+    });
+    if (invite) {
+      const decision = await getLegacyLoginDecision(
+        normalizeInviteEmail(invite.inviteeEmail)
+      );
+      if (!decision.allowed && decision.reason === "sso_domain") {
+        throw createSsoRequiredError(decision.reason);
+      }
+    }
+
     const password = generateRandomCode(10);
     // Detect the accepter's prefs from browser hints so their brand-new user
     // row is stamped at creation. timeZone is left null when the CH-time-zone
@@ -177,9 +209,15 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
       });
     }
 
-    /** Sign in the user */
+    /**
+     * Sign in the user.
+     *
+     * `updateInviteStatus` keys the account on the normalised address, so the
+     * sign-in has to use the same form: a stored invite can still hold the
+     * capitals of the CSV row it came from.
+     */
     const authSession = await signInWithEmail(
-      updatedInvite.inviteeEmail,
+      normalizeInviteEmail(updatedInvite.inviteeEmail),
       password
     ).catch(
       // We don't care about the error here, let the user login if he's already registered

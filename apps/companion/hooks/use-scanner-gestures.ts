@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Animated, PanResponder, Platform, Dimensions } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useReducedMotion } from "@/lib/a11y";
+import { nextScannerActionIndex } from "@/lib/scanner-swipe";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 
@@ -77,6 +78,13 @@ export function useScannerGestures({
   useEffect(() => {
     scannedItemsCountRef.current = scannedItemsCount;
   }, [scannedItemsCount]);
+
+  // The list is derived from the org's roles, which arrive after mount, so the
+  // responder's own copy would stay empty for the whole session.
+  const availableActionsRef = useRef(availableActions);
+  useEffect(() => {
+    availableActionsRef.current = availableActions;
+  }, [availableActions]);
 
   useEffect(() => {
     const idx = availableActions.findIndex((a) => a.key === action);
@@ -171,15 +179,15 @@ export function useScannerGestures({
         const swipedRight = dx > SWIPE_THRESHOLD || vx > VELOCITY_THRESHOLD;
         if (!swipedLeft && !swipedRight) return;
 
-        const currentIdx = actionIndexRef.current;
-        const len = availableActions.length;
-        const nextIdx = swipedLeft
-          ? (currentIdx + 1) % len
-          : (currentIdx - 1 + len) % len;
+        const actions = availableActionsRef.current;
+        const nextIdx = nextScannerActionIndex({
+          actionCount: actions.length,
+          currentIndex: actionIndexRef.current,
+          direction: swipedLeft ? "next" : "previous",
+        });
+        if (nextIdx === null) return;
 
-        if (nextIdx === currentIdx) return;
-
-        const nextAction = availableActions[nextIdx].key;
+        const nextAction = actions[nextIdx].key;
         const direction = swipedLeft ? -1 : 1;
         triggerSwipeRef.current?.(nextAction, direction);
       },

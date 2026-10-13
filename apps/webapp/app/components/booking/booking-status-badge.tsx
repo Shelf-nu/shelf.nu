@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { BookingStatus } from "@prisma/client";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { bookingStatusColorMap } from "~/utils/bookings";
 import { Badge } from "../shared/badge";
 import {
@@ -11,6 +11,10 @@ import {
   TooltipTrigger,
 } from "../shared/tooltip";
 
+/**
+ * A booking's status badge. On a reserved booking the member holds, it adds a
+ * "subject to review" tooltip when that member's reservations are requests.
+ */
 export function BookingStatusBadge({
   status,
   custodianUserId,
@@ -19,16 +23,16 @@ export function BookingStatusBadge({
   /** Id of the custodian if it's a user */
   custodianUserId: string | undefined;
 }) {
-  const { isBase } = useUserRoleHelper();
+  const reservationIsRequest = useReservationIsRequest();
   const user = useUserData();
 
   /**
    * This is used to show the extra info tooltip when the booking is
    * reserved and the user is the custodian of the booking.
-   * This is only shown for base users.
+   * Shown to members whose reservations are requests (they cannot check out).
    */
   const shouldShowExtraInfo =
-    isBase &&
+    reservationIsRequest &&
     status === BookingStatus.RESERVED &&
     custodianUserId &&
     custodianUserId === user?.id;

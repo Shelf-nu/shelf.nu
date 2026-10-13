@@ -606,6 +606,50 @@ function hasNotFoundCause(error: unknown): boolean {
   return false;
 }
 
+/** The serialized error a thrown `data(error(reason), { status })` carries. */
+type ClientErrorPayload = Partial<
+  Pick<FailureReason, "message" | "title" | "label" | "additionalData">
+>;
+
+/**
+ * Reads a thrown React Router `data()` response with a 4xx status.
+ *
+ * `getParams` and a few route helpers throw such a response rather than a
+ * `ShelfError`; this lets {@link makeShelfError} keep its status and message.
+ *
+ * @param cause - The caught value
+ * @returns The status and serialized error, or `null` when `cause` is not a 4xx data response
+ */
+function asClientErrorResponse(cause: unknown): {
+  status: NonNullable<FailureReason["status"]>;
+  error: ClientErrorPayload | undefined;
+} | null {
+  if (
+    typeof cause !== "object" ||
+    cause === null ||
+    (cause as { type?: unknown }).type !== "DataWithResponseInit"
+  ) {
+    return null;
+  }
+  const { data: body, init } = cause as {
+    data?: { error?: ClientErrorPayload | null };
+    init?: { status?: number } | null;
+  };
+  const status = init?.status;
+  if (typeof status !== "number" || status < 400 || status >= 500) {
+    return null;
+  }
+  // Statuses outside the ShelfError union (422, 410...) keep their meaning as
+  // a client error by reporting as a plain 400.
+  const known: NonNullable<FailureReason["status"]>[] = [
+    400, 401, 403, 404, 405, 409, 429, 499,
+  ];
+  return {
+    status: known.find((code) => code === status) ?? 400,
+    error: body?.error ?? undefined,
+  };
+}
+
 /**
  * This function is used to check if the error is a zod validation error.
  */
@@ -702,6 +746,27 @@ export function makeShelfError(
       },
       status: 404,
       shouldBeCaptured: shouldBeCaptured ?? false,
+    });
+  }
+
+  // A thrown client-error response, such as the 400 `getParams` throws for a
+  // missing or malformed request param. Routes catch it with this function, so
+  // without this branch it would fall through to the unknown-error default and
+  // turn a bad request into a captured 500.
+  const clientErrorResponse = asClientErrorResponse(cause);
+  if (clientErrorResponse) {
+    const { status, error: payload } = clientErrorResponse;
+    return new ShelfError({
+      cause: null,
+      message: payload?.message ?? "The request is invalid.",
+      title: payload?.title,
+      label: payload?.label ?? "Request validation",
+      additionalData: {
+        ...(payload?.additionalData ?? {}),
+        ...additionalData,
+      },
+      status,
+      shouldBeCaptured: false,
     });
   }
 

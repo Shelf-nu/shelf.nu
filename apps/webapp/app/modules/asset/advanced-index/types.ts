@@ -322,6 +322,11 @@ export type CriticalRow = {
   minQuantity: number | null;
   consumptionType: ConsumptionType | null;
   availableToBook: boolean;
+  /** When the asset was archived, or `null` while active. A string, not a
+   * `Date`: the legacy mega-query emits the raw `archivedAt` column through
+   * `jsonb_build_object` (no `to_char` wrapper), so the critical query matches
+   * it raw and both paths hand the client the same serialized form. */
+  archivedAt: string | null;
   sequentialId: string | null;
   /** The asset's QR code id. Always present — every asset gets one QR code
    * on creation. */

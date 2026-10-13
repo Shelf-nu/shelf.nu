@@ -1,9 +1,10 @@
 /**
  * Invite Roles
  *
- * Pins that OWNER can never be granted by an invite. Both the invite dialog's
- * Zod enum and the CSV import's runtime check read this list, so this test is
- * the single place that failure mode is caught for both paths.
+ * Pins that OWNER can never be granted by an invite, and that the
+ * policy-derived list still covers every other role. The invite dialog, the
+ * CSV import and resend all read this list, so this test is the single place
+ * that failure mode is caught for every path.
  *
  * @see {@link file://./roles.ts}
  */

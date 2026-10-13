@@ -1,12 +1,13 @@
-import type { AssetStatus } from "@prisma/client";
 import { useAtomValue } from "jotai";
 import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
+import { someKitMemberBlocksCustodyAssignment } from "~/utils/kits";
 import { isSelectingAllItems } from "~/utils/list";
 import {
   PermissionAction,
@@ -66,13 +67,17 @@ function ConditionalDropdown() {
   const selectedKits = useAtomValue(selectedBulkItemsAtom);
   const allSelected = isSelectingAllItems(selectedKits);
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   /**
-   * Due to select all multi page selection,
-   * some of the checks we do cannot be completed as we dont have the data loaded from the server.
-   * As a solution for now we will handle the validation serverSide if hasSelectedAll is true
+   * "Select all" spans every page of the list, so when `allSelected` is true
+   * the selection includes rows this client never loaded and the checks below
+   * cannot be completed from what it holds. They resolve permissively in that
+   * case and the server re-validates the request. Every guard here is an
+   * affordance that explains why an action is unavailable — never the
+   * enforcement.
    */
 
   const allKitsInCustody =
@@ -85,22 +90,15 @@ function ConditionalDropdown() {
     (kit) => kit.status === "CHECKED_OUT"
   );
 
-  const someAssetsInsideKitsCheckedOutOrInCustody = selectedKits.some(
-    (kit) =>
-      kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "CHECKED_OUT"
-      ) ||
-      kit.assets?.some(
-        (asset: { status: AssetStatus }) => asset.status === "IN_CUSTODY"
-      )
-  );
+  const someAssetsInsideKitsCheckedOutOrInCustody =
+    someKitMemberBlocksCustodyAssignment(selectedKits);
 
   const disabled = selectedKits.length === 0;
 
   const selfUserCustody = selectedKits.some(
     (k) => k?.custody?.custodian?.userId === user?.id
   );
-  const disableReleaseCustody = isSelfService && !selfUserCustody;
+  const disableReleaseCustody = assignsSelfOnly && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -234,7 +232,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
                     !allKitsAvailable ||

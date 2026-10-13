@@ -11,6 +11,10 @@ import {
 } from "./client-hints";
 import { ShelfError, isLikeShelfError } from "./error";
 import { parseMarkdownToReact } from "./md";
+import {
+  optionalNumberFromString,
+  requiredNumberFromString,
+} from "./zod-numeric";
 /** Returns the schema depending on the field type.
  * Also handles the required field error message.
  * This was greatly inspired and done with the help of @rphlmr (https://github.com/rphlmr)
@@ -65,12 +69,16 @@ const getSchema = ({
       }
       return v;
     }),
+    // Blank must stay blank rather than coerce to 0: `z.coerce.number()` reads
+    // `""` as zero, which stored a real zero for every optional numeric field the
+    // operator left empty (the downstream blank guard cannot catch it, because by
+    // then the value is the number 0, not an empty string).
     amount: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
     number: required
-      ? z.coerce.number().refine((value) => value !== 0, "Please enter a value")
-      : z.coerce.number(params).optional().nullable(),
+      ? requiredNumberFromString({ fieldName: field_name })
+      : optionalNumberFromString({ blank: null, fieldName: field_name }),
   } as Record<CustomFieldZodSchema["type"], z.ZodTypeAny>;
 };
 
@@ -190,6 +198,22 @@ function formatInvalidNumericMessage(
 }
 
 /**
+ * The subset of a custom-field definition needed to turn a raw cell into a
+ * stored value.
+ *
+ * Narrow on purpose: a definition parsed from a CSV column header
+ * (`getDefinitionFromCsvHeader`) has no database row behind it, so it carries
+ * no `id`. A persisted `CustomField` satisfies this shape too, and its `id`
+ * travels to Sentry when a numeric value is rejected.
+ */
+export type CustomFieldDefinitionForValue = Pick<
+  CustomField,
+  "name" | "type"
+> & {
+  id?: string;
+};
+
+/**
  * Sanitizes and validates numeric input for AMOUNT and NUMBER custom fields.
  *
  * Accepted formats:
@@ -213,7 +237,7 @@ function formatInvalidNumericMessage(
  */
 function sanitizeNumericInput(
   raw: unknown,
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): { numericValue: number; normalizedText: string } {
   const throwInvalid = (reason?: string): never => {
     const baseMessage = formatInvalidNumericMessage(def.name, raw);
@@ -333,7 +357,7 @@ function sanitizeNumericInput(
 
 export const buildCustomFieldValue = (
   value: ShelfAssetCustomFieldValueType["value"],
-  def: CustomField
+  def: CustomFieldDefinitionForValue
 ): ShelfAssetCustomFieldValueType["value"] | undefined => {
   try {
     const { raw } = value;

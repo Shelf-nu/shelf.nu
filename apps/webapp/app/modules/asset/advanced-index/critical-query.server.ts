@@ -162,6 +162,9 @@ export async function getAdvancedAssetCriticalPage({
           'minQuantity', a."minQuantity",
           'consumptionType', a."consumptionType",
           'availableToBook', a."availableToBook",
+          -- Raw column (no to_char), matching the legacy mega-query's
+          -- archivedAt projection, so both paths serialize it identically.
+          'archivedAt', a."archivedAt",
           'sequentialId', a."sequentialId",
           'qrId', ${QR_ID_SUBQUERY},
           'assetModelId', a."assetModelId",

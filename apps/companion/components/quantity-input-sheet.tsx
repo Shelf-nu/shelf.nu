@@ -13,17 +13,34 @@
  * The sheet's explicit confirm button IS the confirmation step — callers must
  * not stack a second Alert on top of `onSubmit`.
  *
+ * Confirming does not close the sheet. The caller sends the request with the
+ * sheet still open and passes `isSubmitting` while it runs; the inputs lock,
+ * the confirm button shows a spinner, and the sheet cannot be dismissed until
+ * the request settles. It closes only once the server accepts the change, so
+ * a refusal keeps the entered numbers.
+ *
  * @see {@link file://../app/(tabs)/assets/[id].tsx} assign/release consumers
+ * @see {@link file://../app/(tabs)/bookings/[id].tsx} the check-out queue consumer
+ * @see {@link file://../app/(tabs)/bookings/add-assets.tsx} the reserve-model consumer
  * @see {@link file://./team-member-picker.tsx} the modal contract this mirrors
  */
-import { useEffect, useRef, useState } from "react";
-import { View, Text, Modal, TextInput, TouchableOpacity } from "react-native";
+import { useRef, useState } from "react";
+import {
+  View,
+  Text,
+  Modal,
+  ScrollView,
+  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
+import type { SourcePickerOption } from "@/lib/custody-source-options";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -34,7 +51,14 @@ type Props = {
   subtitle?: string;
   /** Upper bound for the quantity (inclusive). Submit is disabled above it. */
   max: number;
-  /** Initial value when the sheet opens (clamped to [1, max]). Defaults to 1. */
+  /**
+   * Lower bound for the quantity (inclusive). Defaults to 1, which is the
+   * floor for a plain count. Raise it when part of the quantity is already
+   * committed and cannot be taken back — editing a booking's model
+   * reservation cannot drop below the units already assigned to the booking.
+   */
+  min?: number;
+  /** Initial value when the sheet opens (clamped to [min, max]). Defaults to `min`. */
   defaultValue?: number;
   /** Display unit echoed under the input (e.g. "pcs"); null/undefined hides it. */
   unitOfMeasure?: string | null;
@@ -50,6 +74,25 @@ type Props = {
     /** Initial value when the sheet opens (clamped to [0, primary]). */
     defaultValue?: number;
   };
+  /**
+   * Optional "From location" picker rendered above the quantity: one row per
+   * source the units can come from. Only a pool placed at two or more
+   * locations gets one. The caller owns the selection so it can tie `max`
+   * to the picked row.
+   */
+  source?: {
+    /** Section label, e.g. "From location". */
+    label: string;
+    options: SourcePickerOption[];
+    value: string;
+    onChange: (value: string) => void;
+  };
+  /**
+   * Optional explanation shown under the source picker, e.g. why the cap is
+   * 0 ("Nothing left at Studio. Pick another location."). Purely
+   * informational: the picker stays usable so the operator can switch rows.
+   */
+  notice?: string;
   /** Confirm button label, e.g. "Assign" / "Release". */
   confirmLabel: string;
   /**
@@ -59,11 +102,22 @@ type Props = {
    */
   destructive?: boolean;
   /**
+   * True while the confirmed action's request runs. Locks the inputs, shows a
+   * spinner on the confirm button, and blocks dismissal until the request
+   * settles.
+   */
+  isSubmitting?: boolean;
+  /**
    * Called with the validated quantity when the user confirms, plus the
-   * secondary value when a `secondary` field is configured.
+   * secondary value when a `secondary` field is configured. The caller
+   * performs the request with the sheet still open and closes it only once
+   * the server accepts the change.
    */
   onSubmit: (quantity: number, secondaryValue?: number) => void;
-  /** Called when the user dismisses the sheet without confirming. */
+  /**
+   * Called when the user dismisses the sheet without confirming. Never called
+   * while `isSubmitting`.
+   */
   onClose: () => void;
 };
 
@@ -82,11 +136,15 @@ export function QuantityInputSheet({
   title,
   subtitle,
   max,
+  min = 1,
   defaultValue,
   unitOfMeasure,
   secondary,
+  source,
+  notice,
   confirmLabel,
   destructive,
+  isSubmitting = false,
   onSubmit,
   onClose,
 }: Props) {
@@ -97,35 +155,50 @@ export function QuantityInputSheet({
   const [secondaryValue, setSecondaryValue] = useState("0");
   const inputRef = useRef<TextInput>(null);
 
-  // The secondary field's presence and seed are read out as primitives so the
-  // re-seed effect below can depend on THEM rather than on the `secondary`
-  // object. Callers build that object inline, giving it a fresh identity on
-  // every parent render — as a dependency it would turn "re-seed on open" into
-  // "re-seed on every parent render", silently discarding a split the operator
-  // had already typed.
   const hasSecondaryField = secondary != null;
-  const secondaryDefaultValue = secondary?.defaultValue;
 
-  // Re-seed the inputs every time the sheet opens: each open targets a fresh
-  // action (different member/holder), so stale values must not leak across.
-  useEffect(() => {
+  // The inputs are seeded on the closed-to-open transition only. Each open
+  // targets a fresh action (a different member or holder), so stale values
+  // must not leak across opens. While the sheet is open, `max` follows the
+  // picked source and background refetches, and neither may wipe what the
+  // operator typed. Both transitions are detected during render (React's
+  // "adjust state when a prop changes" pattern), so no effect writes state.
+  const [seededOpen, setSeededOpen] = useState(false);
+  const [seenMax, setSeenMax] = useState(max);
+  if (visible !== seededOpen) {
+    setSeededOpen(visible);
+    setSeenMax(max);
     if (visible) {
-      const seed = Math.min(Math.max(defaultValue ?? 1, 1), Math.max(max, 1));
+      const seed = Math.min(
+        Math.max(defaultValue ?? min, min),
+        Math.max(max, min)
+      );
       setValue(String(seed));
       if (hasSecondaryField) {
-        // Clamp the secondary seed to the primary seed — the two fields move
-        // together and the secondary can never exceed the units being released.
+        // The secondary seed is clamped to the primary seed: the two fields
+        // move together and the secondary never exceeds the units released.
         setSecondaryValue(
-          String(Math.min(Math.max(secondaryDefaultValue ?? 0, 0), seed))
+          String(Math.min(Math.max(secondary?.defaultValue ?? 0, 0), seed))
         );
       }
     }
-  }, [visible, defaultValue, max, hasSecondaryField, secondaryDefaultValue]);
+  } else if (visible && max !== seenMax) {
+    // `max` moved while open: keep the typed value, pulled down to the new
+    // cap when it is now above it. A raised cap leaves the value alone.
+    setSeenMax(max);
+    const cap = Math.max(max, min);
+    const typed = value ? parseInt(value, 10) : NaN;
+    if (Number.isFinite(typed) && typed > cap) {
+      setValue(String(cap));
+      clampSecondaryTo(cap);
+    }
+  }
 
   const parsed = value ? parseInt(value, 10) : NaN;
   const hasValue = Number.isFinite(parsed);
   const overMax = hasValue && parsed > max;
-  const isValid = hasValue && parsed >= 1 && parsed <= max;
+  const underMin = hasValue && parsed < min;
+  const isValid = hasValue && parsed >= min && parsed <= max;
 
   const parsedSecondary = secondaryValue ? parseInt(secondaryValue, 10) : NaN;
   const hasSecondary = Number.isFinite(parsedSecondary);
@@ -136,7 +209,9 @@ export function QuantityInputSheet({
       parsedSecondary >= 0 &&
       hasValue &&
       parsedSecondary <= parsed);
-  const canConfirm = isValid && isSecondaryValid;
+  const canConfirm = isValid && isSecondaryValid && !isSubmitting;
+  const canDecrease = !isSubmitting && hasValue && parsed > min;
+  const canIncrease = !isSubmitting && !(hasValue && parsed >= max);
 
   /**
    * Pull the secondary value down when the primary quantity drops below it.
@@ -148,7 +223,7 @@ export function QuantityInputSheet({
    * used-up count keeps it when they raise the primary again. The webapp's
    * counterpart already does this in its reducer.
    */
-  const clampSecondaryTo = (nextPrimary: number) => {
+  function clampSecondaryTo(nextPrimary: number) {
     if (!hasSecondaryField) return;
     setSecondaryValue((prev) => {
       const prevParsed = prev ? parseInt(prev, 10) : NaN;
@@ -156,25 +231,36 @@ export function QuantityInputSheet({
         return prev;
       return String(nextPrimary);
     });
-  };
+  }
 
-  /** Step the current value by `delta`, clamped to [1, max]. */
+  /** Step the current value by `delta`, clamped to [min, max]. */
   const step = (delta: number) => {
     const current = hasValue ? parsed : 0;
-    const next = Math.min(Math.max(current + delta, 1), Math.max(max, 1));
+    const next = Math.min(Math.max(current + delta, min), Math.max(max, min));
     setValue(String(next));
     clampSecondaryTo(next);
   };
 
   const maxLabel = formatQuantity(max, unitOfMeasure) ?? String(max);
+  const minLabel = formatQuantity(min, unitOfMeasure) ?? String(min);
   const echo = hasValue ? formatQuantity(parsed, unitOfMeasure) : null;
+
+  /**
+   * Every dismissal path goes through here. A request in flight decides
+   * whether the sheet closes, and a refusal must find the entered numbers
+   * still on screen, so dismissal waits for it to settle.
+   */
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
 
   return (
     <Modal
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       // why: imperative focus once the sheet has actually presented — an
       // autoFocus prop fires before the modal animation and misses the
       // keyboard (and jsx-a11y/no-autofocus flags it).
@@ -185,31 +271,84 @@ export function QuantityInputSheet({
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{title}</Text>
           <TouchableOpacity
-            onPress={onClose}
-            style={styles.closeButton}
+            onPress={requestClose}
+            disabled={isSubmitting}
+            style={[styles.closeButton, isSubmitting && styles.dismissDisabled]}
             accessibilityLabel={`Close ${title.toLowerCase()}`}
             accessibilityRole="button"
+            accessibilityState={{ disabled: isSubmitting }}
           >
             <Ionicons name="close" size={24} color={colors.foreground} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.body}>
+        <ScrollView
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+        >
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+
+          {/* "From location": one tappable row per source. The picked row
+              drives `max`, so the quantity echo and the cap follow it. */}
+          {source ? (
+            <View style={styles.sourceSection}>
+              <Text style={styles.sourceLabel}>{source.label}</Text>
+              {source.options.map((option) => {
+                const selected = option.value === source.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.sourceRow,
+                      selected && styles.sourceRowSelected,
+                    ]}
+                    onPress={() => source.onChange(option.value)}
+                    disabled={isSubmitting}
+                    activeOpacity={0.7}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected, disabled: isSubmitting }}
+                    accessibilityLabel={
+                      option.hint
+                        ? `${option.label}, ${option.hint}`
+                        : option.label
+                    }
+                  >
+                    <Ionicons
+                      name={selected ? "radio-button-on" : "radio-button-off"}
+                      size={20}
+                      color={selected ? colors.primary : colors.muted}
+                    />
+                    <View style={styles.sourceText}>
+                      <Text style={styles.sourceRowLabel}>{option.label}</Text>
+                      {option.hint ? (
+                        <Text style={styles.sourceRowHint}>{option.hint}</Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {notice ? (
+            <Text style={styles.notice} accessibilityLiveRegion="polite">
+              {notice}
+            </Text>
+          ) : null}
 
           {/* Quantity row: [-] [input] [+] */}
           <View style={styles.quantityRow}>
             <TouchableOpacity
               style={[
                 styles.stepButton,
-                (!hasValue || parsed <= 1) && styles.stepButtonDisabled,
+                !canDecrease && styles.stepButtonDisabled,
               ]}
               onPress={() => step(-1)}
-              disabled={!hasValue || parsed <= 1}
+              disabled={!canDecrease}
               activeOpacity={0.7}
               accessibilityLabel="Decrease quantity"
               accessibilityRole="button"
-              accessibilityState={{ disabled: !hasValue || parsed <= 1 }}
+              accessibilityState={{ disabled: !canDecrease }}
             >
               <Ionicons name="remove" size={22} color={colors.foreground} />
             </TouchableOpacity>
@@ -228,31 +367,39 @@ export function QuantityInputSheet({
                 const next = cleaned ? parseInt(cleaned, 10) : NaN;
                 if (Number.isFinite(next)) clampSecondaryTo(next);
               }}
-              placeholder={`Max: ${max}`}
+              placeholder={min > 1 ? `${min}–${max}` : `Max: ${max}`}
               placeholderTextColor={colors.placeholderText}
+              editable={!isSubmitting}
               keyboardType="number-pad"
               returnKeyType="done"
-              accessibilityLabel={`Quantity, maximum ${maxLabel}`}
+              accessibilityLabel={
+                min > 1
+                  ? `Quantity, between ${minLabel} and ${maxLabel}`
+                  : `Quantity, maximum ${maxLabel}`
+              }
             />
             <TouchableOpacity
               style={[
                 styles.stepButton,
-                hasValue && parsed >= max && styles.stepButtonDisabled,
+                !canIncrease && styles.stepButtonDisabled,
               ]}
               onPress={() => step(1)}
-              disabled={hasValue && parsed >= max}
+              disabled={!canIncrease}
               activeOpacity={0.7}
               accessibilityLabel="Increase quantity"
               accessibilityRole="button"
-              accessibilityState={{ disabled: hasValue && parsed >= max }}
+              accessibilityState={{ disabled: !canIncrease }}
             >
               <Ionicons name="add" size={22} color={colors.foreground} />
             </TouchableOpacity>
           </View>
 
-          {/* Echo / bounds hint under the input */}
-          {overMax ? (
+          {/* Echo / bounds hint under the input. A notice already explains
+              an empty source, so the over-cap line would repeat it. */}
+          {overMax && notice ? null : overMax ? (
             <Text style={styles.errorHint}>Only {maxLabel} available.</Text>
+          ) : underMin ? (
+            <Text style={styles.errorHint}>At least {minLabel}.</Text>
           ) : (
             <Text style={styles.echoHint}>
               {echo ? `${echo} of ${maxLabel}` : `Up to ${maxLabel}`}
@@ -271,6 +418,7 @@ export function QuantityInputSheet({
                 }}
                 placeholder="0"
                 placeholderTextColor={colors.placeholderText}
+                editable={!isSubmitting}
                 keyboardType="number-pad"
                 returnKeyType="done"
                 accessibilityLabel={secondary.label}
@@ -298,11 +446,18 @@ export function QuantityInputSheet({
             activeOpacity={0.7}
             accessibilityLabel={`${confirmLabel} ${echo ?? "quantity"}`}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !canConfirm }}
+            accessibilityState={{ disabled: !canConfirm, busy: isSubmitting }}
           >
-            <Text style={styles.confirmText}>{confirmLabel}</Text>
+            {isSubmitting ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.primaryForeground}
+              />
+            ) : (
+              <Text style={styles.confirmText}>{confirmLabel}</Text>
+            )}
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
@@ -330,6 +485,9 @@ const useStyles = createStyles((colors, shadows) => ({
   closeButton: {
     padding: spacing.xs,
   },
+  dismissDisabled: {
+    opacity: 0.5,
+  },
   body: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
@@ -339,6 +497,51 @@ const useStyles = createStyles((colors, shadows) => ({
     fontSize: fontSize.lg,
     color: colors.foregroundSecondary,
     lineHeight: 22,
+  },
+  sourceSection: {
+    gap: spacing.xs,
+  },
+  sourceLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: "600",
+    color: colors.foregroundSecondary,
+    marginBottom: spacing.xs,
+  },
+  sourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.white,
+  },
+  sourceRowSelected: {
+    borderColor: colors.primary,
+  },
+  sourceText: {
+    flex: 1,
+    gap: 2,
+  },
+  sourceRowLabel: {
+    fontSize: fontSize.md,
+    fontWeight: "500",
+    color: colors.foreground,
+  },
+  sourceRowHint: {
+    fontSize: fontSize.sm,
+    color: colors.muted,
+  },
+  notice: {
+    fontSize: fontSize.sm,
+    color: colors.warningText,
+    backgroundColor: colors.warningBg,
+    borderRadius: borderRadius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    overflow: "hidden",
   },
   quantityRow: {
     flexDirection: "row",

@@ -21,7 +21,7 @@ import { Button } from "~/components/shared/button";
 import { Th } from "~/components/table";
 import { db } from "~/database/db.server";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
@@ -36,6 +36,7 @@ import {
 } from "~/modules/team-member/service.server";
 import type { RouteHandleWithName } from "~/modules/types";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { setCookie, userPrefs } from "~/utils/cookies.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { computeHasActiveFilters } from "~/utils/filter-params";
@@ -65,18 +66,13 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const {
-      organizationId,
-      currentOrganization,
-      isSelfServiceOrBase,
-      canSeeAllBookings,
-      canSeeAllCustody,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.booking,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.booking,
+        action: PermissionAction.read,
+      });
 
     if (isPersonalOrg(currentOrganization)) {
       throw new ShelfError({
@@ -105,7 +101,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       tags: filterTags,
     } = await getBookingsFilterData({
       request,
-      canSeeAllBookings,
+      canSeeAllBookings: access.bookings.seeAll,
       organizationId,
       userId,
     });
@@ -172,21 +168,22 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         getAll:
           searchParams.has("getAll") &&
           hasGetAllValue(searchParams, "teamMember"),
-        filterByUserId: !canSeeAllCustody, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
+        filterByUserId: !access.custody.seeAll, // If they cant see custody, we dont render the filters anyways, however we still add this for performance reasons so we dont load all team members. This way we only load the current user's team member as that is the only one they can see
         userId,
       }),
 
-      // team members for booking form - BASE/SELF_SERVICE users need their team member guaranteed
-      isSelfServiceOrBase
+      // Team members for the booking form: a member whose booking custodian is
+      // fixed to themself needs their own team member guaranteed.
+      bookingCustodianIsSelf(access)
         ? getTeamMemberForForm({
             organizationId,
             userId,
-            isSelfServiceOrBase,
+            access,
             getAll:
               searchParams.has("getAll") &&
               hasGetAllValue(searchParams, "teamMember"),
           })
-        : Promise.resolve(null), // ADMIN users reuse teamMembersData
+        : Promise.resolve(null), // Everyone else reuses teamMembersData
 
       db.tag.findMany({
         where: {
@@ -236,11 +233,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         modelName,
         hasActiveFilters,
         ...teamMembersData,
-        // For BASE/SELF_SERVICE users, provide dedicated form team members
-        // For ADMIN users, reuse the filter team members
+        // Members fixed to themselves get dedicated form team members;
+        // everyone else reuses the filter team members.
         teamMembersForForm:
           teamMembersForFormData?.teamMembers ?? teamMembersData.teamMembers,
-        isSelfServiceOrBase,
         ...notifyData,
         tags,
         totalTags: tags.length,
@@ -294,7 +290,7 @@ export default function BookingsIndexPage({
   disableBulkActions?: boolean;
 }) {
   const matches = useMatches();
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roleAccess = useRoleAccess();
 
   const currentRoute: RouteHandleWithName = matches[matches.length - 1];
 
@@ -357,7 +353,8 @@ export default function BookingsIndexPage({
 
         <List
           bulkActions={
-            disableBulkActions || isBaseOrSelfService ? undefined : (
+            disableBulkActions ||
+            !roleAccess.policy.bookings.showBulkActions ? undefined : (
               <BulkActionsDropdown />
             )
           }

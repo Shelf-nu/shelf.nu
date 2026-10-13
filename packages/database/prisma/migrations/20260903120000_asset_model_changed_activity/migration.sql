@@ -1,0 +1,11 @@
+-- Records a change to an asset's model in the activity log.
+--
+-- Every other asset field already has one: category, location, tags, valuation,
+-- quantity, min quantity, description, name, status, kit, custom fields, even
+-- the preferred barcode. The model was the single field a user could change
+-- with no trace, which reads to a customer as the activity log being
+-- unreliable rather than as one field being untracked.
+--
+-- Additive: a new enum value only. Nothing reads it until the writers below
+-- start emitting it, and existing rows are untouched.
+ALTER TYPE "ActivityAction" ADD VALUE IF NOT EXISTS 'ASSET_MODEL_CHANGED';

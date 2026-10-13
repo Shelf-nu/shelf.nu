@@ -225,3 +225,48 @@ describe("roleHasPermission — absent or unknown roles", () => {
     );
   });
 });
+
+describe("roleHasPermission — reports entity", () => {
+  test("denies BASE and SELF_SERVICE both read and export", () => {
+    // Reports aggregate org-wide custody, booking and value data. The
+    // sidebar never offers them below ADMIN, and the server matrix must
+    // agree — an empty action list, not a missing entry.
+    for (const role of ["BASE", "SELF_SERVICE"] as const) {
+      assert.deepEqual(
+        Role2PermissionMap[role]?.[PermissionEntity.reports],
+        []
+      );
+      for (const action of [PermissionAction.read, PermissionAction.export]) {
+        assert.equal(
+          roleHasPermission({
+            roles: [role],
+            entity: PermissionEntity.reports,
+            action,
+          }),
+          false
+        );
+      }
+    }
+  });
+
+  test("grants ADMIN and OWNER read and export", () => {
+    for (const role of ["ADMIN", "OWNER"] as const) {
+      // The resolver grants these roles everything via the short-circuit, so
+      // assert the matrix rows directly too — the role-matrix contract must
+      // hold even for readers that consult the map without the resolver.
+      const entry = Role2PermissionMap[role]?.[PermissionEntity.reports] ?? [];
+      assert.equal(entry.includes(PermissionAction.read), true);
+      assert.equal(entry.includes(PermissionAction.export), true);
+      for (const action of [PermissionAction.read, PermissionAction.export]) {
+        assert.equal(
+          roleHasPermission({
+            roles: [role],
+            entity: PermissionEntity.reports,
+            action,
+          }),
+          true
+        );
+      }
+    }
+  });
+});

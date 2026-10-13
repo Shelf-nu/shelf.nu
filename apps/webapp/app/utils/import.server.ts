@@ -1,4 +1,6 @@
+import { parseBackupPlacements } from "~/modules/asset/backup-placements";
 import type { CreateAssetFromContentImportPayload } from "~/modules/asset/types";
+import { decodeCsvListCell } from "./csv-cells";
 import { ShelfError } from "./error";
 import { id } from "./id/id.server";
 
@@ -32,11 +34,13 @@ export function extractCSVDataFromContentImport(
   csvHeaders: string[]
 ) {
   /**
-   * The first row of the CSV contains the keys for the data
-   * We need to trim the keys to remove any whitespace and special characters and Non-printable characters as it already causes issues with in the past
-   * Non-printable character: The non-printable character you encountered at the beginning of the title property key ('\ufeff') is known as the Unicode BOM (Byte Order Mark).
+   * The first row carries the keys. Trimming them strips surrounding
+   * whitespace, which includes a leading Unicode BOM (`\ufeff`) on a file
+   * saved as UTF-8 with signature \u2014 a mark that would otherwise stay glued to
+   * the first header and stop it matching by name. Other non-printable
+   * characters inside a key survive, and make the header unrecognized.
    */
-  const headers = data[0].map((key) => key.trim()); // Trim the keys
+  const headers = data[0].map((key) => key.trim());
   const values = data.slice(1) as string[][];
 
   const csvData = values.map((entry) => {
@@ -54,7 +58,9 @@ export function extractCSVDataFromContentImport(
       entry.map((value, index) => {
         switch (headers[index]) {
           case "tags":
-            return [headers[index], value.split(",").map((tag) => tag.trim())];
+            // A tag name may contain a comma ("Berlin, DE"), so the cell is
+            // read back quote-aware — see `decodeCsvListCell`.
+            return [headers[index], decodeCsvListCell(value ?? "")];
           case "imageUrl":
             // Return empty string if URL is empty/undefined, otherwise trim
             return [headers[index], value?.trim() || ""];
@@ -115,7 +121,7 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
   const keys = data[0] as string[];
   const values = data.slice(1) as string[][];
 
-  return values.map((entry) =>
+  return values.map((entry, rowIndex) =>
     Object.fromEntries(
       entry
         .map((value, index) => {
@@ -123,10 +129,15 @@ export function extractCSVDataFromBackupImport(data: string[][]): any[] {
 
           // Backup-export emits `assetModel` as a JSON-serialised object
           // (`{ name }`) so cross-org backup-restore can resolve / create
-          // the model by name. Symmetric with `category` / `location`.
+          // the model by name. Symmetric with `category`.
           switch (keys[index]) {
-            case "category":
+            case "assetLocations":
+              // Row 1 is the header, so the first data row is row 2.
+              return [keys[index], parseBackupPlacements(value, rowIndex + 2)];
+            // Only a backup written before placements existed has this
+            // column; `placementsForRestore` turns it into one placement.
             case "location":
+            case "category":
             case "tags":
             case "notes":
             case "custody":

@@ -62,14 +62,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, canSeeAllBookings } = await requirePermission(
-      {
-        userId: authSession?.userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.create,
-      }
-    );
+    const { organizationId, access } = await requirePermission({
+      userId: authSession?.userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.create,
+    });
 
     // loadBookingsData + the asset lookup are independent (both only
     // need organizationId from requirePermission above), so parallelise
@@ -79,11 +77,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         request,
         organizationId,
         userId: authSession?.userId,
-        role,
-        canSeeAllBookings,
+        access,
         ids: assetId ? [assetId] : undefined,
       }),
       db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: loads the one asset the dialog was opened for; updateBookingAssets refuses an archived asset with its own message
         where: { id: assetId, organizationId },
         select: {
           id: true,
@@ -131,7 +129,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, role } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       userId: authSession?.userId,
       request,
       entity: PermissionEntity.booking,
@@ -152,7 +150,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       bookingId,
       assetIds,
       organizationId,
-      { userId, role }
+      { userId, access }
     );
 
     /**
@@ -164,6 +162,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
     if (quantity != null && finalAssetIds.length === 1) {
       const assetId = finalAssetIds[0];
       const asset = await db.asset.findFirst({
+        // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: type lookup for one specific asset; the archive guard in updateBookingAssets must still see it to refuse with the archived message
         where: { id: assetId, organizationId },
         select: { id: true, title: true, type: true },
       });
@@ -210,6 +209,8 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       assetIds: finalAssetIds,
       userId,
       quantities,
+      // Re-checks the add rule against the locked booking status.
+      access,
     });
 
     const actor = wrapUserLinkForNote({ ...user, id: authSession.userId });

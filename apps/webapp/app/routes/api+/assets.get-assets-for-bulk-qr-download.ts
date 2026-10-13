@@ -10,6 +10,7 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -38,7 +39,7 @@ export async function loader({ context, request }: ActionFunctionArgs) {
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization, canSeeAllCustody } =
+    const { organizationId, currentOrganization, access } =
       await requirePermission({
         userId,
         request,
@@ -75,9 +76,17 @@ export async function loader({ context, request }: ActionFunctionArgs) {
            */
           allowedTeamMemberIds: await scopeCustodianFilterIds({
             teamMemberIds: searchParams.getAll("teamMember"),
-            canSeeAllCustody,
+            canSeeAllCustody: access.custody.seeAll,
             userId,
             organizationId,
+          }),
+          // The Archived / All views are for members who may see archived
+          // assets (`asset: archive`, issue #382); anyone else downloads the
+          // codes of active assets, whatever the URL says.
+          honorArchivedView: roleHasPermission({
+            roles: [access.role],
+            entity: PermissionEntity.asset,
+            action: PermissionAction.archive,
           }),
         })
       : { id: { in: assetIds }, organizationId };
@@ -96,6 +105,19 @@ export async function loader({ context, request }: ActionFunctionArgs) {
       });
     }
 
+    /**
+     * Every code in one read rather than one read per asset. Assets that
+     * already have a code — which is all of them, in the normal case — then
+     * need no database work at all, and only the rare asset without one pays
+     * for the locked create inside `generateQrObj`.
+     */
+    const existingQrs = await db.qr.findMany({
+      where: { assetId: { in: assets.map((asset) => asset.id) } },
+    });
+    const qrByAssetId = new Map(
+      existingQrs.map((qr) => [qr.assetId, qr] as const)
+    );
+
     const assetsWithQrObj = [];
 
     for (const asset of assets) {
@@ -103,6 +125,9 @@ export async function loader({ context, request }: ActionFunctionArgs) {
         assetId: asset.id,
         organizationId,
         userId,
+        // `null` rather than `undefined`: the read above is authoritative, so
+        // a miss means "create one", not "look again".
+        existingQr: qrByAssetId.get(asset.id) ?? null,
       });
 
       assetsWithQrObj.push({

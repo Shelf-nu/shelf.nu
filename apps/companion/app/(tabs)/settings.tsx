@@ -28,6 +28,13 @@ import {
   setScanSoundEnabled,
   playScanSound,
 } from "@/lib/scan-sound";
+import {
+  disconnectFromServer,
+  getActiveServer,
+  subscribeToServerChange,
+} from "@/lib/server";
+import ConnectServerSheet from "@/components/connect-server-sheet";
+import { getApiBaseUrl } from "@/lib/api";
 
 const appVersion =
   Constants.expoConfig?.version ??
@@ -52,6 +59,72 @@ export default function SettingsScreen() {
 
   const [startPage, setStartPageState] = useState<StartPage>("assets");
   const [scanSoundOn, setScanSoundOn] = useState(true);
+  const [isConnectVisible, setIsConnectVisible] = useState(false);
+  const [isSwitchingServer, setIsSwitchingServer] = useState(false);
+
+  // Subscribed, not read once: this screen is where a signed-in user changes
+  // servers, so it is mounted across the switch it starts and must re-render
+  // rather than keep showing the previous host.
+  const [server, setServer] = useState(() => getActiveServer());
+  useEffect(
+    () => subscribeToServerChange(() => setServer(getActiveServer())),
+    []
+  );
+  /** Host only — the full URL would overflow the row on narrow screens. */
+  const serverLabel = (() => {
+    try {
+      return new URL(server.baseUrl).host;
+    } catch {
+      return server.name;
+    }
+  })();
+
+  /**
+   * Offers the server actions available from this row.
+   *
+   * Both of them end the current session — `setActiveServer` signs out and
+   * clears server-scoped state — so each is confirmed before anything happens.
+   */
+  const handleServerPress = () => {
+    if (isSwitchingServer) return;
+    const connectLabel = server.isCloud
+      ? "Connect to a private server"
+      : "Connect to a different server";
+
+    Alert.alert(
+      `Connected to ${server.name}`,
+      "Changing servers signs you out of this one.",
+      [
+        { text: "Cancel", style: "cancel" },
+        ...(server.isCloud
+          ? []
+          : [
+              {
+                text: "Disconnect",
+                style: "destructive" as const,
+                onPress: () => {
+                  // Locked for the duration: the switch signs out and rebuilds
+                  // the Supabase client, and this screen stays interactive
+                  // while it runs. Requests started in that window would be
+                  // resolving against a server that is being torn down.
+                  setIsSwitchingServer(true);
+                  void disconnectFromServer()
+                    .catch(() => {
+                      // Rebuilding the client can throw. Say so rather than
+                      // leaving the row looking unchanged for no stated reason.
+                      Alert.alert(
+                        "Couldn't disconnect",
+                        "Something went wrong returning to Shelf Cloud. Please try again."
+                      );
+                    })
+                    .finally(() => setIsSwitchingServer(false));
+                },
+              },
+            ]),
+        { text: connectLabel, onPress: () => setIsConnectVisible(true) },
+      ]
+    );
+  };
 
   // Load persisted start page and scan sound preference on mount
   useEffect(() => {
@@ -315,6 +388,35 @@ export default function SettingsScreen() {
             </View>
             <Text style={styles.settingValue}>v{appVersion}</Text>
           </View>
+          {/* Which Shelf server this install is talking to, and the only place
+              to change it once signed in. The login screen carries the same
+              action for anyone who has not signed in yet. */}
+          <TouchableOpacity
+            testID="server-row"
+            style={styles.settingRow}
+            onPress={handleServerPress}
+            disabled={isSwitchingServer}
+            activeOpacity={0.7}
+            accessibilityLabel={`Server: ${serverLabel}. Change which Shelf server this app connects to.`}
+            accessibilityRole="button"
+          >
+            <View style={styles.settingLeft}>
+              <Ionicons
+                name="server-outline"
+                size={20}
+                color={colors.foreground}
+              />
+              <Text style={styles.settingLabel}>Server</Text>
+            </View>
+            <View style={styles.settingLeft}>
+              <Text style={styles.settingValue}>{serverLabel}</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={18}
+                color={colors.mutedLight}
+              />
+            </View>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -323,6 +425,9 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.settingRow}
+            // Stays Shelf's own site on every server, unlike the links
+            // around it: this policy covers the APP, which is Shelf's
+            // regardless of who hosts the instance its data lives on.
             onPress={() =>
               WebBrowser.openBrowserAsync("https://www.shelf.nu/privacy")
             }
@@ -348,7 +453,7 @@ export default function SettingsScreen() {
             onPress={() => {
               Alert.alert(
                 "Delete Account",
-                "Account deletion is handled through the Shelf web app. You will be redirected to shelf.nu to complete this process.",
+                `Account deletion is handled through the Shelf web app. You will be redirected to ${serverLabel} to complete this process.`,
                 [
                   { text: "Cancel", style: "cancel" },
                   {
@@ -356,7 +461,7 @@ export default function SettingsScreen() {
                     style: "destructive",
                     onPress: () =>
                       WebBrowser.openBrowserAsync(
-                        "https://app.shelf.nu/account-details/general"
+                        `${getApiBaseUrl()}/account-details/general`
                       ),
                   },
                 ]
@@ -382,9 +487,14 @@ export default function SettingsScreen() {
         For advanced features, visit{" "}
         <Text
           style={styles.companionFooterLink}
-          onPress={() => WebBrowser.openBrowserAsync("https://app.shelf.nu")}
+          // The web app this companion belongs to, which is the CONNECTED
+          // server — a self-hosted user's advanced features live on their own
+          // instance, and Shelf Cloud has no account of theirs to show them.
+          onPress={() => WebBrowser.openBrowserAsync(getApiBaseUrl())}
+          accessibilityLabel={`Open ${serverLabel} in a browser`}
+          accessibilityRole="link"
         >
-          app.shelf.nu
+          {serverLabel}
         </Text>
       </Text>
 
@@ -398,6 +508,13 @@ export default function SettingsScreen() {
         <Ionicons name="log-out-outline" size={20} color={colors.error} />
         <Text style={styles.signOutText}>Sign Out</Text>
       </TouchableOpacity>
+
+      <ConnectServerSheet
+        visible={isConnectVisible}
+        warnSignOut
+        onClose={() => setIsConnectVisible(false)}
+        onConnected={() => setIsConnectVisible(false)}
+      />
     </ScrollView>
   );
 }

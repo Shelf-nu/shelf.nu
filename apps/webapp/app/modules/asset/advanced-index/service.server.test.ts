@@ -4,7 +4,6 @@ import {
   AssetType,
   BarcodeType,
   BookingStatus,
-  ConsumptionType,
   CustomFieldType,
   KitStatus,
   Prisma,
@@ -19,6 +18,7 @@ import { assembleHydratedAssets } from "./resolver.server";
 import {
   adaptLegacyToStreamShape,
   getAdvancedIndexPage,
+  type GetAdvancedIndexPageArgs,
 } from "./service.server";
 import type { CriticalRow } from "./types";
 
@@ -91,6 +91,7 @@ const RICH_ASSET: AdvancedIndexAsset = {
   minQuantity: null,
   consumptionType: null,
   availableToBook: true,
+  archivedAt: null,
   qrId: "qr-1",
   assetModelId: "model-1",
   assetModelName: "Canon R5",
@@ -231,6 +232,7 @@ const SPARSE_ASSET: AdvancedIndexAsset = {
   minQuantity: null,
   consumptionType: null,
   availableToBook: true,
+  archivedAt: null,
   qrId: "qr-2",
   assetModelId: null,
   assetModelName: null,
@@ -385,9 +387,10 @@ describe("adaptLegacyToStreamShape", () => {
 function makeCommonArgs(overrides?: { parsedFilters?: Filter[] }) {
   return {
     organizationId: ORG_ID,
-    settings: { columns: [], mode: "ADVANCED" } as unknown as Parameters<
-      typeof getAdvancedIndexPageForTypeOnly
-    >[0]["settings"],
+    settings: {
+      columns: [],
+      mode: "ADVANCED",
+    } as unknown as GetAdvancedIndexPageArgs["settings"],
     filters: "",
     parsedFilters: overrides?.parsedFilters ?? ([] as Filter[]),
     whereClause: Prisma.sql`WHERE "organizationId" = ${ORG_ID}`,
@@ -397,12 +400,6 @@ function makeCommonArgs(overrides?: { parsedFilters?: Filter[] }) {
     paginationClause: Prisma.sql`LIMIT 20 OFFSET 0`,
   };
 }
-// why: a type-only helper so makeCommonArgs's `settings` cast stays anchored
-// to the real arg type instead of drifting silently.
-declare function getAdvancedIndexPageForTypeOnly(
-  args: import("./service.server").GetAdvancedIndexPageArgs
-): void;
-
 describe("getAdvancedIndexPage", () => {
   it("flag ON: returns the critical page's items with no legacyResolved, and never calls the legacy service", async () => {
     streamingFlagMock.isStreamingEnabled.mockReturnValue(true);
@@ -427,6 +424,7 @@ describe("getAdvancedIndexPage", () => {
         minQuantity: null,
         consumptionType: null,
         availableToBook: true,
+        archivedAt: null,
         sequentialId: null,
         qrId: "qr-1",
         assetModelId: null,
@@ -447,7 +445,7 @@ describe("getAdvancedIndexPage", () => {
     const args = { request, ...makeCommonArgs() };
 
     const result = await getAdvancedIndexPage(
-      args as unknown as import("./service.server").GetAdvancedIndexPageArgs
+      args as unknown as GetAdvancedIndexPageArgs
     );
 
     expect(result.items).toBe(mockItems);
@@ -493,7 +491,7 @@ describe("getAdvancedIndexPage", () => {
     const args = { request, ...makeCommonArgs({ parsedFilters }) };
 
     const result = await getAdvancedIndexPage(
-      args as unknown as import("./service.server").GetAdvancedIndexPageArgs
+      args as unknown as GetAdvancedIndexPageArgs
     );
 
     const { items: expectedItems, resolved: expectedResolved } =

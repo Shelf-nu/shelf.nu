@@ -11,15 +11,18 @@ import Input from "~/components/forms/input";
 import { ShelfOTP } from "~/components/forms/otp-input";
 import PasswordInput from "~/components/forms/password-input";
 import { Button } from "~/components/shared/button";
-import { db } from "~/database/db.server";
 import { useSearchParams } from "~/hooks/search-params";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 
 import {
+  refuseAuthenticatedLegacySession,
+  revokeSession,
   sendResetPasswordLink,
   updateAccountPassword,
 } from "~/modules/auth/service.server";
+import { createSsoRequiredError } from "~/modules/auth/sso-enforcement.server";
+import { findUserByEmail } from "~/modules/user/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { getValidationErrors } from "~/utils/http";
@@ -106,32 +109,30 @@ export async function action({ request, context }: ActionFunctionArgs) {
          * Distinguishable responses let anyone enumerate which addresses are
          * registered, and which are federated, one request at a time.
          *
-         * Eligibility to receive a link is decided by the PER-USER `sso` flag,
-         * never by the domain's SSO configuration. `sso: true` is only set when
-         * a user actually arrives through SSO, so a domain configured for SSO
-         * can still hold password accounts created before it was federated;
-         * gating on the domain locks those users out of recovery entirely.
-         * `validateNonSSOUser` in `auth/service.server` gates the same way.
+         * Eligibility to receive a code is decided by `getLegacyLoginDecision`
+         * (`auth/sso-enforcement.server`), which `sendResetPasswordLink` asks:
+         * a converted account is refused, and so is every account on an SSO
+         * domain except an unconverted owner of a workspace linked to that
+         * domain. A refused address is sent nothing and the send returns as a
+         * success. That decision costs
+         * a different number of queries depending on the answer, so it runs
+         * inside the un-awaited send below, never before the response.
          *
          * A "use SSO instead" hint belongs in the page as static copy shown to
          * everyone — that helps without answering a question about any
          * particular address.
          */
-        const user = await db.user.findFirst({
-          where: { email },
-          select: {
-            id: true,
-            sso: true,
-          },
-        });
+        // Case-insensitive, like every other account lookup: a stored
+        // "Jane@Acme.com" must still get its reset code for "jane@acme.com".
+        const user = await findUserByEmail(email);
 
         if (user && !user.sso) {
           /**
            * NOT awaited, and its failure never reaches the client.
            *
-           * Response time must not depend on the answer. Awaiting this costs a
-           * second DB read inside `validateNonSSOUser` plus a Supabase API call
-           * (~50-300ms) that an unknown or SSO address never pays, and
+           * Response time must not depend on the answer. Awaiting this costs
+           * the SSO decision's reads plus a Supabase API call (~50-300ms) that
+           * an unknown or SSO address never pays, and
            * averaging repeated requests reads accounts off that difference —
            * the uniform response above, undone by the clock.
            *
@@ -195,16 +196,45 @@ export async function action({ request, context }: ActionFunctionArgs) {
         }
 
         /**
+         * Verifying the code opened a recovery session. Every refusal or
+         * failure from here on revokes it, so it never outlives the request.
+         */
+        const recoveryAccessToken = otpData.session.access_token;
+
+        /**
+         * A code sent before the address was refused (a deploy, a domain newly
+         * configured for SSO) must not set a password. Checked only after the
+         * code verifies, so the refusal is never an answer about an address to
+         * someone who does not hold its code. A refusal, or a decision that
+         * fails, revokes the recovery session.
+         */
+        const refusal = await refuseAuthenticatedLegacySession({
+          // The account and address the code verified, which are the
+          // session's own.
+          userId: otpData.user.id,
+          email: otpData.user.email ?? email,
+          accessToken: recoveryAccessToken,
+        });
+        if (refusal) {
+          throw createSsoRequiredError(refusal);
+        }
+
+        /**
          * Revokes every session for the user so other logged-in browsers are
          * signed out on their next request. We pass the freshly-minted OTP
          * access token so the explicit `signOut(…, "others")` defense-in-depth
          * layer can run before the update (see `updateAccountPassword`).
          */
-        await updateAccountPassword(
-          otpData.user.id,
-          password,
-          otpData.session.access_token
-        );
+        try {
+          await updateAccountPassword(
+            otpData.user.id,
+            password,
+            recoveryAccessToken
+          );
+        } catch (cause) {
+          await revokeSession(recoveryAccessToken);
+          throw cause;
+        }
 
         context.destroySession();
         return redirect("/login?password_reset=true");

@@ -5,6 +5,7 @@
  * @see {@link file://./import-update-diff.ts}
  */
 import { describe, expect, it } from "vitest";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { ShelfError } from "~/utils/error";
 import {
   analyzeUpdateHeaders,
@@ -429,6 +430,40 @@ describe("compareCoreField", () => {
       const asset = makeAsset({ tags: [] });
       const result = compareCoreField("tags", "NewTag", asset, "Tags");
       expect(result?.currentValue).toBe("(none)");
+    });
+
+    it("keeps a quoted tag name intact in the value the apply flow re-reads", () => {
+      // `newValue` is not only display: import-update.server.ts and
+      // import-update-entities.server.ts decode it again to resolve and
+      // connect the tags, so it has to survive that second read.
+      const asset = makeAsset({ tags: [{ id: "t1", name: "small" }] });
+      const result = compareCoreField(
+        "tags",
+        '"Berlin, DE",small',
+        asset,
+        "Tags"
+      );
+
+      expect(result).not.toBeNull();
+      expect(decodeCsvListCell(result!.newValue)).toEqual([
+        "Berlin, DE",
+        "small",
+      ]);
+    });
+
+    it("reads a quoted tag name carrying a comma as one tag", () => {
+      // The import-ready export is this importer's input and quotes a tag name
+      // containing the separator, so a bare split would report a spurious
+      // change here and write the wrong tags on apply.
+      const asset = makeAsset({
+        tags: [
+          { id: "t1", name: "Berlin, DE" },
+          { id: "t2", name: "small" },
+        ],
+      });
+      expect(
+        compareCoreField("tags", '"Berlin, DE",small', asset, "Tags")
+      ).toBeNull();
     });
   });
 
@@ -1057,6 +1092,67 @@ describe("computeAssetDiffs", () => {
     expect(result.assetsToUpdate).toHaveLength(0);
     expect(result.skippedAssets).toHaveLength(1);
     expect(result.skippedAssets[0].reason).toBe("No changes detected");
+  });
+
+  it("reports an archived asset as a failed row, not a pending update", () => {
+    // why: `updateAsset` refuses archived assets at apply time (issue #382).
+    // The preview exists to say what will happen BEFORE anything is saved, so
+    // counting an archived row as "to update" and then failing it makes the
+    // preview lie about its own outcome.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: new Date("2026-08-14T00:00:00Z"),
+        }),
+      ],
+    ]);
+
+    const csvData = [
+      ["Asset ID", "Name"],
+      ["SAM-0001", "New Name"],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.assetsToUpdate).toHaveLength(0);
+    expect(result.failedRows).toHaveLength(1);
+    expect(result.failedRows[0].reason).toBe(
+      "Asset is archived — reinstate it before updating"
+    );
+  });
+
+  it("still previews an update for an asset that is not archived", () => {
+    // why: guards against the archived branch swallowing ordinary rows —
+    // `archivedAt: null` must behave exactly as before.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: null,
+        }),
+      ],
+    ]);
+
+    const result = computeAssetDiffs({
+      csvData: [
+        ["Asset ID", "Name"],
+        ["SAM-0001", "New Name"],
+      ],
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.failedRows).toHaveLength(0);
+    expect(result.assetsToUpdate).toHaveLength(1);
   });
 
   it("reports missing assets as failed rows", () => {

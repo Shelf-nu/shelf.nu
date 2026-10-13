@@ -144,6 +144,41 @@ The rule triggers when:
 3. The `where` clause doesn't include a `deletedAt` filter
 4. **Ternary operators**: Both branches of a ternary expression are checked independently
 
+### `require-archived-at-check-on-asset-queries`
+
+**Purpose**: Make every Asset read say which side of the archive it wants.
+
+**Problem**: Archived assets (issue #382) are out of service: hidden from lists, counts, pickers and snapshot reports, and refused by bookings, kits and custody. A query that forgets the filter quietly counts or offers them again, and nothing notices: typecheck passes and the result is still a valid list.
+
+**Solution**: Every `<client>.asset.findMany / findFirst / findUnique / count / aggregate / groupBy` (and the `OrThrow` variants) with a literal `where` must name `archivedAt`. Covers `db`, `tx` and any other client identifier.
+
+#### Examples
+
+❌ **Bad**:
+
+```typescript
+const assets = await db.asset.findMany({ where: { organizationId } });
+const total = await db.asset.count();
+```
+
+✅ **Good**:
+
+```typescript
+// Active assets, the default everywhere
+db.asset.findMany({ where: { organizationId, archivedAt: null } });
+
+// Deliberately archived ones
+db.asset.findMany({ where: { organizationId, archivedAt: { not: null } } });
+
+// The query must reach archived assets too: say why
+// eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: the asset's own detail page shows archived assets with a badge
+db.asset.findFirst({ where: { id, organizationId } });
+```
+
+**Reach archived on purpose when** the surface shows assets that are already part of a record or a physical label: the asset's own pages, a booking that holds it, a location or kit page, audits, QR/barcode scan resolution, history reports and the backup export. Also guards that read the archive state, and ID allocation (sequential ids must count archived rows).
+
+**Not checked**: a `where` built elsewhere (a variable or a helper such as `getAssetsWhereInput`, which applies the view itself), spreads inside the literal, and writes (the archived freeze in `updateAsset` and the bulk services guards those).
+
 ### `require-button-type`
 
 **Purpose**: Enforce explicit `type` prop on all `<Button>` components rendering as native buttons.
@@ -213,6 +248,126 @@ import { action } from "~/routes/api+/mobile+/qr.claim";
 ```
 
 The `*.test.server.ts` spelling is banned too — that infix only ever existed to dodge the warmup glob. The error message names the exact destination path to move the file to.
+
+### `no-direct-role-checks`
+
+**Purpose**: Every role decision goes through `@shelf/permissions`.
+
+**Problem**: A role comparison decides for the roles it names and guesses for
+the rest. A deny-list (`role === SELF_SERVICE || role === BASE`) treats any
+other role as an admin; an allow-list (`roles.includes(ADMIN)`) treats it as
+restricted. Both styles compile and pass tests, and they disagree silently as
+soon as a role is added.
+
+**Reports**: a role name (`"OWNER" | "ADMIN" | "SELF_SERVICE" | "BASE" |
+"CUSTODY_MANAGER"` or `OrganizationRoles.X`, including aliases) used as an
+operand of `===`/`!==`/`==`/`!=`, a `case` test, an argument of
+`.includes/.indexOf/.lastIndexOf/.has/.some` (or an element of the array they
+are called on), the value of a Prisma `has`, an element of a Prisma
+`hasSome/hasEvery/in/notIn/equals` array, or one of two or more role keys of an
+object literal; and any `roles[0]`.
+
+**Not reported**: role writes (`roles: [OrganizationRoles.OWNER]`,
+`set: [newRole]`), role names as object values, types.
+
+**Allowed files**: `packages/permissions/**`, parity files, tests, `test/`,
+mocks, factories, fixtures, and the effective-access probes.
+
+#### Examples
+
+❌ **Bad**:
+
+```ts
+if (
+  role === OrganizationRoles.SELF_SERVICE ||
+  role === OrganizationRoles.BASE
+) {
+}
+where: {
+  roles: {
+    hasSome: [OrganizationRoles.OWNER, OrganizationRoles.ADMIN];
+  }
+}
+const label = organizationRolesMap[userOrg.roles[0]];
+```
+
+✅ **Good**:
+
+```ts
+if (!access.bookings.writeAll) {
+}
+where: {
+  roles: {
+    hasSome: rolesWhere((p) => p.notifications.orgBookingBroadcasts);
+  }
+}
+const label = ROLE_LABELS[resolveRole(userOrg.roles)];
+```
+
+Also enforced in `apps/companion` (its flat config imports this file).
+
+### `no-hand-coerced-numeric-transform`
+
+**Purpose**: Keep hand-rolled numeric coercion out of zod `.transform()` callbacks.
+
+**Problem**: `Number("")`, `Number("   ")` and `Number("0")` all return `0`, and `+""` is `0` too, so a bare coercion inside `.transform()` cannot tell an untouched form field from a deliberate zero. The truthiness guard usually wrapped around it only half helps: in `val ? +val : null` the string `"0"` is truthy so a real zero survives, and `""` is falsy so a missing value becomes null, but `"   "` is truthy as well and coerces to `0`. A field the operator only put spaces in is therefore stored as a deliberate zero, which is how a whitespace submission becomes a valuation of nothing.
+
+**Solution**: `optionalNumberFromString()` and `requiredNumberFromString()` in `app/utils/zod-numeric.ts` decide blank vs zero on the **string**, before any coercion, and handle trimming and `NaN` along the way. Use them instead of coercing by hand.
+
+#### Examples
+
+❌ **Bad** (will cause ESLint error):
+
+```ts
+// Truthiness guard: a real 0 becomes null
+valuation: z.string().optional().transform((val) => (val ? +val : null)),
+
+// Bare coercion: "" and "0" are indistinguishable
+maxOrganizations: z.string().transform((val) => +val),
+
+// Same trap, other spellings
+count: z.string().transform((val) => Number(val)),
+limit: z.string().transform((val) => parseInt(val, 10)),
+```
+
+✅ **Good** (passes ESLint):
+
+```ts
+valuation: optionalNumberFromString({ blank: null }),
+maxOrganizations: requiredNumberFromString({ fieldName: "Max organizations" }),
+```
+
+✅ **Also good** (no coercion, never flagged):
+
+```ts
+z.string().transform((val) => val === "on"); // checkbox field
+z.string().transform((val) => val.trim()); // text field
+z.coerce.number().transform((val) => (Number.isNaN(val) ? undefined : val)); // guard
+```
+
+#### When does the rule trigger?
+
+The rule triggers when:
+
+1. The call is `.transform(...)`, matched by property name only (a zod chain spans many lines and is assembled from helpers, so proving the receiver statically is what would make this rule brittle)
+2. The first argument is an arrow function with an **expression body**
+3. Its first parameter is a plain identifier
+4. That parameter is coerced somewhere in the body by `+val`, `Number(val)`, `parseInt(val)`, `parseFloat(val)`, `Number.parseInt(val)` or `Number.parseFloat(val)`
+
+The report lands on the coercion itself, not on the whole `.transform()` call, so the squiggle points at the thing to replace.
+
+#### When does the rule skip checking?
+
+The rule does NOT flag:
+
+1. **Coercion outside a `.transform()`**: `Number(csvValue)` in `app/utils/import-update-diff.ts` compares CSV cells against stored values, which is a different job
+2. **A different value**: `.transform((val) => Number(somethingElse))` coerces something the callback did not receive
+3. **Guards**: `Number.isNaN(val)` and `Number.isFinite(val)` return a boolean and coerce nothing
+4. **Function references**: `.transform(Number)`, `.transform(toNumber)` carry no body to read at the call site
+5. **Block bodies**: `.transform((val) => { ... })` can branch, reassign and return from several places, so the rule bails rather than risk a false positive
+6. **Destructured or rest parameters**: `.transform(({ val }) => ...)` has no single name to match a coercion against
+7. **Nested callbacks**: an inner function can rebind the parameter name, so its body is not walked
+8. **`app/utils/zod-numeric.ts`**: the helper module coerces on purpose, after its own blank check, so that one file is exempt while every caller stays covered
 
 ## Development
 

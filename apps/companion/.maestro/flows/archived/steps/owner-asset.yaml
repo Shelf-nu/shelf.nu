@@ -1,0 +1,32 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: an archived asset's own screen, seen by an owner or admin.
+# No login here: the entry flow (../01-owner.yaml) signs in first.
+#
+# An archived asset is read-only. One calm "Archived" badge replaces its
+# status, a notice says why, custody / location / edit are disabled, and
+# Reinstate is offered because the owner holds `asset: archive`. More stays
+# live: an archived asset can still be deleted.
+
+- openLink: "shelf://assets/${SHELF_TEST_ARCHIVED_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "This asset is archived. Reinstate it to make changes."
+    timeout: 20000
+- assertVisible: "Archived"
+- assertNotVisible: "Available"
+- assertVisible:
+    text: "Reinstate asset"
+    enabled: true
+- assertVisible:
+    text: "Assign custody of asset"
+    enabled: false
+- assertVisible:
+    text: "Update location"
+    enabled: false
+- assertVisible:
+    text: "Edit asset"
+    enabled: false
+- assertVisible:
+    text: "More actions"
+    enabled: true
+- takeScreenshot: archived-owner-asset

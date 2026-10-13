@@ -29,12 +29,12 @@
  *   the per-organization gate this file resolves once per call
  */
 import type { LoaderFunctionArgs } from "react-router";
+import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type {
   AdvancedAssetBooking,
   AdvancedIndexAsset,
   ICustomFieldValueJson,
 } from "~/modules/asset/types";
-import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
@@ -72,11 +72,16 @@ type LegacyCustodyEntry = NonNullable<AdvancedIndexAsset["custody"]>[number];
  */
 type LegacyRowRuntimeShape = Omit<
   AdvancedIndexAsset,
-  "createdAt" | "updatedAt" | "mainImageExpiration" | "upcomingReminder"
+  | "createdAt"
+  | "updatedAt"
+  | "mainImageExpiration"
+  | "archivedAt"
+  | "upcomingReminder"
 > & {
   createdAt: string;
   updatedAt: string;
   mainImageExpiration: string | null;
+  archivedAt: string | null;
   upcomingReminder?: {
     id: string;
     name: string;
@@ -212,6 +217,7 @@ export function adaptLegacyToStreamShape(assets: AdvancedIndexAsset[]): {
       minQuantity: row.minQuantity,
       consumptionType: row.consumptionType,
       availableToBook: row.availableToBook,
+      archivedAt: row.archivedAt,
       sequentialId: row.sequentialId,
       qrId: row.qrId,
       assetModelId: row.assetModelId,
@@ -406,7 +412,9 @@ export async function getAdvancedIndexPage(
     assetIds,
     getBookings = false,
     canUseBarcodes = false,
-    availableToBookOnly = false,
+    bookableScope = null,
+    honorArchivedView = false,
+    archivedFilter,
     timeZone = "UTC",
     parsedFilters,
     whereClause,
@@ -451,7 +459,9 @@ export async function getAdvancedIndexPage(
     assetIds,
     getBookings,
     canUseBarcodes,
-    availableToBookOnly,
+    bookableScope,
+    honorArchivedView,
+    archivedFilter,
     preParsedFilters: parsedFilters,
     timeZone,
   });

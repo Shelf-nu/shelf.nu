@@ -32,12 +32,12 @@ import { Prisma } from "@prisma/client";
 import { withPrismaRetry } from "@shelf/database";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
-import type { Column } from "~/modules/asset-index-settings/helpers";
 import { buildSlimPagedAssetCTEs } from "~/modules/asset/query.server";
 import type {
   AdvancedIndexAsset,
   CustomFieldSorting,
 } from "~/modules/asset/types";
+import type { Column } from "~/modules/asset-index-settings/helpers";
 import { isAbortError } from "~/utils/error";
 import { type ReadLane, withReadSlot } from "~/utils/read-batch-limiter.server";
 import { getAdvancedAssetCriticalPage } from "./critical-query.server";
@@ -478,6 +478,7 @@ export function toAdvancedIndexExportAsset(
     minQuantity: row.minQuantity,
     consumptionType: row.consumptionType,
     availableToBook: row.availableToBook,
+    archivedAt: row.archivedAt ? new Date(row.archivedAt) : null,
     qrId: row.qrId,
     assetModelId: row.assetModelId,
     assetModelName: row.assetModelName,

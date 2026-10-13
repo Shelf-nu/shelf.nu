@@ -11,18 +11,18 @@ import type { BatchKey, CriticalRow, ResolvedHydration } from "./types";
 // why: isolates createDeferredHydration from the real batch fetchers — each
 // test controls which BatchKey each mock stands in for, without a database.
 const hydrateSimpleMock = vi.hoisted(() => ({
-  fetchTagsBatch: vi.fn(async () => new Map()),
-  fetchLocationsBatch: vi.fn(async () => new Map()),
-  fetchKitsBatch: vi.fn(async () => new Map()),
-  fetchCustomFieldsBatch: vi.fn(async () => new Map()),
-  fetchRemindersBatch: vi.fn(async () => new Map()),
+  fetchTagsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchLocationsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchKitsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchCustomFieldsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchRemindersBatch: vi.fn(() => Promise.resolve(new Map())),
 }));
 vi.mock("./hydrate-simple.server", () => hydrateSimpleMock);
 
 const hydrateHeavyMock = vi.hoisted(() => ({
-  fetchCustodyBatch: vi.fn(async () => new Map()),
-  fetchBookingsBatch: vi.fn(async () => new Map()),
-  fetchBarcodesBatch: vi.fn(async () => new Map()),
+  fetchCustodyBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchBookingsBatch: vi.fn(() => Promise.resolve(new Map())),
+  fetchBarcodesBatch: vi.fn(() => Promise.resolve(new Map())),
 }));
 vi.mock("./hydrate-heavy.server", () => hydrateHeavyMock);
 
@@ -233,6 +233,7 @@ function makeCriticalRow(overrides: Partial<CriticalRow> = {}): CriticalRow {
     minQuantity: null,
     consumptionType: null,
     availableToBook: true,
+    archivedAt: null,
     sequentialId: null,
     qrId: "qr-1",
     assetModel: null,

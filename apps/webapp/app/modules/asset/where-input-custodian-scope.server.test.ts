@@ -95,6 +95,12 @@ describe("getAssetsWhereInput custodian scoping", () => {
   });
 });
 
+/**
+ * The clause is `custodianId: { in: [...] }` rather than a bare id because the
+ * custodian control is a multi-select. The SCOPING answers here are unchanged: an
+ * id the viewer may not filter by is refused with an unmatchable one rather than
+ * dropped, which would widen the query to every kit.
+ */
 describe("getKitsWhereInput custodian scoping", () => {
   it("keeps the requested custodian when the caller may see all custody", () => {
     const where = getKitsWhereInput({
@@ -103,7 +109,7 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: "all",
     });
 
-    expect(where.custody).toEqual({ custodianId: COLLEAGUE });
+    expect(where.custody).toEqual({ custodianId: { in: [COLLEAGUE] } });
   });
 
   it("refuses a colleague's id rather than dropping the filter", () => {
@@ -113,7 +119,9 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: [MINE],
     });
 
-    expect(where.custody).toEqual({ custodianId: CUSTODY_FILTER_REFUSED });
+    expect(where.custody).toEqual({
+      custodianId: { in: [CUSTODY_FILTER_REFUSED] },
+    });
   });
 
   it("keeps the caller's own id", () => {
@@ -123,7 +131,7 @@ describe("getKitsWhereInput custodian scoping", () => {
       allowedTeamMemberIds: [MINE],
     });
 
-    expect(where.custody).toEqual({ custodianId: MINE });
+    expect(where.custody).toEqual({ custodianId: { in: [MINE] } });
   });
 
   it("adds no custody clause when no custodian was requested", () => {
