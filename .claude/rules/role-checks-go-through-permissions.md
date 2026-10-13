@@ -1,12 +1,10 @@
 ---
 description: Never compare organization roles directly, ask @shelf/permissions the named question
-globs:
-  [
-    "apps/webapp/app/**/*.ts",
-    "apps/webapp/app/**/*.tsx",
-    "apps/companion/**/*.ts",
-    "apps/companion/**/*.tsx",
-  ]
+paths:
+  - "apps/webapp/app/**/*.ts"
+  - "apps/webapp/app/**/*.tsx"
+  - "apps/companion/**/*.ts"
+  - "apps/companion/**/*.tsx"
 ---
 
 # Role Checks Go Through `@shelf/permissions`

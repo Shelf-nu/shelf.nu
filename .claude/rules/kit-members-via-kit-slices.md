@@ -1,6 +1,9 @@
 ---
 description: Route kit members into a booking through kitSlices, never the standalone assetIds bucket
-globs: apps/webapp/app/routes/_layout+/*booking*,apps/webapp/app/routes/_layout+/kits.*,apps/webapp/app/modules/booking/service.server.ts
+paths:
+  - "apps/webapp/app/routes/_layout+/*booking*"
+  - "apps/webapp/app/routes/_layout+/kits.*"
+  - "apps/webapp/app/modules/booking/service.server.ts"
 ---
 
 # Kit Members Go Through `kitSlices`, Not `assetIds`

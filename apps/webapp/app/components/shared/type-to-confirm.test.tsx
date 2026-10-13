@@ -87,7 +87,7 @@ const SURFACES: Surface[] = [
     name: "asset",
     element: (
       <DeleteAsset
-        asset={{ id: "a1", title: "Camera Kit", mainImage: null }}
+        asset={{ id: "a1", title: "Camera Kit" }}
         trigger={openButton}
       />
     ),
@@ -98,10 +98,7 @@ const SURFACES: Surface[] = [
   {
     name: "kit",
     element: (
-      <DeleteKit
-        kit={{ id: "k1", name: "Studio Kit", image: null }}
-        trigger={openButton}
-      />
+      <DeleteKit kit={{ id: "k1", name: "Studio Kit" }} trigger={openButton} />
     ),
     expected: "Studio Kit",
     confirmLabel: /^delete$/i,
