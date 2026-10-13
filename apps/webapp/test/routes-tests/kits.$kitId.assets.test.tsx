@@ -29,7 +29,12 @@ const dbMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("~/database/db.server", () => ({
-  db: { kit: { findFirst: dbMocks.kit.findFirst } },
+  db: {
+    kit: { findFirst: dbMocks.kit.findFirst },
+    // why: the loader counts the kit's archived members for the Active view's
+    // empty state; none here.
+    assetKit: { count: vi.fn().mockResolvedValue(0) },
+  },
 }));
 
 vi.mock("~/utils/roles.server", () => ({

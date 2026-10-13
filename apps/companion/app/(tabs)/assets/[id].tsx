@@ -1,4 +1,7 @@
-import { ASSET_QTY_STATUS_LABELS } from "@shelf/labels";
+import {
+  ASSET_QTY_STATUS_LABELS,
+  DELETE_CONSEQUENCE_LABELS,
+} from "@shelf/labels";
 import { useMemo, useState } from "react";
 import {
   View,
@@ -59,6 +62,7 @@ import {
 } from "@/lib/custody-source-options";
 import { AdjustQuantitySheet } from "@/components/adjust-quantity-sheet";
 import { ManagePlacementsSheet } from "@/components/manage-placements-sheet";
+import ConfirmDeleteSheet from "@/components/confirm-delete-sheet";
 import { AssetDetailSkeleton } from "@/components/skeleton-loader";
 import { AssetHeader } from "@/components/asset-detail/asset-header";
 import { QuickActions } from "@/components/asset-detail/quick-actions";
@@ -66,6 +70,12 @@ import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { InfoRow } from "@/components/shared/info-row";
+import { ArchivedNotice } from "@/components/shared/archived-notice";
+import {
+  archivedAssetReason,
+  assetBadgeStatus,
+  isArchivedAsset,
+} from "@/lib/archived-assets";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
@@ -105,6 +115,13 @@ export default function AssetDetailScreen() {
     roles,
     entity: "note",
     action: "create",
+  });
+  // Reinstating an archived asset uses the same grant as archiving it on the
+  // web (`asset: archive`: admins and owners).
+  const canReinstate = userHasPermission({
+    roles,
+    entity: "asset",
+    action: "archive",
   });
   // Members whose custody scope is self may only take custody for themselves
   // and release their OWN quantity-custody rows; the server enforces both.
@@ -223,6 +240,7 @@ export default function AssetDetailScreen() {
   const [showOverflowMenu, setShowOverflowMenu] = useState(false);
   const [showAdjustSheet, setShowAdjustSheet] = useState(false);
   const [showImageZoom, setShowImageZoom] = useState(false);
+  const [isReinstating, setIsReinstating] = useState(false);
 
   // Quantity-custody steps (QUANTITY_TRACKED assets only). Non-null values
   // double as the "sheet visible" flag AND carry the pending target, so the
@@ -293,6 +311,8 @@ export default function AssetDetailScreen() {
   // QUANTITY_TRACKED assets edit their location spread in the placements
   // editor; INDIVIDUAL assets keep the picker + confirm-alert flow.
   const [showPlacementsSheet, setShowPlacementsSheet] = useState(false);
+  // The typed-name delete confirmation (see ConfirmDeleteSheet).
+  const [showDeleteSheet, setShowDeleteSheet] = useState(false);
 
   /**
    * Current placement rows for the placements card + editor seed. Prefers
@@ -428,29 +448,55 @@ export default function AssetDetailScreen() {
     setIsPostingNote(false);
   };
 
-  // ── Delete Asset ──────────────────────────────────
+  // ── Reinstate (archived assets) ───────────────────
 
-  const handleDeleteAsset = () => {
+  // Same action as the web asset page's "Reinstate", behind a confirm because
+  // it puts the asset back in service for everyone in the workspace.
+  const handleReinstate = () => {
     if (!asset) return;
     Alert.alert(
-      "Delete Asset",
-      `Are you sure you want to permanently delete "${asset.title}"? This action cannot be undone.`,
+      "Reinstate asset?",
+      `"${asset.title}" becomes active again: it can be booked, moved and put in custody.`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: performDeleteAsset,
-        },
+        { text: "Reinstate", onPress: () => void performReinstate() },
       ]
     );
   };
 
-  const performDeleteAsset = async () => {
+  const performReinstate = async () => {
+    if (!currentOrg || !asset) return;
+    setIsReinstating(true);
+    const { error: err } = await api.reinstateAsset(currentOrg.id, asset.id);
+    if (err) {
+      setIsReinstating(false);
+      Alert.alert("Couldn't reinstate", err);
+      return;
+    }
+    await fetchAsset();
+    setIsReinstating(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  // ── Delete Asset ──────────────────────────────────
+
+  // A permanent delete asks for the asset's name to be typed first, the same
+  // rule as the webapp's delete dialog.
+  const handleDeleteAsset = () => {
+    if (!asset) return;
+    setShowDeleteSheet(true);
+  };
+
+  const performDeleteAsset = async (confirmation: string) => {
     if (!currentOrg || !asset) return;
     setIsActionLoading(true);
-    const { error: err } = await api.deleteAsset(currentOrg.id, asset.id);
+    const { error: err } = await api.deleteAsset(
+      currentOrg.id,
+      asset.id,
+      confirmation
+    );
     setIsActionLoading(false);
+    setShowDeleteSheet(false);
     if (err) {
       Alert.alert("Error", err);
     } else {
@@ -500,7 +546,14 @@ export default function AssetDetailScreen() {
     );
   }
 
-  const badge = statusBadge[asset.status] ?? {
+  // An archived asset is read-only: one "Archived" badge replaces its status,
+  // a notice says why, and every change the server would refuse is off.
+  const isArchived = isArchivedAsset(asset);
+  const archivedReason = isArchived
+    ? archivedAssetReason({ canReinstate })
+    : undefined;
+  const canUpdateLiveAsset = canUpdateAsset && !isArchived;
+  const badge = statusBadge[assetBadgeStatus(asset)] ?? {
     bg: colors.backgroundTertiary,
     text: colors.muted,
   };
@@ -541,8 +594,9 @@ export default function AssetDetailScreen() {
   // web shows a derived "Partial custody". Use the shared quantity-aware label
   // (identical precedence to web getQuantityBadgeLabelAndColor); fall back to
   // the plain enum label for INDIVIDUAL assets or QT assets with no breakdown.
-  const statusLabel =
-    getQuantityStatusLabel(breakdown) ?? formatStatus(asset.status);
+  const statusLabel = isArchived
+    ? formatStatus(assetBadgeStatus(asset))
+    : getQuantityStatusLabel(breakdown) ?? formatStatus(asset.status);
   const unitSuffix = asset.unitOfMeasure?.trim()
     ? ` ${asset.unitOfMeasure.trim()}`
     : "";
@@ -688,7 +742,7 @@ export default function AssetDetailScreen() {
             onImagePress={() => setShowImageZoom(true)}
             onUploadPress={handleImagePress}
             isUploading={isUploadingImage}
-            canUpload={canUpdateAsset}
+            canUpload={canUpdateLiveAsset}
           />
 
           {/* ── Title + Status ─────────────────────────── */}
@@ -703,6 +757,18 @@ export default function AssetDetailScreen() {
               </Text>
             </View>
           </View>
+
+          {archivedReason && (
+            <View style={styles.archivedNotice}>
+              <ArchivedNotice
+                message={archivedReason}
+                actionLabel={canReinstate ? "Reinstate" : undefined}
+                actionAccessibilityLabel="Reinstate asset"
+                onAction={canReinstate ? handleReinstate : undefined}
+                busy={isReinstating}
+              />
+            </View>
+          )}
 
           {asset.description && (
             <Text style={styles.description}>{asset.description}</Text>
@@ -720,7 +786,7 @@ export default function AssetDetailScreen() {
                   <Text style={styles.quantityTotalLabel}>total</Text>
                   {/* Stock adjust — server requires asset:update, so the
                       affordance is hidden from roles that would 403. */}
-                  {canUpdateAsset && (
+                  {canUpdateLiveAsset && (
                     <TouchableOpacity
                       style={styles.adjustButton}
                       onPress={() => setShowAdjustSheet(true)}
@@ -804,6 +870,7 @@ export default function AssetDetailScreen() {
             isSelfService={takesCustodyForSelfOnly}
             isQtyTracked={isQtyTracked}
             custodyAvailable={isQtyTracked ? assignMax : undefined}
+            archivedReason={archivedReason}
           />
 
           {/* ── Details Card ───────────────────────────── */}
@@ -843,7 +910,7 @@ export default function AssetDetailScreen() {
                   // chevron signal it opens the editor. The QuickActions
                   // "Placements" button carries the "Manage placements" label.
                   onPress={
-                    idx === 0 && canUpdateAsset
+                    idx === 0 && canUpdateLiveAsset
                       ? () => setShowPlacementsSheet(true)
                       : undefined
                   }
@@ -865,7 +932,7 @@ export default function AssetDetailScreen() {
                       }`
                 }
                 onPress={
-                  placements.length === 0 && canUpdateAsset
+                  placements.length === 0 && canUpdateLiveAsset
                     ? () => setShowPlacementsSheet(true)
                     : undefined
                 }
@@ -1189,6 +1256,19 @@ export default function AssetDetailScreen() {
             onSelect={handleLocationSelect}
             onClose={() => setShowLocationPicker(false)}
           />
+          {asset && (
+            <ConfirmDeleteSheet
+              visible={showDeleteSheet}
+              title="Delete asset"
+              message={DELETE_CONSEQUENCE_LABELS.ASSET}
+              expected={asset.title}
+              isDeleting={isActionLoading}
+              onConfirm={(confirmation) =>
+                void performDeleteAsset(confirmation)
+              }
+              onClose={() => setShowDeleteSheet(false)}
+            />
+          )}
           {/* Quantity steps — mounted only for QUANTITY_TRACKED assets so
               INDIVIDUAL rendering stays byte-identical. */}
           {isQtyTracked && (
@@ -1427,6 +1507,10 @@ const useStyles = createStyles((colors, shadows) => ({
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     gap: spacing.md,
+  },
+  archivedNotice: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   title: {
     fontSize: fontSize.xxxl,

@@ -8,7 +8,7 @@
  *
  * It lives here rather than in either route because almost everything around
  * that predicate is a guard: the permission gate, the organization scope, the
- * `availableToBookOnly` narrowing a viewer limited to bookable assets gets, and the custodian
+ * list-scope narrowing a viewer limited to bookable assets gets, and the custodian
  * redaction applied before the payload leaves. Two routes each carrying their
  * own copy of that stack is how one of them ends up missing a guard, which on
  * this endpoint exposes data rather than merely looking wrong.
@@ -28,6 +28,11 @@ import { AssetType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
+import {
+  bookableListScopeWhere,
+  resolveBookableListScope,
+} from "~/modules/asset/list-scope.server";
+import type { BookableListScope } from "~/modules/asset/list-scope.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type { ArchivedFilter } from "~/modules/asset/types";
 import {
@@ -96,8 +101,8 @@ function stringifyFilters(params: URLSearchParams): string {
  *   with no model at all.
  * @param organizationId - The caller's workspace, from `requirePermission` and
  *   never from the request
- * @param availableToBookOnly - Restricts the count to assets the viewer may
- *   reserve, matching the asset query beside it
+ * @param bookableScope - The viewer's list scope, matching the asset query
+ *   beside it; `null` counts every asset
  * @param archivedFilter - The index's Active / Archived / All view (issue #382).
  *   Not a filter the user can clear, so it scopes this count too: counting
  *   archived assets in the Active view would promise rows that clearing every
@@ -107,19 +112,19 @@ function stringifyFilters(params: URLSearchParams): string {
 async function countBucketAssetsIgnoringFilters({
   bucket,
   organizationId,
-  availableToBookOnly,
+  bookableScope,
   archivedFilter,
 }: {
   bucket: AssetModelBucket;
   organizationId: string;
-  availableToBookOnly: boolean;
+  bookableScope: BookableListScope | null;
   archivedFilter: ArchivedFilter;
 }): Promise<number> {
   const where: Prisma.AssetWhereInput = {
     organizationId,
     type: AssetType.INDIVIDUAL,
     assetModelId: bucket.kind === "model" ? bucket.assetModelId : null,
-    ...(availableToBookOnly ? { availableToBook: true } : {}),
+    ...(bookableScope ? { AND: [bookableListScopeWhere(bookableScope)] } : {}),
   };
   applyArchivedFilter(where, archivedFilter);
 
@@ -222,7 +227,7 @@ export async function loadAssetModelBucketAssets({
     // limited to bookable assets sees the same set here as on the page that
     // opened the sheet. Both endpoints are reachable directly, not only
     // through it.
-    const availableToBookOnly = access.policy.assets.listScope === "bookable";
+    const bookableScope = resolveBookableListScope({ access, userId });
 
     // The index's Archived and All views are for members whose role may see
     // archived assets (`assets.seeArchived`, issue #382); everyone else is held
@@ -237,7 +242,7 @@ export async function loadAssetModelBucketAssets({
         filters: stringifyFilters(forwarded),
         canUseBarcodes,
         timeZone,
-        availableToBookOnly,
+        bookableScope,
         honorArchivedView,
       });
 
@@ -249,7 +254,7 @@ export async function loadAssetModelBucketAssets({
         ? await countBucketAssetsIgnoringFilters({
             bucket,
             organizationId,
-            availableToBookOnly,
+            bookableScope,
             archivedFilter: honorArchivedView
               ? getArchivedFilterFromParams(forwarded)
               : "active",

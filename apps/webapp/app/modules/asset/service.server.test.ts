@@ -17,6 +17,7 @@ import { isModelShortfallMessage } from "~/modules/asset/archive-shortfall";
 import { assertAssetQuantityNotBelowReservations } from "~/modules/asset/availability-primitives.server";
 import type * as AvailabilityPrimitivesModule from "~/modules/asset/availability-primitives.server";
 import { findModelReservationsShortAfterArchive } from "~/modules/booking-model-request/service.server";
+import { createSystemBookingNotes } from "~/modules/booking-note/service.server";
 import { getCategory } from "~/modules/category/service.server";
 import { checkAndNotifyLowStock } from "~/modules/consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-lock.server";
@@ -231,7 +232,18 @@ vitest.mock("~/database/db.server", () => ({
         .fn()
         .mockResolvedValue({ firstName: "John", lastName: "Doe" }),
     },
+    // why: archiving reads the draft bookings that still hold the asset, for
+    // the success message. Default: none.
+    booking: {
+      findMany: vitest.fn().mockResolvedValue([]),
+    },
   },
+}));
+
+// why: the booking-side note an "Archive anyway" writes has its own suite;
+// here only whether the archive asks for it matters.
+vitest.mock("~/modules/booking-note/service.server", () => ({
+  createSystemBookingNotes: vitest.fn().mockResolvedValue(undefined),
 }));
 
 // why: lockAssetForQuantityUpdate runs a raw SELECT ... FOR UPDATE that we
@@ -656,6 +668,24 @@ describe("duplicateAsset", () => {
     mockAssetDelete.mockReset();
     mockAssetDelete.mockResolvedValue({ reminders: [] });
     vi.mocked(getActiveCustomFields).mockResolvedValue([]);
+  });
+
+  it("refuses an archived asset, so no active twin of it is created", async () => {
+    await expect(
+      duplicateAsset({
+        asset: makeSource({ archivedAt: new Date("2026-10-01") }),
+        userId: "user-1",
+        amountOfDuplicates: 2,
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('"Boxes" is archived.'),
+      additionalData: expect.objectContaining({
+        archivedAssetIds: ["asset-src"],
+      }),
+    });
+    expect(mockAssetCreate).not.toHaveBeenCalled();
   });
 
   it.each(["ONE_WAY", "TWO_WAY"] as const)(
@@ -2174,6 +2204,7 @@ describe("bulkDeleteAssets — activity events", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1", "asset-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
       // settings is required by the function but only consumed by the
@@ -4164,6 +4195,50 @@ describe("bulkCheckOutAssets — SELF_SERVICE guard", () => {
     );
   });
 
+  it("refuses the scope before the archived rows when both apply", async () => {
+    // A caller who may not assign to this person at all is told so first;
+    // removing the archived row would only lead to this refusal anyway.
+    const countMock = db.asset.count as ReturnType<typeof vitest.fn>;
+    countMock.mockResolvedValueOnce(1);
+    (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
+      {
+        id: "asset-1",
+        title: "Drill",
+        status: "AVAILABLE",
+        type: "INDIVIDUAL",
+      },
+    ]);
+    (db.teamMember.findFirst as ReturnType<typeof vitest.fn>).mockResolvedValue(
+      {
+        name: "Other Person",
+        user: {
+          id: "other-user",
+          firstName: "Other",
+          lastName: "Person",
+          displayName: null,
+        },
+      }
+    );
+
+    await expect(
+      bulkCheckOutAssets({
+        allowedTeamMemberIds: "all" as const,
+        userId: "user-current",
+        assetIds: ["asset-1"],
+        custodianId: "tm-other",
+        custodianName: "Other Person",
+        organizationId: "org-1",
+        settings: ASSET_INDEX_SETTINGS,
+        custodyAssign: "self",
+      })
+    ).rejects.toMatchObject({ status: 403 });
+    expect(countMock).not.toHaveBeenCalled();
+    // Drain the unused Once value and restore the file-wide "nothing archived"
+    // default, which later suites rely on.
+    countMock.mockReset();
+    countMock.mockResolvedValue(0);
+  });
+
   it("allows SELF_SERVICE assigning to a custodian whose user IS the actor", async () => {
     (db.asset.findMany as ReturnType<typeof vitest.fn>).mockResolvedValue([
       {
@@ -5079,6 +5154,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1", "asset-2"],
+      confirmation: "2",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant
@@ -5112,6 +5188,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: [],
+      confirmation: "0",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant
@@ -5130,6 +5207,7 @@ describe("bulkDeleteAssets", () => {
 
     await bulkDeleteAssets({
       assetIds: ["asset-1"],
+      confirmation: "1",
       organizationId: "org-1",
       userId: "user-1",
       // @ts-expect-error settings not relevant
@@ -6100,18 +6178,134 @@ describe("archiveAsset", () => {
     });
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
+    // why: the confirmed archive still leaves "Shoot" one unit short.
+    vitest
+      .mocked(findModelReservationsShortAfterArchive)
+      .mockResolvedValueOnce([
+        {
+          bookingId: "b1",
+          bookingName: "Shoot",
+          modelName: "Sony A7",
+          short: 1,
+        },
+      ]);
+
     await archiveAsset({
       id: "a1",
       organizationId: "org-1",
+      actorUserId: "u1",
       confirmModelShortfall: true,
     });
 
-    // Confirmed: not even measured, and the archive goes through.
-    expect(findModelReservationsShortAfterArchive).not.toHaveBeenCalled();
+    // Confirmed: the archive goes through, and the booking left short is told
+    // on its own activity feed, inside the archive transaction.
     expect(mockRecordEvent).toHaveBeenCalledWith(
       expect.objectContaining({ action: "ASSET_ARCHIVED" }),
       expect.anything()
     );
+    expect(createSystemBookingNotes).toHaveBeenCalledWith(
+      {
+        notes: [
+          expect.objectContaining({
+            bookingId: "b1",
+            content: expect.stringContaining(
+              "This booking's reservation of **Sony A7** is now 1 unit short for its dates."
+            ),
+          }),
+        ],
+        organizationId: "org-1",
+      },
+      expect.anything()
+    );
+  });
+
+  it("writes an Activity note naming who archived the asset", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      title: "Camera",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    await archiveAsset({
+      id: "a1",
+      organizationId: "org-1",
+      actorUserId: "u1",
+    });
+
+    expect(db.note.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          assetId: "a1",
+          userId: "u1",
+          type: "UPDATE",
+          content: expect.stringMatching(/ archived the asset\.$/),
+        }),
+      ],
+    });
+  });
+
+  it("names the draft bookings that still hold the archived asset", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      title: "Camera",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+    // why: one draft booking still lists the asset.
+    (db.booking.findMany as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
+      [{ id: "b1", name: "Shoot" }]
+    );
+
+    const result = await archiveAsset({ id: "a1", organizationId: "org-1" });
+
+    expect(result.draftBookings).toEqual([{ id: "b1", name: "Shoot" }]);
+    expect(db.booking.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org-1",
+          status: "DRAFT",
+          bookingAssets: { some: { assetId: { in: ["a1"] } } },
+        }),
+      })
+    );
+  });
+
+  it("looks up the draft bookings inside the archive transaction", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      title: "Camera",
+      type: "INDIVIDUAL",
+      status: "AVAILABLE",
+      archivedAt: null,
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+    let transactionSettled = false;
+    let lookedUpInsideTransaction: boolean | undefined;
+    // why: record when the transaction callback finishes, so the test can
+    // tell a lookup inside it from one after the commit.
+    (db.$transaction as ReturnType<typeof vitest.fn>).mockImplementationOnce(
+      async (callback: (tx: unknown) => Promise<unknown>) => {
+        const result = await callback(db);
+        transactionSettled = true;
+        return result;
+      }
+    );
+    // why: capture whether the draft lookup ran before the commit.
+    (
+      db.booking.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementationOnce(() => {
+      lookedUpInsideTransaction = !transactionSettled;
+      return Promise.resolve([]);
+    });
+
+    await archiveAsset({ id: "a1", organizationId: "org-1" });
+
+    expect(lookedUpInsideTransaction).toBe(true);
   });
 
   it("throws 409 when already archived", async () => {
@@ -6249,6 +6443,31 @@ describe("unarchiveAsset", () => {
       expect.anything()
     );
     expect(result.id).toBe("a1");
+    // The Activity tab says who reinstated it.
+    expect(db.note.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          assetId: "a1",
+          userId: "u1",
+          type: "UPDATE",
+          content: expect.stringMatching(/ reinstated the asset\.$/),
+        }),
+      ],
+    });
+  });
+
+  it("reports whether the reinstated asset is bookable", async () => {
+    mockFindFirst.mockResolvedValue({
+      id: "a1",
+      archivedAt: new Date(),
+      availableToBook: false,
+      assetKits: [],
+    });
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const result = await unarchiveAsset({ id: "a1", organizationId: "org-1" });
+
+    expect(result.availableToBook).toBe(false);
   });
 
   it("throws 409 when the asset is not archived", async () => {
@@ -6328,7 +6547,11 @@ describe("bulkArchiveAssets", () => {
       actorUserId: "u1",
     });
 
-    expect(result).toEqual({ archivedCount: 2, skippedCount: 1 });
+    expect(result).toEqual({
+      archivedCount: 2,
+      skippedCount: 1,
+      draftBookings: [],
+    });
     expect(mockUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -6343,6 +6566,13 @@ describe("bulkArchiveAssets", () => {
       expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a1" }),
       expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a2" }),
     ]);
+    // One Activity note per asset actually archived, naming the actor.
+    expect(db.note.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ assetId: "a1", userId: "u1" }),
+        expect.objectContaining({ assetId: "a2", userId: "u1" }),
+      ],
+    });
   });
 
   it("counts and emits for the rows the write stamped, not the eligible ones", async () => {
@@ -6364,7 +6594,11 @@ describe("bulkArchiveAssets", () => {
       actorUserId: "u1",
     });
 
-    expect(result).toEqual({ archivedCount: 1, skippedCount: 1 });
+    expect(result).toEqual({
+      archivedCount: 1,
+      skippedCount: 1,
+      draftBookings: [],
+    });
     const events = mockRecordEvents.mock.calls[0][0];
     expect(events).toEqual([
       expect.objectContaining({ action: "ASSET_ARCHIVED", assetId: "a1" }),
@@ -6385,7 +6619,11 @@ describe("bulkArchiveAssets", () => {
       settings: {} as never,
     });
 
-    expect(result).toEqual({ archivedCount: 0, skippedCount: 1 });
+    expect(result).toEqual({
+      archivedCount: 0,
+      skippedCount: 1,
+      draftBookings: [],
+    });
     expect(mockRecordEvents).not.toHaveBeenCalled();
   });
 
@@ -6400,7 +6638,11 @@ describe("bulkArchiveAssets", () => {
       settings: {} as never,
     });
 
-    expect(result).toEqual({ archivedCount: 0, skippedCount: 2 });
+    expect(result).toEqual({
+      archivedCount: 0,
+      skippedCount: 2,
+      draftBookings: [],
+    });
     expect(mockUpdateMany).not.toHaveBeenCalled();
     expect(mockRecordEvents).not.toHaveBeenCalled();
   });

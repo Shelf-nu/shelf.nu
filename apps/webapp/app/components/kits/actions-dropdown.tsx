@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Prisma } from "@prisma/client";
+import { kitWithoutActiveAssetsReason } from "@shelf/labels";
 import { MapPinIcon } from "lucide-react";
 import { useLoaderData } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
@@ -54,7 +55,7 @@ export default function ActionsDropdown({
 }
 
 function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
-  const { kit } = useLoaderData<typeof loader>();
+  const { kit, archivedMemberCount } = useLoaderData<typeof loader>();
   const kitCanBeReleased = kit.custody;
   const kitIsCheckedOut = kit.status === "CHECKED_OUT";
 
@@ -73,6 +74,19 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
     (ak) =>
       ak.asset.type !== "QUANTITY_TRACKED" && ak.asset.status !== "AVAILABLE"
   );
+
+  // `kit.assetKits` holds the active members only. A kit without one (all
+  // archived, or empty) has nothing to put into custody, which the server
+  // refuses too.
+  const assignCustodyDisabled =
+    kit.assetKits.length === 0
+      ? {
+          reason: kitWithoutActiveAssetsReason({
+            hasArchivedAssets: archivedMemberCount > 0,
+            action: "custody",
+          }),
+        }
+      : someAssetIsNotAvailable;
 
   const roles = useOrganizationRoles();
   const assignsSelfOnly = useRoleAccess().custody.assign === "self";
@@ -182,7 +196,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
                     className="justify-start px-4 py-3 text-gray-700 hover:text-gray-700"
                     width="full"
                     onClick={() => setOpen(false)}
-                    disabled={someAssetIsNotAvailable}
+                    disabled={assignCustodyDisabled}
                     aria-label="Assign/Take Custody"
                   >
                     <span className="flex items-center gap-2">
@@ -309,7 +323,8 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         contextType="kit"
         contextId={kit.id}
         contextName={kit.name}
-        assetCount={kit.assetKits.length}
+        // An audit started from a kit lists its archived members too.
+        assetCount={kit.assetKits.length + archivedMemberCount}
         open={isStartAuditOpen}
         onClose={() => setIsStartAuditOpen(false)}
         showTrigger={false}

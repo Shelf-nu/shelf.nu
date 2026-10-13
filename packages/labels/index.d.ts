@@ -222,6 +222,74 @@ export declare function kitMembersCustodyRefusal(
 export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
 /**
+ * Why "Reinstate" is refused for an archived asset whose kit is in custody or
+ * checked out. Shared by the server refusal and the disabled menu action.
+ */
+export declare const KIT_IN_USE_REINSTATE_REASON: "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
+/**
+ * The reason an action on an archived asset is disabled. A reader who cannot
+ * reinstate (no asset `archive` permission) is told to ask an admin.
+ *
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ * @param options.action - what the disabled control does; defaults to "change"
+ */
+export declare function archivedAssetBlockedReason(options: {
+  canReinstate: boolean;
+  action?: "change" | "book";
+}): string;
+
+/** How an archived-assets refusal tells the reader to move on. */
+export type ArchivedAssetsFix =
+  | "reinstate"
+  | "remove-from-list"
+  | "remove-from-booking";
+
+/**
+ * The refusal when a request touches archived assets: names the first few
+ * titles, then the way out for this request and this reader.
+ *
+ * @param options.titles - titles of the archived assets, at least one
+ * @param options.fix - "reinstate" for a change to the asset itself,
+ *   "remove-from-list" for a batch the reader built, "remove-from-booking" for
+ *   a booking that holds them
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ */
+export declare function archivedAssetsRefusal(options: {
+  titles: string[];
+  fix: ArchivedAssetsFix;
+  canReinstate: boolean;
+}): string;
+
+/**
+ * "1 archived asset was left out." / "2 archived assets were left out."
+ *
+ * @param count - archived assets left out, at least one
+ */
+export declare function archivedAssetsLeftOut(count: number): string;
+
+/**
+ * The refusal when kits with no active asset (only archived ones, or none) are
+ * put into custody or booked.
+ *
+ * @param options.kits - at least one; `hasArchivedAssets` is false for an empty kit
+ * @param options.action - what was refused
+ */
+export declare function kitsWithoutActiveAssetsRefusal(options: {
+  kits: { name: string; hasArchivedAssets: boolean }[];
+  action: "custody" | "booking";
+}): string;
+
+/**
+ * The reason a kit's Book or custody action is disabled because the kit holds
+ * no active asset.
+ */
+export declare function kitWithoutActiveAssetsReason(options: {
+  hasArchivedAssets: boolean;
+  action: "custody" | "booking";
+}): string;
+
+/**
  * The semantic weight a status badge carries, independent of any palette. Each
  * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
  * the companion's light/dark theme), so the VALUES stay app-owned while the
@@ -332,3 +400,31 @@ export declare const CLIENT_DECLARED_BOOKING_METHODS: readonly [
 /** A method an app may declare on a check-in or check-out request. */
 export type ClientDeclaredBookingMethod =
   (typeof CLIENT_DECLARED_BOOKING_METHODS)[number];
+
+/** Name of the form field that carries a typed delete confirmation. */
+export declare const DELETE_CONFIRMATION_FIELD: "confirmation";
+
+/**
+ * Reduces a typed delete confirmation to the form it is compared in: NFC,
+ * trimmed, whitespace collapsed, lower-cased. `""` for null or undefined.
+ */
+export declare function normalizeDeleteConfirmation(value: unknown): string;
+
+/**
+ * Whether a typed confirmation unlocks a delete. Shared by the webapp dialogs,
+ * the server guard on bulk deletes and the companion's delete sheets. A blank
+ * expected value never matches.
+ *
+ * @param typed - what the user typed
+ * @param expected - the item's name, or the number of selected items
+ */
+export declare function deleteConfirmationMatches(
+  typed: unknown,
+  expected: string | number
+): boolean;
+
+/** What a permanent delete removes, for the deletes both apps offer. */
+export declare const DELETE_CONSEQUENCE_LABELS: {
+  readonly ASSET: string;
+  readonly BOOKING: string;
+};

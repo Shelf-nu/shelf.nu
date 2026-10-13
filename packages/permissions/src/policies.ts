@@ -64,7 +64,11 @@ type RolePolicyShape = {
     documentsForOthers: boolean;
   };
   assets: {
-    /** The asset list shows every asset, or only those available to book. */
+    /**
+     * The asset list shows every asset, or ("bookable") only those available
+     * to book plus the ones the member holds (in their custody, or checked out
+     * to them on an active booking).
+     */
     listScope: "all" | "bookable";
     /**
      * May open the Archived and All views of an asset list. Seeing is not
@@ -329,7 +333,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "all", seeArchived: false },
+    assets: { listScope: "bookable", seeArchived: false },
     custody: { see: "own-unless-workspace-allows", assign: "none" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {

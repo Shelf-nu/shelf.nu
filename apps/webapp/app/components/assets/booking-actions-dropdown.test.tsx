@@ -32,11 +32,12 @@ vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => ({ id: "org-1", type: "TEAM" }),
 }));
 
-// why: `useCanArchiveAssets` reads the member's roles off the _layout route
-// loader, which is not mounted here. It only picks the archived tooltip's
-// wording, which these tests do not exercise.
+const canArchiveMock = vi.hoisted(() => vi.fn(() => true));
+
+// why: the archived reason is worded for the viewer's role, which the hook
+// reads from the _layout route loader; the role is the variable under test.
 vi.mock("~/hooks/use-can-archive-assets", () => ({
-  useCanArchiveAssets: () => true,
+  useCanArchiveAssets: canArchiveMock,
 }));
 
 /**
@@ -48,10 +49,19 @@ vi.mock("~/hooks/use-can-archive-assets", () => ({
  * links array IS the component's output contract, so we assert on it directly.
  */
 let capturedLinks: BookLink[] = [];
+/** The `disabledTrigger` from the last render: why the Book button is off. */
+let capturedTrigger: unknown;
 
 vi.mock("../shared/generic-add-to-bookings-actions-dropdown", () => ({
-  GenericBookActionsDropdown: ({ links }: { links: BookLink[] }) => {
+  GenericBookActionsDropdown: ({
+    links,
+    disabledTrigger,
+  }: {
+    links: BookLink[];
+    disabledTrigger: unknown;
+  }) => {
     capturedLinks = links;
+    capturedTrigger = disabledTrigger;
     return null;
   },
 }));
@@ -76,6 +86,8 @@ const kitMembership = (kitId: string, name: string) => ({
 describe("BookingActionsDropdown", () => {
   beforeEach(() => {
     capturedLinks = [];
+    capturedTrigger = undefined;
+    canArchiveMock.mockReturnValue(true);
   });
 
   it("blocks both booking actions for an INDIVIDUAL asset inside a kit", () => {
@@ -127,5 +139,40 @@ describe("BookingActionsDropdown", () => {
 
     expect(disabledFor("Create new booking")).toBe(false);
     expect(disabledFor("Add to existing booking")).toBe(false);
+  });
+
+  it("tells an admin to reinstate an archived asset to book it", () => {
+    useLoaderDataMock.mockReturnValue({
+      asset: {
+        ...baseAsset,
+        type: "INDIVIDUAL",
+        assetKits: [],
+        archivedAt: "2026-10-01T00:00:00Z",
+      },
+    });
+
+    render(<BookingActionsDropdown />);
+
+    expect(capturedTrigger).toEqual({
+      reason: "This asset is archived. Reinstate it to book it.",
+    });
+  });
+
+  it("tells Base and Self-service to ask an admin, since they cannot reinstate", () => {
+    canArchiveMock.mockReturnValue(false);
+    useLoaderDataMock.mockReturnValue({
+      asset: {
+        ...baseAsset,
+        type: "INDIVIDUAL",
+        assetKits: [],
+        archivedAt: "2026-10-01T00:00:00Z",
+      },
+    });
+
+    render(<BookingActionsDropdown />);
+
+    expect(capturedTrigger).toEqual({
+      reason: "This asset is archived. Ask an admin to reinstate it.",
+    });
   });
 });

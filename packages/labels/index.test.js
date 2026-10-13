@@ -28,6 +28,10 @@ import {
   AUDIT_STATUS_LABELS,
   AUDIT_STATUS_TONES,
   BOOKING_METHOD,
+  DELETE_CONFIRMATION_FIELD,
+  DELETE_CONSEQUENCE_LABELS,
+  deleteConfirmationMatches,
+  normalizeDeleteConfirmation,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
   CONSUMPTION_TYPE_ADJECTIVES,
@@ -38,6 +42,7 @@ import {
   EXPLICIT_REQUIREMENT_ROLE_LABELS,
   explicitRequirementSwitchDescription,
   KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -45,6 +50,11 @@ import {
   kitMemberCustodyBlockedReason,
   kitMemberCustodyRefusal,
   kitMembersCustodyRefusal,
+  archivedAssetBlockedReason,
+  archivedAssetsLeftOut,
+  archivedAssetsRefusal,
+  kitWithoutActiveAssetsReason,
+  kitsWithoutActiveAssetsRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -342,6 +352,119 @@ test("the multi-member refusal counts the members and names the first three", ()
   );
 });
 
+test("an archived asset's disabled reason never offers a reinstate the reader lacks", () => {
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true }),
+    "This asset is archived. Reinstate it to make changes."
+  );
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true, action: "book" }),
+    "This asset is archived. Reinstate it to book it."
+  );
+  for (const action of ["change", "book"]) {
+    const reason = archivedAssetBlockedReason({ canReinstate: false, action });
+    assert.equal(
+      reason,
+      "This asset is archived. Ask an admin to reinstate it."
+    );
+    assert.doesNotMatch(reason, /Reinstate it/);
+  }
+  // A reinstate held up by an in-use kit names the way out.
+  assert.match(
+    KIT_IN_USE_REINSTATE_REASON,
+    /Release or check in the kit first/
+  );
+});
+
+test("the archived refusal names the assets and the way out for this reader", () => {
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: true,
+    }),
+    '"Cam A" is archived. Reinstate it to make changes.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Ask an admin to reinstate it.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A", "Cam B"],
+      fix: "remove-from-list",
+      canReinstate: false,
+    }),
+    '"Cam A" and "Cam B" are archived. Remove them from the list and try again.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["A", "B", "C", "D", "E"],
+      fix: "remove-from-booking",
+      canReinstate: true,
+    }),
+    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "remove-from-booking",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Remove it from the booking or ask an admin to reinstate it.'
+  );
+});
+
+test("left-out counts agree in number", () => {
+  assert.equal(archivedAssetsLeftOut(1), "1 archived asset was left out.");
+  assert.equal(archivedAssetsLeftOut(3), "3 archived assets were left out.");
+});
+
+test("a kit with no active asset says whether it is empty or only archived", () => {
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: true }],
+      action: "custody",
+    }),
+    'Kit "Camera Kit" holds only archived assets, so there is nothing to put into custody. Add an active asset to it, or have an admin reinstate one.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: false }],
+      action: "booking",
+    }),
+    'Kit "Camera Kit" has no assets, so there is nothing to book. Add assets to it first.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: ["A", "B", "C", "D"].map((name) => ({
+        name,
+        hasArchivedAssets: true,
+      })),
+      action: "custody",
+    }),
+    '4 kits have no active assets, so there is nothing to put into custody: "A", "B", "C" and 1 more. Add active assets to them first.'
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: true,
+      action: "booking",
+    }),
+    "This kit holds only archived assets. Add an active asset to book this kit."
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: false,
+      action: "custody",
+    }),
+    "This kit has no assets. Add assets to assign custody."
+  );
+});
+
 test("the declarable booking methods are BOOKING_METHOD's values, never quick", () => {
   // The server validates the request field against the tuple and the app sends
   // BOOKING_METHOD values, so the two must list the same words.
@@ -350,4 +473,39 @@ test("the declarable booking methods are BOOKING_METHOD's values, never quick", 
     Object.values(BOOKING_METHOD).sort()
   );
   assert.equal(CLIENT_DECLARED_BOOKING_METHODS.includes("quick"), false);
+});
+
+test("a typed delete confirmation matches its name loosely but never blank", () => {
+  // Case, edge whitespace and doubled spaces do not decide a delete.
+  assert.equal(
+    deleteConfirmationMatches("  camera   kit ", "Camera Kit"),
+    true
+  );
+  // A composed é (NFC) and a decomposed one (NFD, as macOS can type it).
+  assert.equal(deleteConfirmationMatches("Résumé", "Résumé"), true);
+  // Counts are compared as text.
+  assert.equal(deleteConfirmationMatches("12", 12), true);
+  assert.equal(deleteConfirmationMatches(" 12 ", 12), true);
+  // A different name, a prefix or a different count is refused.
+  assert.equal(deleteConfirmationMatches("Camera", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("11", 12), false);
+  // Nothing typed, or nothing to match, never unlocks.
+  assert.equal(deleteConfirmationMatches("", "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches(undefined, "Camera Kit"), false);
+  assert.equal(deleteConfirmationMatches("", ""), false);
+  assert.equal(deleteConfirmationMatches("   ", "  "), false);
+});
+
+test("the confirmation field name is the one the bulk endpoints read", () => {
+  assert.equal(DELETE_CONFIRMATION_FIELD, "confirmation");
+  assert.equal(normalizeDeleteConfirmation(null), "");
+});
+
+test("each delete consequence says it is permanent", () => {
+  for (const text of Object.values(DELETE_CONSEQUENCE_LABELS)) {
+    assert.match(text, /permanently deletes/);
+    assert.match(text, /This cannot be undone\.$/);
+    // House rule: no em or en dashes in user-facing strings.
+    assert.doesNotMatch(text, /[\u2013\u2014]/);
+  }
 });

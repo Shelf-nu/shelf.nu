@@ -5,7 +5,11 @@ import {
   PopoverPortal,
   PopoverTrigger,
 } from "@radix-ui/react-popover";
-import { kitMemberCustodyBlockedReason } from "@shelf/labels";
+import {
+  archivedAssetBlockedReason,
+  KIT_IN_USE_REINSTATE_REASON,
+  kitMemberCustodyBlockedReason,
+} from "@shelf/labels";
 import {
   AlarmClockIcon,
   ArchiveIcon,
@@ -142,7 +146,6 @@ const ConditionalActionsDropdown = () => {
   /**
    * Why archiving is blocked for this asset, if at all. Mirrors the server
    * guard in `archiveAsset` so the UI explains the disabled state up-front.
-   * Reinstating has no such gate (an archived asset is always AVAILABLE).
    */
   const archiveDisabledReason: { reason: string } | false = isQtyTracked
     ? { reason: "Quantity-tracked assets can't be archived yet." }
@@ -156,15 +159,26 @@ const ConditionalActionsDropdown = () => {
     : false;
 
   /**
+   * Reinstating is refused while the asset's kit is in custody or out on a
+   * booking (`unarchiveAsset`): the kit took its hold without this member, so
+   * it would come back as an active member its own kit does not account for.
+   * Said up-front, with the server's refusal text, rather than after the click.
+   */
+  const reinstateDisabledReason: { reason: string } | false =
+    isArchived && assetIsPartOfUnavailableKit
+      ? { reason: KIT_IN_USE_REINSTATE_REASON }
+      : false;
+
+  /**
    * An archived asset is frozen: every action is disabled except Reinstate.
    * Thread this into each action's `disabled` so the whole menu reads as
    * read-only with one consistent reason, while Reinstate stays enabled.
    */
   const archivedActionDisabled: { reason: string } | false = isArchived
     ? {
-        reason: canArchiveAsset
-          ? "This asset is archived. Reinstate it to make changes."
-          : "This asset is archived. Ask an admin to reinstate it.",
+        // Members who see this menu without the archive grant (Manager, self
+        // service) cannot reinstate, so they are told who can instead.
+        reason: archivedAssetBlockedReason({ canReinstate: canArchiveAsset }),
       }
     : false;
 
@@ -472,7 +486,7 @@ const ConditionalActionsDropdown = () => {
                       width="full"
                       disabled={
                         isArchived
-                          ? isArchiveSubmitting
+                          ? reinstateDisabledReason || isArchiveSubmitting
                           : archiveDisabledReason || isArchiveSubmitting
                       }
                       onClick={() => {

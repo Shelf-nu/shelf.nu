@@ -57,6 +57,7 @@ Do not edit by hand: run `pnpm --filter @shelf/webapp docs:roles`.
 | Sees every booking (toggles off / on) | yes / yes | yes / yes | yes / yes | no / yes | no / yes |
 | Sees every custodian (toggles off / on) | yes / yes | yes / yes | yes / yes | no / yes | no / yes |
 | Removes booking items in | DRAFT, RESERVED, ONGOING, OVERDUE | DRAFT, RESERVED, ONGOING, OVERDUE | DRAFT, RESERVED, ONGOING, OVERDUE | DRAFT, RESERVED | DRAFT |
+| Asset list shows | Every asset | Every asset | Every asset | Assets available for bookings, plus the ones they hold | Assets available for bookings, plus the ones they hold |
 | Default asset index | ADVANCED | ADVANCED | ADVANCED | SIMPLE | SIMPLE |
 
 #### Permission matrix

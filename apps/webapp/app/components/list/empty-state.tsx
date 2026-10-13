@@ -63,6 +63,9 @@ export const EmptyState = ({
     archivedParam !== "archived" && archivedParam !== "all";
   const searchMayBeHidingArchived =
     plural === "assets" && offersArchivedView && viewHidesArchived;
+  /** The Archived view searches archived assets only, so it hides the rest. */
+  const searchIsArchivedOnly =
+    plural === "assets" && offersArchivedView && archivedParam === "archived";
 
   /**
    * Only members who may see archived assets get the view menu (see
@@ -76,11 +79,16 @@ export const EmptyState = ({
   const filteredTexts = hasSearch
     ? {
         title: `No ${plural} found`,
-        p: !searchMayBeHidingArchived
-          ? `Your search for "${search}" did not match any ${plural} in the database.`
-          : canViewArchivedAssets
-          ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Pick Archived from the menu on the list title.`
-          : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
+        // The server ignores `archived=` for members without the Archived
+        // view, so only they are told about it.
+        p:
+          searchIsArchivedOnly && canViewArchivedAssets
+            ? `No archived ${plural} match "${search}". Active ${plural} are hidden from this view. Pick Active or All from the menu on the list title.`
+            : !searchMayBeHidingArchived
+            ? `Your search for "${search}" did not match any ${plural} in the database.`
+            : canViewArchivedAssets
+            ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Pick Archived from the menu on the list title.`
+            : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }
     : {
         title: `No ${plural} found`,

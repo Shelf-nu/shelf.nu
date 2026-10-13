@@ -6,6 +6,7 @@ import {
   type MetaFunction,
 } from "react-router";
 import { z } from "zod";
+import { archivedHiddenEmptyState } from "~/components/assets/archived-hidden-empty-state";
 import {
   ArchivedViewMenu,
   useArchivedView,
@@ -80,7 +81,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
      * page can render `${kit.name}'s assets` (matches the sibling overview
      * route's title pattern) without an extra round-trip.
      */
-    const [assets, kit] = await Promise.all([
+    const [assets, kit, archivedMemberCount] = await Promise.all([
       getAssetsForKits({
         request,
         organizationId,
@@ -94,6 +95,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       db.kit.findFirst({
         where: { id: kitId, organizationId },
         select: { name: true },
+      }),
+      // Archived members the Active view hides, so its empty state can say
+      // where they went rather than "No assets in this kit".
+      db.assetKit.count({
+        where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
       }),
     ]);
 
@@ -182,6 +188,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       ...assets,
       ...(bookingImpactByAssetId ? { bookingImpactByAssetId } : {}),
       modelName,
+      archivedMemberCount,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId, kitId });
@@ -193,6 +200,16 @@ export default function KitAssets() {
   const roles = useOrganizationRoles();
   const canViewArchivedAssets = useCanViewArchivedAssets();
   const archivedView = useArchivedView(canViewArchivedAssets);
+  const { archivedMemberCount } = useLoaderData<typeof loader>();
+  /** Set only on the Active view of a kit whose members are all archived. */
+  const archivedHiddenState =
+    archivedView === "active"
+      ? archivedHiddenEmptyState({
+          archivedCount: archivedMemberCount,
+          canViewArchivedAssets,
+          place: "kit",
+        })
+      : null;
 
   const userRoleCanManageAssets = userHasPermission({
     roles,
@@ -250,10 +267,12 @@ export default function KitAssets() {
             archivedView === "archived"
               ? { title: "No archived assets in this kit", text: "" }
               : {
-                  title: "No assets in this kit",
-                  text: userRoleCanManageAssets
-                    ? "Start by adding your first asset."
-                    : "",
+                  title: archivedHiddenState?.title ?? "No assets in this kit",
+                  text:
+                    archivedHiddenState?.text ??
+                    (userRoleCanManageAssets
+                      ? "Start by adding your first asset."
+                      : ""),
                   newButtonContent: userRoleCanManageAssets
                     ? "Add assets"
                     : undefined,

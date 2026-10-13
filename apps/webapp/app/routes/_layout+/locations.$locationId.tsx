@@ -27,6 +27,7 @@ import TextualDivider from "~/components/shared/textual-divider";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import {
+  assertLocationDeleteConfirmed,
   deleteLocation,
   getLocation,
   getLocationDescendantsTree,
@@ -40,6 +41,7 @@ import {
   updateCookieWithPerPage,
   userPrefs,
 } from "~/utils/cookies.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { geolocate } from "~/utils/geolocate.server";
@@ -48,6 +50,7 @@ import {
   error,
   getCurrentSearchParams,
   getParams,
+  parseData,
 } from "~/utils/http.server";
 import { getParamsValues } from "~/utils/list";
 import {
@@ -170,6 +173,13 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       entity: PermissionEntity.location,
       action: PermissionAction.delete,
     });
+
+    // The dialog asks for the location's name; refuse a request that skipped it.
+    const { confirmation } = parseData(
+      await request.formData(),
+      DeleteConfirmationSchema
+    );
+    await assertLocationDeleteConfirmed({ id, organizationId, confirmation });
 
     await deleteLocation({ id, organizationId });
 

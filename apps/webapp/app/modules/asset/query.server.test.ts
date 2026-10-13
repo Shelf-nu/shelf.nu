@@ -844,7 +844,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -888,7 +888,7 @@ describe("generateWhereClause - built-in date filter timezone", () => {
       null,
       [filter],
       undefined,
-      false,
+      null,
       "Asia/Tokyo"
     );
 
@@ -1322,6 +1322,23 @@ describe("generateWhereClause - tag EXISTS-ification (slim-phase enabler)", () =
   });
 });
 
+describe("generateWhereClause - list scope", () => {
+  const orgId = "test-org-id";
+
+  it("lists every asset when there is no scope", () => {
+    const sql = getSqlString(generateWhereClause(orgId, null, []));
+    expect(sql).not.toContain("availableToBook");
+  });
+
+  it("keeps bookable assets and the ones the viewer holds", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [], undefined, { holderUserId: "u-1" })
+    );
+    expect(sql).toContain(`AND (a."availableToBook" = true OR EXISTS`);
+    expect(sql).toContain(`FROM "Custody" scope_cu`);
+  });
+});
+
 describe("generateWhereClause - lowStockOnly", () => {
   const orgId = "test-org-id";
 
@@ -1332,9 +1349,9 @@ describe("generateWhereClause - lowStockOnly", () => {
   });
 
   it("does NOT emit the low-stock predicate when explicitly false", () => {
-    // Args: (org, search, filters, assetIds, availableToBookOnly, timeZone, lowStockOnly)
+    // Args: (org, search, filters, assetIds, bookableScope, timeZone, lowStockOnly)
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", false)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", false)
     );
     expect(sql).not.toContain("QUANTITY_TRACKED");
     expect(sql).not.toContain("minQuantity");
@@ -1342,7 +1359,7 @@ describe("generateWhereClause - lowStockOnly", () => {
 
   it("emits the low-stock predicate when the flag is set", () => {
     const sql = getSqlString(
-      generateWhereClause(orgId, null, [], undefined, false, "UTC", true)
+      generateWhereClause(orgId, null, [], undefined, null, "UTC", true)
     );
     expect(sql).toContain(`a."type" = 'QUANTITY_TRACKED'`);
     expect(sql).toContain(`a."minQuantity" IS NOT NULL`);

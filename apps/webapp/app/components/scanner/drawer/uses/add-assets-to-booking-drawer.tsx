@@ -41,6 +41,11 @@ import { createBlockers } from "../blockers-factory";
 import ConfigurableDrawer from "../configurable-drawer";
 import { GenericItemRow, DefaultLoadingState } from "../generic-item-row";
 import { ScannedAssetQuantityInput } from "../scanned-asset-quantity-input";
+import {
+  buildAddToBookingBlockers,
+  resolveScannedUnitsAvailable,
+} from "./booking-scan-blockers";
+import { kitHasUnavailableActiveMember } from "./scan-blocker-helpers";
 
 // Export the schema so it can be reused
 export const addScannedAssetsToBookingSchema = z
@@ -73,25 +78,6 @@ export const addScannedAssetsToBookingSchema = z
   });
 
 /**
- * Free units this booking may still draw on for a scanned row, or `null` when
- * the question doesn't apply because the row is an INDIVIDUAL asset.
- *
- * `pickerMeta.maxAllowed` is the booking's pool for this asset, resolved
- * server-side by the same primitive the write guard enforces with, so a row
- * judged here agrees with what the submit will do. It is absent only when a
- * scan carried no picker context; the asset's own stock is the closest stand-in
- * then, and a quantity-tracked row with no recorded stock has nothing to stage.
- *
- * Shared by the blocker list and the row badge so the two can never disagree
- * about which rows are exhausted — a blocker whose row shows no badge is a
- * count the user cannot attribute to anything.
- */
-function resolveScannedUnitsAvailable(asset: AssetFromQr): number | null {
-  if (!isQuantityTracked(asset)) return null;
-  return asset.pickerMeta?.maxAllowed ?? asset.quantity ?? 0;
-}
-
-/**
  * Drawer component for managing scanned assets to be added to bookings
  */
 export default function AddAssetsToBookingDrawer({
@@ -118,10 +104,6 @@ export default function AddAssetsToBookingDrawer({
   const { assetIds } = useAtomValue(scannedItemIdsAtom);
 
   // Filter and prepare data for component rendering
-  const assets = Object.values(items)
-    .filter((item) => !!item && item.data && item.type === "asset")
-    .map((item) => item?.data as AssetFromQr);
-
   const kits = Object.values(items)
     .filter((item) => !!item && item.data && item.type === "kit")
     .map((item) => item?.data as KitFromQr);
@@ -252,7 +234,7 @@ export default function AddAssetsToBookingDrawer({
    * disagree on which of several equally-claimable rows wins a single unit.
    * That is fine here because the direction only ever fails closed: the
    * worst case is the blocker holding a scan the server would have accepted,
-   * never the reverse, which is the failure mode this fix removes.
+   * never a duplicate slipping through.
    *
    * The value is the model the row answers, which the badge names.
    */
@@ -287,210 +269,13 @@ export default function AddAssetsToBookingDrawer({
     [progressByModel]
   );
 
-  // Setup blockers
-  const errors = Object.entries(items).filter(([, item]) => !!item?.error);
-
-  // Asset blockers
-  //
-  // A scan the matcher put in the `claimed` bucket is already on the booking
-  // by definition, and scanning it is how it comes to answer a reserved unit
-  // (the server claims it via `claimUnstampedBookingRows`). Excluding those
-  // ids here is what lets that submit go through instead of being refused as
-  // a plain duplicate. The progress strip and pull list above already move
-  // when this happens, so the operator sees the claim take effect there.
-  //
-  // This must be the matcher's verdict, not the structural `claimableIncludedIds`
-  // a row is eligible on: eligibility alone says nothing about whether an
-  // outstanding reservation actually matches, or whether this session's
-  // other scans already used up what did. On a booking with no reservations,
-  // every already-added asset is structurally claimable, so exempting on
-  // that set would silently disable this blocker for the ordinary case.
-  const assetsAlreadyAddedIds = assets
-    .filter((asset) => !!asset)
-    .filter(
-      (asset) =>
-        booking.bookingAssets.some((ba) => ba.assetId === asset.id) &&
-        !claimedModelNameByAssetId.has(asset.id)
-    )
-    .map((a) => !!a && a.id);
-
-  // Only INDIVIDUAL assets that are in a kit are truly "scan the kit
-  // QR instead" cases — the whole asset is committed to a kit, so
-  // booking the asset directly would conflict with the kit.
-  //
-  // QUANTITY_TRACKED assets only have a *slice* of their pool in any
-  // given kit (`AssetKit.quantity` ≤ `Asset.quantity`); the free
-  // remainder is bookable individually. Server-side availability
-  // re-validation (sum-within-pool + DEFERRED trigger) is the source
-  // of truth — this client-side blocker is just UX. So qty-tracked
-  // rows with kit memberships are no longer blocked here.
-  const assetsPartOfKitIds = assets
-    .filter(
-      (asset) =>
-        !!asset &&
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.assetKits.length > 0 &&
-        asset.id
-    )
-    .map((asset) => asset.id);
-
-  const unavailableAssetsIds = assets
-    .filter((asset) => !asset.availableToBook)
-    .map((a) => !!a && a.id);
-
-  // Kit blockers
-  const kitsWithUnavailableAssets = kits
-    .filter((kit) => kit.assetKits.some((ak) => !ak.asset.availableToBook))
-    .map((kit) => kit.id);
-
-  const qrIdsOfUnavailableKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return kitsWithUnavailableAssets.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-
-  // Assets already checked out, blocking only while the booking itself is.
-  //
-  // INDIVIDUAL only: `Asset.status` is one flag for the whole row, so a
-  // QUANTITY_TRACKED pool reads CHECKED_OUT while one unit is out and the rest
-  // is free stock. Qty rows are judged on their own free pool instead
-  // (`noUnitsAvailableIds` below), the same `pickerMeta.maxAllowed` the row's
-  // qty input is capped at.
-  const checkedOutAssetsIds = assets
-    .filter(
-      (asset) =>
-        asset.type === AssetType.INDIVIDUAL &&
-        asset.status === AssetStatus.CHECKED_OUT
-    )
-    .map((asset) => asset.id);
-  const tryingToAddCheckedOutAssets =
-    checkedOutAssetsIds.length > 0 &&
-    ["ONGOING", "OVERDUE"].includes(booking.status);
-
-  // Qty-tracked rows with nothing left to stage (see
-  // `resolveScannedUnitsAvailable`). At zero the row renders no qty input and
-  // the server would reject it, so it belongs in the blocker list where one
-  // tap clears it. Rows already on the booking are exempt: the scan is a no-op
-  // for them, and "Already added to this booking" is the badge that says so.
-  const noUnitsAvailableIds = assets
-    .filter((asset) => {
-      const unitsAvailable = resolveScannedUnitsAvailable(asset);
-      return (
-        unitsAvailable !== null &&
-        unitsAvailable <= 0 &&
-        !booking.bookingAssets.some((ba) => ba.assetId === asset.id)
-      );
-    })
-    .map((asset) => asset.id);
-
-  // Kits already checked out as current booking is checked out
-  const checkedOutKitsIds = kits
-    .filter((kit) => kit.status === AssetStatus.CHECKED_OUT)
-    .map((kit) => kit.id);
-  const qrIdsOfCheckedOutKits = Object.entries(items)
-    .filter(([, item]) => {
-      if (!item || item.type !== "kit") return false;
-      return checkedOutKitsIds.includes((item?.data as any)?.id);
-    })
-    .map(([qrId]) => qrId);
-  const tryingToAddCheckedOutKits =
-    checkedOutKitsIds.length > 0 &&
-    ["ONGOING", "OVERDUE"].includes(booking.status);
-
-  // Create blockers configuration
-  const blockerConfigs = [
-    {
-      condition: tryingToAddCheckedOutAssets,
-      count: checkedOutAssetsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already checked out.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(checkedOutAssetsIds),
-    },
-    {
-      condition: noUnitsAvailableIds.length > 0,
-      count: noUnitsAvailableIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s have" : " has"}`}</strong> no
-          units available.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(noUnitsAvailableIds),
-    },
-    {
-      condition: tryingToAddCheckedOutKits,
-      count: checkedOutKitsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          already checked out.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfCheckedOutKits),
-    },
-    {
-      condition: unavailableAssetsIds.length > 0,
-      count: unavailableAssetsIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s are" : " is"}`}</strong>{" "}
-          marked as <strong>unavailable</strong>.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(unavailableAssetsIds),
-    },
-    {
-      condition: assetsAlreadyAddedIds.length > 0,
-      count: assetsAlreadyAddedIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""}`}</strong> already
-          added to the booking.
-        </>
-      ),
-      onResolve: () => removeAssetsFromList(assetsAlreadyAddedIds),
-    },
-    {
-      condition: assetsPartOfKitIds.length > 0,
-      count: assetsPartOfKitIds.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} asset${count > 1 ? "s" : ""} `}</strong> are part
-          of a kit.
-        </>
-      ),
-      description:
-        "Note: Scan the kit QR to add them — the kit fulfils any reserved units its assets cover",
-      onResolve: () => removeAssetsFromList(assetsPartOfKitIds),
-    },
-    {
-      condition: kitsWithUnavailableAssets.length > 0,
-      count: kitsWithUnavailableAssets.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} kit${count > 1 ? "s have" : " has"} `}</strong>{" "}
-          unavailable assets inside {count > 1 ? "them" : "it"}.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(qrIdsOfUnavailableKits),
-    },
-    {
-      condition: errors.length > 0,
-      count: errors.length,
-      message: (count: number) => (
-        <>
-          <strong>{`${count} QR code${count > 1 ? "s" : ""}`}</strong>{" "}
-          {count > 1 ? "are" : "is"} invalid.
-        </>
-      ),
-      onResolve: () => removeItemsFromList(errors.map(([qrId]) => qrId)),
-    },
-  ];
+  const { blockerConfigs } = buildAddToBookingBlockers({
+    items,
+    booking,
+    claimedAssetIds: new Set(claimedModelNameByAssetId.keys()),
+    removeAssetsFromList,
+    removeItemsFromList,
+  });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
@@ -673,6 +458,7 @@ export function AssetRow({
 
   // Use a combination of standard presets and custom configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.unavailable(!asset.availableToBook),
     assetLabelPresets.partOfKit(
       asset.assetKits.length > 0,
@@ -786,7 +572,7 @@ export function KitRow({ kit }: { kit: KitFromQr }) {
       kit.assetKits.some((ak) => ak.asset.status === AssetStatus.IN_CUSTODY)
     ),
     kitLabelPresets.containsUnavailableAssets(
-      kit.assetKits.some((ak) => !ak.asset.availableToBook)
+      kitHasUnavailableActiveMember(kit)
     ),
     // Custom preset for "already checked out" - only show when booking is checked out
     {

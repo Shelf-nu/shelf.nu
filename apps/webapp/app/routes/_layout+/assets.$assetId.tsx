@@ -17,9 +17,11 @@ import BookingActionsDropdown from "~/components/assets/booking-actions-dropdown
 import Header from "~/components/layout/header";
 import type { HeaderData } from "~/components/layout/header/types";
 import HorizontalTabs from "~/components/layout/horizontal-tabs";
+import { DateS } from "~/components/shared/date";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { draftBookingsNote } from "~/modules/asset/archive-messages";
 import {
   CONFIRM_MODEL_SHORTFALL_FIELD,
   isModelShortfallMessage,
@@ -29,6 +31,7 @@ import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { toStillOutBookingRows } from "~/modules/asset/quantity-breakdown.server";
 import {
   archiveAsset,
+  assertAssetDeleteConfirmed,
   deleteAsset,
   deleteOtherImages,
   getAsset,
@@ -52,6 +55,7 @@ import { getClientHint } from "~/utils/client-hints";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -336,15 +340,24 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       intent === "set-reminder" ||
       intent === "add-barcode"
     ) {
-      await assertAssetsAreNotArchived({ assetIds: [id], organizationId });
+      await assertAssetsAreNotArchived({
+        assetIds: [id],
+        organizationId,
+        actorUserId: userId,
+      });
     }
 
     switch (intent) {
       case "delete": {
-        const { mainImageUrl } = parseData(
+        const { mainImageUrl, confirmation } = parseData(
           formData,
-          z.object({ mainImageUrl: z.string().optional() })
+          z
+            .object({ mainImageUrl: z.string().optional() })
+            .merge(DeleteConfirmationSchema)
         );
+
+        // The dialog asks for the asset's title; refuse a request that skipped it.
+        await assertAssetDeleteConfirmed({ id, organizationId, confirmation });
 
         // Name the actor, or the activity event records the deletion as
         // "System" — the mobile delete route already passes it, so the same
@@ -371,7 +384,7 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "archive": {
-        await archiveAsset({
+        const { draftBookings } = await archiveAsset({
           id,
           organizationId,
           actorUserId: userId,
@@ -382,8 +395,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         sendNotification({
           title: "Asset archived",
-          message:
-            "The asset is hidden from your lists and can't be booked. You can reinstate it any time.",
+          message: `The asset is hidden from your lists and can't be booked. You can reinstate it any time.${draftBookingsNote(
+            draftBookings
+          )}`,
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -392,11 +406,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       }
 
       case "reinstate": {
-        await unarchiveAsset({ id, organizationId, actorUserId: userId });
+        const { availableToBook } = await unarchiveAsset({
+          id,
+          organizationId,
+          actorUserId: userId,
+        });
 
         sendNotification({
           title: "Asset reinstated",
-          message: "The asset is active again and available to book.",
+          // Archiving never changed availability, so an asset marked
+          // unavailable before it was archived is still unavailable now.
+          message: availableToBook
+            ? "The asset is active again and available to book."
+            : "The asset is active again. It is still marked as unavailable for bookings.",
           icon: { name: "success", variant: "success" },
           senderId: authSession.userId,
         });
@@ -611,7 +633,7 @@ export default function AssetDetailsPage() {
           ),
         }}
         subHeading={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <AssetStatusBadge
               id={asset.id}
               status={asset.status}
@@ -619,6 +641,12 @@ export default function AssetDetailsPage() {
               asset={asset}
               isArchived={!!asset.archivedAt}
             />
+            {/* When it left service; who did it is on the Activity tab. */}
+            {asset.archivedAt ? (
+              <span className="text-sm text-gray-600">
+                Archived on <DateS date={asset.archivedAt} />
+              </span>
+            ) : null}
           </div>
         }
       >

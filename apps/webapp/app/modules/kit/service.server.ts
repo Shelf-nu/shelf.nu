@@ -33,7 +33,10 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { findKitsHeldByOtherBookings } from "~/modules/booking/kit-conflicts.server";
-import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
+import {
+  assertKitsCustodyAssignable,
+  assertKitsHaveActiveAssets,
+} from "~/modules/booking/kit-holds.server";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
 import { lockAssetsForKitMembership } from "~/modules/custody/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
@@ -42,11 +45,16 @@ import { ASSET_MAX_IMAGE_UPLOAD_SIZE } from "~/utils/constants";
 import { updateCookieWithPerPage } from "~/utils/cookies.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { dateTimeInUnix } from "~/utils/date-time-in-unix";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   ShelfError,
   throwIfAssetQuantityOverAllocation,
   VALIDATION_ERROR,
@@ -3167,6 +3175,35 @@ async function performKitDeletion({
   );
 }
 
+/**
+ * Refuses a single kit delete unless the user typed its name, as the delete
+ * dialog asks. A kit that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The kit to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertKitDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.kit
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((kit) => kit?.name ?? null),
+    label,
+  });
+}
+
 export async function deleteKit({
   id,
   organizationId,
@@ -3316,6 +3353,9 @@ export async function releaseCustody({
           id: true,
           name: true,
           assetKits: {
+            // Archived members are left out of kit custody (issue #382), so
+            // the release has nothing to say or write about them.
+            where: { asset: { archivedAt: null } },
             // type + unitOfMeasure power the qty-tracked unit count in the
             // release note ("custody of 50 units"); the count itself comes
             // from the inherited Custody rows captured inside the tx.
@@ -3847,11 +3887,17 @@ export async function bulkDeleteKits({
   organizationId,
   userId,
   currentSearchParams,
+  confirmation,
 }: {
   kitIds: Kit["id"][];
   organizationId: Kit["organizationId"];
   userId: User["id"];
   currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * kits this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
@@ -3916,6 +3962,15 @@ export async function bulkDeleteKits({
       },
     });
 
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: kitIds,
+      confirmation,
+      matchedCount: kitRows.length,
+      noun: { one: "kit", many: "kits" },
+      label,
+    });
+
     // Flatten pivot rows into the in-memory `assets` shape that
     // `performKitDeletion` consumes. Main's PR #2535 added per-asset
     // ASSET_KIT_CHANGED emission for the cascade unkit inside
@@ -3938,6 +3993,9 @@ export async function bulkDeleteKits({
       userId,
     });
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting kits.",
@@ -4117,6 +4175,26 @@ export async function bulkAssignKitCustody({
         organizationId,
       });
 
+      // The archive row lock on every member, taken once and in sorted order,
+      // after the kit rows (above) and before any write, so an archive cannot
+      // commit between the members read above and the custody written below
+      // and leave an archived asset in custody (issue #382). The checks and
+      // the re-read below then see the truth.
+      await lockAssetsForArchiveGuard(
+        tx,
+        allAssetsOfAllKits.map((asset) => asset.id),
+        organizationId
+      );
+
+      // A kit whose members are all archived (or that has none) would go into
+      // custody while nothing in it does. Read under the lock above, so an
+      // archive cannot empty the kit after this check.
+      await assertKitsHaveActiveAssets(tx, {
+        kitIds: kits.map((kit) => kit.id),
+        organizationId,
+        action: "custody",
+      });
+
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
@@ -4147,16 +4225,6 @@ export async function bulkAssignKitCustody({
       );
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
-
-      // The archive row lock on every member, taken once and in sorted order,
-      // so an archive cannot commit between the members read above and the
-      // custody written below and leave an archived asset in custody
-      // (issue #382). The helper and the re-read below then see the truth.
-      await lockAssetsForArchiveGuard(
-        tx,
-        allAssetsOfAllKits.map((asset) => asset.id),
-        organizationId
-      );
 
       /** Creating custodies over assets of kits — one row per (asset, kit-custody) */
       const inheritDataPerKit = await Promise.all(
@@ -4343,7 +4411,10 @@ export async function bulkReleaseKitCustody({
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
+          // Archived members are left out of kit custody (issue #382), so the
+          // release writes no note, event or status for them.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -5882,6 +5953,9 @@ export async function updateKitAssets({
                   // the membership-remove custody-release note.
                   type: true,
                   unitOfMeasure: true,
+                  // An archived member holds no kit custody, so removing it
+                  // from a kit in custody releases nothing.
+                  archivedAt: true,
                   assetKits: { select: { kitId: true } },
                   bookingAssets: {
                     include: {
@@ -6111,6 +6185,7 @@ export async function updateKitAssets({
     await assertAssetsAreNotArchived({
       assetIds: archiveGuardAssetIds,
       organizationId,
+      actorUserId: userId,
     });
 
     /**
@@ -6304,7 +6379,7 @@ export async function updateKitAssets({
       // archive paths take, so the two serialize (issue #382).
       await lockAssetsForArchiveGuard(tx, archiveGuardAssetIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: archiveGuardAssetIds, organizationId },
+        { assetIds: archiveGuardAssetIds, organizationId, actorUserId: userId },
         tx
       );
 
@@ -6944,14 +7019,19 @@ export async function updateKitAssets({
      * then we have to make the removed assets Available
      * Only apply this when not in addOnly mode
      */
+    // Archived members never took the kit's custody (issue #382), so they get
+    // no release note, event or status write when they leave the kit.
+    const removedCustodyMembers = removedAssets.filter(
+      (asset) => !asset.archivedAt
+    );
     if (
       !addOnly &&
-      removedAssets.length &&
+      removedCustodyMembers.length &&
       kit.custody?.id &&
       kit.custody.custodian.id
     ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
-      const assetIds = removedAssets.map((a) => a.id);
+      const assetIds = removedCustodyMembers.map((a) => a.id);
       // Filter the kit-custody delete by `kitCustodyId` so only the
       // kit-allocated rows are removed; operator-assigned per-unit
       // custody on the same asset stays. Emitting events keyed only
@@ -6960,7 +7040,7 @@ export async function updateKitAssets({
       const kitCustodyId = kit.custody.id;
 
       // Asset shape (type / unitOfMeasure) keyed by id, for the unit count.
-      const assetById = new Map(removedAssets.map((a) => [a.id, a]));
+      const assetById = new Map(removedCustodyMembers.map((a) => [a.id, a]));
       // Per-asset released units, populated inside the tx from the kit-
       // allocated Custody rows; consumed by the post-tx note. Assets with no
       // kit-custody row stay absent → no count → unchanged "custody" wording.
@@ -7037,7 +7117,7 @@ export async function updateKitAssets({
       // kit-custody row (and all INDIVIDUAL assets) keep the prior wording.
       // why: assetIds derived from this kit's org-scoped assets — same-tenant
       // by construction.
-      const releaseNoteData = removedAssets.map((asset) => {
+      const releaseNoteData = removedCustodyMembers.map((asset) => {
         const count = formatUnitCount(
           asset,
           releasedQtyByAssetId.get(asset.id)

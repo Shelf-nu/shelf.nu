@@ -1,3 +1,4 @@
+import { archivedAssetBlockedReason } from "@shelf/labels";
 import { useLoaderData } from "react-router";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -14,7 +15,7 @@ import { GenericBookActionsDropdown } from "../shared/generic-add-to-bookings-ac
 export default function BookingActionsDropdown() {
   const { asset } = useLoaderData<typeof loader>();
   const organization = useCurrentOrganization();
-  const canArchiveAsset = useCanArchiveAssets();
+  const canReinstate = useCanArchiveAssets();
   const { availableToBook } = asset;
 
   if (isPersonalOrg(organization)) return null;
@@ -50,9 +51,9 @@ export default function BookingActionsDropdown() {
 
   const disabledTrigger = asset.archivedAt
     ? {
-        reason: canArchiveAsset
-          ? "This asset is archived. Reinstate it to book it."
-          : "This asset is archived. Ask an admin to reinstate it.",
+        // Members without the archive grant (Manager, self service, base)
+        // cannot reinstate, so they are told who can.
+        reason: archivedAssetBlockedReason({ canReinstate, action: "book" }),
       }
     : availableToBook
     ? false

@@ -23,6 +23,7 @@ import {
   claimUnstampedBookingRows,
   fulfilModelRequestsForAssets,
   findModelReservationsShortAfterArchive,
+  findModelRequestShortfallsForBooking,
   getAssetModelAvailability,
   getBookingModelTabData,
   materializeModelRequestForAsset,
@@ -478,6 +479,74 @@ describe("getAssetModelAvailability", () => {
       (whereOf(db.bookingAsset.aggregate)?.asset as Record<string, unknown>)
         ?.archivedAt
     ).toBeNull();
+  });
+});
+
+describe("findModelRequestShortfallsForBooking", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  const booking = (
+    modelRequests: Array<{
+      quantity: number;
+      fulfilledQuantity?: number;
+      fulfilledAt?: Date | null;
+    }>
+  ) => ({
+    id: "b1",
+    from: new Date("2026-10-20T09:00:00Z"),
+    to: new Date("2026-10-21T09:00:00Z"),
+    modelRequests: modelRequests.map((r) => ({
+      assetModelId: MODEL_ID,
+      quantity: r.quantity,
+      fulfilledQuantity: r.fulfilledQuantity ?? 0,
+      fulfilledAt: r.fulfilledAt ?? null,
+      assetModel: { name: "LED Light" },
+    })),
+  });
+
+  it("reports a reservation the pool can no longer fill, and by how much", async () => {
+    // why: three active units of the model remain for these dates.
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(3);
+
+    await expect(
+      findModelRequestShortfallsForBooking({
+        booking: booking([{ quantity: 4 }]),
+        organizationId: "org-1",
+      })
+    ).resolves.toEqual([
+      {
+        assetModelId: MODEL_ID,
+        modelName: "LED Light",
+        outstanding: 4,
+        available: 3,
+        short: 1,
+      },
+    ]);
+  });
+
+  it("reports nothing while the reservation fits", async () => {
+    vitest.mocked(db.asset.count).mockResolvedValueOnce(5);
+
+    await expect(
+      findModelRequestShortfallsForBooking({
+        booking: booking([{ quantity: 4 }]),
+        organizationId: "org-1",
+      })
+    ).resolves.toEqual([]);
+  });
+
+  it("skips reservations that are already filled", async () => {
+    await expect(
+      findModelRequestShortfallsForBooking({
+        booking: booking([
+          { quantity: 2, fulfilledQuantity: 2, fulfilledAt: new Date() },
+        ]),
+        organizationId: "org-1",
+      })
+    ).resolves.toEqual([]);
+    expect(db.asset.count).not.toHaveBeenCalled();
   });
 });
 

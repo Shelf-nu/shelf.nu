@@ -39,6 +39,8 @@ import type { RoleAccess } from "~/utils/permissions/role-access";
 import { canImportAssets } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import { resolveBookableListScope } from "./list-scope.server";
+import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
 import { parseFiltersWithHierarchy } from "./query.server";
 import {
@@ -362,7 +364,7 @@ export async function simpleModeLoader({
               },
             }
           : undefined,
-      availableToBookOnly: access.policy.assets.listScope === "bookable",
+      bookableScope: resolveBookableListScope({ access, userId }),
       userId,
     }),
     getTagsForBookingTagsFilter({
@@ -620,7 +622,7 @@ async function getAssetModelRollupPage({
   timeZone,
   filters,
   parsedFilters,
-  availableToBookOnly,
+  bookableScope,
   honorArchivedView,
   sortBy,
   sortDirection,
@@ -630,7 +632,8 @@ async function getAssetModelRollupPage({
   timeZone: string;
   filters: string | undefined;
   parsedFilters: Filter[];
-  availableToBookOnly: boolean;
+  /** The caller's list scope; `null` lists every asset. */
+  bookableScope: BookableListScope | null;
   /** Honour `?archived=` (issue #382); see `canViewArchivedAssets`. */
   honorArchivedView: boolean;
   sortBy: AssetModelRollupSortKey;
@@ -665,7 +668,7 @@ async function getAssetModelRollupPage({
       timeZone,
       page,
       perPage,
-      availableToBookOnly,
+      bookableScope,
       archivedFilter,
       sortBy,
       sortDirection,
@@ -826,7 +829,7 @@ export async function advancedModeLoader({
           // Same scoping the asset query three lines below applies, so a
           // restricted role's model counts describe the assets it can actually
           // see rather than the whole workspace.
-          availableToBookOnly: access.policy.assets.listScope === "bookable",
+          bookableScope: resolveBookableListScope({ access, userId }),
           honorArchivedView,
           sortBy: modelSortBy,
           sortDirection: modelSortDirection,
@@ -839,7 +842,7 @@ export async function advancedModeLoader({
           settings,
           getBookings: view === "availability",
           canUseBarcodes: currentOrganization.barcodesEnabled ?? false,
-          availableToBookOnly: access.policy.assets.listScope === "bookable",
+          bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,
           honorArchivedView,
           // Both arms carry the same keys so the caller reads them directly.

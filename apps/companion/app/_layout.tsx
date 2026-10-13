@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { OfflineBanner } from "@/components/offline-banner";
+import { UpdateAvailableBanner } from "@/components/update-available-banner";
 import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
@@ -78,7 +79,9 @@ function RootLayoutNav() {
     <>
       <StatusBar style={isDark ? "light" : "dark"} />
       <OfflineBanner />
-      <Slot />
+      <UpdateAvailableBanner>
+        <Slot />
+      </UpdateAvailableBanner>
       {!splashComplete && (
         <AnimatedSplash
           isReady={!isLoading}

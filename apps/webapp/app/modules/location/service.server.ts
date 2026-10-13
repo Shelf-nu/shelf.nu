@@ -25,12 +25,17 @@ import {
   DEFAULT_MAX_IMAGE_UPLOAD_SIZE,
   PUBLIC_BUCKET,
 } from "~/utils/constants";
+import {
+  assertBulkDeleteConfirmed,
+  assertDeleteConfirmedFor,
+} from "~/utils/delete-confirmation.server";
 import type { ErrorLabel } from "~/utils/error";
 import {
   ShelfError,
   isLikeShelfError,
   isNotFoundError,
   maybeUniqueConstraintViolation,
+  rethrowIfClientError,
   throwIfAssetQuantityOverAllocation,
   throwIfIndividualAssetAlreadyPlaced,
 } from "~/utils/error";
@@ -643,8 +648,15 @@ export async function getLocationSubtreeDepth(params: {
 
 export const LOCATION_LIST_INCLUDE = {
   // Asset count comes from the `AssetLocation` pivot rather than a
-  // direct `Location.assets` relation (which doesn't exist).
-  _count: { select: { kits: true, assetLocations: true, children: true } },
+  // direct `Location.assets` relation (which doesn't exist). Archived assets
+  // are out of service and left out, the same as every other inventory count.
+  _count: {
+    select: {
+      kits: true,
+      assetLocations: { where: { asset: { archivedAt: null } } },
+      children: true,
+    },
+  },
   parent: {
     select: {
       id: true,
@@ -755,7 +767,9 @@ export async function getLocationTotalValuation({
   // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
   // to `$queryRaw` and keep the same scope (assets joined to the pivot).
   // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
-  // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+  // mirrors `getAssetTotalValue`. No `::bigint` cast, it truncates floats.
+  // Archived assets are out of service, so they add nothing to the value
+  // stored here, matching the dashboard and the inventory reports.
   const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
       SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
@@ -764,6 +778,7 @@ export async function getLocationTotalValuation({
         SELECT al."assetId" FROM "AssetLocation" al
         WHERE al."locationId" = ${locationId}
       )
+      AND a."archivedAt" IS NULL
     `
   );
 
@@ -1013,6 +1028,35 @@ async function safeRemoveImageFilesOfLocations(
       );
     }
   }
+}
+
+/**
+ * Refuses a single location delete unless the user typed its name, as the delete
+ * dialog asks. A location that is already gone passes, so the delete itself
+ * reports it.
+ *
+ * @param params.id - The location to delete
+ * @param params.organizationId - The caller's organization
+ * @param params.confirmation - What the user typed in the dialog
+ * @throws {ShelfError} 400 when the confirmation does not match
+ */
+export async function assertLocationDeleteConfirmed({
+  id,
+  organizationId,
+  confirmation,
+}: {
+  id: string;
+  organizationId: string;
+  confirmation: string | null | undefined;
+}) {
+  await assertDeleteConfirmedFor({
+    confirmation,
+    findName: () =>
+      db.location
+        .findFirst({ where: { id, organizationId }, select: { name: true } })
+        .then((location) => location?.name ?? null),
+    label,
+  });
 }
 
 /**
@@ -1364,20 +1408,40 @@ export async function createLocationsIfNotExists({
 export async function bulkDeleteLocations({
   locationIds,
   organizationId,
+  currentSearchParams,
+  confirmation,
 }: {
   locationIds: Location["id"][];
   organizationId: Organization["id"];
+  /** The index's search params; a "select all" deletes only what they match. */
+  currentSearchParams?: string | null;
+  /**
+   * The number the user typed in the delete dialog. Must equal the number of
+   * locations this call removes, see {@link assertBulkDeleteConfirmed}.
+   */
+  confirmation: string | null | undefined;
 }) {
   try {
     /**
      * Read before the delete: the `Image` row ids and the storage URLs are
-     * gone once the location rows are deleted.
+     * gone once the location rows are deleted. A "select all" resolves through
+     * the index's own builder, so it removes exactly the locations the list
+     * shows for the active search.
      */
     const locations = await db.location.findMany({
       where: locationIds.includes(ALL_SELECTED_KEY)
-        ? { organizationId }
+        ? getLocationsWhereInput({ organizationId, currentSearchParams })
         : { id: { in: locationIds }, organizationId },
       select: { id: true, imageId: true, imageUrl: true, thumbnailUrl: true },
+    });
+
+    // Before any write: the typed count must be the number about to go.
+    assertBulkDeleteConfirmed({
+      selectedIds: locationIds,
+      confirmation,
+      matchedCount: locations.length,
+      noun: { one: "location", many: "locations" },
+      label,
     });
 
     await db.$transaction(async (tx) => {
@@ -1411,6 +1475,9 @@ export async function bulkDeleteLocations({
      */
     void safeRemoveImageFilesOfLocations(locations);
   } catch (cause) {
+    // A refused confirmation carries the count to type in its additionalData.
+    rethrowIfClientError(cause);
+
     throw new ShelfError({
       cause,
       message: "Something went wrong while bulk deleting locations.",
@@ -2157,6 +2224,7 @@ export async function updateLocationAssets({
     await assertAssetsAreNotArchived({
       assetIds: actuallyNewAssetIds,
       organizationId,
+      actorUserId: userId,
     });
 
     /**
@@ -2765,7 +2833,11 @@ export async function updateLocationKits({
           name: true,
           locationId: true,
           location: { select: { id: true, name: true } },
+          // Archived members are frozen (issue #382): their placement stays
+          // where it was and they get no "moved" note, the same as the
+          // kit-side cascade (`cascadeKitLocationToAssets`).
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -2822,11 +2894,20 @@ export async function updateLocationKits({
             // kit might be moving in from another location), then
             // create fresh kit-driven rows here.
             const newKitIds = kitsToAdd.map((k) => k.id);
+            // Active members only: an archived member's placement is frozen.
             await tx.assetLocation.deleteMany({
-              where: { assetKit: { kitId: { in: newKitIds } } },
+              where: {
+                assetKit: {
+                  kitId: { in: newKitIds },
+                  asset: { archivedAt: null },
+                },
+              },
             });
             const assetKitsForKits = await tx.assetKit.findMany({
-              where: { kitId: { in: newKitIds } },
+              where: {
+                kitId: { in: newKitIds },
+                asset: { archivedAt: null },
+              },
               select: { id: true, assetId: true, quantity: true },
             });
             if (assetKitsForKits.length > 0) {
@@ -2988,7 +3069,9 @@ export async function updateLocationKits({
         select: {
           id: true,
           name: true,
+          // Archived members keep their placement and get no note.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: { asset: { select: { id: true, title: true } } },
           },
         },
@@ -3021,7 +3104,10 @@ export async function updateLocationKits({
             // created at this location for the same assets survive.
             await tx.assetLocation.deleteMany({
               where: {
-                assetKit: { kitId: { in: removedKitIds } },
+                assetKit: {
+                  kitId: { in: removedKitIds },
+                  asset: { archivedAt: null },
+                },
                 locationId,
                 organizationId,
               },

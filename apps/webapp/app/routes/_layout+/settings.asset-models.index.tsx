@@ -158,9 +158,12 @@ const AssetModelItem = ({
     AssetModel,
     "id" | "description" | "name" | "image" | "thumbnailImage"
   > & {
+    /** Every linked asset; the delete dialog warns about all of them. */
     _count: {
       assets: number;
     };
+    /** Linked assets that are not archived; what the Assets column shows. */
+    activeAssetCount: number;
     defaultCategory?: Pick<Category, "id" | "name" | "color"> | null;
   };
 }) => (
@@ -205,7 +208,7 @@ const AssetModelItem = ({
         <span className="text-gray-400">—</span>
       )}
     </Td>
-    <Td>{item._count.assets}</Td>
+    <Td>{item.activeAssetCount}</Td>
     <Td>
       <AssetModelQuickActions assetModel={item} />
     </Td>
