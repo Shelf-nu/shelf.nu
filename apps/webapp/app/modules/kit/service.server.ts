@@ -59,7 +59,6 @@ import {
   throwIfAssetQuantityOverAllocation,
   VALIDATION_ERROR,
 } from "~/utils/error";
-import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
@@ -92,7 +91,7 @@ import {
   KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
   KITS_INCLUDE_FIELDS,
 } from "./types";
-import { getKitsWhereInput } from "./utils.server";
+import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
@@ -2338,8 +2337,9 @@ export async function updateKitImage({
  * `refreshExpiredAssetImages`: we re-sign server-side in the loader so rows
  * carry fresh URLs and the client fetcher stays dormant.
  *
- * Kits are simpler than assets — a single `image` field, no separate
- * thumbnail. Failures are logged and skipped (the row keeps its stale URL and
+ * Kits are simpler than assets: a single `image` field, no separate
+ * thumbnail. Only a file inside the kit's own folder is re-signed (see
+ * `isOwnKitImagePath`). Failures are logged and skipped (the row keeps its stale URL and
  * the client `KitImage` fallback still covers genuinely broken images), so a
  * storage hiccup never fails the report.
  *
@@ -2367,7 +2367,9 @@ export async function refreshExpiredKitImages<
   const refreshKit = async (kit: (typeof expiredKits)[number]) => {
     try {
       const imagePath = extractStoragePath(kit.image!, "kits");
-      if (!imagePath) return null;
+      // Only the kit's own file is re-signed: a stored URL naming any other
+      // path keeps its stale URL rather than gaining a fresh one.
+      if (!imagePath || !isOwnKitImagePath(imagePath, kit.id)) return null;
 
       const newImageUrl = await createSignedUrl({
         filename: imagePath,
@@ -2410,6 +2412,66 @@ export async function refreshExpiredKitImages<
   return kits.map((k) => {
     const fresh = refreshed.get(k.id);
     return fresh ? { ...k, ...fresh } : k;
+  });
+}
+
+/**
+ * Re-signs one kit's stored image and saves the new URL on the kit. Backs
+ * `POST /api/kit/refresh-image`, which `KitImage` calls when the URL it was
+ * rendered with has expired.
+ *
+ * The file to sign is read from the kit row, scoped to `organizationId`,
+ * never taken from the request, and only a file inside the kit's own folder
+ * is signed (see `isOwnKitImagePath`).
+ *
+ * @param args.kitId - The kit whose image to refresh
+ * @param args.organizationId - The caller's workspace; scopes the read and write
+ * @param args.userId - The caller, recorded on the update's activity event
+ * @returns The updated kit
+ * @throws {ShelfError} 404 when the kit is not in the workspace, has no image,
+ *   or stores a path outside its own folder
+ */
+export async function refreshKitImage({
+  kitId,
+  organizationId,
+  userId,
+}: {
+  kitId: Kit["id"];
+  organizationId: Kit["organizationId"];
+  userId: User["id"];
+}) {
+  const storedKit = await db.kit.findFirst({
+    where: { id: kitId, organizationId },
+    select: { image: true },
+  });
+
+  const imagePath = storedKit?.image
+    ? extractStoragePath(storedKit.image, "kits")
+    : null;
+
+  if (!imagePath || !isOwnKitImagePath(imagePath, kitId)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Cannot find kit filename",
+      additionalData: { userId, kitId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const signedUrl = await createSignedUrl({
+    filename: imagePath,
+    bucketName: "kits",
+  });
+
+  return updateKit({
+    id: kitId,
+    image: signedUrl,
+    // Matches the 72h lifetime `createSignedUrl` signs with.
+    imageExpiration: threeDaysFromNow(),
+    createdById: userId,
+    organizationId,
   });
 }
 
@@ -2937,7 +2999,7 @@ type KitForDeletion = {
  *   3. Outside the tx (best-effort, audit-only):
  *      a. Write asset notes — one `createNotes` call per in-custody
  *        kit so each group gets its kit's correct custodian.
- *      b. Delete kit images.
+ *      b. Delete each kit's stored image (see `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
  *   responsible for org-scoping the read.
@@ -3171,7 +3233,7 @@ async function performKitDeletion({
 
   const kitWithImages = kits.filter((k) => !!k.image);
   await Promise.all(
-    kitWithImages.map((k) => deleteKitImage({ url: k.image! }))
+    kitWithImages.map((k) => deleteKitImage({ url: k.image!, kitId: k.id }))
   );
 }
 
@@ -3297,20 +3359,46 @@ export async function deleteKit({
   }
 }
 
+/**
+ * Removes a kit's image file from storage. Best-effort: a failure is logged,
+ * never thrown, so a storage problem cannot fail the kit delete around it.
+ *
+ * Kit images live at `<uploaderUserId>/<kitId>/<file>` (see `updateKitImage`),
+ * and only a file inside `kitId`'s own folder is removed (see
+ * `isOwnKitImagePath`). A URL naming any
+ * other path in the bucket is refused, so a kit can never take another kit's
+ * file (or another workspace's) with it.
+ *
+ * @param args.url - The kit's stored `image` URL, read from the kit row
+ * @param args.kitId - The kit whose image this is
+ * @param args.bucketName - Storage bucket holding kit images
+ * @returns `true` once removed, `undefined` when refused or failed
+ */
 export async function deleteKitImage({
   url,
+  kitId,
   bucketName = "kits",
 }: {
   url: string;
+  kitId: Kit["id"];
   bucketName?: string;
 }) {
   try {
-    const path = extractImageNameFromSupabaseUrl({ url, bucketName });
+    const path = extractStoragePath(url, bucketName);
     if (!path) {
       throw new ShelfError({
         cause: null,
         message: "Cannot extract the image path from the URL",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
+        label,
+      });
+    }
+
+    if (!isOwnKitImagePath(path, kitId)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Refused to delete a kit image outside the kit's own folder",
+        additionalData: { kitId, path, bucketName },
         label,
       });
     }
@@ -3329,7 +3417,7 @@ export async function deleteKitImage({
       new ShelfError({
         cause,
         message: "Failed to delete kit image",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
         label,
       })
     );
