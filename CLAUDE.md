@@ -69,7 +69,7 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 `/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
 reuse, security, consumers, performance and deploy safety. Every finding is
 verified, and the report is a plain-language verdict with numbered findings.
-Read-only; it never posts unless you ask.
+Read-only (except a "prove N" you request); it never posts unless you ask.
 
 - Skill: `.claude/skills/pr-review/SKILL.md`
 - Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,

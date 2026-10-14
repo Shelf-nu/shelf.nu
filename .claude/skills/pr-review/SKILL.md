@@ -1,13 +1,14 @@
 ---
 name: pr-review
-description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only, never posts. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
+description: First review of the PR linked to the current branch (or a PR number). Checks what the PR claims against what it does, bugs, tests, project conventions and reuse, security, consumers, performance and deploy safety, verifies every finding, and prints a plain-language verdict with numbered findings. Read-only (except a user-requested "prove N" throwaway test), never posts. Use when the user says "review this PR", "review PR 3191", or invokes /pr-review.
 ---
 
 # PR Review
 
 Give the first review of a PR: fast, verified, in plain language. The user
 reads the report and decides what to fix. **Read-only**: never edit, commit,
-push, or post to GitHub during this skill.
+push, or post to GitHub during this skill. The one exception is a
+user-requested "prove N" (see "After the report").
 
 **Announce:** "Using pr-review on PR #N (tier X)." once Stage 1 is done.
 
@@ -57,7 +58,7 @@ sections of `.claude/agents/shelf-pr-reviewer-tests.md`,
 `shelf-pr-reviewer-conventions.md`, `shelf-pr-reviewer-security.md` and
 `shelf-pr-reviewer-impact.md`, plus
 the rule copies, and apply them. Also look for bugs: wrong results, crashes,
-missing org scoping. Check each one by opening the cited line; drop what you cannot confirm and drop pre-existing nits. Keep a dismissed entry for each finding you drop because you could not confirm it (see Stage 4 step 4). Then name the safety fact (below) and go to Stage 5.
+missing org scoping. Check each one by opening the cited line; drop what you cannot confirm and drop pre-existing nits. Keep a dismissed entry (see "Dismissed entries" below) for each finding you drop because you could not confirm it. Then name the safety fact (below) and go to Stage 5.
 
 ### Tier M and L (agents)
 
@@ -116,10 +117,18 @@ the report and carry on. Never re-run the whole review.
 
 **Safety fact.** The report's "Safe because" line needs the single fact the
 change's safety depends on. When the impact pass ran, use the `safetyFact`,
-`confidence` and `evidence` from the second json block in its final message.
+`confidence` and `evidence` from the second json block in its final message. The first block is the
+findings array and the second is the safety object. If the second block is
+missing or malformed, write the fact yourself and mark it `unproven`.
 Otherwise (tier S, or impact not triggered) write it yourself from your reading
-in Stage 2 and 3. Mark it `checked in code` only when you or an agent opened
+in Stages 2 and 3. Mark it `checked in code` only when you or an agent opened
 the code that guarantees it; otherwise it is `unproven`.
+
+**Dismissed entries (both tiers).** Every finding a validator rejected, or that
+you dropped because you could not confirm it, becomes a dismissed entry. Keep
+the whole finding (severity, impact, trigger, fix, `file:line`) plus a one-line
+reason, so "restore D<n>" can bring it back at its original severity.
+Pre-existing nits are dropped silently and are not kept.
 
 ## Stage 4: Verify (tier M and L)
 
@@ -133,14 +142,10 @@ the code that guarantees it; otherwise it is `unproven`.
    with the findings JSON fenced by the marker, `diffPath`, and only the rule
    `copyPath`s cited in those findings' `evidence`. When `localHeadMatchesPr`
    is false, add: "The working tree is not the PR head; where the file and the
-   diff disagree, the diff is the PR." Drop `rejected` findings (and keep each as a dismissed entry, step 4).
+   diff disagree, the diff is the PR." Drop `rejected` findings (each becomes a dismissed entry).
    Apply the validator's `severity` and `introducedByPr`.
 3. **Nits and code-review CONFIRMED findings**: check each yourself by opening
    the cited line. Drop anything you cannot confirm. Drop pre-existing nits. When confirming a code-review finding, set its severity (must-fix / should-fix / nit) using the same definitions as the validator.
-4. **Dismissed list.** Every finding a validator rejected, or that you dropped
-   because you could not confirm it, becomes a dismissed entry: title,
-   `file:line` and a one-line reason. Pre-existing nits are dropped silently
-   and are not listed.
 
 ## Stage 5: Report
 
@@ -168,6 +173,7 @@ per finding, no theory, no jargon a busy engineer has to decode. No em dashes.
 ### Nits
 ### Spotted along the way (not caused by this PR)
 <n>. **<title>**. <impact> `<file>:<line>` → follow-up PR: "<conventional-commit title>"
+
 ### Dismissed
 D1. <title> (`<file>:<line>`): <one-line reason>
 
@@ -204,16 +210,22 @@ Rules:
 Stop. Do not fix anything until the user asks.
 
 **"restore D<n>":** bring that dismissed entry back as a normal finding with
-the next free number, at the severity it had, and print it in the report shape.
+the next free number, at its original severity, with its saved impact, trigger
+and fix, and print it in the report shape. Then recompute the verdict and the
+header counts and print them.
 
 **"prove N":** the ONE user-requested exception to read-only. Write a
 throwaway test that fails if finding N is real, at
-`apps/webapp/test/pr-review-proof-<N>.test.ts` (or next to the code, matching
-repo test conventions). Run only that file with
-`pnpm webapp:test -- --run <file>`. Show the command and its output, then say
-"proven" (the test failed for the reason the finding names) or "not proven".
-Then DELETE the test file. Never commit it and never run the full suite. For
-non-webapp code use the closest equivalent (`node --test` for scripts) with the
-same delete-after rule. If they ask to post: a
+`apps/webapp/test/pr-review-proof-<N>.test.ts` (never under `app/routes/`).
+If `localHeadMatchesPr` is false, refuse and tell the user to check out the PR
+head first. Run only that file with `pnpm webapp:test -- --run <file>`. Show the
+command and its output, then say "proven" (the test failed for the reason the
+finding names), "not proven", or "inconclusive" (it failed for another reason,
+such as an import or setup error). DELETE the test file in all cases (pass,
+fail, error, timeout), then run `git status --short` to confirm nothing is
+left. Never commit it and never run the full suite. For non-webapp code use the
+closest equivalent (`node --test` for scripts) with the same rules.
+
+If they ask to post: a
 request-changes review uses `gh pr review <n> --request-changes --body-file <file>`,
 a comment uses `gh pr comment`. Show the body first and post only after they confirm.

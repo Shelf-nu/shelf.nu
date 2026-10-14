@@ -78,7 +78,8 @@ the change, say): report them with `introducedByPr: false`.
 ## Output
 
 Plain language: `impact` is one sentence saying what goes wrong, for whom, and
-when. Final message: one fenced `json` block, an array of findings:
+when. Final message: two fenced `json` blocks: first the findings array, then the
+safety object. The findings array looks like this:
 
 ```json
 [
@@ -100,7 +101,8 @@ when. Final message: one fenced `json` block, an array of findings:
 Return `[]` when you find nothing. Ids are `impact-1`, `impact-2`, ...
 
 After the findings array, add a SECOND fenced `json` block with the safety fact
-from checklist item 6. The findings array stays first and keeps its shape:
+from checklist item 6. Report item 6 ONLY in this second block, not as a
+finding, unless the fact fails (then it is also a finding). The findings array stays first and keeps its shape:
 
 ```json
 {

@@ -7,7 +7,8 @@ affects outside the diff. Every finding is verified before you see it, and the
 report is written in plain language.
 
 It is read-only. It never edits code and never posts to GitHub unless you ask
-after reading the report. For handling CodeRabbit, Codex and Copilot comments
+after reading the report. The one exception is a "prove N" you request, which
+writes and then deletes a throwaway test. For handling CodeRabbit, Codex and Copilot comments
 after the review, use [`/pr-review-loop`](./pr-review-loop.md).
 
 ## Running it
@@ -56,7 +57,7 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    fix, Nits, and "Spotted along the way" for real problems the PR did not
    cause (each with a suggested follow-up PR), then "Dismissed".
 
-   Under the Scope and CI lines, **Safe because** names the one fact the
+   Under the CI line, **Safe because** names the one fact the
    change's safety depends on and says whether it was `checked in code` or is
    `unproven`. A finding that two or more passes found independently carries
    `found by <n> passes (<names>)`. "Dismissed" lists findings a validator
@@ -72,14 +73,14 @@ committed and never runs the full suite.
 
 ## The agents
 
-| Agent                           | Runs when                                                                 | Looks at                                                             |
-| ------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `/code-review` (built in)       | M, L                                                                      | bugs                                                                 |
-| `shelf-pr-reviewer-tests`       | M, L                                                                      | breaking tests, mocks, test placement                                |
-| `shelf-pr-reviewer-conventions` | M, L                                                                      | `.claude/rules`, CLAUDE.md, reuse of existing helpers and packages   |
-| `shelf-pr-reviewer-security`    | routes, server, schema, migrations, auth, dependencies (\*)               | org scoping, permissions, validation, redirects, Markdoc injection   |
-| `shelf-pr-reviewer-impact`      | server, packages, mobile API, schema, migrations, dependencies, companion | callers, companion drift, query cost, deploy safety, silent failures |
-| `shelf-pr-finding-validator`    | M, L                                                                      | confirms or rejects findings                                         |
+| Agent                           | Runs when                                                                 | Looks at                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `/code-review` (built in)       | M, L                                                                      | bugs                                                                                               |
+| `shelf-pr-reviewer-tests`       | M, L                                                                      | breaking tests, mocks, test placement                                                              |
+| `shelf-pr-reviewer-conventions` | M, L                                                                      | `.claude/rules`, CLAUDE.md, reuse of existing helpers and packages                                 |
+| `shelf-pr-reviewer-security`    | routes, server, schema, migrations, auth, dependencies (\*)               | org scoping, permissions, validation, redirects, Markdoc injection                                 |
+| `shelf-pr-reviewer-impact`      | server, packages, mobile API, schema, migrations, dependencies, companion | callers, companion drift, query cost, deploy safety, silent failures; also returns the safety fact |
+| `shelf-pr-finding-validator`    | M, L                                                                      | confirms or rejects findings                                                                       |
 
 (\*) Security also runs when the PR is about sanitizing, permissions, auth or
 rendering user content, whatever files it touches.
