@@ -345,6 +345,39 @@ export function httpsRepoUrl(prUrl) {
   return match ? `${match[1]}.git` : null;
 }
 
+/**
+ * Turns a repo path into a single file name, so copies of files with the same
+ * basename in different folders never overwrite each other.
+ * @param {string} repoPath - e.g. `.claude/rules/a/x.md`
+ * @returns {string} e.g. `.claude__rules__a__x.md`
+ */
+export function flattenPath(repoPath) {
+  return repoPath.replaceAll("/", "__");
+}
+
+/**
+ * Lists PR files with uncommitted (staged or unstaged) edits in the working
+ * tree. Untracked files are ignored. A failing `git status` counts as clean,
+ * since the HEAD comparison has already passed.
+ * @param {Runner} run - command runner
+ * @param {string[]} paths - the PR's changed paths
+ * @returns {string[]} the edited paths, in `git status` order
+ */
+export function editedPrFiles(run, paths) {
+  const status = run("git", [
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=no",
+    "--",
+    ...paths,
+  ]);
+  if (status.code !== 0) return [];
+  return status.stdout
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3));
+}
+
 /** A failure the skill reports to the user instead of reviewing. */
 export class ContextError extends Error {
   /**
@@ -447,7 +480,7 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   // Reviewers read the working tree, so it has to be the PR. A detached HEAD at
   // the PR head is fine; the PR branch at another commit only warns (below).
   const localHead = must(run, "git", ["rev-parse", "HEAD"]).trim();
-  const localHeadMatchesPr = localHead === pr.headRefOid;
+  let localHeadMatchesPr = localHead === pr.headRefOid;
   if (!localHeadMatchesPr) {
     const branch = must(run, "git", [
       "rev-parse",
@@ -482,6 +515,21 @@ export function collectContext({ run, prArg, startedAt, marker }) {
     .map((line) => JSON.parse(line))
     .map((file) => ({ ...file, areas: classifyFile(file.path) }));
   const paths = files.map((file) => file.path);
+
+  // At the PR head, uncommitted edits to the PR's own files still make the
+  // working tree differ from the PR. Untracked files and edits to other files
+  // do not affect what the reviewers read for this PR, so they are ignored.
+  if (localHeadMatchesPr && paths.length > 0) {
+    const edited = editedPrFiles(run, paths);
+    if (edited.length > 0) {
+      localHeadMatchesPr = false;
+      const shown = edited.slice(0, 5).join(", ");
+      const more = edited.length > 5 ? ` and ${edited.length - 5} more` : "";
+      warnings.push(
+        `Uncommitted edits to PR files (${shown}${more}): reviewers read local files, so commit or stash them first for an exact review.`
+      );
+    }
+  }
   const base = `origin/${pr.baseRefName}`;
 
   // Rules and the fallback diff read the base branch, so refresh it first.
@@ -531,8 +579,12 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   }
 
   // Rules come from the base branch so the PR cannot change what it is judged by.
+  // Without the base ref there is no trusted copy, so the review runs without
+  // rules rather than reading ones the PR may have written.
   let rulesRef = base;
-  let ruleListing = run("git", [
+  let rules = [];
+  let claudeMd = [];
+  const ruleListing = run("git", [
     "ls-tree",
     "-r",
     "--name-only",
@@ -541,36 +593,27 @@ export function collectContext({ run, prArg, startedAt, marker }) {
     ".claude/rules",
   ]);
   if (ruleListing.code !== 0) {
-    rulesRef = "HEAD";
+    rulesRef = null;
     warnings.push(
-      `${base} not found locally; rules were read from the PR branch, which this PR may have changed.`
+      `${base} not found locally: the review runs without project rules and CLAUDE.md, because the PR's own copies cannot be trusted. Fetch ${pr.baseRefName} and re-run for a full review.`
     );
-    ruleListing = {
-      stdout: must(run, "git", [
-        "ls-tree",
-        "-r",
-        "--name-only",
-        "HEAD",
-        "--",
-        ".claude/rules",
-      ]),
-    };
+  } else {
+    const allRules = ruleListing.stdout
+      .split("\n")
+      .filter((p) => p.endsWith(".md"))
+      .map((p) => {
+        const content = must(run, "git", ["show", `${rulesRef}:${p}`]);
+        return { path: p, content, ...parseRuleFrontmatter(content) };
+      });
+    rules = selectRules(allRules, paths);
+    const tree = must(run, "git", ["ls-tree", "-r", "--name-only", rulesRef])
+      .split("\n")
+      .filter(Boolean);
+    claudeMd = selectClaudeMdFiles(tree, paths).map((p) => ({
+      path: p,
+      content: must(run, "git", ["show", `${rulesRef}:${p}`]),
+    }));
   }
-  const allRules = ruleListing.stdout
-    .split("\n")
-    .filter((p) => p.endsWith(".md"))
-    .map((p) => {
-      const content = must(run, "git", ["show", `${rulesRef}:${p}`]);
-      return { path: p, content, ...parseRuleFrontmatter(content) };
-    });
-  const rules = selectRules(allRules, paths);
-  const tree = must(run, "git", ["ls-tree", "-r", "--name-only", rulesRef])
-    .split("\n")
-    .filter(Boolean);
-  const claudeMd = selectClaudeMdFiles(tree, paths).map((p) => ({
-    path: p,
-    content: must(run, "git", ["show", `${rulesRef}:${p}`]),
-  }));
 
   const selfModified = paths.some((p) => REVIEWER_PATH.test(p));
   if (selfModified) {
@@ -682,16 +725,12 @@ function main() {
     const diffPath = path.join(outDir, "diff.patch");
     writeFileSync(diffPath, artifacts.diff);
     const rules = artifacts.rules.map((rule) => {
-      const copyPath = path.join(outDir, "rules", path.basename(rule.path));
+      const copyPath = path.join(outDir, "rules", flattenPath(rule.path));
       writeFileSync(copyPath, rule.content);
       return { path: rule.path, description: rule.description, copyPath };
     });
     const claudeMd = artifacts.claudeMd.map((file) => {
-      const copyPath = path.join(
-        outDir,
-        "claude-md",
-        file.path.replaceAll("/", "__")
-      );
+      const copyPath = path.join(outDir, "claude-md", flattenPath(file.path));
       writeFileSync(copyPath, file.content);
       return { path: file.path, copyPath };
     });

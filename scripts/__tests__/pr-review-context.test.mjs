@@ -24,6 +24,8 @@ import {
   artifactDir,
   ContextError,
   httpsRepoUrl,
+  editedPrFiles,
+  flattenPath,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -255,6 +257,8 @@ test("summarizeChecks", () => {
  * Builds a fake Runner. `responses` is an ordered list of [commandPrefix, result];
  * the first prefix the joined command starts with answers it. Unknown commands fail.
  */
+// why: collectContext shells out to git and gh, which need network, gh auth and
+// a live PR; a scripted Runner keeps these tests hermetic and deterministic.
 function fakeRun(responses) {
   return (cmd, args) => {
     const key = [cmd, ...args].join(" ");
@@ -326,6 +330,7 @@ function baseResponses({
     ],
     ["gh pr diff 3191", { stdout: "diff --git a/x b/x\n" }],
     ["git rev-parse HEAD", { stdout: localHead + "\n" }],
+    ["git status --porcelain=v1 --untracked-files=no", { stdout: "" }],
     [
       "git ls-tree -r --name-only origin/main -- .claude/rules",
       {
@@ -576,24 +581,72 @@ test("collectContext: explicit number for a merged PR is allowed with a warning"
   assert.match(context.warnings.join("\n"), /PR is MERGED/);
 });
 
-test("collectContext: reads rules from the PR branch, with a warning, when the base ref is missing", () => {
-  const run = fakeRun([
+test("collectContext: runs without rules, never the PR's own copies, when the base ref is missing", () => {
+  const calls = [];
+  const inner = fakeRun([
     [
       "git ls-tree -r --name-only origin/main -- .claude/rules",
       { code: 128, stderr: "not a tree" },
     ],
+    ...baseResponses(),
+  ]);
+  const run = (cmd, args, options) => {
+    calls.push([cmd, ...args].join(" "));
+    return inner(cmd, args, options);
+  };
+  const { context, artifacts } = collectContext({
+    run,
+    startedAt: 0,
+    marker: "m",
+  });
+  assert.equal(context.rulesRef, null);
+  assert.deepEqual(artifacts.rules, []);
+  assert.deepEqual(artifacts.claudeMd, []);
+  assert.ok(
+    !calls.some((c) => c.includes("HEAD:")),
+    "nothing is read from HEAD"
+  );
+  assert.match(
+    context.warnings.join("\n"),
+    /origin\/main not found locally: the review runs without project rules/
+  );
+});
+
+test("collectContext: uncommitted edits to PR files mean the checkout is not the PR", () => {
+  const run = fakeRun([
     [
-      "git ls-tree -r --name-only HEAD -- .claude/rules",
-      { stdout: ".claude/rules/org.md\n" },
+      "git status --porcelain=v1 --untracked-files=no",
+      { stdout: " M apps/webapp/app/routes/a.tsx\n" },
     ],
-    ["git show HEAD:.claude/rules/org.md", { stdout: RULE_SCOPED }],
-    ["git ls-tree -r --name-only HEAD", { stdout: "CLAUDE.md\n" }],
-    ["git show HEAD:CLAUDE.md", { stdout: "# CLAUDE\n" }],
     ...baseResponses(),
   ]);
   const { context } = collectContext({ run, startedAt: 0, marker: "m" });
-  assert.equal(context.rulesRef, "HEAD");
-  assert.match(context.warnings.join("\n"), /origin\/main not found locally/);
+  assert.equal(context.localHeadMatchesPr, false);
+  assert.match(
+    context.warnings.join("\n"),
+    /Uncommitted edits to PR files \(apps\/webapp\/app\/routes\/a\.tsx\)/
+  );
+});
+
+test("editedPrFiles: checks only the PR's paths, ignores untracked files, and treats a git failure as clean", () => {
+  let seen;
+  const run = (cmd, args) => {
+    seen = [cmd, ...args];
+    return { code: 0, stdout: "M  a.ts\n M b.ts\n", stderr: "" };
+  };
+  assert.deepEqual(editedPrFiles(run, ["a.ts", "b.ts"]), ["a.ts", "b.ts"]);
+  assert.ok(seen.includes("--untracked-files=no"));
+  assert.deepEqual(seen.slice(-3), ["--", "a.ts", "b.ts"]);
+  const failing = () => ({ code: 128, stdout: "", stderr: "boom" });
+  assert.deepEqual(editedPrFiles(failing, ["a.ts"]), []);
+});
+
+test("flattenPath: same basename in different folders gives different names", () => {
+  assert.equal(flattenPath(".claude/rules/a/x.md"), ".claude__rules__a__x.md");
+  assert.notEqual(
+    flattenPath(".claude/rules/a/x.md"),
+    flattenPath(".claude/rules/b/x.md")
+  );
 });
 
 test("artifactDir: artifacts live in .pr-review/<n> at the worktree root", () => {

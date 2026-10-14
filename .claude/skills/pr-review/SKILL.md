@@ -231,7 +231,7 @@ header counts and print them.
 throwaway test that fails if finding N is real, at
 `apps/webapp/test/pr-review-proof-<N>.test.ts` (never under `app/routes/`).
 If `localHeadMatchesPr` is false, refuse and tell the user to check out the PR
-head first. Run only that file with `pnpm webapp:test -- --run <file>`. Show the
+head first, with no uncommitted edits to its files. Run only that file with `pnpm webapp:test -- --run <file>`. Show the
 command and its output, then say "proven" (the test failed for the reason the
 finding names), "not proven", or "inconclusive" (it failed for another reason,
 such as an import or setup error). DELETE the test file in all cases (pass,

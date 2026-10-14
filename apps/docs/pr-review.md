@@ -109,7 +109,8 @@ prompt injection. Prompts, rules, skills or docs that the PR itself changes
 are what is being reviewed, not an attack.
 
 Rules are read from the base branch, so a PR cannot weaken the rules it is
-judged by. When a PR edits the reviewer itself (the `/pr-review` skill, the
+judged by. If the base branch cannot be found locally, the review runs without
+rules and says so, rather than trusting the PR's own copies. When a PR edits the reviewer itself (the `/pr-review` skill, the
 `shelf-pr-*` and `shelf-security*` agents, `CLAUDE.md` or the context script),
 the report warns you.
 
