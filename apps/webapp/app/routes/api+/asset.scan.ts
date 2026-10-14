@@ -44,7 +44,11 @@ export async function action({ context, request }: ActionFunctionArgs) {
     // manuallyGenerated=yes. Archived assets are frozen (issue #382), so block
     // that deliberate update (regular auto scans keep working).
     if (manuallyGenerated) {
-      await assertAssetsAreNotArchived({ assetIds: [assetId], organizationId });
+      await assertAssetsAreNotArchived({
+        assetIds: [assetId],
+        organizationId,
+        actorUserId: userId,
+      });
     }
 
     const asset = await getAsset({

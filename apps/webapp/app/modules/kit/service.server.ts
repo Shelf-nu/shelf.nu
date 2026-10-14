@@ -33,7 +33,10 @@ import {
 } from "~/modules/barcode/service.server";
 import { normalizeBarcodeValue } from "~/modules/barcode/validation";
 import { findKitsHeldByOtherBookings } from "~/modules/booking/kit-conflicts.server";
-import { assertKitsCustodyAssignable } from "~/modules/booking/kit-holds.server";
+import {
+  assertKitsCustodyAssignable,
+  assertKitsHaveActiveAssets,
+} from "~/modules/booking/kit-holds.server";
 import { resolveSliceKitIds } from "~/modules/booking/slice-kit-attribution";
 import { lockAssetsForKitMembership } from "~/modules/custody/service.server";
 import { assetQtyMeta, formatUnitCount } from "~/utils/asset-quantity";
@@ -56,7 +59,6 @@ import {
   throwIfAssetQuantityOverAllocation,
   VALIDATION_ERROR,
 } from "~/utils/error";
-import { extractImageNameFromSupabaseUrl } from "~/utils/extract-image-name-from-supabase-url";
 import { getRedirectUrlFromRequest } from "~/utils/http";
 import { getCurrentSearchParams } from "~/utils/http.server";
 import { id } from "~/utils/id/id.server";
@@ -89,7 +91,7 @@ import {
   KIT_SELECT_FIELDS_FOR_LIST_ITEMS,
   KITS_INCLUDE_FIELDS,
 } from "./types";
-import { getKitsWhereInput } from "./utils.server";
+import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
 import { recordEvent, recordEvents } from "../activity-event/service.server";
 import type { ActivityEventInput } from "../activity-event/types";
 import { resolveAssetIdsForBulkOperation } from "../asset/bulk-operations-helper.server";
@@ -2335,8 +2337,9 @@ export async function updateKitImage({
  * `refreshExpiredAssetImages`: we re-sign server-side in the loader so rows
  * carry fresh URLs and the client fetcher stays dormant.
  *
- * Kits are simpler than assets — a single `image` field, no separate
- * thumbnail. Failures are logged and skipped (the row keeps its stale URL and
+ * Kits are simpler than assets: a single `image` field, no separate
+ * thumbnail. Only a file inside the kit's own folder is re-signed (see
+ * `isOwnKitImagePath`). Failures are logged and skipped (the row keeps its stale URL and
  * the client `KitImage` fallback still covers genuinely broken images), so a
  * storage hiccup never fails the report.
  *
@@ -2364,7 +2367,9 @@ export async function refreshExpiredKitImages<
   const refreshKit = async (kit: (typeof expiredKits)[number]) => {
     try {
       const imagePath = extractStoragePath(kit.image!, "kits");
-      if (!imagePath) return null;
+      // Only the kit's own file is re-signed: a stored URL naming any other
+      // path keeps its stale URL rather than gaining a fresh one.
+      if (!imagePath || !isOwnKitImagePath(imagePath, kit.id)) return null;
 
       const newImageUrl = await createSignedUrl({
         filename: imagePath,
@@ -2407,6 +2412,66 @@ export async function refreshExpiredKitImages<
   return kits.map((k) => {
     const fresh = refreshed.get(k.id);
     return fresh ? { ...k, ...fresh } : k;
+  });
+}
+
+/**
+ * Re-signs one kit's stored image and saves the new URL on the kit. Backs
+ * `POST /api/kit/refresh-image`, which `KitImage` calls when the URL it was
+ * rendered with has expired.
+ *
+ * The file to sign is read from the kit row, scoped to `organizationId`,
+ * never taken from the request, and only a file inside the kit's own folder
+ * is signed (see `isOwnKitImagePath`).
+ *
+ * @param args.kitId - The kit whose image to refresh
+ * @param args.organizationId - The caller's workspace; scopes the read and write
+ * @param args.userId - The caller, recorded on the update's activity event
+ * @returns The updated kit
+ * @throws {ShelfError} 404 when the kit is not in the workspace, has no image,
+ *   or stores a path outside its own folder
+ */
+export async function refreshKitImage({
+  kitId,
+  organizationId,
+  userId,
+}: {
+  kitId: Kit["id"];
+  organizationId: Kit["organizationId"];
+  userId: User["id"];
+}) {
+  const storedKit = await db.kit.findFirst({
+    where: { id: kitId, organizationId },
+    select: { image: true },
+  });
+
+  const imagePath = storedKit?.image
+    ? extractStoragePath(storedKit.image, "kits")
+    : null;
+
+  if (!imagePath || !isOwnKitImagePath(imagePath, kitId)) {
+    throw new ShelfError({
+      cause: null,
+      message: "Cannot find kit filename",
+      additionalData: { userId, kitId, organizationId },
+      label,
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const signedUrl = await createSignedUrl({
+    filename: imagePath,
+    bucketName: "kits",
+  });
+
+  return updateKit({
+    id: kitId,
+    image: signedUrl,
+    // Matches the 72h lifetime `createSignedUrl` signs with.
+    imageExpiration: threeDaysFromNow(),
+    createdById: userId,
+    organizationId,
   });
 }
 
@@ -2934,7 +2999,7 @@ type KitForDeletion = {
  *   3. Outside the tx (best-effort, audit-only):
  *      a. Write asset notes — one `createNotes` call per in-custody
  *        kit so each group gets its kit's correct custodian.
- *      b. Delete kit images.
+ *      b. Delete each kit's stored image (see `deleteKitImage`).
  *
  * @param args.kits - Pre-fetched kits with the shape above. Caller is
  *   responsible for org-scoping the read.
@@ -3168,7 +3233,7 @@ async function performKitDeletion({
 
   const kitWithImages = kits.filter((k) => !!k.image);
   await Promise.all(
-    kitWithImages.map((k) => deleteKitImage({ url: k.image! }))
+    kitWithImages.map((k) => deleteKitImage({ url: k.image!, kitId: k.id }))
   );
 }
 
@@ -3294,20 +3359,46 @@ export async function deleteKit({
   }
 }
 
+/**
+ * Removes a kit's image file from storage. Best-effort: a failure is logged,
+ * never thrown, so a storage problem cannot fail the kit delete around it.
+ *
+ * Kit images live at `<uploaderUserId>/<kitId>/<file>` (see `updateKitImage`),
+ * and only a file inside `kitId`'s own folder is removed (see
+ * `isOwnKitImagePath`). A URL naming any
+ * other path in the bucket is refused, so a kit can never take another kit's
+ * file (or another workspace's) with it.
+ *
+ * @param args.url - The kit's stored `image` URL, read from the kit row
+ * @param args.kitId - The kit whose image this is
+ * @param args.bucketName - Storage bucket holding kit images
+ * @returns `true` once removed, `undefined` when refused or failed
+ */
 export async function deleteKitImage({
   url,
+  kitId,
   bucketName = "kits",
 }: {
   url: string;
+  kitId: Kit["id"];
   bucketName?: string;
 }) {
   try {
-    const path = extractImageNameFromSupabaseUrl({ url, bucketName });
+    const path = extractStoragePath(url, bucketName);
     if (!path) {
       throw new ShelfError({
         cause: null,
         message: "Cannot extract the image path from the URL",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
+        label,
+      });
+    }
+
+    if (!isOwnKitImagePath(path, kitId)) {
+      throw new ShelfError({
+        cause: null,
+        message: "Refused to delete a kit image outside the kit's own folder",
+        additionalData: { kitId, path, bucketName },
         label,
       });
     }
@@ -3326,7 +3417,7 @@ export async function deleteKitImage({
       new ShelfError({
         cause,
         message: "Failed to delete kit image",
-        additionalData: { url, bucketName },
+        additionalData: { url, kitId, bucketName },
         label,
       })
     );
@@ -3350,6 +3441,9 @@ export async function releaseCustody({
           id: true,
           name: true,
           assetKits: {
+            // Archived members are left out of kit custody (issue #382), so
+            // the release has nothing to say or write about them.
+            where: { asset: { archivedAt: null } },
             // type + unitOfMeasure power the qty-tracked unit count in the
             // release note ("custody of 50 units"); the count itself comes
             // from the inherited Custody rows captured inside the tx.
@@ -4169,6 +4263,26 @@ export async function bulkAssignKitCustody({
         organizationId,
       });
 
+      // The archive row lock on every member, taken once and in sorted order,
+      // after the kit rows (above) and before any write, so an archive cannot
+      // commit between the members read above and the custody written below
+      // and leave an archived asset in custody (issue #382). The checks and
+      // the re-read below then see the truth.
+      await lockAssetsForArchiveGuard(
+        tx,
+        allAssetsOfAllKits.map((asset) => asset.id),
+        organizationId
+      );
+
+      // A kit whose members are all archived (or that has none) would go into
+      // custody while nothing in it does. Read under the lock above, so an
+      // archive cannot empty the kit after this check.
+      await assertKitsHaveActiveAssets(tx, {
+        kitIds: kits.map((kit) => kit.id),
+        organizationId,
+        action: "custody",
+      });
+
       /** Creating custodies over kits */
       await tx.kitCustody.createMany({
         data: kits.map((kit) => ({
@@ -4199,16 +4313,6 @@ export async function bulkAssignKitCustody({
       );
 
       /** If a kit is going to be in custody, then all it's assets should also inherit the same status */
-
-      // The archive row lock on every member, taken once and in sorted order,
-      // so an archive cannot commit between the members read above and the
-      // custody written below and leave an archived asset in custody
-      // (issue #382). The helper and the re-read below then see the truth.
-      await lockAssetsForArchiveGuard(
-        tx,
-        allAssetsOfAllKits.map((asset) => asset.id),
-        organizationId
-      );
 
       /** Creating custodies over assets of kits — one row per (asset, kit-custody) */
       const inheritDataPerKit = await Promise.all(
@@ -4395,7 +4499,10 @@ export async function bulkReleaseKitCustody({
           custody: {
             select: { id: true, custodian: { include: { user: true } } },
           },
+          // Archived members are left out of kit custody (issue #382), so the
+          // release writes no note, event or status for them.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -5934,6 +6041,9 @@ export async function updateKitAssets({
                   // the membership-remove custody-release note.
                   type: true,
                   unitOfMeasure: true,
+                  // An archived member holds no kit custody, so removing it
+                  // from a kit in custody releases nothing.
+                  archivedAt: true,
                   assetKits: { select: { kitId: true } },
                   bookingAssets: {
                     include: {
@@ -6163,6 +6273,7 @@ export async function updateKitAssets({
     await assertAssetsAreNotArchived({
       assetIds: archiveGuardAssetIds,
       organizationId,
+      actorUserId: userId,
     });
 
     /**
@@ -6356,7 +6467,7 @@ export async function updateKitAssets({
       // archive paths take, so the two serialize (issue #382).
       await lockAssetsForArchiveGuard(tx, archiveGuardAssetIds, organizationId);
       await assertAssetsAreNotArchived(
-        { assetIds: archiveGuardAssetIds, organizationId },
+        { assetIds: archiveGuardAssetIds, organizationId, actorUserId: userId },
         tx
       );
 
@@ -6996,14 +7107,19 @@ export async function updateKitAssets({
      * then we have to make the removed assets Available
      * Only apply this when not in addOnly mode
      */
+    // Archived members never took the kit's custody (issue #382), so they get
+    // no release note, event or status write when they leave the kit.
+    const removedCustodyMembers = removedAssets.filter(
+      (asset) => !asset.archivedAt
+    );
     if (
       !addOnly &&
-      removedAssets.length &&
+      removedCustodyMembers.length &&
       kit.custody?.id &&
       kit.custody.custodian.id
     ) {
       const custodianDisplay = kitCustodianDisplay ?? "**Unknown Custodian**";
-      const assetIds = removedAssets.map((a) => a.id);
+      const assetIds = removedCustodyMembers.map((a) => a.id);
       // Filter the kit-custody delete by `kitCustodyId` so only the
       // kit-allocated rows are removed; operator-assigned per-unit
       // custody on the same asset stays. Emitting events keyed only
@@ -7012,7 +7128,7 @@ export async function updateKitAssets({
       const kitCustodyId = kit.custody.id;
 
       // Asset shape (type / unitOfMeasure) keyed by id, for the unit count.
-      const assetById = new Map(removedAssets.map((a) => [a.id, a]));
+      const assetById = new Map(removedCustodyMembers.map((a) => [a.id, a]));
       // Per-asset released units, populated inside the tx from the kit-
       // allocated Custody rows; consumed by the post-tx note. Assets with no
       // kit-custody row stay absent → no count → unchanged "custody" wording.
@@ -7089,7 +7205,7 @@ export async function updateKitAssets({
       // kit-custody row (and all INDIVIDUAL assets) keep the prior wording.
       // why: assetIds derived from this kit's org-scoped assets — same-tenant
       // by construction.
-      const releaseNoteData = removedAssets.map((asset) => {
+      const releaseNoteData = removedCustodyMembers.map((asset) => {
         const count = formatUnitCount(
           asset,
           releasedQtyByAssetId.get(asset.id)

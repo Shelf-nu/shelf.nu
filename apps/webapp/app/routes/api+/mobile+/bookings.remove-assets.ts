@@ -218,12 +218,18 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Which of those mean "delete this asset's kit-less row" rather than "every
     // row it has here". A caller that can observe the distinction states it in
-    // `standaloneAssetIds`; one that cannot leaves the field off, and every id
-    // it named is read as that instruction — the endpoint's default contract.
+    // `standaloneAssetIds`. One that cannot leaves the field off, and what that
+    // silence means depends on whether it also named kits:
     //
-    // Either way a named id stays in this bucket even when it ALSO belongs to a
-    // kit in `kitIds`: a qty-tracked asset can hold both a standalone row and
-    // kit-driven rows on one booking, and a caller naming both wants both gone.
+    //   - With kits named, every id it gave is read as a standalone
+    //     instruction, so an asset ticked in its own right loses its free-pool
+    //     row even though a named kit also holds it. A qty-tracked asset can
+    //     hold both, and a caller naming both wants both gone. Saying nothing
+    //     here would instead let the service infer the bucket from kit
+    //     membership, which cannot see that the asset was ticked at all.
+    //   - With no kits there is nothing to disambiguate, so the field stays off
+    //     and the service keeps its whole-asset scope: naming an asset and
+    //     nothing else means every row it has on this booking.
     const explicitStandaloneIdSet = requestedStandaloneAssetIds
       ? new Set(requestedStandaloneAssetIds)
       : null;
@@ -231,7 +237,9 @@ export async function action({ request }: ActionFunctionArgs) {
       ? requestedAttachedAssetIds.filter((assetId) =>
           explicitStandaloneIdSet.has(assetId)
         )
-      : requestedAttachedAssetIds;
+      : kitIds.length > 0
+      ? requestedAttachedAssetIds
+      : undefined;
 
     // `assets` drives the booking-note phrasing only ("… removed {kits} and
     // {assets} from booking"), NOT what gets detached — so it names everything
@@ -264,15 +272,21 @@ export async function action({ request }: ActionFunctionArgs) {
      *
      * The two cases mirror `removeAssets`'s own scoping. With kits named it
      * deletes the named kits' membership rows plus the kit-less rows of the
-     * standalone bucket; with no kit named it deletes every row of every asset
-     * it was given. Change that scoping and this count has to move with it.
+     * standalone bucket; with no kit named every asset it was given loses a
+     * row, whether that is the asset's every slice or just its free-pool one.
+     * Change that scoping and this count has to move with it.
      */
     const kitAssetIdSet = new Set(kitAssetIds);
+    // Mirrors the service's own fallback: with no explicit bucket, anything
+    // that is not a member of a named kit is the standalone half.
+    const countedStandaloneAssetIds =
+      standaloneAssetIds ??
+      attachedAssetIds.filter((assetId) => !kitAssetIdSet.has(assetId));
     const removedAssetIds =
       kitIds.length > 0
         ? new Set([
             ...attachedAssetIds.filter((assetId) => kitAssetIdSet.has(assetId)),
-            ...standaloneAssetIds,
+            ...countedStandaloneAssetIds,
           ])
         : new Set(attachedAssetIds);
 

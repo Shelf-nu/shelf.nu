@@ -1,6 +1,7 @@
 ---
 description: Every Asset read must say whether it includes archived assets
-globs: apps/webapp/app/**/*.{ts,tsx}
+paths:
+  - "apps/webapp/app/**/*.{ts,tsx}"
 ---
 
 # Asset Queries Name `archivedAt`

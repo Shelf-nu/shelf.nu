@@ -862,7 +862,11 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
      * the newly added ids only, so a booking that already holds an asset
      * archived after the fact can still be saved and emptied.
      */
-    await assertAssetsAreNotArchived({ assetIds: newAssetIds, organizationId });
+    await assertAssetsAreNotArchived({
+      assetIds: newAssetIds,
+      organizationId,
+      actorUserId: userId,
+    });
 
     // Get partial check-in details to determine actual availability using context-aware status
     const { partialCheckinDetails } =

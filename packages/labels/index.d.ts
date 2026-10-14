@@ -222,6 +222,74 @@ export declare function kitMembersCustodyRefusal(
 export declare const KIT_MEMBERS_CUSTODY_BLOCKED_REASON: "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
 /**
+ * Why "Reinstate" is refused for an archived asset whose kit is in custody or
+ * checked out. Shared by the server refusal and the disabled menu action.
+ */
+export declare const KIT_IN_USE_REINSTATE_REASON: "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
+/**
+ * The reason an action on an archived asset is disabled. A reader who cannot
+ * reinstate (no asset `archive` permission) is told to ask an admin.
+ *
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ * @param options.action - what the disabled control does; defaults to "change"
+ */
+export declare function archivedAssetBlockedReason(options: {
+  canReinstate: boolean;
+  action?: "change" | "book";
+}): string;
+
+/** How an archived-assets refusal tells the reader to move on. */
+export type ArchivedAssetsFix =
+  | "reinstate"
+  | "remove-from-list"
+  | "remove-from-booking";
+
+/**
+ * The refusal when a request touches archived assets: names the first few
+ * titles, then the way out for this request and this reader.
+ *
+ * @param options.titles - titles of the archived assets, at least one
+ * @param options.fix - "reinstate" for a change to the asset itself,
+ *   "remove-from-list" for a batch the reader built, "remove-from-booking" for
+ *   a booking that holds them
+ * @param options.canReinstate - whether the reader holds the asset `archive` permission
+ */
+export declare function archivedAssetsRefusal(options: {
+  titles: string[];
+  fix: ArchivedAssetsFix;
+  canReinstate: boolean;
+}): string;
+
+/**
+ * "1 archived asset was left out." / "2 archived assets were left out."
+ *
+ * @param count - archived assets left out, at least one
+ */
+export declare function archivedAssetsLeftOut(count: number): string;
+
+/**
+ * The refusal when kits with no active asset (only archived ones, or none) are
+ * put into custody or booked.
+ *
+ * @param options.kits - at least one; `hasArchivedAssets` is false for an empty kit
+ * @param options.action - what was refused
+ */
+export declare function kitsWithoutActiveAssetsRefusal(options: {
+  kits: { name: string; hasArchivedAssets: boolean }[];
+  action: "custody" | "booking";
+}): string;
+
+/**
+ * The reason a kit's Book or custody action is disabled because the kit holds
+ * no active asset.
+ */
+export declare function kitWithoutActiveAssetsReason(options: {
+  hasArchivedAssets: boolean;
+  action: "custody" | "booking";
+}): string;
+
+/**
  * The semantic weight a status badge carries, independent of any palette. Each
  * app maps a tone onto its own colours (the webapp's fixed hex `BADGE_COLORS`,
  * the companion's light/dark theme), so the VALUES stay app-owned while the
@@ -336,16 +404,32 @@ export type ClientDeclaredBookingMethod =
 /** Name of the form field that carries a typed delete confirmation. */
 export declare const DELETE_CONFIRMATION_FIELD: "confirmation";
 
+/** The word a delete asks for when the item has no name to type. */
+export declare const DELETE_CONFIRMATION_FALLBACK: "delete";
+
 /**
- * Reduces a typed delete confirmation to the form it is compared in: NFC,
+ * Reduces a typed delete confirmation to the form it is compared in: format
+ * characters (zero-width space, joiners, byte order mark) removed, then NFC,
  * trimmed, whitespace collapsed, lower-cased. `""` for null or undefined.
  */
 export declare function normalizeDeleteConfirmation(value: unknown): string;
 
 /**
+ * What the user must type to confirm a delete: the item's name or count, or
+ * {@link DELETE_CONFIRMATION_FALLBACK} when the name is blank once normalized.
+ * Every surface shows this in its instruction.
+ *
+ * @param expected - the item's name, or the number of selected items
+ */
+export declare function deleteConfirmationTarget(
+  expected: string | number
+): string;
+
+/**
  * Whether a typed confirmation unlocks a delete. Shared by the webapp dialogs,
- * the server guard on bulk deletes and the companion's delete sheets. A blank
- * expected value never matches.
+ * the server guards and the companion's delete sheets. Compares against
+ * {@link deleteConfirmationTarget}, which is never blank, so an empty input
+ * confirms nothing.
  *
  * @param typed - what the user typed
  * @param expected - the item's name, or the number of selected items

@@ -75,3 +75,27 @@ export function getKitsWhereInput({
 
   return where;
 }
+
+/**
+ * Whether a storage path in the `kits` bucket is an image of `kitId`'s own.
+ *
+ * `updateKitImage` writes kit images to `<uploaderUserId>/<kitId>/<file>`, so
+ * a kit's own image has exactly three non-empty segments with `kitId` in the
+ * middle. Any other path names a file that belongs to a different kit, or to
+ * a different workspace, and must never be signed for this kit or removed
+ * with it. Callers check the same string they then sign or remove.
+ *
+ * @param path - A path from `extractStoragePath(url, "kits")`
+ * @param kitId - The kit the image is stored on
+ * @returns `true` only for a file directly inside the kit's own folder
+ */
+export function isOwnKitImagePath(path: string, kitId: Kit["id"]): boolean {
+  const segments = path.split("/");
+  return (
+    segments.length === 3 &&
+    segments[1] === kitId &&
+    segments.every(
+      (segment) => segment !== "" && segment !== "." && segment !== ".."
+    )
+  );
+}

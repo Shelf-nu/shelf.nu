@@ -69,6 +69,7 @@ vitest.mock("~/database/db.server", () => ({
 
 import { db } from "~/database/db.server";
 import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
+import { bookableListScopeWhere } from "~/modules/asset/list-scope.server";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
 import { requirePermission } from "~/utils/roles.server";
@@ -194,10 +195,10 @@ describe("asset model assets endpoint", () => {
     expect(args.filters).toContain("status=is:AVAILABLE");
     expect(args.filters).toContain("assetModel=is:am-1");
     // An ADMIN caller gets the unrestricted query, matching the index loader.
-    expect(args.availableToBookOnly).toBe(false);
+    expect(args.bookableScope).toBeNull();
   });
 
-  it("restricts to bookable assets for a SELF_SERVICE caller, matching the index loader", async () => {
+  it("restricts to bookable and held assets for a SELF_SERVICE caller, matching the index loader", async () => {
     vitest.mocked(requirePermission).mockResolvedValue(
       caller("SELF_SERVICE", {
         organizationId: "org-1",
@@ -213,10 +214,12 @@ describe("asset model assets endpoint", () => {
 
     const [args] = vitest.mocked(getAdvancedPaginatedAndFilterableAssets).mock
       .calls[0];
-    expect(args.availableToBookOnly).toBe(true);
+    expect(args.bookableScope).toEqual({ holderUserId: "user-1" });
     // The unfiltered count is narrowed the same way: counted over the wider
     // set, it would report assets this viewer is shown nowhere else.
-    expect(unfilteredCountWhere()).toMatchObject({ availableToBook: true });
+    expect(unfilteredCountWhere()).toMatchObject({
+      AND: [bookableListScopeWhere({ holderUserId: "user-1" })],
+    });
   });
 
   it("counts the model's own assets unfiltered when nothing matched, scoped to the caller's organization", async () => {

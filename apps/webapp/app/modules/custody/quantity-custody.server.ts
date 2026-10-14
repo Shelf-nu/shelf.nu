@@ -114,6 +114,40 @@ export function splitQuantityAssetIds(
 }
 
 /**
+ * Refuses an assignment the caller's custody scope does not allow: a caller
+ * limited to their own custody (`access.custody.assign === "self"`) may assign
+ * only to themselves. Reads nothing, so a route can run it before any check
+ * that costs a query.
+ *
+ * @param args.custodian - Who would receive the custody.
+ * @param args.custodyAssign - Whose custody the caller may change (`access.custody.assign`).
+ * @param args.userId - The acting user.
+ * @throws {ShelfError} 403 when the caller may not assign to this custodian.
+ */
+export function assertMayAssignCustodyTo({
+  custodian,
+  custodyAssign,
+  userId,
+}: {
+  custodian: Pick<QuantityCustodian, "id" | "user">;
+  custodyAssign: CustodyAssign;
+  userId: string;
+}): void {
+  if (custodyAssign === "self" && custodian.user?.id !== userId) {
+    throw new ShelfError({
+      cause: null,
+      title: "Action not allowed",
+      status: 403,
+      label: "Assets",
+      shouldBeCaptured: false,
+      message:
+        "Nothing was assigned. Self-service users can only assign custody to themselves.",
+      additionalData: { userId, custodianId: custodian.id },
+    });
+  }
+}
+
+/**
  * Checks every per-unit assignment of a submission before any is written.
  *
  * Each `checkOutQuantity` call is its own transaction, so once one has
@@ -171,18 +205,7 @@ export async function assertAssignableQuantities({
 }): Promise<void> {
   if (!quantityAssetIds.length) return;
 
-  if (custodyAssign === "self" && custodian.user?.id !== userId) {
-    throw new ShelfError({
-      cause: null,
-      title: "Action not allowed",
-      status: 403,
-      label: "Assets",
-      shouldBeCaptured: false,
-      message:
-        "Nothing was assigned. Self-service users can only assign custody to themselves.",
-      additionalData: { userId, custodianId: custodian.id },
-    });
-  }
+  assertMayAssignCustodyTo({ custodian, custodyAssign, userId });
 
   const unavailable: string[] = [];
 

@@ -1,3 +1,11 @@
+---
+description: User.displayName replaces firstName lastName everywhere a person is named; never re-list the name fields
+paths:
+  - "apps/webapp/app/**/*.{ts,tsx}"
+  - "apps/companion/**/*.{ts,tsx}"
+  - "apps/webapp/test/**/*.{ts,tsx}"
+---
+
 # `displayName` Is The User-Facing Name
 
 `User.displayName` REPLACES `firstName lastName` everywhere a person is named —

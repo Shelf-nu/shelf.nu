@@ -26,6 +26,7 @@ import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   getBookingsFilterData,
+  getBookingsListWhereParams,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
@@ -88,7 +89,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       page,
       perPage,
       search,
-      status,
       teamMemberIds,
       orderBy,
       orderDirection,
@@ -98,7 +98,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       filtersCookie,
       filters,
       redirectNeeded,
-      tags: filterTags,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings: access.bookings.seeAll,
@@ -122,20 +121,17 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       notifyData,
     ] = await Promise.all([
       getBookings({
-        organizationId,
+        ...getBookingsListWhereParams({
+          list: { kind: "index" },
+          searchParams,
+          organizationId,
+          userId,
+          custodianScope: selfServiceData?.custodianScope ?? null,
+        }),
         page,
         perPage,
-        search,
-        userId: userId,
-        ...(status && {
-          // If status is in the params, we filter based on it
-          statuses: [status],
-        }),
-        custodianTeamMemberIds: teamMemberIds,
-        ...selfServiceData,
         orderBy,
         orderDirection,
-        tags: filterTags,
         // PERF: the list renders booking-level fields plus an asset COUNT. The
         // per-booking `bookingAssets` payload existed only for the assets
         // drawer, which now fetches it from

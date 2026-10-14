@@ -152,3 +152,26 @@ describe("GET /api/mobile/kits — kit images", () => {
     }
   });
 });
+
+describe("GET /api/mobile/kits: member count", () => {
+  it("counts only members still in service, so an archived member is not an asset of the kit", async () => {
+    const kit = storedKit({ id: "kit-1", image: null, imageExpiration: null });
+    findManyMock.mockResolvedValueOnce([kit] as never);
+    countMock.mockResolvedValueOnce(1);
+    refreshExpiredKitImagesMock.mockResolvedValueOnce([kit]);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/kits"),
+      })
+    );
+
+    expect(findManyMock.mock.calls[0][0]).toMatchObject({
+      select: {
+        _count: {
+          select: { assetKits: { where: { asset: { archivedAt: null } } } },
+        },
+      },
+    });
+  });
+});

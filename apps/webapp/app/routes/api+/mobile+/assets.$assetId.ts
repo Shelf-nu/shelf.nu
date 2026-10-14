@@ -117,6 +117,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         mainImageExpiration: true,
         thumbnailImage: true,
         availableToBook: true,
+        // The detail screen badges an archived asset and turns its actions off.
+        archivedAt: true,
         valuation: true,
         // Quantity fields (additive) — surfaced so the companion detail
         // screen can DISPLAY quantity. Null for INDIVIDUAL assets.
@@ -316,6 +318,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       thumbnailImage: asset.thumbnailImage,
       assetModel: asset.assetModel,
       availableToBook: asset.availableToBook,
+      archivedAt: asset.archivedAt,
       // Helper's `category` type is `{ name } | null`; widen-then-narrow.
       category: asset.category ? { name: asset.category.name } : null,
       // Quantity scalars the helper requires (this route only consumes

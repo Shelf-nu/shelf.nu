@@ -1,6 +1,7 @@
 ---
 description: Hand-copied webapp logic in the companion must be marked as a mirror, point at its source, and prefer extraction to packages/*. Companion is the only secondary app today — extend the glob when another appears.
-globs: apps/companion/**
+paths:
+  - "apps/companion/**"
 ---
 
 # Cross-App Mirrors Need Provenance
@@ -49,6 +50,7 @@ Existing mirrors:
 | `lib/custody-scan-quantities.ts` → `unitsFor` + the holder counts                           | `apps/webapp/app/components/scanner/drawer/custody-scan-quantities.ts`                                                           | `@shelf/quantity-control`                     |
 | `lib/batch-blockers.ts` → the custody blockers                                              | `apps/webapp/app/components/scanner/drawer/uses/custody-blockers.tsx`                                                            | a pure `packages/*` scanner module (none yet) |
 | `lib/kit-member-custody.ts` → `kitMemberCustodyBlock`                                       | `apps/webapp/app/modules/asset/utils.ts` → `isIndividualKitMember`                                                               | a pure `packages/*` asset module (none yet)   |
+| `lib/archived-assets.ts` → the archived reasons                                             | `apps/webapp/app/components/assets/actions-dropdown.tsx` → the archived disabled reason                                          | `@shelf/labels`                               |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

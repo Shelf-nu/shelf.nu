@@ -1,26 +1,163 @@
 /**
- * Server Error For The Current Opening Of A Dialog
+ * What The Server Said During This Opening Of A Dialog
  *
  * A dialog that submits through a keyed `useFetcher` keeps that fetcher's last
- * response after it closes. Read straight from `fetcher.data`, a refusal from
- * a previous attempt is shown again the next time the dialog opens, and every
- * dialog sharing the key shows it too. This hook returns the error message
- * only when the response arrived while the dialog was open this time.
+ * response after it closes, and every dialog sharing the key reads the same
+ * one. Read straight from `fetcher.data`, that response is answered to the
+ * wrong opening, in both directions:
+ *
+ * - a refusal is shown again the next time the dialog opens, when nothing is
+ *   wrong this time;
+ * - a success is acted on again, so a dialog that closes itself on success
+ *   shuts the instant it reopens, which leaves the control dead.
+ *
+ * These hooks report the response only when it arrived during the opening in
+ * front of the operator. Both ways a dialog reaches an opening are covered:
+ * one that stays mounted and toggles an `open` prop, and one that is rendered
+ * only while open and so is mounted fresh each time.
  *
  * @see {@link file://../components/assets/quantity-custody-dialog.tsx}
  * @see {@link file://../components/assets/release-by-source-button.tsx}
+ * @see {@link file://../components/assets/quick-adjust-dialog.tsx}
+ * @see {@link file://../components/booking/adjust-booking-asset-quantity-dialog.tsx}
  */
 
 import { useState } from "react";
+import { isFormProcessing } from "~/utils/form";
 
-/** The part of a fetcher this hook reads. */
-type FetcherWithData = { data?: unknown };
+/** The parts of a fetcher these hooks read. */
+type FetcherWithData = {
+  data?: unknown;
+  /** Back to `"idle"` only once the loaders the action invalidated have run. */
+  state: "idle" | "submitting" | "loading";
+};
+
+/**
+ * The server's answer to the current opening of a dialog.
+ *
+ * `pending` covers both "nothing submitted yet" and "a response that belongs
+ * to an earlier opening", because a dialog must treat those the same way.
+ *
+ * Every field is a primitive, so depend on `status` and `message` directly
+ * rather than on the returned object, which is rebuilt each render.
+ */
+export type FetcherOutcomeSinceOpen =
+  | { status: "pending"; message: null }
+  | { status: "rejected"; message: string | null }
+  | { status: "accepted"; message: null };
+
+/** What one opening of a dialog started from. */
+type OpeningSnapshot = {
+  /** The `open` this snapshot was taken for, to notice the next flip. */
+  open: boolean;
+  /** The response the fetcher held, which is not an answer to this opening. */
+  data: unknown;
+  /** Whether a submission from an earlier opening was still in flight. */
+  inheritedSubmission: boolean;
+};
+
+const PENDING: FetcherOutcomeSinceOpen = { status: "pending", message: null };
+const ACCEPTED: FetcherOutcomeSinceOpen = { status: "accepted", message: null };
+
+/**
+ * Whether a response is a refusal.
+ *
+ * Only a non-null `error` VALUE says so. The `payload()` helper stamps
+ * `error: null` onto every success, so the key is always present and its
+ * presence says nothing.
+ *
+ * @param data - A fetcher response of unknown shape.
+ * @returns True when the action refused.
+ */
+function isRejection(data: unknown): boolean {
+  if (!data || typeof data !== "object" || !("error" in data)) return false;
+  return (data as { error?: unknown }).error != null;
+}
 
 /** Reads `{ error: { message } }` from a fetcher response, if it has one. */
 function errorMessageOf(data: unknown): string | null {
   if (!data || typeof data !== "object" || !("error" in data)) return null;
   const { error } = data as { error?: { message?: unknown } | null };
   return typeof error?.message === "string" ? error.message : null;
+}
+
+/**
+ * The server's answer to this opening of the dialog, ignoring any response
+ * that was already in the fetcher when the dialog opened.
+ *
+ * @param fetcher - The dialog's fetcher.
+ * @param open - Whether the dialog is open.
+ * @returns The outcome for this opening.
+ */
+export function useFetcherOutcomeSinceOpen(
+  fetcher: FetcherWithData,
+  open: boolean
+): FetcherOutcomeSinceOpen {
+  // One snapshot of what this opening started from. The three move together on
+  // every opening, so they are held as one value rather than three states that
+  // can disagree.
+  const [snapshot, setSnapshot] = useState<OpeningSnapshot>(() => ({
+    open,
+    // Whatever the fetcher is already holding, whether or not the dialog starts
+    // open. A dialog rendered only while open is mounted fresh on each opening,
+    // so its first render IS an opening, and a response that predates this
+    // instance was never an answer to it.
+    data: fetcher.data,
+    inheritedSubmission: isFormProcessing(fetcher.state),
+  }));
+
+  // Adjusting state while rendering, React's documented pattern for state
+  // derived from a prop change: what this opening started from is recorded in
+  // the same render that opens the dialog, so nothing stale flashes.
+  let current = snapshot;
+
+  if (open !== current.open) {
+    current = open
+      ? {
+          open,
+          data: fetcher.data,
+          inheritedSubmission: isFormProcessing(fetcher.state),
+        }
+      : { ...current, open };
+    setSnapshot(current);
+  }
+
+  // The inherited submission has answered. That answer belongs to the opening
+  // that started it, so it becomes this opening's baseline instead.
+  if (current.inheritedSubmission && !isFormProcessing(fetcher.state)) {
+    current = { ...current, data: fetcher.data, inheritedSubmission: false };
+    setSnapshot(current);
+  }
+
+  if (!open) {
+    return PENDING;
+  }
+
+  // Dismissing a dialog does not abort its write, so an opening can begin while
+  // an earlier submission is still in flight. Its answer is not this opening's,
+  // and the operator is looking at a fresh form.
+  if (current.inheritedSubmission) {
+    return PENDING;
+  }
+
+  // A fetcher keyed on an entity is replaced when that entity changes, and the
+  // replacement carries no data until it answers. That is pending: it is not an
+  // answer to this opening, and the snapshot describes the entity before it.
+  if (fetcher.data === undefined || fetcher.data === current.data) {
+    return PENDING;
+  }
+
+  // A refusal is reported the moment it lands. Nothing behind the dialog has
+  // changed, so there is nothing to wait for.
+  if (isRejection(fetcher.data)) {
+    return { status: "rejected", message: errorMessageOf(fetcher.data) };
+  }
+
+  // Acceptance waits for idle. A fetcher carries its action's result while the
+  // loaders that result invalidated are still running, so the response arrives
+  // before the page behind the dialog reflects it, and the updated figure there
+  // is the operator's confirmation that the write landed.
+  return isFormProcessing(fetcher.state) ? PENDING : ACCEPTED;
 }
 
 /**
@@ -35,19 +172,5 @@ export function useFetcherErrorSinceOpen(
   fetcher: FetcherWithData,
   open: boolean
 ): string | null {
-  const [wasOpen, setWasOpen] = useState(open);
-  const [dataAtOpen, setDataAtOpen] = useState<unknown>(
-    open ? undefined : fetcher.data
-  );
-
-  // Adjusting state while rendering, React's documented pattern for state
-  // derived from a prop change: the stale response is recorded in the same
-  // render that opens the dialog, so it never flashes.
-  if (open !== wasOpen) {
-    setWasOpen(open);
-    if (open) setDataAtOpen(fetcher.data);
-  }
-
-  if (!open || fetcher.data === dataAtOpen) return null;
-  return errorMessageOf(fetcher.data);
+  return useFetcherOutcomeSinceOpen(fetcher, open).message;
 }

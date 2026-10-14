@@ -23,6 +23,7 @@ import { LocationSelect } from "~/components/location/location-select";
 import { Button } from "~/components/shared/button";
 import { useDisabled } from "~/hooks/use-disabled";
 import { getLocationsForCreateAndEdit } from "~/modules/asset/service.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { getKit, updateKitLocation } from "~/modules/kit/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -68,7 +69,9 @@ export async function loader({ params, request, context }: LoaderFunctionArgs) {
       organizationId,
       userOrganizations,
       extraInclude: {
-        _count: { select: { assetKits: true } },
+        // Archived members keep their placement when the kit moves, so the
+        // "will also update N assets" note counts only the ones that move.
+        _count: KIT_ACTIVE_MEMBER_COUNT,
       },
     });
 

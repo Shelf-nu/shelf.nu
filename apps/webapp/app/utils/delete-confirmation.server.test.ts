@@ -183,4 +183,25 @@ describe("assertDeleteConfirmed", () => {
       );
     }
   });
+
+  it("asks an item with no name for the word delete", () => {
+    expect(() =>
+      assertDeleteConfirmed({
+        confirmation: " Delete",
+        expected: "",
+        label: "Assets",
+      })
+    ).not.toThrow();
+
+    for (const confirmation of [undefined, "", "   "]) {
+      expect(() =>
+        assertDeleteConfirmed({ confirmation, expected: "", label: "Assets" })
+      ).toThrow(
+        expect.objectContaining({
+          status: 400,
+          message: 'Nothing was deleted. Type "delete" to confirm.',
+        })
+      );
+    }
+  });
 });

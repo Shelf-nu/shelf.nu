@@ -293,6 +293,143 @@ export function kitMembersCustodyRefusal(members) {
 export const KIT_MEMBERS_CUSTODY_BLOCKED_REASON =
   "Some of the selected assets are part of a kit. Assign custody to the kit, or remove them from the kit first.";
 
+// Why "Reinstate" is refused for an archived asset whose kit is in custody or
+// checked out. The kit took its hold without this member, so reinstating it
+// would leave an active member the kit does not account for. Shown by the
+// server refusal and by the disabled Reinstate action alike.
+export const KIT_IN_USE_REINSTATE_REASON =
+  "This asset belongs to a kit that is in custody or checked out. Release or check in the kit first, then reinstate the asset.";
+
+// Archived assets (`Asset.archivedAt`) are out of service: the only changes
+// allowed are reinstate and permanent delete. Reinstating needs the asset
+// `archive` permission (admins and owners), so every sentence below that says
+// how to fix things is worded for the person reading it. A member who cannot
+// reinstate is told to ask an admin, never to use a button they do not have.
+// One register for the web tooltips, the server's refusals (which the
+// companion shows verbatim) and the companion's own reasons.
+
+/** How many assets or kits a refusal names before summarising the rest. */
+const NAMED_IN_ARCHIVED_REFUSAL = 3;
+
+/**
+ * Joins names for a sentence: `"A"`, `"A" and "B"`, `"A", "B", "C" and 2 more`.
+ *
+ * @param {string[]} names - at least one
+ * @returns {string}
+ */
+function quotedNameList(names) {
+  const named = names
+    .slice(0, NAMED_IN_ARCHIVED_REFUSAL)
+    .map((name) => `"${name}"`);
+  const rest = names.length - named.length;
+  if (rest > 0) return `${named.join(", ")} and ${rest} more`;
+  if (named.length === 1) return named[0];
+  return `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
+}
+
+/**
+ * The reason an action on an archived asset is disabled.
+ *
+ * @param {{ canReinstate: boolean; action?: "change" | "book" }} options -
+ *   `canReinstate` is whether the reader holds the asset `archive` permission
+ * @returns {string}
+ */
+export function archivedAssetBlockedReason({
+  canReinstate,
+  action = "change",
+}) {
+  if (!canReinstate) {
+    return "This asset is archived. Ask an admin to reinstate it.";
+  }
+  return action === "book"
+    ? "This asset is archived. Reinstate it to book it."
+    : "This asset is archived. Reinstate it to make changes.";
+}
+
+/**
+ * The refusal when a request touches archived assets. Names them, so the
+ * person can find them in a long list or a scanner batch.
+ *
+ * - `"reinstate"`: a change to the asset itself (edit, custody, location).
+ * - `"remove-from-list"`: a batch the person built (scanner, selection). The
+ *   fix that works for every role is dropping the archived rows.
+ * - `"remove-from-booking"`: a booking that holds them (reserve, check-out).
+ *
+ * @param {{ titles: string[]; fix: "reinstate" | "remove-from-list" | "remove-from-booking"; canReinstate: boolean }} options
+ * @returns {string}
+ */
+export function archivedAssetsRefusal({ titles, fix, canReinstate }) {
+  const count = titles.length;
+  const them = count === 1 ? "it" : "them";
+  const subject =
+    count === 0
+      ? "Some of these assets are archived."
+      : `${quotedNameList(titles)} ${count === 1 ? "is" : "are"} archived.`;
+
+  switch (fix) {
+    case "remove-from-list":
+      return `${subject} Remove ${them} from the list and try again.`;
+    case "remove-from-booking":
+      return canReinstate
+        ? `${subject} Remove ${them} from the booking or reinstate ${them}.`
+        : `${subject} Remove ${them} from the booking or ask an admin to reinstate ${them}.`;
+    default:
+      return canReinstate
+        ? `${subject} Reinstate ${them} to make changes.`
+        : `${subject} Ask an admin to reinstate ${them}.`;
+  }
+}
+
+/**
+ * The sentence added to a success message when archived kit members, or
+ * archived assets of a copied booking, were left out.
+ *
+ * @param {number} count - archived assets left out, at least one
+ * @returns {string}
+ */
+export function archivedAssetsLeftOut(count) {
+  return `${count} archived ${
+    count === 1 ? "asset was" : "assets were"
+  } left out.`;
+}
+
+/**
+ * The refusal when kits with no active asset are put into custody or booked.
+ * Such a kit would be held or booked while nothing in it is.
+ *
+ * @param {{ kits: { name: string; hasArchivedAssets: boolean }[]; action: "custody" | "booking" }} options
+ *   - `kits`: at least one; `hasArchivedAssets` is false for an empty kit
+ * @returns {string}
+ */
+export function kitsWithoutActiveAssetsRefusal({ kits, action }) {
+  const verb = action === "custody" ? "put into custody" : "book";
+  if (kits.length === 1) {
+    const [kit] = kits;
+    return kit.hasArchivedAssets
+      ? `Kit "${kit.name}" holds only archived assets, so there is nothing to ${verb}. Add an active asset to it, or have an admin reinstate one.`
+      : `Kit "${kit.name}" has no assets, so there is nothing to ${verb}. Add assets to it first.`;
+  }
+  return `${
+    kits.length
+  } kits have no active assets, so there is nothing to ${verb}: ${quotedNameList(
+    kits.map((kit) => kit.name)
+  )}. Add active assets to them first.`;
+}
+
+/**
+ * The reason a kit's Book or custody action is disabled because the kit holds
+ * no active asset.
+ *
+ * @param {{ hasArchivedAssets: boolean; action: "custody" | "booking" }} options
+ * @returns {string}
+ */
+export function kitWithoutActiveAssetsReason({ hasArchivedAssets, action }) {
+  const goal = action === "custody" ? "assign custody" : "book this kit";
+  return hasArchivedAssets
+    ? `This kit holds only archived assets. Add an active asset to ${goal}.`
+    : `This kit has no assets. Add assets to ${goal}.`;
+}
+
 /**
  * The semantic weight a status badge carries, independent of any palette.
  *
@@ -493,19 +630,43 @@ export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
 export const DELETE_CONFIRMATION_FIELD = "confirmation";
 
 /**
+ * The word a delete asks for when the item has no name to type: a blank title,
+ * or one made only of spaces or invisible characters.
+ */
+export const DELETE_CONFIRMATION_FALLBACK = "delete";
+
+/**
+ * The invisible format characters a delete confirmation ignores: soft hyphen,
+ * Arabic letter mark, Mongolian vowel separator, zero-width space, joiners and
+ * direction marks, bidi embeddings and isolates, word joiner and invisible
+ * operators, byte order mark, and interlinear annotation marks.
+ *
+ * Spelled out rather than written as `\p{Cf}`: the companion bundles this
+ * package for Hermes, and an explicit class compiles on every engine both apps
+ * support.
+ */
+const INVISIBLE_FORMAT_CHARACTERS =
+  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g;
+
+/**
  * Reduces a typed delete confirmation to the form it is compared in.
  *
- * Unicode NFC first: a macOS keyboard can emit a decomposed "é" while the
- * stored name holds the composed one, and the two would never match. Then
- * trims, collapses runs of whitespace (a title with a double space must not
- * demand one) and lower-cases. The point of the field is a deliberate act, not
- * a spelling test.
+ * Drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
+ * order mark and the like) first: the instruction cannot show them, so they
+ * are never asked for. Then Unicode NFC, after the drop so a letter and an
+ * accent that sat on either side of an invisible character still compose: a
+ * macOS keyboard can emit a decomposed "é" while the stored name holds the
+ * composed one, and the two would never match. Then trims, collapses runs of
+ * whitespace (a title with a double space must not demand one) and
+ * lower-cases. The point of the field is a deliberate act, not a spelling
+ * test.
  *
  * @param {unknown} value - what the user typed, or the expected name or count
  * @returns {string} the comparable form; "" for null or undefined
  */
 export function normalizeDeleteConfirmation(value) {
   return String(value ?? "")
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
     .normalize("NFC")
     .trim()
     .replace(/\s+/g, " ")
@@ -513,13 +674,29 @@ export function normalizeDeleteConfirmation(value) {
 }
 
 /**
+ * What the user must type to confirm a delete: the item's name or count, or
+ * {@link DELETE_CONFIRMATION_FALLBACK} when the name is blank once normalized.
+ * Every surface shows this in its instruction rather than the raw name, which
+ * can be blank.
+ *
+ * @param {string | number} expected - the item's name, or the number of
+ *   selected items for a bulk delete
+ * @returns {string} the text to show and to type
+ */
+export function deleteConfirmationTarget(expected) {
+  return normalizeDeleteConfirmation(expected)
+    ? String(expected)
+    : DELETE_CONFIRMATION_FALLBACK;
+}
+
+/**
  * Whether a typed confirmation unlocks a delete.
  *
- * One rule for every surface: the webapp dialogs, the server guard on bulk
- * deletes and the companion's delete sheets all call this, so the button the
- * user sees enabled is never refused by the server for a spelling difference.
- * An expected value that is blank never matches, so an empty input cannot
- * confirm a nameless item.
+ * One rule for every surface: the webapp dialogs, the server guards and the
+ * companion's delete sheets all call this, so the button the user sees
+ * enabled is never refused by the server for a spelling difference. The typed
+ * value is compared with {@link deleteConfirmationTarget}, which is never
+ * blank, so an empty input confirms nothing, a nameless item included.
  *
  * @param {unknown} typed - what the user typed
  * @param {string | number} expected - the item's name, or the number of
@@ -527,8 +704,10 @@ export function normalizeDeleteConfirmation(value) {
  * @returns {boolean} true when they match after normalization
  */
 export function deleteConfirmationMatches(typed, expected) {
-  const want = normalizeDeleteConfirmation(expected);
-  return want.length > 0 && normalizeDeleteConfirmation(typed) === want;
+  return (
+    normalizeDeleteConfirmation(typed) ===
+    normalizeDeleteConfirmation(deleteConfirmationTarget(expected))
+  );
 }
 
 /**

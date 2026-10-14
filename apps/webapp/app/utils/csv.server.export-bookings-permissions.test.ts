@@ -1,6 +1,7 @@
 /**
- * Permission regression tests for `exportBookingsFromIndexToCsv`'s
- * where-construction on the explicit-ids (non-select-all) branch.
+ * Tests for the `where` `exportBookingsFromIndexToCsv` builds: the custody
+ * restriction on the explicit-ids branch, and which bookings "Select all"
+ * stands for on each bookings list.
  *
  * That branch receives `bookingsIds` straight from the `?bookingsIds=` query
  * param of the export route, so the values are attacker-controlled. Because
@@ -18,8 +19,13 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "~/database/db.server";
-import { bookingDraftVisibilityClause } from "~/modules/booking/service.server";
+import {
+  bookingDraftVisibilityClause,
+  buildBookingsWhere,
+  getBookingsListWhereParams,
+} from "~/modules/booking/service.server";
 import { exportBookingsFromIndexToCsv } from "./csv.server";
+import { ALL_SELECTED_KEY } from "./list";
 
 // @vitest-environment node
 // 👋 see https://vitest.dev/guide/environment.html#environments-for-specific-files
@@ -80,6 +86,7 @@ async function captureWhere(
     bookingsIds: [VICTIM_BOOKING_ID],
     canSeeAllBookings,
     organizationId: ORGANIZATION_ID,
+    list: null,
   });
 
   return findManyMock.mock.calls[0][0].where as Prisma.BookingWhereInput;
@@ -132,5 +139,96 @@ describe("exportBookingsFromIndexToCsv — explicit bookingsIds branch", () => {
     await captureWhere(true);
 
     expect(db.teamMember.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("exportBookingsFromIndexToCsv: select all", () => {
+  const KIT_ID = "kit-1";
+  const TAG_ID = "tag-1";
+
+  /**
+   * Runs a select-all export from a page URL and returns the `where` handed to
+   * `db.booking.findMany`.
+   */
+  async function captureSelectAllWhere({
+    query,
+    list,
+    canSeeAllBookings,
+  }: {
+    query: string;
+    list: Parameters<typeof exportBookingsFromIndexToCsv>[0]["list"];
+    canSeeAllBookings: boolean;
+  }): Promise<Prisma.BookingWhereInput> {
+    await exportBookingsFromIndexToCsv({
+      request: new Request(
+        `http://localhost/bookings/export/bookings.csv?bookingsIds=${ALL_SELECTED_KEY}&${query}`
+      ),
+      userId: RESTRICTED_USER_ID,
+      bookingsIds: [ALL_SELECTED_KEY],
+      canSeeAllBookings,
+      organizationId: ORGANIZATION_ID,
+      list,
+    });
+
+    return findManyMock.mock.calls[0][0].where as Prisma.BookingWhereInput;
+  }
+
+  it("exports a kit tab's bookings, with its tag filter, as that tab lists them", async () => {
+    const query = `tag=${TAG_ID}`;
+    const list = { kind: "kit" as const, kitId: KIT_ID };
+
+    const where = await captureSelectAllWhere({
+      query,
+      list,
+      canSeeAllBookings: true,
+    });
+
+    expect(where).toEqual(
+      buildBookingsWhere(
+        getBookingsListWhereParams({
+          list,
+          searchParams: new URLSearchParams(query),
+          organizationId: ORGANIZATION_ID,
+          userId: RESTRICTED_USER_ID,
+          custodianScope: null,
+        })
+      )
+    );
+    // Pinned directly as well, so the test fails if the shared helper drops them.
+    expect(where.bookingAssets).toEqual({
+      some: { asset: { assetKits: { some: { kitId: KIT_ID } } } },
+    });
+    expect(where.tags).toEqual({ some: { id: { in: [TAG_ID] } } });
+  });
+
+  it("keeps a restricted caller to their own custody", async () => {
+    const where = await captureSelectAllWhere({
+      query: "",
+      list: { kind: "index" },
+      canSeeAllBookings: false,
+    });
+
+    expect(where.AND).toEqual(
+      expect.arrayContaining([
+        {
+          OR: [
+            { custodianUserId: RESTRICTED_USER_ID },
+            { custodianTeamMemberId: { in: [OWN_TEAM_MEMBER_ID] } },
+          ],
+        },
+      ])
+    );
+  });
+
+  it("refuses a select all that names no list, exporting nothing", async () => {
+    await expect(
+      captureSelectAllWhere({
+        query: "",
+        list: null,
+        canSeeAllBookings: true,
+      })
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(findManyMock).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,59 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: a Self-service member and an archived asset. They may take custody
+# of available assets for themselves, but not of an archived one, and they
+# cannot reinstate it, so every surface tells them to ask an admin or to
+# remove it. No login (see ../03-self-service.yaml).
+
+# ── Asset screen ─────────────────────────────────────────────────────
+- openLink: "shelf://assets/${SHELF_TEST_ARCHIVED_ASSET_ID}"
+- extendedWaitUntil:
+    visible: "This asset is archived. Ask an admin to reinstate it."
+    timeout: 20000
+- assertNotVisible: "Reinstate asset"
+- assertVisible:
+    text: "Take custody of asset"
+    enabled: false
+- takeScreenshot: archived-ss-asset
+
+# ── Scanner: Assign (take custody) ───────────────────────────────────
+- openLink: "shelf://scanner"
+- extendedWaitUntil:
+    visible: "Scanner action: Assign.*"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ARCHIVED_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- assertVisible: "1 asset is archived and can't be put in custody."
+- assertVisible:
+    id: "batch-drawer-submit"
+    enabled: false
+- takeScreenshot: archived-ss-scanner
+- tapOn: "Clear all scanned items"
+
+# ── Their own draft booking ──────────────────────────────────────────
+- openLink: "shelf://bookings/${SHELF_TEST_ARCHIVED_BOOKING_SS_ID}"
+- extendedWaitUntil:
+    visible: "E2E Archived Camera.*Archived.*"
+    timeout: 20000
+- scrollUntilVisible:
+    element: '"E2E Archived Camera" is archived. Remove it from the booking or ask an admin to reinstate it.'
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Reserve this booking"
+    enabled: false
+- takeScreenshot: archived-ss-booking

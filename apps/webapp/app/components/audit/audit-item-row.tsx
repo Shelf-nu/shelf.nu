@@ -37,7 +37,10 @@ import {
 import { AuditAssetActions } from "~/components/audit/audit-asset-actions";
 import { AvailabilityBadge } from "~/components/booking/availability-label";
 import ImageWithPreview from "~/components/image-with-preview/image-with-preview";
-import { createAvailabilityLabels } from "~/components/scanner/drawer/availability-label-factory";
+import {
+  createAvailabilityLabels,
+  assetLabelPresets,
+} from "~/components/scanner/drawer/availability-label-factory";
 import {
   DefaultLoadingState,
   GenericItemRow,
@@ -157,6 +160,11 @@ export function AuditItemRow({
             : 0);
 
         const availabilityConfigs = [
+          // An archived asset still counts in an audit (it is physically
+          // somewhere); the badge says it is out of service.
+          assetLabelPresets.archivedInAudit(
+            isAsset && "archivedAt" in data && !!data.archivedAt
+          ),
           {
             condition: isExpected,
             badgeText: "Expected",
