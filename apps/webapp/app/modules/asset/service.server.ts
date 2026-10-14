@@ -40,6 +40,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // Imported from the dependency-free leaf (NOT `availability.server`) so that
 // importing asset/service.server does NOT drag in the heavy
@@ -1705,7 +1706,7 @@ export async function createAsset({
               },
             })
           : created;
-      });
+      }, LONG_TRANSACTION_OPTIONS);
 
       // Successfully created asset, exit the retry loop
       return asset;
