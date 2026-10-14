@@ -13945,10 +13945,14 @@ export async function removeAssets({
        *
        * The blanket flip was unsafe: an asset can simultaneously sit on a
        * different ONGOING/OVERDUE booking OR be held by a Custody row, and
-       * stamping AVAILABLE silently stripped those signals (bug #99). The
-       * source booking's slice has already been deleted above in this same
-       * tx, so `excludeBookingId` is informational (the rows are gone
-       * anyway) but kept for symmetry with the other exit paths.
+       * stamping AVAILABLE silently stripped those signals (bug #99).
+       *
+       * Nothing is excluded, this booking included. A removal scoped to an
+       * asset's free-pool row leaves its kit-driven slices in place, and a
+       * surviving slice that is still checked out is exactly the evidence
+       * this reconciliation must weigh: excluding the booking would free an
+       * asset whose kit units are still in the field. Rows the delete above
+       * took are already gone, so they cannot be counted either way.
        *
        * RESERVED/DRAFT removals are unchanged: the asset was never out, so
        * there is nothing to reconcile.
@@ -13971,7 +13975,7 @@ export async function removeAssets({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds,
-          excludeBookingIds: [id],
+          excludeBookingIds: [],
           organizationId,
         });
       }
