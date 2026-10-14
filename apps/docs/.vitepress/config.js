@@ -123,6 +123,10 @@ export default {
             text: "PR Review Loop",
             link: "/pr-review-loop",
           },
+          {
+            text: "PR Review",
+            link: "/pr-review",
+          },
         ],
       },
       {
