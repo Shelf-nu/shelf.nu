@@ -56,6 +56,11 @@ prop.
 miss three times: user comments are user-controlled too, and they legitimately
 link out. When you add a `MarkdownViewer` call site, ask who typed the string.
 
+Render UPDATE / system-generated notes with `SystemNoteViewer`
+(`~/components/markdown/system-note-viewer`), never a bare `MarkdownViewer`.
+The wrappers store raw line breaks and backslashes inside tag attributes, and
+only `SystemNoteViewer` encodes them so the tags parse.
+
 When you splice ANY user-controlled string into note content:
 
 - Prefer a **wrapper** from `~/utils/markdoc-wrappers.ts` (`wrapLinkForNote`,

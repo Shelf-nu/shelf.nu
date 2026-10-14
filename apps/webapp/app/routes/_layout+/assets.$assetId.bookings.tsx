@@ -1,4 +1,3 @@
-import { BookingStatus } from "@prisma/client";
 import { data, type LoaderFunctionArgs, type MetaFunction } from "react-router";
 import { z } from "zod";
 import type { HeaderData } from "~/components/layout/header/types";
@@ -7,6 +6,7 @@ import { decorateBookingsForList } from "~/modules/booking/list-flags.server";
 import {
   getBookings,
   getBookingsFilterData,
+  getBookingsListWhereParams,
 } from "~/modules/booking/service.server";
 import { setSelectedOrganizationIdCookie } from "~/modules/organization/context.server";
 import { TAG_WITH_COLOR_SELECT } from "~/modules/tag/constants";
@@ -35,14 +35,6 @@ import { requirePermission } from "~/utils/roles.server";
 import BookingsIndexPage, {
   bookingsSearchFieldTooltipText,
 } from "./bookings._index";
-
-const BOOKING_STATUS_TO_SHOW = [
-  BookingStatus.DRAFT,
-  BookingStatus.COMPLETE,
-  BookingStatus.ONGOING,
-  BookingStatus.OVERDUE,
-  BookingStatus.RESERVED,
-];
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
   { title: data ? appendToMetaTitle(data.header.title) : "" },
@@ -73,12 +65,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const {
       page,
       search,
-      status,
       teamMemberIds,
       orderBy,
       orderDirection,
       selfServiceData,
-      tags: filterTags,
     } = await getBookingsFilterData({
       request,
       canSeeAllBookings: access.bookings.seeAll,
@@ -89,18 +79,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const [{ bookings, bookingCount }, teamMembersData, tagsData] =
       await Promise.all([
         getBookings({
-          organizationId,
+          ...getBookingsListWhereParams({
+            list: { kind: "asset", assetId },
+            searchParams,
+            organizationId,
+            userId,
+            custodianScope: selfServiceData?.custodianScope ?? null,
+          }),
           page,
           perPage,
-          search,
-          userId: authSession?.userId,
-          assetIds: [assetId],
-          statuses: status ? [status] : BOOKING_STATUS_TO_SHOW,
-          ...selfServiceData,
           orderBy,
           orderDirection,
-          custodianTeamMemberIds: teamMemberIds,
-          tags: filterTags,
           // PERF: the list renders booking-level fields plus an asset COUNT. The
           // per-booking `bookingAssets` payload existed only for the assets
           // drawer, which now fetches it from
