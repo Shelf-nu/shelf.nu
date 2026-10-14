@@ -41,6 +41,7 @@ import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { requireAdmin } from "~/utils/roles.server";
 import { hasSsoGroupMappings } from "~/utils/sso-group-roles";
 import { validateDomains } from "~/utils/sso.server";
+import { canUseBarcodes } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export const meta = () => [
@@ -297,10 +298,15 @@ export const action = async ({
           csvData,
           ASSET_CSV_HEADERS
         );
+        const organization = await db.organization.findUniqueOrThrow({
+          where: { id: organizationId },
+          select: { barcodesEnabled: true },
+        });
         await createAssetsFromContentImport({
           data: contentData,
           userId,
           organizationId,
+          canUseBarcodes: canUseBarcodes(organization),
         });
         return payload(null);
       }
