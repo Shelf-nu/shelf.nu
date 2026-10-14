@@ -39,10 +39,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "../shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 type CheckoutDropdownProps = {
   /** Disables the trigger and the "Scan to check out" option */
@@ -109,7 +106,7 @@ export default function CheckoutDropdown({
 }: CheckoutDropdownProps) {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -226,11 +223,7 @@ export default function CheckoutDropdown({
         modal={false}
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={(openValue) => {
-          if (defaultApplied && isSheetViewport()) {
-            setOpen(openValue);
-          }
-        }}
+        onOpenChange={onOpenChange}
       >
         <DropdownMenuTrigger
           className="hidden md:flex"

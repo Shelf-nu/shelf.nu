@@ -11,10 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "~/components/shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "~/components/shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
 import { useSearchParams } from "~/hooks/search-params";
 import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
@@ -52,7 +49,7 @@ export default function BookSelectedAssetsDropdown() {
 function ConditionalActionsDropdown() {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -175,11 +172,7 @@ function ConditionalActionsDropdown() {
         modal={false}
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={(openValue) => {
-          if (defaultApplied && isSheetViewport()) {
-            setOpen(openValue);
-          }
-        }}
+        onOpenChange={onOpenChange}
       >
         <DropdownMenuTrigger
           className="hidden md:flex"

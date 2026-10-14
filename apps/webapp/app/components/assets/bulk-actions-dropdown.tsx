@@ -44,10 +44,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "../shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 import BookSelectedAssetsDropdown from "./assets-index/book-selected-assets-dropdown";
 import BulkDownloadQrDialog from "./bulk-download-qr-dialog";
@@ -82,7 +79,7 @@ function ConditionalDropdown() {
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -252,9 +249,7 @@ function ConditionalDropdown() {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && isSheetViewport()) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >

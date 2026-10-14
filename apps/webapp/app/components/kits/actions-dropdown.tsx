@@ -27,10 +27,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "../shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 
 export default function ActionsDropdown({
@@ -97,7 +94,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -121,9 +118,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && isSheetViewport()) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >

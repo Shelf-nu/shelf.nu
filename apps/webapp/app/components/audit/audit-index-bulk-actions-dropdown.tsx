@@ -38,10 +38,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "../shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 /**
  * Bulk actions dropdown for the audits index page.
@@ -122,7 +119,7 @@ function ConditionalDropdown() {
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -149,9 +146,7 @@ function ConditionalDropdown() {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && isSheetViewport()) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >

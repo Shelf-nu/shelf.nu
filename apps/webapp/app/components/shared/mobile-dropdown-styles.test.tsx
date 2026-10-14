@@ -18,11 +18,8 @@ import type { Window as HappyDOMWindow } from "happy-dom";
 import { renderToStaticMarkup } from "react-dom/server";
 import resolveConfig from "tailwindcss/resolveConfig";
 import { describe, expect, it } from "vitest";
-import {
-  MobileDropdownStyles,
-  SHEET_MEDIA_QUERY,
-  isSheetViewport,
-} from "./mobile-dropdown-styles";
+import { SHEET_MEDIA_QUERY, isSheetViewport } from "~/utils/sheet-viewport";
+import { MobileDropdownStyles } from "./mobile-dropdown-styles";
 import tailwindConfig from "../../../tailwind.config";
 
 /** `app/`: components and routes both render menus. */
@@ -46,6 +43,17 @@ function sourceFiles(dir: string): string[] {
 const SHEET_CLASSES =
   /["'`][^"'`]*(\bfixed\b[^"'`]*\bbottom-0\b|\bbottom-0\b[^"'`]*\bfixed\b)/;
 
+/** One `tw(...)` call whose arguments, taken together, hold both classes. */
+const SHEET_TW_CALL = /\btw\((?=[^)]*\bfixed\b)(?=[^)]*\bbottom-0\b)[^)]*\)/;
+
+/**
+ * Whether `source` styles an element as a fixed, bottom-anchored sheet, with
+ * the two classes in one literal or spread across one `tw(...)` call.
+ */
+function hasSheetClasses(source: string): boolean {
+  return SHEET_CLASSES.test(source) || SHEET_TW_CALL.test(source);
+}
+
 /**
  * Files whose popper content holds a bottom sheet: a Radix menu or popover
  * content plus a fixed, bottom-anchored element.
@@ -55,7 +63,7 @@ const SHEET_MENUS = sourceFiles(APP)
   .filter(
     ({ source }) =>
       /<(DropdownMenuContent|PopoverContent)\b/.test(source) &&
-      SHEET_CLASSES.test(source)
+      hasSheetClasses(source)
   );
 
 /** The sheet menus whose source matches `pattern`, as paths under `app/`. */
@@ -89,6 +97,10 @@ describe("MobileDropdownStyles", () => {
     // keeps its own position.
     expect(html).toContain(
       "[data-radix-popper-content-wrapper]:has([data-mobile-sheet]) {\n    transform: none !important;"
+    );
+    // Browsers without `:has()` clear every wrapper, at the same widths.
+    expect(html).toContain(
+      `@supports not selector(:has(*)) {\n  @media ${SHEET_MEDIA_QUERY} {\n    [data-radix-popper-content-wrapper] {\n      transform: none !important;`
     );
   });
 
@@ -142,9 +154,21 @@ describe("menus that render a bottom sheet", () => {
   });
 
   it("switch their behaviour at the same width as the sheet", () => {
-    // Both triggers switch at `md`, like the sheet styling.
+    // Both triggers switch at `md`, like the sheet styling: the toggle
+    // trigger is `hidden md:flex` and the open-only one is `md:hidden`. The
+    // overlay is `md:hidden` too, so the open-only trigger is the `md:hidden`
+    // class list that is not `fixed`.
     expect(
       sheetMenusWhere((source) => /\bsm:(hidden|flex)\b/.test(source))
+    ).toEqual([]);
+    expect(
+      sheetMenusWhere(
+        (source) =>
+          !/["'`][^"'`]*\bhidden\b[^"'`]*\bmd:flex\b/.test(source) ||
+          !(source.match(/["'`][^"'`]*\bmd:hidden\b[^"'`]*["'`]/g) ?? []).some(
+            (classes) => !/\bfixed\b/.test(classes)
+          )
+      )
     ).toEqual([]);
     // Width checks read `isSheetViewport`, never a hand-written pixel value.
     expect(sheetMenusWhere((source) => source.includes("innerWidth"))).toEqual(

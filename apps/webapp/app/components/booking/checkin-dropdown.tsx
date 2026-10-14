@@ -10,10 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import {
-  MobileDropdownStyles,
-  isSheetViewport,
-} from "../shared/mobile-dropdown-styles";
+import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
 
 type CheckinDropdownProps = {
   disabled?: boolean;
@@ -33,7 +30,7 @@ export default function CheckinDropdown({
 }: CheckinDropdownProps) {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -68,11 +65,7 @@ export default function CheckinDropdown({
         modal={false}
         open={open}
         defaultOpen={defaultOpen}
-        onOpenChange={(openValue) => {
-          if (defaultApplied && isSheetViewport()) {
-            setOpen(openValue);
-          }
-        }}
+        onOpenChange={onOpenChange}
       >
         <DropdownMenuTrigger
           className="hidden md:flex"

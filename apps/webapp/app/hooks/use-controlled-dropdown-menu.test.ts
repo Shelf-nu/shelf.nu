@@ -266,6 +266,24 @@ describe("useControlledDropdownMenu", () => {
     });
   });
 
+  describe("Radix open changes (onOpenChange)", () => {
+    it("closes the sheet when Radix asks after a QR-scan auto-open", async () => {
+      setViewportWidth(712);
+      mockSearchParams.set("ref", "qr");
+
+      const { result } = renderHook(() => useControlledDropdownMenu());
+      await waitFor(() => {
+        expect(result.current.open).toBe(true);
+      });
+
+      // Escape or an item select reaches the hook as onOpenChange(false)
+      act(() => {
+        result.current.onOpenChange(false);
+      });
+      expect(result.current.open).toBe(false);
+    });
+  });
+
   describe("auto-open behavior", () => {
     it("only auto-opens once even if conditions remain true", async () => {
       setViewportWidth(640);

@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { useEffect, useRef, useState } from "react";
-import { isSheetViewport } from "~/components/shared/mobile-dropdown-styles";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "~/hooks/search-params";
+import { isSheetViewport } from "~/utils/sheet-viewport";
 
 type UseControlledDropdownMenuReturn = {
   ref: RefObject<HTMLDivElement | null>;
@@ -9,6 +9,12 @@ type UseControlledDropdownMenuReturn = {
   defaultApplied: boolean;
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
+  /**
+   * Pass to the Radix menu's `onOpenChange`. Applies the open state Radix
+   * asks for only after a QR-scan auto-open on a sheet viewport; otherwise the
+   * menu's own triggers and `setOpen` drive it.
+   */
+  onOpenChange: (open: boolean) => void;
 };
 
 interface Options {
@@ -48,6 +54,13 @@ export function useControlledDropdownMenu(
     }
   }, [shouldAutoOpen, defaultApplied]);
 
+  const onOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (defaultApplied && isSheetViewport()) setOpen(nextOpen);
+    },
+    [defaultApplied]
+  );
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -75,5 +88,6 @@ export function useControlledDropdownMenu(
     defaultApplied,
     open,
     setOpen,
+    onOpenChange,
   };
 }
