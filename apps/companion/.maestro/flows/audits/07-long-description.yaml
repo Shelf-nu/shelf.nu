@@ -24,6 +24,7 @@ tags:
 - extendedWaitUntil:
     visible: "E2E Long Description Audit"
     timeout: 20000
+  label: "Fixture audit opens (if not, its rows are gone: re-run seed-e2e.sh long-description-up)"
 
 - scrollUntilVisible:
     element:

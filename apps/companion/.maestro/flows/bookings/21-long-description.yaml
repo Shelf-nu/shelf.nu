@@ -24,6 +24,7 @@ tags:
 - extendedWaitUntil:
     visible: "E2E Long Description"
     timeout: 20000
+  label: "Fixture booking opens (if not, its rows are gone: re-run seed-e2e.sh long-description-up)"
 
 - scrollUntilVisible:
     element:

@@ -57,27 +57,10 @@ if [ ! -d "$SUITE_DIR" ]; then
 fi
 
 # ─── Load environment variables ─────────────────────────────────────
-ENV_FILE="$MAESTRO_DIR/env/test.env"
-if [ ! -f "$ENV_FILE" ]; then
-  echo -e "${RED}✗ Missing env file: $ENV_FILE${NC}"
-  echo "  Copy env/test.env.example to env/test.env and fill in values."
-  exit 1
-fi
-
-# Build Maestro -e flags from env file
-MAESTRO_ENV_FLAGS=()
 # test.env, plus the ids each seed-e2e.sh fixture writes (env/e2e*.env).
-for env_file in "$ENV_FILE" "$MAESTRO_DIR"/env/e2e*.env; do
-  [ -f "$env_file" ] || continue
-  while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" == \#* ]] && continue
-    value="${value%\"}"
-    value="${value#\"}"
-    value="${value%\'}"
-    value="${value#\'}"
-    MAESTRO_ENV_FLAGS+=(-e "$key=$value")
-  done < "$env_file"
-done
+# shellcheck source=lib/load-env.sh
+source "$SCRIPT_DIR/lib/load-env.sh"
+load_maestro_env "$MAESTRO_DIR"
 
 echo -e "${CYAN}${BOLD}━━━ Running suite: $SUITE_NAME ━━━${NC}"
 echo ""
@@ -93,6 +76,7 @@ fi
 
 PASS_COUNT=0
 FAIL_COUNT=0
+SKIP_COUNT=0
 FAILED_TESTS=()
 
 for flow in "$SUITE_DIR"/*.yaml; do
@@ -100,6 +84,14 @@ for flow in "$SUITE_DIR"/*.yaml; do
   FLOW_NAME=$(basename "$flow" .yaml)
 
   echo -n "  ▸ $FLOW_NAME ... "
+
+  # A fixture flow whose fixture is not seeded has nothing to run against.
+  MISSING=$(missing_flow_vars "$flow")
+  if [ -n "$MISSING" ]; then
+    echo -e "${YELLOW}SKIP${NC} (not set: $MISSING; seed its fixture with seed-e2e.sh)"
+    SKIP_COUNT=$((SKIP_COUNT + 1))
+    continue
+  fi
 
   FLOW_OUTPUT="$RESULTS_DIR/${SUITE_NAME}_${FLOW_NAME}.log"
   if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
@@ -120,6 +112,9 @@ fi
 TOTAL=$((PASS_COUNT + FAIL_COUNT))
 echo ""
 
+if [ "$SKIP_COUNT" -gt 0 ]; then
+  echo -e "${YELLOW}⊘ $SKIP_COUNT skipped: their fixture is not seeded${NC}"
+fi
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo -e "${GREEN}${BOLD}✅ $SUITE_NAME: $TOTAL/$TOTAL passed${NC}"
 else

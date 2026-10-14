@@ -40,34 +40,11 @@ echo -e "${CYAN}${BOLD}═══════════════════
 echo ""
 
 # ─── Load environment variables ─────────────────────────────────────
-ENV_FILE="$MAESTRO_DIR/env/test.env"
-if [ ! -f "$ENV_FILE" ]; then
-  echo -e "${RED}✗ Missing env file: $ENV_FILE${NC}"
-  echo "  Copy env/test.env.example to env/test.env and fill in values."
-  exit 1
-fi
-
-# Build Maestro -e flags from env file
-# Maestro doesn't reliably read shell env vars; use -e flag instead
-MAESTRO_ENV_FLAGS=()
-# test.env, plus the ids each seed-e2e.sh fixture writes (env/e2e*.env), so
-# fixture flows find their records when the whole suite runs.
-for env_file in "$ENV_FILE" "$MAESTRO_DIR"/env/e2e*.env; do
-  [ -f "$env_file" ] || continue
-  while IFS='=' read -r key value; do
-    # Skip comments and empty lines
-    [[ -z "$key" || "$key" == \#* ]] && continue
-    # Strip quotes from value
-    value="${value%\"}"
-    value="${value#\"}"
-    value="${value%\'}"
-    value="${value#\'}"
-    MAESTRO_ENV_FLAGS+=(-e "$key=$value")
-    # Also export for report generation
-    export "$key=$value"
-  done < "$env_file"
-done
-echo -e "${GREEN}✓ Loaded ${#MAESTRO_ENV_FLAGS[@]} env vars from test.env and fixture env files${NC}"
+# test.env, plus the ids each seed-e2e.sh fixture writes (env/e2e*.env).
+# shellcheck source=lib/load-env.sh
+source "$SCRIPT_DIR/lib/load-env.sh"
+load_maestro_env "$MAESTRO_DIR"
+echo -e "${GREEN}✓ Loaded $(( ${#MAESTRO_ENV_FLAGS[@]} / 2 )) env vars from test.env and fixture env files${NC}"
 
 # ─── Verify Maestro is installed ────────────────────────────────────
 if ! command -v maestro &>/dev/null; then
@@ -127,9 +104,16 @@ for suite in "${SUITES[@]}"; do
   for flow in "$SUITE_DIR"/*.yaml; do
     [ -f "$flow" ] || continue
     FLOW_NAME=$(basename "$flow" .yaml)
-    TOTAL_COUNT=$((TOTAL_COUNT + 1))
-
     echo -n "  ▸ $FLOW_NAME ... "
+
+    # A fixture flow whose fixture is not seeded has nothing to run against.
+    MISSING=$(missing_flow_vars "$flow")
+    if [ -n "$MISSING" ]; then
+      echo -e "${YELLOW}SKIP${NC} (not set: $MISSING; seed its fixture with seed-e2e.sh)"
+      SKIP_COUNT=$((SKIP_COUNT + 1))
+      continue
+    fi
+    TOTAL_COUNT=$((TOTAL_COUNT + 1))
 
     FLOW_OUTPUT="$RESULTS_DIR/${suite}_${FLOW_NAME}.log"
     if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
@@ -162,9 +146,16 @@ if [ "${SKIP_DARK:-}" != "1" ]; then
     for flow in "$DARK_DIR"/*.yaml; do
       [ -f "$flow" ] || continue
       FLOW_NAME=$(basename "$flow" .yaml)
-      TOTAL_COUNT=$((TOTAL_COUNT + 1))
-
       echo -n "  ▸ $FLOW_NAME ... "
+
+      # A fixture flow whose fixture is not seeded has nothing to run against.
+      MISSING=$(missing_flow_vars "$flow")
+      if [ -n "$MISSING" ]; then
+        echo -e "${YELLOW}SKIP${NC} (not set: $MISSING; seed its fixture with seed-e2e.sh)"
+        SKIP_COUNT=$((SKIP_COUNT + 1))
+        continue
+      fi
+      TOTAL_COUNT=$((TOTAL_COUNT + 1))
 
       FLOW_OUTPUT="$RESULTS_DIR/dark-mode_${FLOW_NAME}.log"
       if maestro test "${MAESTRO_ENV_FLAGS[@]}" "$flow" --output "$RESULTS_DIR" > "$FLOW_OUTPUT" 2>&1; then
