@@ -3,8 +3,10 @@
  *
  * The shared "type X to confirm" field for permanent deletes. A dialog asks
  * for the item's name (single delete) or the number of selected items (bulk
- * delete) and keeps its destructive button disabled until the typed value
- * matches. Matching is {@link deleteConfirmationMatches} from `@shelf/labels`,
+ * delete), or the word "delete" for an item with no name, and keeps its
+ * destructive button disabled until the typed value matches. What to type is
+ * {@link deleteConfirmationTarget} and matching is
+ * {@link deleteConfirmationMatches}, both from `@shelf/labels`,
  * the same rule the server guard on bulk deletes and the companion's delete
  * sheets apply, so an enabled button is never refused for a spelling
  * difference.
@@ -20,6 +22,7 @@ import { useCallback, useId, useState } from "react";
 import {
   DELETE_CONFIRMATION_FIELD,
   deleteConfirmationMatches,
+  deleteConfirmationTarget,
 } from "@shelf/labels";
 import Input from "~/components/forms/input";
 
@@ -39,7 +42,10 @@ export function useTypeToConfirm(expected: string | number) {
 }
 
 type TypeToConfirmProps = {
-  /** The name or count the user must type, shown in bold in the instruction. */
+  /**
+   * The item's name or the count. The instruction shows, in bold, what to type
+   * for it: the value itself, or "delete" when the name is blank.
+   */
   expected: string | number;
   /** The typed value, from {@link useTypeToConfirm}. */
   value: string;
@@ -76,7 +82,7 @@ export function TypeToConfirm({
       <p id={hintId} className="text-sm text-gray-600">
         To confirm, type{" "}
         <span className="break-all font-semibold text-gray-900">
-          {expected}
+          {deleteConfirmationTarget(expected)}
         </span>{" "}
         below.
       </p>
