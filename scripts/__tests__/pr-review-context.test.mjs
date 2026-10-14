@@ -641,12 +641,20 @@ test("editedPrFiles: checks only the PR's paths, ignores untracked files, and tr
   assert.deepEqual(editedPrFiles(failing, ["a.ts"]), []);
 });
 
-test("flattenPath: same basename in different folders gives different names", () => {
-  assert.equal(flattenPath(".claude/rules/a/x.md"), ".claude__rules__a__x.md");
-  assert.notEqual(
+test("flattenPath: distinct paths always give distinct names", () => {
+  assert.equal(
     flattenPath(".claude/rules/a/x.md"),
-    flattenPath(".claude/rules/b/x.md")
+    ".claude%2Frules%2Fa%2Fx.md"
   );
+  const pairs = [
+    [".claude/rules/a/x.md", ".claude/rules/b/x.md"],
+    [".claude/rules/a__b/x.md", ".claude/rules/a/b__x.md"],
+    [".claude/rules/a%2Fb.md", ".claude/rules/a/b.md"],
+  ];
+  for (const [left, right] of pairs) {
+    assert.notEqual(flattenPath(left), flattenPath(right));
+  }
+  assert.ok(!flattenPath("a/b/c.md").includes("/"));
 });
 
 test("artifactDir: artifacts live in .pr-review/<n> at the worktree root", () => {

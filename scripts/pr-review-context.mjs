@@ -348,11 +348,13 @@ export function httpsRepoUrl(prUrl) {
 /**
  * Turns a repo path into a single file name, so copies of files with the same
  * basename in different folders never overwrite each other.
+ * Encoding (rather than swapping `/` for a separator) keeps every distinct path
+ * distinct, whatever characters its folder and file names contain.
  * @param {string} repoPath - e.g. `.claude/rules/a/x.md`
- * @returns {string} e.g. `.claude__rules__a__x.md`
+ * @returns {string} e.g. `.claude%2Frules%2Fa%2Fx.md`
  */
 export function flattenPath(repoPath) {
-  return repoPath.replaceAll("/", "__");
+  return encodeURIComponent(repoPath);
 }
 
 /**
