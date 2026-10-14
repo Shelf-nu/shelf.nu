@@ -2608,6 +2608,26 @@ describe("createAsset reused barcodes", () => {
   });
 });
 
+describe("createAsset transaction budget", () => {
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("gives its transaction 15 seconds instead of Prisma's 5 second default", async () => {
+    expect.assertions(1);
+
+    await createAsset({
+      title: "New asset",
+      userId: "user-1",
+      organizationId: "org-A",
+    } as unknown as Parameters<typeof createAsset>[0]);
+
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
+  });
+});
+
 describe("updateAsset asset-model activity", () => {
   beforeEach(() => {
     vitest.clearAllMocks();

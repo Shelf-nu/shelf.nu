@@ -4093,6 +4093,13 @@ export async function bulkDeleteKits({
   }
 }
 
+/**
+ * Transaction options for {@link bulkAssignKitCustody}. Its work grows with the
+ * number of kits and their members, and the CSV import passes every kit in the
+ * file at once, which outlasts Prisma's 5 s default.
+ */
+const BULK_ASSIGN_KIT_CUSTODY_TRANSACTION_OPTIONS = { timeout: 15000 };
+
 export async function bulkAssignKitCustody({
   kitIds,
   organizationId,
@@ -4426,7 +4433,7 @@ export async function bulkAssignKitCustody({
         })),
         tx
       );
-    });
+    }, BULK_ASSIGN_KIT_CUSTODY_TRANSACTION_OPTIONS);
   } catch (cause) {
     const message =
       cause instanceof ShelfError

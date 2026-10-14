@@ -1273,6 +1273,13 @@ export function buildAssetKitCreateData({
   };
 }
 
+/**
+ * Transaction options for {@link createAsset}. The CSV import calls it once per
+ * row on a busy database, where one asset's writes can outlast Prisma's 5 s
+ * default. 15 s matches the other long transactions in this module.
+ */
+const CREATE_ASSET_TRANSACTION_OPTIONS = { timeout: 15000 };
+
 export async function createAsset({
   title,
   description,
@@ -1705,7 +1712,7 @@ export async function createAsset({
               },
             })
           : created;
-      });
+      }, CREATE_ASSET_TRANSACTION_OPTIONS);
 
       // Successfully created asset, exit the retry loop
       return asset;

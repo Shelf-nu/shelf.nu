@@ -1349,8 +1349,10 @@ describe("bulkAssignKitCustody", () => {
     expect(db.kit.findMany).toHaveBeenCalled();
     expect(db.$transaction).toHaveBeenCalled();
 
-    // Verify the transaction was called
-    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function));
+    // 15 s, not Prisma's 5 s default: a CSV import hands this every kit at once.
+    expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      timeout: 15000,
+    });
   });
 
   it("refuses a kit that reads AVAILABLE while a live booking has some of its units out", async () => {
