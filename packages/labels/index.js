@@ -631,19 +631,43 @@ export const CLIENT_DECLARED_BOOKING_METHODS = Object.freeze([
 export const DELETE_CONFIRMATION_FIELD = "confirmation";
 
 /**
+ * The word a delete asks for when the item has no name to type: a blank title,
+ * or one made only of spaces or invisible characters.
+ */
+export const DELETE_CONFIRMATION_FALLBACK = "delete";
+
+/**
+ * The invisible format characters a delete confirmation ignores: soft hyphen,
+ * Arabic letter mark, Mongolian vowel separator, zero-width space, joiners and
+ * direction marks, bidi embeddings and isolates, word joiner and invisible
+ * operators, byte order mark, and interlinear annotation marks.
+ *
+ * Spelled out rather than written as `\p{Cf}`: the companion bundles this
+ * package for Hermes, and an explicit class compiles on every engine both apps
+ * support.
+ */
+const INVISIBLE_FORMAT_CHARACTERS =
+  /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF\uFFF9-\uFFFB]/g;
+
+/**
  * Reduces a typed delete confirmation to the form it is compared in.
  *
- * Unicode NFC first: a macOS keyboard can emit a decomposed "é" while the
- * stored name holds the composed one, and the two would never match. Then
- * trims, collapses runs of whitespace (a title with a double space must not
- * demand one) and lower-cases. The point of the field is a deliberate act, not
- * a spelling test.
+ * Drops {@link INVISIBLE_FORMAT_CHARACTERS} (zero-width space, joiners, byte
+ * order mark and the like) first: the instruction cannot show them, so they
+ * are never asked for. Then Unicode NFC, after the drop so a letter and an
+ * accent that sat on either side of an invisible character still compose: a
+ * macOS keyboard can emit a decomposed "é" while the stored name holds the
+ * composed one, and the two would never match. Then trims, collapses runs of
+ * whitespace (a title with a double space must not demand one) and
+ * lower-cases. The point of the field is a deliberate act, not a spelling
+ * test.
  *
  * @param {unknown} value - what the user typed, or the expected name or count
  * @returns {string} the comparable form; "" for null or undefined
  */
 export function normalizeDeleteConfirmation(value) {
   return String(value ?? "")
+    .replace(INVISIBLE_FORMAT_CHARACTERS, "")
     .normalize("NFC")
     .trim()
     .replace(/\s+/g, " ")
@@ -651,13 +675,29 @@ export function normalizeDeleteConfirmation(value) {
 }
 
 /**
+ * What the user must type to confirm a delete: the item's name or count, or
+ * {@link DELETE_CONFIRMATION_FALLBACK} when the name is blank once normalized.
+ * Every surface shows this in its instruction rather than the raw name, which
+ * can be blank.
+ *
+ * @param {string | number} expected - the item's name, or the number of
+ *   selected items for a bulk delete
+ * @returns {string} the text to show and to type
+ */
+export function deleteConfirmationTarget(expected) {
+  return normalizeDeleteConfirmation(expected)
+    ? String(expected)
+    : DELETE_CONFIRMATION_FALLBACK;
+}
+
+/**
  * Whether a typed confirmation unlocks a delete.
  *
- * One rule for every surface: the webapp dialogs, the server guard on bulk
- * deletes and the companion's delete sheets all call this, so the button the
- * user sees enabled is never refused by the server for a spelling difference.
- * An expected value that is blank never matches, so an empty input cannot
- * confirm a nameless item.
+ * One rule for every surface: the webapp dialogs, the server guards and the
+ * companion's delete sheets all call this, so the button the user sees
+ * enabled is never refused by the server for a spelling difference. The typed
+ * value is compared with {@link deleteConfirmationTarget}, which is never
+ * blank, so an empty input confirms nothing, a nameless item included.
  *
  * @param {unknown} typed - what the user typed
  * @param {string | number} expected - the item's name, or the number of
@@ -665,8 +705,10 @@ export function normalizeDeleteConfirmation(value) {
  * @returns {boolean} true when they match after normalization
  */
 export function deleteConfirmationMatches(typed, expected) {
-  const want = normalizeDeleteConfirmation(expected);
-  return want.length > 0 && normalizeDeleteConfirmation(typed) === want;
+  return (
+    normalizeDeleteConfirmation(typed) ===
+    normalizeDeleteConfirmation(deleteConfirmationTarget(expected))
+  );
 }
 
 /**

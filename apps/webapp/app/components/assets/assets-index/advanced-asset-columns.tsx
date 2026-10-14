@@ -59,6 +59,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { BarcodeCell } from "./advanced-columns/barcode-cell";
@@ -452,15 +453,21 @@ function StatusColumn({
   );
 }
 
+/** The most description characters the index tooltip shows. */
+const DESCRIPTION_TOOLTIP_MAX_LENGTH = 600;
+
 /**
  * Displays a truncated plain-text preview of the asset description and shows
- * the full markdown-rendered content inside a tooltip on hover.
+ * the markdown-rendered content inside a tooltip on hover. The tooltip shows
+ * at most {@link DESCRIPTION_TOOLTIP_MAX_LENGTH} characters and points to the
+ * asset page for the rest.
  * Description column component - exported for reuse in other index pages
  */
 export function DescriptionColumn({ value }: { value: string }) {
   const plainPreview = cleanMarkdownFormatting(value ?? "");
   const hasContent = Boolean(value && value.trim().length > 0);
   const previewText = plainPreview.length > 0 ? plainPreview : value.trim();
+  const isTooltipTruncated = value.length > DESCRIPTION_TOOLTIP_MAX_LENGTH;
 
   return (
     <Td className="max-w-62 min-w-60 whitespace-pre-wrap">
@@ -479,7 +486,15 @@ export function DescriptionColumn({ value }: { value: string }) {
                   textarea and rendered as plain text on the asset page, so
                   they are not a markdown surface. Links here would also be
                   unreachable — Radix tooltip content is not interactive. */}
-              <MarkdownViewer content={value} className="mt-2 text-sm" />
+              <MarkdownViewer
+                content={truncateText(value, DESCRIPTION_TOOLTIP_MAX_LENGTH)}
+                className="mt-2 text-sm"
+              />
+              {isTooltipTruncated ? (
+                <p className="mt-2 text-xs text-gray-500">
+                  Open the asset to read the full description
+                </p>
+              ) : null}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

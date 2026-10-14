@@ -47,6 +47,13 @@ import { createStyles } from "@/lib/create-styles";
 import { labelForRequired } from "@/lib/a11y";
 import { CustomFieldInput } from "@/components/asset-edit/custom-field-input";
 import { TagPickerField } from "@/components/asset-edit/tag-picker-field";
+import { CharacterCount } from "@/components/shared/character-count";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH,
+  ASSET_DESCRIPTION_TOO_LONG_MESSAGE,
+  countCharacters,
+  isAssetDescriptionTooLong,
+} from "@/lib/asset-description";
 
 // expo-image-picker requires native module — lazy-loaded to avoid crash
 // if the dev client hasn't been rebuilt yet
@@ -425,11 +432,17 @@ export default function CreateAssetScreen() {
       .filter((cf): cf is { id: string; value: string } => cf !== null);
   }, [customFieldDefs, customFieldValues]);
 
+  const descriptionTooLong = isAssetDescriptionTooLong(description);
+
   // ── Submit ──────────────────────────────────────
   const handleSubmit = async () => {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length < 2) {
       Alert.alert("Validation", "Title must be at least 2 characters.");
+      return;
+    }
+    if (descriptionTooLong) {
+      Alert.alert("Validation", ASSET_DESCRIPTION_TOO_LONG_MESSAGE);
       return;
     }
     if (!currentOrg) return;
@@ -543,6 +556,7 @@ export default function CreateAssetScreen() {
 
   const canSubmit =
     title.trim().length >= 2 &&
+    !descriptionTooLong &&
     !isSubmitting &&
     !isCustomFieldsLoading &&
     !customFieldsError;
@@ -653,9 +667,21 @@ export default function CreateAssetScreen() {
             multiline
             numberOfLines={3}
             textAlignVertical="top"
-            maxLength={500}
             accessibilityLabel="Description"
           />
+          <CharacterCount
+            count={countCharacters(description)}
+            max={ASSET_DESCRIPTION_MAX_LENGTH}
+          />
+          {descriptionTooLong && (
+            <Text
+              style={styles.errorHint}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="polite"
+            >
+              {ASSET_DESCRIPTION_TOO_LONG_MESSAGE}
+            </Text>
+          )}
         </View>
 
         {/* ── Category Picker ──────────────────────── */}

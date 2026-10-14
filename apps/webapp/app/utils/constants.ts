@@ -33,6 +33,20 @@ export const ONE_DAY = ONE_HOUR * 24;
 export const NOTE_MAX_CONTENT_LENGTH = 5000;
 
 /**
+ * Max number of characters an asset description can contain.
+ *
+ * One long-text size for the product, the same as notes
+ * ({@link NOTE_MAX_CONTENT_LENGTH}) and multi-line custom fields. The rule is validated when a description
+ * is written (web form, inline edit, mobile API, CSV import) and is never
+ * enforced by blocking the keyboard, so a stored description that is longer
+ * than the limit still opens and can be shortened. The rule itself lives in
+ * `~/utils/asset-description`.
+ *
+ * The companion app mirrors this value in `apps/companion/lib/asset-description.ts`.
+ */
+export const ASSET_DESCRIPTION_MAX_LENGTH = 5000;
+
+/**
  * Where the browser posts Sentry envelopes, so ad-blockers and tracking
  * protection see our own domain instead of Sentry's.
  *

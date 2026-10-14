@@ -53,6 +53,7 @@ import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
 import { LocationPicker } from "@/components/location-picker";
 import type { AssetPlacement } from "@/lib/api/types";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type EditableRow = {
   /** Stable client-side row id so removes don't re-key sibling rows. */
@@ -191,6 +192,7 @@ export function ManagePlacementsSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   const [{ rows, duplicateHint, openedOverPlaced }, dispatch] = useReducer(
     editorReducer,
@@ -327,7 +329,10 @@ export function ManagePlacementsSheet({
       presentationStyle="pageSheet"
       onRequestClose={requestClose}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Manage Placements</Text>
