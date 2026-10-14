@@ -4,6 +4,10 @@ import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { countActiveCustomFields } from "~/modules/custom-field/service.server";
 import {
+  REPORTS_PLAN_MESSAGE,
+  REPORTS_PLAN_TITLE,
+} from "~/modules/reports/plan-copy";
+import {
   getOrganizationTierLimit,
   getUserTierLimit,
 } from "~/modules/tier/service.server";
@@ -81,6 +85,90 @@ export async function assertUserCanExportAssets({
 }
 
 /** End Export */
+
+/** Reports */
+
+/**
+ * Whether a workspace's plan includes reports. Reports are part of the Plus
+ * and Team plans, and of every custom plan unless it is switched off there.
+ *
+ * Pass the WORKSPACE's tier limit (`getOrganizationTierLimit`, which reads the
+ * owner's tier), never the viewer's own: an administrator on a Free account
+ * keeps reports inside a Team workspace.
+ *
+ * @param tierLimit - The tier limit of the workspace owner
+ * @returns `true` when the plan includes reports, or when premium features are
+ *   off (self-hosted instances have every feature)
+ */
+export const canUseReports = (
+  tierLimit: { canUseReports: boolean } | null | undefined
+) => {
+  if (!premiumIsEnabled) return true;
+  if (!tierLimit) return false;
+  return tierLimit.canUseReports;
+};
+
+/** The caller's workspaces, as `requirePermission` returns them. */
+type ReportsPlanArgs = {
+  organizationId: Organization["id"];
+  organizations: {
+    id: string;
+    type: OrganizationType;
+    name: string;
+    imageId: string | null;
+    userId: string;
+  }[];
+};
+
+/**
+ * Resolves whether the active workspace's plan includes reports, from its
+ * owner's tier. Call it after `requirePermission`, so a role that may not see
+ * reports still gets the role error first.
+ *
+ * @param args.organizationId - The active workspace
+ * @param args.organizations - The caller's workspaces, as `requirePermission` returns them
+ * @returns `true` when the workspace may open reports
+ */
+export async function workspaceCanUseReports({
+  organizationId,
+  organizations,
+}: ReportsPlanArgs) {
+  // Self-hosted instances have every feature; skip the tier lookup.
+  if (!premiumIsEnabled) return true;
+
+  const tierLimit = await getOrganizationTierLimit({
+    organizationId,
+    organizations,
+  });
+
+  return canUseReports(tierLimit);
+}
+
+/**
+ * Refuses a request for report data when the workspace's plan does not include
+ * reports. Used by the download doors (CSV and PDF); the report pages send a
+ * Free workspace to the unlock page instead.
+ *
+ * @param args.organizationId - The active workspace
+ * @param args.organizations - The caller's workspaces, as `requirePermission` returns them
+ * @throws {ShelfError} 403 when the workspace's plan does not include reports
+ */
+export async function assertUserCanUseReports(args: ReportsPlanArgs) {
+  if (!(await workspaceCanUseReports(args))) {
+    throw new ShelfError({
+      cause: null,
+      title: REPORTS_PLAN_TITLE,
+      message: REPORTS_PLAN_MESSAGE,
+      additionalData: { organizationId: args.organizationId },
+      label,
+      // `ShelfError.status` defaults to 500; a plan limit is a refusal, not a fault.
+      status: 403,
+      shouldBeCaptured: false,
+    });
+  }
+}
+
+/** End Reports */
 
 /** Import */
 /** Important:

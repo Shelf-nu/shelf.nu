@@ -56,13 +56,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { getIntParam } from "~/utils/search-params-number";
+import { assertUserCanUseReports } from "~/utils/subscription.server";
 
 /**
  * Builds the report named by `?reportId` as a CSV download, applying the same
  * filters as the report page but reading up to 10,000 rows instead of one page.
  *
- * @returns The CSV as an attachment, or the failure with its status — 400 without
- *   a report id, 404 for an unknown report, 403 for one that does not export
+ * @returns The CSV as an attachment, or the failure with its status: 400 without
+ *   a report id, 404 for an unknown report, 403 for one that does not export or
+ *   when the workspace's plan does not include reports
  */
 export const loader = async ({
   context,
@@ -75,12 +77,18 @@ export const loader = async ({
   try {
     // `currentOrganization` supplies the workspace currency for the reports
     // whose KPI strings carry money values.
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.reports,
-      action: PermissionAction.export,
-    });
+    const { organizationId, organizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.reports,
+        action: PermissionAction.export,
+      });
+
+    // Reports are part of the Plus and Team plans. This is a download URL, so
+    // a workspace without them gets the 403 as JSON rather than a page.
+    await assertUserCanUseReports({ organizationId, organizations });
+
     const currency = currentOrganization.currency;
 
     const searchParams = getCurrentSearchParams(request);
