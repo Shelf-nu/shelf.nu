@@ -3,9 +3,11 @@
  *
  * Shown instead of a two-button alert for the deletes the app offers (an asset,
  * a booking). It says what the delete removes and keeps the destructive button
- * disabled until the user types the item's name. Matching is
- * `deleteConfirmationMatches` from `@shelf/labels`, the same rule the webapp's
- * delete dialogs use, so a name that unlocks the website unlocks the phone.
+ * disabled until the user types the item's name, or the word "delete" for an
+ * item with no name. What to type is `deleteConfirmationTarget` and matching is
+ * `deleteConfirmationMatches`, both from `@shelf/labels` and the same rule the
+ * webapp's delete dialogs use, so a name that unlocks the website unlocks the
+ * phone.
  *
  * Built from core React Native only (`Modal`, `TextInput`), so it ships in an
  * over-the-air update. Follows the house sheet contract
@@ -26,10 +28,14 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { deleteConfirmationMatches } from "@shelf/labels";
+import {
+  deleteConfirmationMatches,
+  deleteConfirmationTarget,
+} from "@shelf/labels";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -38,7 +44,10 @@ type Props = {
   title: string;
   /** What the delete removes, in plain words. */
   message: string;
-  /** The item's name, which the user types to unlock the delete. */
+  /**
+   * The item's name. The sheet asks for it, or for "delete" when it is blank,
+   * to unlock the delete.
+   */
   expected: string;
   /** True while the delete request is in flight. */
   isDeleting: boolean;
@@ -68,9 +77,11 @@ export default function ConfirmDeleteSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
   const inputRef = useRef<TextInput>(null);
   const [typed, setTyped] = useState("");
 
+  const target = deleteConfirmationTarget(expected);
   const isArmed = !isDeleting && deleteConfirmationMatches(typed, expected);
 
   // Hidden by the caller (after a delete, or a failed one): start empty next
@@ -101,7 +112,10 @@ export default function ConfirmDeleteSheet({
       // autoFocus prop fires before the modal animation and misses the keyboard.
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {title}
@@ -121,7 +135,7 @@ export default function ConfirmDeleteSheet({
           <Text style={styles.message}>{message}</Text>
 
           <Text style={styles.label}>
-            To confirm, type <Text style={styles.expected}>{expected}</Text>{" "}
+            To confirm, type <Text style={styles.expected}>{target}</Text>{" "}
             below.
           </Text>
           <TextInput
@@ -136,7 +150,7 @@ export default function ConfirmDeleteSheet({
             returnKeyType="done"
             editable={!isDeleting}
             accessibilityLabel="Confirmation"
-            accessibilityHint={`Type ${expected} to enable delete`}
+            accessibilityHint={`Type ${target} to enable delete`}
           />
 
           <TouchableOpacity

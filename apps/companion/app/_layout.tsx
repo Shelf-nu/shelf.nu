@@ -16,6 +16,7 @@ import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
 import { initSentry, trackServerTag } from "@/lib/sentry";
 import { hydrateActiveServer, refreshActiveServerConfig } from "@/lib/server";
+import { unlockOrientationOnTablets } from "@/lib/orientation";
 import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
 
@@ -24,6 +25,9 @@ initSentry();
 
 // Keep the native splash visible until our animated splash is mounted.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Phones stay upright; an Android tablet follows its rotation from launch.
+unlockOrientationOnTablets();
 
 // ── Startup diagnostic (visible in Metro terminal) ──────────────────
 if (__DEV__) {

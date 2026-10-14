@@ -36,7 +36,6 @@ import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
   assertKitDeleteConfirmed,
   deleteKit,
-  deleteKitImage,
   emitAssetKitDetachmentNotes,
   fetchAssetKitDetachmentImpact,
   getKit,
@@ -334,14 +333,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
-    const { image } = parseData(
-      formData,
-      z.object({
-        image: z.string().optional(),
-      }),
-      { additionalData: { userId, organizationId, kitId } }
-    );
-
     switch (intent) {
       case "delete": {
         // The dialog asks for the kit's name; refuse a request that skipped it.
@@ -352,11 +343,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           confirmation,
         });
 
+        // Also removes the kit's stored image file. The image is read from
+        // the kit row, never from the request.
         await deleteKit({ id: kitId, organizationId, actorUserId: userId });
-
-        if (image) {
-          await deleteKitImage({ url: image });
-        }
 
         sendNotification({
           title: "Kit deleted",

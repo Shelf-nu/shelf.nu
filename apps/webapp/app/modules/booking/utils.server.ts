@@ -1,11 +1,5 @@
 import { AssetStatus, AssetType, BookingStatus } from "@prisma/client";
-import type {
-  Asset,
-  Booking,
-  Organization,
-  Prisma,
-  User,
-} from "@prisma/client";
+import type { Asset, Booking, Prisma, User } from "@prisma/client";
 import { DateTime } from "luxon";
 import { redirect } from "react-router";
 import type { ErrorLabel } from "~/utils/error";
@@ -60,57 +54,10 @@ export function getBookingOwnershipScope({
 }
 
 /**
- * Builds the complete `where` for a bulk booking action.
- *
- * Shared by `bulkDeleteBookings`, `bulkArchiveBookings` and
- * `bulkCancelBookings` so the three cannot drift — and so the ownership scope
- * cannot be forgotten on one of them.
- *
- * The ownership predicate is AND-ed onto BOTH branches on purpose. Applying it
- * only to "select all" would still let a restricted caller act on someone
- * else's booking by posting its id directly.
- *
- * @param bookingIds - Explicit ids, or `[ALL_SELECTED_KEY]` for select-all
- * @param organizationId - The caller's (validated) organization
- * @param currentSearchParams - The list filters, for the select-all branch
- * @param access - The caller's access
- * @param userId - The caller
- * @returns A `Prisma.BookingWhereInput` scoped to org, filters and ownership
- */
-export function getBulkBookingsWhereInput({
-  bookingIds,
-  organizationId,
-  currentSearchParams,
-  access,
-  userId,
-}: {
-  bookingIds: Booking["id"][];
-  organizationId: Organization["id"];
-  currentSearchParams?: string | null;
-  access: RoleAccess;
-  /** Absent for system-initiated calls, which have no acting user */
-  userId?: User["id"];
-}): Prisma.BookingWhereInput {
-  const base: Prisma.BookingWhereInput = bookingIds.includes(ALL_SELECTED_KEY)
-    ? getBookingWhereInput({ currentSearchParams, organizationId })
-    : { id: { in: bookingIds }, organizationId };
-
-  const ownership = getBookingOwnershipScope({ access, userId });
-
-  if (!ownership) {
-    return base;
-  }
-
-  // AND rather than a spread: `base` may carry its own OR, and merging the two
-  // would union them — widening a destructive action instead of narrowing it.
-  return { AND: [base, ownership] };
-}
-
-/**
  * Refuses a bulk action whose explicit selection reaches outside the caller's
  * own bookings.
  *
- * {@link getBulkBookingsWhereInput} already narrows the query to what the
+ * `getBulkBookingsWhereInput` already narrows the query to what the
  * caller may act on, so a foreign id is simply not found. Without this check
  * the action then succeeds on the rest and reports success for a selection it
  * partly ignored. Select-all is scoped by its filters and is not checked here.
@@ -146,33 +93,6 @@ export function assertBulkSelectionWithinOwnership({
     status: 403,
     shouldBeCaptured: false,
   });
-}
-
-export function getBookingWhereInput({
-  organizationId,
-  currentSearchParams,
-}: {
-  organizationId: Organization["id"];
-  currentSearchParams?: string | null;
-}): Prisma.BookingWhereInput {
-  const where: Prisma.BookingWhereInput = { organizationId };
-
-  if (!currentSearchParams) {
-    return where;
-  }
-
-  const searchParams = new URLSearchParams(currentSearchParams);
-
-  const status =
-    searchParams.get("status") === "ALL"
-      ? null
-      : (searchParams.get("status") as BookingStatus);
-
-  if (status) {
-    where.status = status;
-  }
-
-  return where;
 }
 
 /** This function checks if the booking is expired or not */
