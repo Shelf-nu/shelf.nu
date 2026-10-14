@@ -2490,6 +2490,9 @@ enum AssetImportPhase {
 
 /// One CSV content import. Holds the parsed rows from preview until the import
 /// completes, so the job imports exactly the file the user previewed.
+/// A partial unique index on (organizationId) WHERE status IN (QUEUED, RUNNING) allows one
+/// active import per workspace. Prisma cannot express it; it lives in migration
+/// 20261015120100_asset_import_one_active_per_workspace.
 model AssetImport {
   id             String            @id @default(cuid())
   status         AssetImportStatus @default(DRAFT)

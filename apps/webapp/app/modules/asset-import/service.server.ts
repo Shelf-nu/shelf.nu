@@ -8,12 +8,25 @@
  * @see {@link file://./worker.server.ts}
  */
 import type { Organization, User } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { db } from "~/database/db.server";
-import { ShelfError } from "~/utils/error";
+import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { ASSET_IMPORT_DRAFT_TTL_HOURS } from "./constants";
 import type { StoredImportRow } from "./types";
 import { validateContentImportFile } from "./validate.server";
 import { enqueueAssetImportStep } from "./worker.server";
+
+/** The 409 raised when the workspace already has an active import. */
+function anotherImportRunning(): ShelfError {
+  return new ShelfError({
+    cause: null,
+    message:
+      "Another import is already running in this workspace. Wait for it to finish.",
+    label: "Asset Import",
+    status: 409,
+    shouldBeCaptured: false,
+  });
+}
 
 /**
  * Confirms a DRAFT import: re-validates its stored rows against the
@@ -25,7 +38,8 @@ import { enqueueAssetImportStep } from "./worker.server";
  * @returns The id of the queued import
  * @throws {ShelfError} 404 when no such draft exists for this user and
  * workspace, 400 when the draft expired or its rows no longer validate, 409
- * when another import is queued or running in the workspace, and the queue's
+ * when another import is queued or running in the workspace or this draft was
+ * already confirmed, and the queue's
  * error when the PREPARE step cannot be sent (the draft is restored first)
  */
 export async function confirmAssetImport({
@@ -73,14 +87,7 @@ export async function confirmAssetImport({
   });
 
   if (active) {
-    throw new ShelfError({
-      cause: null,
-      message:
-        "Another import is already running in this workspace. Wait for it to finish.",
-      label: "Asset Import",
-      status: 409,
-      shouldBeCaptured: false,
-    });
+    throw anotherImportRunning();
   }
 
   // The workspace may have changed since the preview (a QR code claimed, a
@@ -92,10 +99,34 @@ export async function confirmAssetImport({
     canUseBarcodes: draft.canUseBarcodes,
   });
 
-  await db.assetImport.updateMany({
-    where: { id: importId, organizationId, status: "DRAFT" },
-    data: { status: "QUEUED", phase: "PREPARE", confirmedAt: new Date() },
-  });
+  // The partial unique index on active imports turns a lost race with another
+  // draft's confirm into P2002; a lost race on this same draft matches no row.
+  let claimed: { count: number };
+  try {
+    claimed = await db.assetImport.updateMany({
+      where: { id: importId, organizationId, status: "DRAFT" },
+      data: { status: "QUEUED", phase: "PREPARE", confirmedAt: new Date() },
+    });
+  } catch (cause) {
+    const original = isLikeShelfError(cause) ? cause.cause : cause;
+    if (
+      original instanceof PrismaClientKnownRequestError &&
+      original.code === "P2002"
+    ) {
+      throw anotherImportRunning();
+    }
+    throw cause;
+  }
+
+  if (claimed.count === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "This import has already been confirmed.",
+      label: "Asset Import",
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  }
 
   try {
     await enqueueAssetImportStep({ importId, step: "PREPARE" });

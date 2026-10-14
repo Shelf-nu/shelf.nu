@@ -5,6 +5,7 @@
  *
  * @see {@link file://./service.server.ts}
  */
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -44,6 +45,7 @@ describe("confirmAssetImport", () => {
     vi.resetAllMocks();
     vi.mocked(validateContentImportFile).mockResolvedValue(undefined);
     vi.mocked(enqueueAssetImportStep).mockResolvedValue(undefined);
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
   });
 
   it("re-validates the stored rows, queues the import and sends the PREPARE step", async () => {
@@ -132,5 +134,35 @@ describe("confirmAssetImport", () => {
       where: { id: "imp", organizationId: "org", status: "QUEUED" },
       data: { status: "DRAFT" },
     });
+  });
+
+  it("409s without queuing or rolling back when the draft was already confirmed", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce(draft() as never)
+      .mockResolvedValueOnce(null);
+    vi.mocked(db.assetImport.updateMany).mockResolvedValueOnce({ count: 0 });
+
+    await expect(confirmAssetImport(args)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(enqueueAssetImportStep).not.toHaveBeenCalled();
+    expect(db.assetImport.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("409s when the database refuses a second active import in the workspace", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce(draft() as never)
+      .mockResolvedValueOnce(null);
+    vi.mocked(db.assetImport.updateMany).mockRejectedValueOnce(
+      new PrismaClientKnownRequestError("unique", {
+        code: "P2002",
+        clientVersion: "test",
+      })
+    );
+
+    await expect(confirmAssetImport(args)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(enqueueAssetImportStep).not.toHaveBeenCalled();
   });
 });
