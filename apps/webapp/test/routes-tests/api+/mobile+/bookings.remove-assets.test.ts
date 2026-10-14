@@ -268,6 +268,24 @@ describe("POST /api/mobile/bookings/remove-assets — the note", () => {
     expect((response.data as { removedCount: number }).removedCount).toBe(3);
   });
 
+  it("still names the bucket when the field is absent but kits are not", async () => {
+    // With kits named, silence cannot be left to the service: its fallback
+    // infers the bucket from kit membership, which would read an asset the
+    // caller ticked in its own right as having come along with its kit, and
+    // spare the free-pool row the caller meant to remove.
+    world({
+      inOrg: ["a1"],
+      onBooking: ["a1", "m1"],
+      kitMembers: ["m1"],
+    });
+
+    await post({ assetIds: ["a1"], kitIds: ["kit-1"] });
+
+    // Only the ids the caller named: `m1` came along with the kit, so it is the
+    // kit clause's business, not the standalone bucket's.
+    expect(serviceCall().standaloneAssetIds).toEqual(["a1"]);
+  });
+
   it("leaves kit members out of the note, which the kit half already covers", async () => {
     // Listing them twice turns a kit removal into a note naming every member.
     vi.mocked(db.kit.findMany).mockResolvedValue([

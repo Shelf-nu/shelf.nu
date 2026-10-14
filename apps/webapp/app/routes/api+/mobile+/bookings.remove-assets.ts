@@ -218,22 +218,27 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Which of those mean "delete this asset's kit-less row" rather than "every
     // row it has here". A caller that can observe the distinction states it in
-    // `standaloneAssetIds`; one that cannot leaves the field off, and every id
-    // it named is read as that instruction — the endpoint's default contract.
+    // `standaloneAssetIds`. One that cannot leaves the field off, and what that
+    // silence means depends on whether it also named kits:
     //
-    // Either way a named id stays in this bucket even when it ALSO belongs to a
-    // kit in `kitIds`: a qty-tracked asset can hold both a standalone row and
-    // kit-driven rows on one booking, and a caller naming both wants both gone.
+    //   - With kits named, every id it gave is read as a standalone
+    //     instruction, so an asset ticked in its own right loses its free-pool
+    //     row even though a named kit also holds it. A qty-tracked asset can
+    //     hold both, and a caller naming both wants both gone. Saying nothing
+    //     here would instead let the service infer the bucket from kit
+    //     membership, which cannot see that the asset was ticked at all.
+    //   - With no kits there is nothing to disambiguate, so the field stays off
+    //     and the service keeps its whole-asset scope: naming an asset and
+    //     nothing else means every row it has on this booking.
     const explicitStandaloneIdSet = requestedStandaloneAssetIds
       ? new Set(requestedStandaloneAssetIds)
       : null;
-    // Left undefined when the client named nothing: the service then keeps its
-    // whole-asset scope, which is what a client that cannot express row
-    // provenance means by naming an asset.
     const standaloneAssetIds = explicitStandaloneIdSet
       ? requestedAttachedAssetIds.filter((assetId) =>
           explicitStandaloneIdSet.has(assetId)
         )
+      : kitIds.length > 0
+      ? requestedAttachedAssetIds
       : undefined;
 
     // `assets` drives the booking-note phrasing only ("… removed {kits} and
