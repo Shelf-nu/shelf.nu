@@ -10933,6 +10933,117 @@ describe("removeAssets", () => {
     });
   });
 
+  it("removes only the standalone row when the caller names one and no kit", async () => {
+    // A quantity-tracked asset can hold a free-pool row alongside kit-driven
+    // ones on the same booking. A caller that can see which row the operator
+    // acted on says so, and only that row goes: the kit still holds its units.
+    expect.assertions(1);
+
+    const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      standaloneAssetIds: ["asset-1"],
+      firstName: "Test",
+      lastName: "User",
+      displayName: null,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        assetId: { in: ["asset-1"] },
+        assetKitId: null,
+      },
+    });
+  });
+
+  it("lets reconciliation see a kit slice that survived the removal", async () => {
+    // Removing only the free-pool row leaves the asset's kit-driven slices on
+    // this booking. Reconciliation decides whether the asset is still out, so
+    // it has to be able to see them: excluding the whole booking would mark an
+    // asset available while the kit's units are still in the field.
+    expect.assertions(1);
+
+    const mockBooking = { id: "booking-1", assetIds: ["asset-1"] };
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 1 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.ONGOING,
+    });
+
+    // Only the reconciler's read carries a `checkedOutAt` filter.
+    let reconcilerWhere: { bookingId?: { notIn?: string[] } } | undefined;
+    (
+      db.bookingAsset.findMany as ReturnType<typeof vitest.fn>
+    ).mockImplementation((args?: any) => {
+      if (args?.where?.checkedOutAt !== undefined) {
+        reconcilerWhere = args.where;
+      }
+      return Promise.resolve([]);
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      standaloneAssetIds: ["asset-1"],
+      firstName: "Test",
+      lastName: "User",
+      displayName: null,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(reconcilerWhere?.bookingId?.notIn ?? []).not.toContain("booking-1");
+  });
+
+  it("keeps the whole-asset scope for a caller that names no standalone rows", async () => {
+    // The manage-assets picker unticks an asset outright, which means every
+    // slice of it. Leaving the field off is how a caller says that.
+    expect.assertions(1);
+
+    const mockBooking = { id: "booking-1", assetIds: ["asset-1", "asset-2"] };
+
+    //@ts-expect-error missing vitest type
+    db.bookingAsset.deleteMany.mockResolvedValue({ count: 2 });
+    //@ts-expect-error missing vitest type
+    db.booking.findUniqueOrThrow.mockResolvedValue({
+      ...mockBooking,
+      name: "Test Booking",
+      status: BookingStatus.DRAFT,
+    });
+
+    await removeAssets({
+      booking: mockBooking,
+      firstName: "Test",
+      lastName: "User",
+      displayName: null,
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+
+    expect(db.bookingAsset.deleteMany).toHaveBeenCalledWith({
+      where: {
+        bookingId: "booking-1",
+        assetId: { in: ["asset-1", "asset-2"] },
+      },
+    });
+  });
+
   it("should remove assets from booking successfully", async () => {
     expect.assertions(2);
 

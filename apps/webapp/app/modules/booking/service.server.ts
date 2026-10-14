@@ -13778,10 +13778,14 @@ export async function removeAssets({
   assets?: Array<{ id: string; title: string }>;
   /**
    * Assets whose *standalone* booking row the caller explicitly wants gone,
-   * even if the same asset is also a member of a kit in `kitIds`.
+   * even if the same asset also holds kit-driven rows on this booking.
    *
-   * Only meaningful alongside `kitIds` — with no kits the whole call already
-   * removes every slice of every asset in `booking.assetIds`.
+   * Naming an asset here scopes its deletion to its free-pool row
+   * (`assetKitId: null`), whether or not `kitIds` is also given. Leaving the
+   * field off keeps the whole-asset scope: every slice of every asset in
+   * `booking.assetIds` goes. So a caller that can see WHICH row the operator
+   * acted on must say so, or a removal aimed at one free-pool row takes the
+   * asset out of its kits on this booking too.
    *
    * Omit it and the service falls back to inferring standalone intent from
    * kit membership. That inference cannot see a user who ticked BOTH an
@@ -13953,6 +13957,33 @@ export async function removeAssets({
 
         rowsToDeleteWhere =
           orClauses.length === 1
+            ? { bookingId: id, ...orClauses[0] }
+            : { bookingId: id, OR: orClauses };
+      } else if (standaloneAssetIds) {
+        // No kit named, but the caller can see row provenance. Scope the ids
+        // it named to their free-pool rows and leave any kit-driven slices of
+        // the same asset alone; anything else in the call keeps the
+        // whole-asset scope.
+        const standaloneSet = new Set(standaloneAssetIds);
+        const wholeAssetIds = assetIds.filter(
+          (assetId) => !standaloneSet.has(assetId)
+        );
+
+        const orClauses: Prisma.BookingAssetWhereInput[] = [];
+        if (standaloneAssetIds.length > 0) {
+          orClauses.push({
+            assetId: { in: standaloneAssetIds },
+            assetKitId: null,
+          });
+        }
+        if (wholeAssetIds.length > 0) {
+          orClauses.push({ assetId: { in: wholeAssetIds } });
+        }
+
+        rowsToDeleteWhere =
+          orClauses.length === 0
+            ? { bookingId: id, assetId: { in: assetIds } }
+            : orClauses.length === 1
             ? { bookingId: id, ...orClauses[0] }
             : { bookingId: id, OR: orClauses };
       } else {
@@ -14133,10 +14164,14 @@ export async function removeAssets({
        *
        * The blanket flip was unsafe: an asset can simultaneously sit on a
        * different ONGOING/OVERDUE booking OR be held by a Custody row, and
-       * stamping AVAILABLE silently stripped those signals (bug #99). The
-       * source booking's slice has already been deleted above in this same
-       * tx, so `excludeBookingId` is informational (the rows are gone
-       * anyway) but kept for symmetry with the other exit paths.
+       * stamping AVAILABLE silently stripped those signals (bug #99).
+       *
+       * Nothing is excluded, this booking included. A removal scoped to an
+       * asset's free-pool row leaves its kit-driven slices in place, and a
+       * surviving slice that is still checked out is exactly the evidence
+       * this reconciliation must weigh: excluding the booking would free an
+       * asset whose kit units are still in the field. Rows the delete above
+       * took are already gone, so they cannot be counted either way.
        *
        * RESERVED/DRAFT removals are unchanged: the asset was never out, so
        * there is nothing to reconcile.
@@ -14159,7 +14194,7 @@ export async function removeAssets({
         await reconcileAssetStatusForBookingExit({
           tx,
           assetIds,
-          excludeBookingIds: [id],
+          excludeBookingIds: [],
           organizationId,
         });
       }

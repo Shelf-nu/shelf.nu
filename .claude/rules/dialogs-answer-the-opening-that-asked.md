@@ -1,6 +1,8 @@
 ---
 description: A keyed useFetcher keeps its last response after a dialog closes. Read it through useFetcherOutcomeSinceOpen, never straight off fetcher.data.
-globs: apps/webapp/app/components/**
+paths:
+  - "apps/webapp/app/components/**"
+  - "apps/webapp/app/hooks/use-fetcher-error-since-open.ts"
 ---
 
 # A Dialog Answers The Opening That Asked
