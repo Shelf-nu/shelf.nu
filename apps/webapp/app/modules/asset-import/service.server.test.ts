@@ -1,16 +1,24 @@
 // @vitest-environment node
 /**
- * Tests for `confirmAssetImport`: the guards before an import is queued and
- * what happens when the queue refuses the first step.
+ * Tests for `confirmAssetImport` and `resumeAssetImport`: the guards before
+ * an import is queued and what happens when the queue refuses the first step.
+ * Also covers stall detection, which fails a RUNNING import that stopped
+ * moving exactly once.
  *
  * @see {@link file://./service.server.ts}
  */
+import type { AssetImport } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
+import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ShelfError } from "~/utils/error";
-import { confirmAssetImport } from "./service.server";
+import {
+  confirmAssetImport,
+  markStalledImportIfNeeded,
+  resumeAssetImport,
+} from "./service.server";
 import { validateContentImportFile } from "./validate.server";
 import { enqueueAssetImportStep } from "./worker.server";
 
@@ -25,7 +33,31 @@ vi.mock("./worker.server", () => ({ enqueueAssetImportStep: vi.fn() }));
 // why: validation has its own tests; here only whether it passes matters.
 vi.mock("./validate.server", () => ({ validateContentImportFile: vi.fn() }));
 
+// why: the email is sent over the network; here only whether it is sent.
+vi.mock("~/emails/asset-import-finished", () => ({
+  sendAssetImportFinishedEmail: vi.fn(),
+}));
+
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3600 * 1000);
+const minutesAgo = (minutes: number) =>
+  new Date(Date.now() - minutes * 60 * 1000);
+
+/**
+ * An import row in the given state.
+ *
+ * @param overrides - Fields to set
+ */
+function imp(overrides: Partial<AssetImport> = {}): AssetImport {
+  return {
+    id: "imp",
+    status: "RUNNING",
+    organizationId: "org",
+    createdById: "u",
+    errorMessage: null,
+    updatedAt: new Date(),
+    ...overrides,
+  } as AssetImport;
+}
 
 function draft(overrides: Record<string, unknown> = {}) {
   return {
@@ -164,5 +196,148 @@ describe("confirmAssetImport", () => {
       status: 409,
     });
     expect(enqueueAssetImportStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("markStalledImportIfNeeded", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("marks a stale RUNNING import as failed exactly once", async () => {
+    vi.mocked(db.assetImport.updateMany)
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(
+      imp({ status: "FAILED" }) as never
+    );
+    const stale = imp({ status: "RUNNING", updatedAt: minutesAgo(31) });
+
+    const first = await markStalledImportIfNeeded(stale);
+    await markStalledImportIfNeeded(stale);
+
+    expect(db.assetImport.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "imp",
+        organizationId: "org",
+        status: { in: ["QUEUED", "RUNNING"] },
+      },
+      data: {
+        status: "FAILED",
+        errorMessage: expect.stringContaining("Resume"),
+      },
+    });
+    expect(sendAssetImportFinishedEmail).toHaveBeenCalledOnce();
+    expect(first.status).toBe("FAILED");
+  });
+
+  it("leaves a recently updated RUNNING import alone", async () => {
+    const recent = imp({ status: "RUNNING", updatedAt: minutesAgo(5) });
+
+    await expect(markStalledImportIfNeeded(recent)).resolves.toBe(recent);
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves an old import that is not RUNNING alone", async () => {
+    await markStalledImportIfNeeded(
+      imp({ status: "COMPLETED", updatedAt: minutesAgo(600) })
+    );
+
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("resumeAssetImport", () => {
+  const resumeArgs = { importId: "imp", organizationId: "org" };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(enqueueAssetImportStep).mockResolvedValue(undefined);
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+  });
+
+  it("queues a FAILED import again from PREPARE", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce({ id: "imp", errorMessage: "boom" } as never)
+      .mockResolvedValueOnce(null);
+
+    await expect(resumeAssetImport(resumeArgs)).resolves.toEqual({
+      importId: "imp",
+    });
+
+    expect(db.assetImport.findFirst).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: { id: "imp", organizationId: "org", status: "FAILED" },
+      })
+    );
+    expect(db.assetImport.updateMany).toHaveBeenCalledWith({
+      where: { id: "imp", organizationId: "org", status: "FAILED" },
+      data: {
+        status: "QUEUED",
+        phase: "PREPARE",
+        lockedUntil: null,
+        errorMessage: null,
+      },
+    });
+    expect(enqueueAssetImportStep).toHaveBeenCalledWith({
+      importId: "imp",
+      step: "PREPARE",
+    });
+  });
+
+  it("404s for an import that is not FAILED", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await expect(resumeAssetImport(resumeArgs)).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(enqueueAssetImportStep).not.toHaveBeenCalled();
+  });
+
+  it("409s while another import is queued or running", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce({ id: "imp", errorMessage: "boom" } as never)
+      .mockResolvedValueOnce({ id: "other" } as never);
+
+    await expect(resumeAssetImport(resumeArgs)).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
+    expect(enqueueAssetImportStep).not.toHaveBeenCalled();
+  });
+
+  it("409s when the database refuses a second active import in the workspace", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce({ id: "imp", errorMessage: "boom" } as never)
+      .mockResolvedValueOnce(null);
+    vi.mocked(db.assetImport.updateMany).mockRejectedValueOnce(
+      new PrismaClientKnownRequestError("unique", {
+        code: "P2002",
+        clientVersion: "test",
+      })
+    );
+
+    await expect(resumeAssetImport(resumeArgs)).rejects.toMatchObject({
+      status: 409,
+      message:
+        "Another import is already running in this workspace. Wait for it to finish.",
+    });
+    expect(enqueueAssetImportStep).not.toHaveBeenCalled();
+  });
+
+  it("puts the import back to FAILED with its reason when PREPARE cannot be sent", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce({ id: "imp", errorMessage: "boom" } as never)
+      .mockResolvedValueOnce(null);
+    vi.mocked(enqueueAssetImportStep).mockRejectedValueOnce(
+      new Error("queue down")
+    );
+
+    await expect(resumeAssetImport(resumeArgs)).rejects.toThrow("queue down");
+    expect(db.assetImport.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "imp", organizationId: "org", status: "QUEUED" },
+      data: { status: "FAILED", errorMessage: "boom" },
+    });
   });
 });

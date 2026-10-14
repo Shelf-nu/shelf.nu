@@ -1,11 +1,14 @@
 /**
  * Asset import service.
  *
- * Moves a stored DRAFT import into the queue. Starting the import is the only
- * step that writes; everything before it (upload, preview) only reads.
+ * Moves a stored DRAFT import into the queue, and puts a FAILED import back
+ * on it. Starting the import is the only step that writes; everything before
+ * it (upload, preview) only reads. Also exposes the failure and stall helpers
+ * the status reads use.
  *
  * @see {@link file://./preview.server.ts}
  * @see {@link file://./worker.server.ts}
+ * @see {@link file://./failure.server.ts}
  */
 import type { Organization, User } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
@@ -15,6 +18,22 @@ import { ASSET_IMPORT_DRAFT_TTL_HOURS } from "./constants";
 import type { StoredImportRow } from "./types";
 import { validateContentImportFile } from "./validate.server";
 import { enqueueAssetImportStep } from "./worker.server";
+
+export { markImportFailed, markStalledImportIfNeeded } from "./failure.server";
+
+/**
+ * Whether an error is the partial unique index on active imports refusing a
+ * second QUEUED or RUNNING import in the workspace.
+ *
+ * @param cause - What the status update threw
+ */
+function isActiveImportConflict(cause: unknown): boolean {
+  const original = isLikeShelfError(cause) ? cause.cause : cause;
+  return (
+    original instanceof PrismaClientKnownRequestError &&
+    original.code === "P2002"
+  );
+}
 
 /** The 409 raised when the workspace already has an active import. */
 function anotherImportRunning(): ShelfError {
@@ -108,11 +127,7 @@ export async function confirmAssetImport({
       data: { status: "QUEUED", phase: "PREPARE", confirmedAt: new Date() },
     });
   } catch (cause) {
-    const original = isLikeShelfError(cause) ? cause.cause : cause;
-    if (
-      original instanceof PrismaClientKnownRequestError &&
-      original.code === "P2002"
-    ) {
+    if (isActiveImportConflict(cause)) {
       throw anotherImportRunning();
     }
     throw cause;
@@ -135,6 +150,92 @@ export async function confirmAssetImport({
     await db.assetImport.updateMany({
       where: { id: importId, organizationId, status: "QUEUED" },
       data: { status: "DRAFT" },
+    });
+    throw cause;
+  }
+
+  return { importId };
+}
+
+/**
+ * Resumes a FAILED import: marks it QUEUED again and sends PREPARE. PREPARE
+ * recreates anything deleted since, checks the creator's permission again and
+ * continues at the chunk holding the first unwritten row.
+ *
+ * @param args.importId - The failed import
+ * @param args.organizationId - Active workspace; the import must belong to it
+ * @returns The id of the queued import
+ * @throws {ShelfError} 404 when no failed import with this id exists in the
+ * workspace, 409 when another import is queued or running in the workspace or
+ * this one was already resumed, and the queue's error when PREPARE cannot be
+ * sent (the import is put back to FAILED first)
+ */
+export async function resumeAssetImport({
+  importId,
+  organizationId,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+}): Promise<{ importId: string }> {
+  const failed = await db.assetImport.findFirst({
+    where: { id: importId, organizationId, status: "FAILED" },
+    select: { id: true, errorMessage: true },
+  });
+
+  if (!failed) {
+    throw new ShelfError({
+      cause: null,
+      message: "There is no stopped import to resume.",
+      label: "Asset Import",
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  }
+
+  const active = await db.assetImport.findFirst({
+    where: { organizationId, status: { in: ["QUEUED", "RUNNING"] } },
+    select: { id: true },
+  });
+
+  if (active) {
+    throw anotherImportRunning();
+  }
+
+  let claimed: { count: number };
+  try {
+    claimed = await db.assetImport.updateMany({
+      where: { id: importId, organizationId, status: "FAILED" },
+      data: {
+        status: "QUEUED",
+        phase: "PREPARE",
+        lockedUntil: null,
+        errorMessage: null,
+      },
+    });
+  } catch (cause) {
+    if (isActiveImportConflict(cause)) {
+      throw anotherImportRunning();
+    }
+    throw cause;
+  }
+
+  if (claimed.count === 0) {
+    throw new ShelfError({
+      cause: null,
+      message: "This import has already been resumed.",
+      label: "Asset Import",
+      status: 409,
+      shouldBeCaptured: false,
+    });
+  }
+
+  try {
+    await enqueueAssetImportStep({ importId, step: "PREPARE" });
+  } catch (cause) {
+    // Back to FAILED with its reason so the user can press Resume again.
+    await db.assetImport.updateMany({
+      where: { id: importId, organizationId, status: "QUEUED" },
+      data: { status: "FAILED", errorMessage: failed.errorMessage },
     });
     throw cause;
   }
