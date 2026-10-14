@@ -18,6 +18,7 @@ import {
   assertAssetsBelongToOrg,
   assertAssetKitsBelongToOrg,
   assertAssetModelBelongsToOrg,
+  assertCategoriesBelongToOrg,
   assertCategoryBelongsToOrg,
   assertCustomFieldsBelongToOrg,
   assertKitsBelongToOrg,
@@ -26,6 +27,7 @@ import {
   assertTagsBelongToOrg,
   assertTagsAssignableToAssets,
   assertTeamMemberBelongsToOrg,
+  assertTeamMembersBelongToOrg,
   assertUserBelongsToOrg,
 } from "./org-validation.server";
 import { hasPermission } from "./permissions/permission.validator.server";
@@ -349,6 +351,103 @@ describe("assertLocationsBelongToOrg", () => {
     expect(err).toBeInstanceOf(ShelfError);
     expect(err.status).toBe(400);
     expect(err.title).toBe("Invalid locations");
+  });
+});
+
+describe("assertCategoriesBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({
+      category: { findMany: vitest.fn().mockResolvedValue([]) },
+    });
+    await expect(
+      assertCategoriesBelongToOrg({ categoryIds: [], organizationId: ORG }, tx)
+    ).resolves.toBeUndefined();
+    expect(tx.category.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every id belongs to the org, deduping and scoping by organizationId", async () => {
+    const tx = txWith({
+      category: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "c1" }, { id: "c2" }]),
+      },
+    });
+
+    await expect(
+      assertCategoriesBelongToOrg(
+        { categoryIds: ["c1", "c2", "c1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.category.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["c1", "c2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any ID is foreign/missing", async () => {
+    const tx = txWith({
+      category: { findMany: vitest.fn().mockResolvedValue([{ id: "c1" }]) },
+    });
+
+    const err = await assertCategoriesBelongToOrg(
+      { categoryIds: ["c1", "c9"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid categories");
+  });
+});
+
+describe("assertTeamMembersBelongToOrg", () => {
+  it("is a no-op for an empty list (no query issued)", async () => {
+    const tx = txWith({
+      teamMember: { findMany: vitest.fn().mockResolvedValue([]) },
+    });
+    await expect(
+      assertTeamMembersBelongToOrg(
+        { teamMemberIds: [], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+    expect(tx.teamMember.findMany).not.toHaveBeenCalled();
+  });
+
+  it("resolves when every id belongs to the org, deduping and scoping by organizationId", async () => {
+    const tx = txWith({
+      teamMember: {
+        findMany: vitest.fn().mockResolvedValue([{ id: "t1" }, { id: "t2" }]),
+      },
+    });
+
+    await expect(
+      assertTeamMembersBelongToOrg(
+        { teamMemberIds: ["t1", "t2", "t1"], organizationId: ORG },
+        tx
+      )
+    ).resolves.toBeUndefined();
+
+    expect(tx.teamMember.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["t1", "t2"] }, organizationId: ORG },
+      select: { id: true },
+    });
+  });
+
+  it("rejects with a 400 ShelfError when any ID is foreign/missing", async () => {
+    const tx = txWith({
+      teamMember: { findMany: vitest.fn().mockResolvedValue([{ id: "t1" }]) },
+    });
+
+    const err = await assertTeamMembersBelongToOrg(
+      { teamMemberIds: ["t1", "t9"], organizationId: ORG },
+      tx
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ShelfError);
+    expect(err.status).toBe(400);
+    expect(err.title).toBe("Invalid custodians");
   });
 });
 

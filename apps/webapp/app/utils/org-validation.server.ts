@@ -84,12 +84,20 @@ export type OrgValidationTxClient = {
       where: { id: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
   category: {
     findFirst: (args: {
       where: { id: string; organizationId: string };
       select: { id: true };
     }) => Promise<{ id: string } | null>;
+    findMany: (args: {
+      where: { id: { in: string[] }; organizationId: string };
+      select: { id: true };
+    }) => Promise<{ id: string }[]>;
   };
   location: {
     findFirst: (args: {
@@ -617,6 +625,92 @@ export async function assertTeamMemberBelongsToOrg(
       status: 400,
       shouldBeCaptured: false,
       additionalData: { organizationId, teamMemberId },
+    });
+  }
+}
+
+/**
+ * Asserts that every category ID belongs to `organizationId`.
+ *
+ * Plural counterpart to the singular guard, for bulk paths that resolve many
+ * category IDs at once (e.g. the background asset import). Dedupes the input so
+ * duplicate IDs don't inflate the expected count. A no-op for an empty list.
+ *
+ * @param params.categoryIds - category IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertCategoriesBelongToOrg(
+  {
+    categoryIds,
+    organizationId,
+  }: { categoryIds: Category["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (categoryIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(categoryIds)];
+
+  const found = await client.category.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid categories",
+      message:
+        "Some of the selected categories do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
+    });
+  }
+}
+
+/**
+ * Asserts that every team member ID belongs to `organizationId`.
+ *
+ * Plural counterpart to the singular guard, for bulk paths that resolve many
+ * team member IDs at once (e.g. the background asset import). Dedupes the input so
+ * duplicate IDs don't inflate the expected count. A no-op for an empty list.
+ *
+ * @param params.teamMemberIds - team member IDs sourced from request/form input
+ * @param params.organizationId - The caller's (validated) organization ID
+ * @param tx - Optional Prisma transaction client; defaults to the global `db`
+ * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ */
+export async function assertTeamMembersBelongToOrg(
+  {
+    teamMemberIds,
+    organizationId,
+  }: { teamMemberIds: TeamMember["id"][]; organizationId: string },
+  tx?: OrgValidationTxClient
+): Promise<void> {
+  if (teamMemberIds.length === 0) return;
+
+  const client = tx ?? db;
+  const uniqueIds = [...new Set(teamMemberIds)];
+
+  const found = await client.teamMember.findMany({
+    where: { id: { in: uniqueIds }, organizationId },
+    select: { id: true },
+  });
+
+  if (found.length !== uniqueIds.length) {
+    throw new ShelfError({
+      cause: null,
+      title: "Invalid custodians",
+      message:
+        "Some of the selected custodians do not exist in your workspace. Please reload and try again.",
+      label,
+      status: 400,
+      shouldBeCaptured: false,
+      additionalData: { organizationId },
     });
   }
 }
