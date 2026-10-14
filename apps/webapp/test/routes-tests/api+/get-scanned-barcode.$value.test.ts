@@ -24,7 +24,7 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 const { barcodeTable } = vi.hoisted(() => ({
-  barcodeTable: { findFirst: vi.fn(), findMany: vi.fn() },
+  barcodeTable: { findMany: vi.fn() },
 }));
 // why: the barcode table is the boundary; each test seeds the rows it needs.
 vi.mock("~/database/db.server", () => ({
@@ -46,12 +46,12 @@ function seed(rows: FakeBarcodeRow[]) {
           assetModel: null,
         }
       : null;
-  const withRelations = (row: FakeBarcodeRow | null) =>
-    row ? { ...row, asset: assetFor(row.assetId), kit: null } : null;
+  const withRelations = (row: FakeBarcodeRow) => ({
+    ...row,
+    asset: assetFor(row.assetId),
+    kit: null,
+  });
   const table = inMemoryBarcodeTable(rows);
-  barcodeTable.findFirst.mockImplementation(async (args) =>
-    withRelations(await table.findFirst(args))
-  );
   barcodeTable.findMany.mockImplementation(async (args) =>
     (await table.findMany(args)).map(withRelations)
   );

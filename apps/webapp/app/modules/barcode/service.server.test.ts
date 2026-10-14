@@ -587,13 +587,10 @@ describe("getBarcodeByValue", () => {
     kitId: links.kitId ?? null,
   });
 
-  /** Points both read methods at an in-memory table holding `rows`. */
+  /** Points the barcode read at an in-memory table holding `rows`. */
   function seed(rows: FakeBarcodeRow[]) {
-    const table = inMemoryBarcodeTable(rows);
     //@ts-expect-error missing vitest type
-    db.barcode.findFirst.mockImplementation(table.findFirst);
-    //@ts-expect-error missing vitest type
-    db.barcode.findMany.mockImplementation(table.findMany);
+    db.barcode.findMany.mockImplementation(inMemoryBarcodeTable(rows).findMany);
   }
 
   async function scan(value: string) {
@@ -653,6 +650,19 @@ describe("getBarcodeByValue", () => {
     expect(await scan("example.it/ABC123")).toBe("bare");
   });
 
+  it("resolves a tie between two other spellings to the oldest row", async () => {
+    seed([
+      row("older", "example.it/ABC123", "ExternalQR"),
+      row("newer", "https://example.it/ABC123", "ExternalQR"),
+    ]);
+    expect(await scan("http://www.example.it/ABC123")).toBe("older");
+  });
+
+  it("resolves a URL whose host was scanned in upper case", async () => {
+    seed([row("ext", "example.it/ABC123", "ExternalQR")]);
+    expect(await scan("HTTPS://EXAMPLE.IT/ABC123")).toBe("ext");
+  });
+
   it("prefers a linked code over an unlinked one with the exact spelling", async () => {
     seed([
       row("orphan", "https://example.it/ABC123", "ExternalQR", {}),
@@ -671,10 +681,8 @@ describe("getBarcodeByValue", () => {
       include: customInclude,
     });
 
-    const call =
-      //@ts-expect-error missing vitest type
-      db.barcode.findMany.mock.calls[0] ?? db.barcode.findFirst.mock.calls[0];
-    expect(call[0].include).toEqual(customInclude);
+    //@ts-expect-error missing vitest type
+    expect(db.barcode.findMany.mock.calls[0][0].include).toEqual(customInclude);
   });
 });
 
@@ -1601,7 +1609,6 @@ describe("parseBarcodesFromImportData", () => {
               ],
             },
           },
-          { type: BarcodeType.ExternalQR, value: { in: [] } },
         ],
         organizationId: "org-1", // Only check within this organization
       },

@@ -1,3 +1,9 @@
+/**
+ * Which External QR texts count as one code: URL scheme, `www.`, one trailing
+ * slash and host case are ignored, the path and non-link text are not.
+ *
+ * @see {@link file://./external-qr-spellings.ts}
+ */
 import {
   externalQrCanonical,
   externalQrSpellings,
@@ -15,6 +21,7 @@ describe("externalQrCanonical", () => {
     ["example.it/", "example.it"],
     ["https://example.it/a?b=1#c", "example.it/a?b=1#c"],
     ["http://10.0.0.5:8080/x", "10.0.0.5:8080/x"],
+    ["HTTPS://EXAMPLE.IT/ABC123", "example.it/ABC123"],
   ])("reduces %s to %s", (scanned, canonical) => {
     expect(externalQrCanonical(scanned)).toBe(canonical);
   });

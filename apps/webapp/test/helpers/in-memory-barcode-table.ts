@@ -51,15 +51,12 @@ export function barcodeWhereMatches(
 }
 
 /**
- * `findFirst` / `findMany` implementations over `rows`, in insertion order, the
- * way Postgres returns an unordered scan of a small table.
+ * A `findMany` over `rows` that keeps them in array order, so a suite lists
+ * rows oldest first to match the lookup's `createdAt` ordering.
  */
 export function inMemoryBarcodeTable(rows: FakeBarcodeRow[]) {
-  const matching = ({ where }: { where: Where }) =>
-    rows.filter((row) => barcodeWhereMatches(row, where));
   return {
-    findFirst: (args: { where: Where }) =>
-      Promise.resolve(matching(args)[0] ?? null),
-    findMany: (args: { where: Where }) => Promise.resolve(matching(args)),
+    findMany: ({ where }: { where: Where }) =>
+      Promise.resolve(rows.filter((row) => barcodeWhereMatches(row, where))),
   };
 }

@@ -360,7 +360,7 @@ export function scannedBarcodeWhere(value: string) {
  *
  * When several rows match, a row linked to an asset or kit wins over an
  * unlinked one, then the exact text over its upper-case form over another
- * URL spelling.
+ * URL spelling, then the oldest row.
  */
 export async function getBarcodeByValue<
   T = {
@@ -383,6 +383,9 @@ export async function getBarcodeByValue<
         asset: true,
         kit: true,
       },
+      // Equal-ranked rows resolve to the oldest, so one sticker always opens
+      // the same item.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
     const rank = (barcode: Barcode) =>
       (barcode.assetId || barcode.kitId ? 0 : 3) +
@@ -947,10 +950,14 @@ export async function parseBarcodesFromImportData({
       where: {
         OR: [
           { value: { in: allBarcodeValues } },
-          {
-            type: BarcodeType.ExternalQR,
-            value: { in: externalQrSpellingValues },
-          },
+          ...(externalQrSpellingValues.length > 0
+            ? [
+                {
+                  type: BarcodeType.ExternalQR,
+                  value: { in: externalQrSpellingValues },
+                },
+              ]
+            : []),
         ],
         organizationId, // Only check within current organization
       },
@@ -970,7 +977,8 @@ export async function parseBarcodesFromImportData({
         const sources = barcodeAssetsMap.get(importBarcodeKey(barcode));
         const linkedTo =
           barcode.asset?.title || barcode.kit?.name || "Unknown item";
-        return `${barcode.value} (${sources?.[0]?.type}) - already linked to "${linkedTo}"`;
+        const type = sources?.[0]?.type ?? barcode.type;
+        return `${barcode.value} (${type}) - already linked to "${linkedTo}"`;
       });
 
       throw new ShelfError({
