@@ -338,6 +338,31 @@ div[data-radix-popper-content-wrapper] > div[data-side="bottom"] {
   }
 }
 
+/*
+ * Bottom sheets (`data-mobile-sheet`, see
+ * `components/shared/mobile-dropdown-styles.tsx`) fade in instead of sliding
+ * below `md`. On a popover sheet the slide's `transform` lands on the element
+ * that wraps the fixed sheet and anchors the sheet to it for the length of the
+ * animation. The rule lives here, not in the styles injected while a menu is
+ * open, so the animation name stays the same when the menu closes: Radix reads
+ * a changed name as an exit animation and keeps the closed sheet on screen
+ * until it ends. The query is `SHEET_MEDIA_QUERY`.
+ */
+@media not all and (min-width: 768px) {
+  [data-mobile-sheet] {
+    animation-name: mobileSheetFadeIn !important;
+  }
+}
+
+@keyframes mobileSheetFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 ::target-text {
   background-color: yellow;
   color: black;
