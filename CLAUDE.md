@@ -63,6 +63,24 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 
 📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
 
+### PR Review
+
+`/pr-review` gives the first review of the PR for the current branch (or
+`/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
+reuse, security, consumers, performance and deploy safety. Every finding is
+verified, and the report is a plain-language verdict with numbered findings.
+Read-only (except a "prove N" you request); it never posts unless you ask.
+
+- Skill: `.claude/skills/pr-review/SKILL.md`
+- Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
+  `.claude/agents/shelf-pr-finding-validator.md` (read-only, no Bash or network).
+  Security runs on opus with `Skill` and loads skills only when the diff
+  touches their area. The bugs pass runs the built-in `/code-review`, which has Bash.
+- Setup script: `scripts/pr-review-context.mjs`
+- Tests: `pnpm test:tooling`
+
+📖 Full documentation: [apps/docs/pr-review.md](./apps/docs/pr-review.md).
+
 ### PR Review Loop
 
 `/pr-review-loop` automates the review-response cycle on a PR: it watches for
