@@ -1662,14 +1662,17 @@ export function parseSortingOptions(sortBy: string[]): {
           getNormalizedSortExpression(`"${columnName}"`, field.direction)
         );
       } else if (field.name === "valuation") {
-        // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
-        // what the "Value" cell displays. INDIVIDUAL assets are quantity=1 so
-        // this is identical to sorting on `assetValue` for them; QT assets
-        // are now ordered by total worth (the number users actually compare),
-        // not per-unit price. `assetValue` and `assetQuantity` are aliases on
-        // the outer SELECT — safe to multiply without quoting concerns.
+        // Quantity-aware: sort by TOTAL value (per-unit x quantity), matching
+        // what the "Value" cell displays. Both factors must be coalesced:
+        // `Asset.quantity` is NULL for INDIVIDUAL assets and `value` is NULL
+        // for an asset with no price, and a NULL factor makes the whole
+        // product NULL, which collapses every such row onto the `"assetId"`
+        // tiebreaker and leaves the list unsorted by value. An INDIVIDUAL
+        // asset counts as one unit, a missing price as zero. `assetValue` and
+        // `assetQuantity` are aliases projected by the asset query's SELECT,
+        // safe to multiply without quoting concerns.
         orderByParts.push(
-          `("assetValue" * "assetQuantity") ${field.direction}`
+          `(COALESCE("assetValue", 0) * COALESCE("assetQuantity", 1)) ${field.direction}`
         );
       } else {
         // Use regular sorting for non-text columns
