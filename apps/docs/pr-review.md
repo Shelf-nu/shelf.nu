@@ -114,6 +114,11 @@ rules and says so, rather than trusting the PR's own copies. When a PR edits the
 `shelf-pr-*` and `shelf-security*` agents, `CLAUDE.md` or the context script),
 the report warns you.
 
+Running `/pr-review` on a branch loads that branch's own skill, agents, hooks
+and scripts, so only run it on branches whose code you would run locally
+anyway. Same-repo PRs come from people with write access; PRs from a fork ask
+before the Bash-capable bugs pass runs.
+
 ## Changing it
 
 - Skill: `.claude/skills/pr-review/SKILL.md`
