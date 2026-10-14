@@ -21,6 +21,7 @@ import {
   summarizeChecks,
   collectContext,
   resolvePrNumber,
+  artifactDir,
   ContextError,
 } from "../pr-review-context.mjs";
 
@@ -82,6 +83,11 @@ test("globToRegExp: brace alternatives and literal dots", () => {
   );
   assert.ok(!matchesGlob("pnpm-workspaceXyaml", "pnpm-workspace.yaml"));
   assert.ok(globToRegExp("routes/api+/x.ts").test("routes/api+/x.ts"));
+});
+
+test("globToRegExp: an unclosed brace is a literal and does not hang", () => {
+  assert.ok(globToRegExp("a/{b").test("a/{b"));
+  assert.ok(!globToRegExp("a/{b").test("a/b"));
 });
 
 test("parseRuleFrontmatter: description and block list paths", () => {
@@ -262,6 +268,8 @@ function fakeRun(responses) {
 const HEAD_SHA = "a".repeat(40);
 const PR_VIEW = {
   number: 3191,
+  isCrossRepository: false,
+  author: { login: "octo", name: "Octo Cat" },
   title: "fix: confirm before delete",
   body: "Adds a confirm dialog.",
   url: "https://github.com/Shelf-nu/shelf.nu/pull/3191",
@@ -310,6 +318,7 @@ function baseResponses({
       { stdout: '[{"number":3191,"title":"x"}]' },
     ],
     ["gh pr view 3191", { stdout: JSON.stringify(prView) }],
+    ["git fetch origin main", {}],
     [
       "gh api --paginate repos/{owner}/{repo}/pulls/3191/files",
       { stdout: files + "\n" },
@@ -387,6 +396,78 @@ test("collectContext: happy path", () => {
   assert.deepEqual(context.warnings, []);
   assert.equal(artifacts.diff, "diff --git a/x b/x\n");
   assert.equal(artifacts.rules[0].content, RULE_SCOPED);
+  assert.equal(context.pr.isCrossRepository, false);
+  assert.equal(context.pr.author, "octo");
+});
+
+/**
+ * Wraps a runner so every call is recorded with its options.
+ * @returns {{run: Function, calls: Array<{key: string, options: object}>}}
+ */
+function recording(run) {
+  const calls = [];
+  return {
+    calls,
+    run: (cmd, args, options) => {
+      calls.push({ key: [cmd, ...args].join(" "), options });
+      return run(cmd, args, options);
+    },
+  };
+}
+
+test("collectContext: fetches the base branch non-interactively before reading rules", () => {
+  const { run, calls } = recording(fakeRun(baseResponses()));
+  collectContext({ run, startedAt: 0, marker: "m" });
+  const fetchIndex = calls.findIndex((c) => c.key === "git fetch origin main");
+  assert.ok(fetchIndex >= 0, "git fetch origin main ran");
+  assert.equal(calls[fetchIndex].options.env.GIT_TERMINAL_PROMPT, "0");
+  assert.match(calls[fetchIndex].options.env.GIT_SSH_COMMAND, /BatchMode=yes/);
+  const rulesIndex = calls.findIndex((c) =>
+    c.key.startsWith("git ls-tree -r --name-only origin/main -- .claude/rules")
+  );
+  assert.ok(fetchIndex < rulesIndex, "fetch happens before the rules are read");
+});
+
+test("collectContext: a failed fetch only warns, naming how old origin/main is", () => {
+  const run = fakeRun([
+    ["git fetch origin main", { code: 128, stderr: "Permission denied" }],
+    ["git log -1 --format=%cr origin/main", { stdout: "3 days ago\n" }],
+    ...baseResponses(),
+  ]);
+  const { context } = collectContext({ run, startedAt: 0, marker: "m" });
+  assert.match(
+    context.warnings.join("\n"),
+    /could not fetch origin\/main \(last updated 3 days ago\); rules may be stale/
+  );
+});
+
+test("collectContext: refuses to review from a different branch", () => {
+  const run = fakeRun([
+    ["git rev-parse --abbrev-ref HEAD", { stdout: "main\n" }],
+    ...baseResponses({ localHead: "b".repeat(40) }),
+  ]);
+  assert.throws(
+    () => collectContext({ run, prArg: "3191", startedAt: 0, marker: "m" }),
+    (err) =>
+      err instanceof ContextError &&
+      /you are on main, not the PR branch fix\/delete-confirm: run gh pr checkout 3191 first/.test(
+        err.message
+      )
+  );
+});
+
+test("collectContext: a detached HEAD exactly at the PR head is allowed", () => {
+  const run = fakeRun([
+    ["git rev-parse --abbrev-ref HEAD", { stdout: "HEAD\n" }],
+    ...baseResponses(),
+  ]);
+  const { context } = collectContext({
+    run,
+    prArg: "3191",
+    startedAt: 0,
+    marker: "m",
+  });
+  assert.equal(context.localHeadMatchesPr, true);
 });
 
 test("collectContext: warns when local HEAD is not the PR head", () => {
@@ -402,8 +483,11 @@ test("collectContext: warns when local HEAD is not the PR head", () => {
 test("collectContext: falls back to the local diff when GitHub refuses it", () => {
   const run = fakeRun([
     ["gh pr diff 3191", { code: 1, stderr: "diff too large" }],
-    ["git merge-base origin/main HEAD", { stdout: "c".repeat(40) + "\n" }],
-    [`git diff ${"c".repeat(40)} HEAD`, { stdout: "local diff\n" }],
+    [
+      `git merge-base origin/main ${HEAD_SHA}`,
+      { stdout: "c".repeat(40) + "\n" },
+    ],
+    [`git diff ${"c".repeat(40)} ${HEAD_SHA}`, { stdout: "local diff\n" }],
     ...baseResponses(),
   ]);
   const { context, artifacts } = collectContext({
@@ -430,6 +514,21 @@ test("collectContext: flags a PR that edits the reviewer itself", () => {
   });
   assert.equal(context.selfModified, true);
   assert.match(context.warnings.join("\n"), /reviewer's own/);
+});
+
+test("collectContext: a PR that only edits a project rule is not self-modifying", () => {
+  const files = JSON.stringify({
+    path: ".claude/rules/x.md",
+    additions: 3,
+    deletions: 1,
+    status: "modified",
+  });
+  const { context } = collectContext({
+    run: fakeRun(baseResponses({ files })),
+    startedAt: 0,
+    marker: "m",
+  });
+  assert.equal(context.selfModified, false);
 });
 
 test("collectContext: explicit number for a merged PR is allowed with a warning", () => {
@@ -464,4 +563,11 @@ test("collectContext: reads rules from the PR branch, with a warning, when the b
   const { context } = collectContext({ run, startedAt: 0, marker: "m" });
   assert.equal(context.rulesRef, "HEAD");
   assert.match(context.warnings.join("\n"), /origin\/main not found locally/);
+});
+
+test("artifactDir: artifacts live in .pr-review/<n> at the worktree root", () => {
+  const run = fakeRun([
+    ["git rev-parse --show-toplevel", { stdout: "/repo/wt\n" }],
+  ]);
+  assert.equal(artifactDir(run, 3191), "/repo/wt/.pr-review/3191");
 });

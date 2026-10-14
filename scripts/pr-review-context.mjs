@@ -11,7 +11,7 @@
  * Usage: node scripts/pr-review-context.mjs [pr-number]
  *
  * Prints the context JSON to stdout and writes the diff and rule copies under
- * <git-common-dir>/pr-review/<pr>/. When no PR can be resolved it prints
+ * <worktree-root>/.pr-review/<pr>/ (gitignored). When no PR can be resolved it prints
  * {"error": "...", ...} and exits 3.
  *
  * Contains no review judgement: it only measures and selects.
@@ -76,6 +76,7 @@ function escapeRegExp(text) {
  * Converts the glob dialect used in `.claude/rules` `paths` frontmatter into a
  * RegExp source (no anchors). Supports `**` (any depth, `**\/` also zero
  * directories), `*` and `?` (within one path segment) and `{a,b}` alternatives.
+ * A `{` without a closing `}` is matched literally.
  * @param {string} glob
  * @returns {string}
  */
@@ -97,6 +98,11 @@ function globSource(glob) {
       source += "[^/]";
     } else if (char === "{") {
       const end = glob.indexOf("}", i);
+      // An unclosed brace has no alternatives: match it literally.
+      if (end === -1) {
+        source += escapeRegExp(char);
+        continue;
+      }
       const alternatives = glob
         .slice(i + 1, end)
         .split(",")
@@ -303,10 +309,28 @@ export function summarizeChecks(rollup) {
 
 /** `gh pr view --json` fields the skill uses. */
 const PR_FIELDS =
-  "number,title,body,url,state,isDraft,headRefName,headRefOid,baseRefName,labels,closingIssuesReferences,statusCheckRollup";
+  "number,title,body,url,state,isDraft,isCrossRepository,author,headRefName,headRefOid,baseRefName,labels,closingIssuesReferences,statusCheckRollup";
 
-/** Paths that make up the reviewer itself; a PR touching them is reviewed by code it changed. */
-const REVIEWER_PATH = /^(\.claude\/|CLAUDE\.md$|scripts\/pr-review-context)/;
+/**
+ * Paths that make up the reviewer itself; a PR touching them is reviewed by code
+ * it changed. Project rules are excluded: they are always read from the base branch.
+ */
+const REVIEWER_PATH =
+  /^(\.claude\/(skills\/pr-review\/|agents\/shelf-pr-|agents\/shelf-security)|scripts\/pr-review-context|CLAUDE\.md$)/;
+
+/**
+ * Environment for `git fetch`: never prompt for credentials and give up fast on
+ * SSH, so an unreachable remote costs seconds instead of hanging the review.
+ */
+const NON_INTERACTIVE_GIT_ENV = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=5",
+};
+
+/**
+ * Runs one command. `options.env` adds variables to the inherited environment.
+ * @typedef {(cmd: string, args: string[], options?: {env?: Record<string, string>}) => {code: number, stdout: string, stderr: string}} Runner
+ */
 
 /** A failure the skill reports to the user instead of reviewing. */
 export class ContextError extends Error {
@@ -322,7 +346,7 @@ export class ContextError extends Error {
 
 /**
  * Runs a command through the runner and returns stdout, throwing on failure.
- * @param {(cmd: string, args: string[]) => {code: number, stdout: string, stderr: string}} run
+ * @param {Runner} run
  * @param {string} cmd
  * @param {string[]} args
  * @returns {string}
@@ -341,7 +365,7 @@ function must(run, cmd, args) {
 /**
  * Finds the PR to review: the explicit number, else the single open PR whose
  * head is the current branch.
- * @param {(cmd: string, args: string[]) => {code: number, stdout: string, stderr: string}} run
+ * @param {Runner} run
  * @param {string} [prArg] - PR number from the skill arguments
  * @returns {number}
  * @throws {ContextError} on a non-numeric argument, main, detached HEAD, or zero or several open PRs
@@ -389,7 +413,7 @@ export function resolvePrNumber(run, prArg) {
 /**
  * Gathers the review context. All I/O goes through `run`, so tests can feed fixtures.
  * @param {object} args
- * @param {(cmd: string, args: string[]) => {code: number, stdout: string, stderr: string}} args.run
+ * @param {Runner} args.run
  * @param {string} [args.prArg] - explicit PR number
  * @param {number} args.startedAt - epoch ms, echoed so the report can show elapsed time
  * @param {string} args.marker - random tag the skill uses to fence untrusted PR text
@@ -407,6 +431,32 @@ export function collectContext({ run, prArg, startedAt, marker }) {
       `PR is ${pr.state}: reviewing it anyway because you named it.`
     );
 
+  // Reviewers read the working tree, so it has to be the PR. A detached HEAD at
+  // the PR head is fine; the PR branch at another commit only warns (below).
+  const localHead = must(run, "git", ["rev-parse", "HEAD"]).trim();
+  const localHeadMatchesPr = localHead === pr.headRefOid;
+  if (!localHeadMatchesPr) {
+    const branch = must(run, "git", [
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    ]).trim();
+    if (branch !== pr.headRefName) {
+      throw new ContextError(
+        `you are on ${branch}, not the PR branch ${pr.headRefName}: run gh pr checkout ${number} first`
+      );
+    }
+    warnings.push(
+      `Local HEAD ${localHead.slice(
+        0,
+        9
+      )} is not the PR head ${pr.headRefOid.slice(
+        0,
+        9
+      )}: reviewers read local files, so pull (or push) first for an exact review.`
+    );
+  }
+
   const files = must(run, "gh", [
     "api",
     "--paginate",
@@ -421,6 +471,19 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   const paths = files.map((file) => file.path);
   const base = `origin/${pr.baseRefName}`;
 
+  // Rules and the fallback diff read the base branch, so refresh it first.
+  // Failing to fetch (offline, no SSH agent) is not fatal.
+  const fetched = run("git", ["fetch", "origin", pr.baseRefName], {
+    env: NON_INTERACTIVE_GIT_ENV,
+  });
+  if (fetched.code !== 0) {
+    const age = run("git", ["log", "-1", "--format=%cr", base]);
+    const lastUpdated = age.code === 0 ? age.stdout.trim() : "unknown";
+    warnings.push(
+      `could not fetch ${base} (last updated ${lastUpdated}); rules may be stale`
+    );
+  }
+
   // GitHub's diff is computed against the true merge base, so a stale local
   // main cannot inflate it. GitHub refuses very large diffs; then use git.
   let diff;
@@ -429,25 +492,15 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   if (ghDiff.code === 0) {
     diff = ghDiff.stdout;
   } else {
-    const mergeBase = must(run, "git", ["merge-base", base, "HEAD"]).trim();
-    diff = must(run, "git", ["diff", mergeBase, "HEAD"]);
+    const mergeBase = must(run, "git", [
+      "merge-base",
+      base,
+      pr.headRefOid,
+    ]).trim();
+    diff = must(run, "git", ["diff", mergeBase, pr.headRefOid]);
     diffSource = "local";
     warnings.push(
-      `GitHub refused the diff (${ghDiff.stderr.trim()}); using the local diff against the merge base with ${base}, which is only as fresh as your last fetch.`
-    );
-  }
-
-  const localHead = must(run, "git", ["rev-parse", "HEAD"]).trim();
-  const localHeadMatchesPr = localHead === pr.headRefOid;
-  if (!localHeadMatchesPr) {
-    warnings.push(
-      `Local HEAD ${localHead.slice(
-        0,
-        9
-      )} is not the PR head ${pr.headRefOid.slice(
-        0,
-        9
-      )}: reviewers read local files, so pull (or push) first for an exact review.`
+      `GitHub refused the diff (${ghDiff.stderr.trim()}); using the local diff of the PR head against its merge base with ${base}.`
     );
   }
 
@@ -496,7 +549,7 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   const selfModified = paths.some((p) => REVIEWER_PATH.test(p));
   if (selfModified) {
     warnings.push(
-      "This PR changes the reviewer's own skill, agents, rules or CLAUDE.md: the review runs with those changes, so read them yourself."
+      "This PR changes the reviewer's own skill, agents, context script or CLAUDE.md: the review runs with those changes, so read them yourself."
     );
   }
 
@@ -514,6 +567,8 @@ export function collectContext({ run, prArg, startedAt, marker }) {
       url: pr.url,
       state: pr.state,
       isDraft: pr.isDraft,
+      isCrossRepository: pr.isCrossRepository === true,
+      author: pr.author?.login ?? "",
       headRefName: pr.headRefName,
       headRefOid: pr.headRefOid,
       baseRefName: pr.baseRefName,
@@ -551,14 +606,13 @@ export function collectContext({ run, prArg, startedAt, marker }) {
 
 /**
  * Runs a real command synchronously.
- * @param {string} cmd
- * @param {string[]} args
- * @returns {{code: number, stdout: string, stderr: string}}
+ * @type {Runner}
  */
-function realRun(cmd, args) {
+function realRun(cmd, args, options = {}) {
   const result = spawnSync(cmd, args, {
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
+    env: options.env ? { ...process.env, ...options.env } : process.env,
   });
   return {
     code: result.status ?? 1,
@@ -568,9 +622,23 @@ function realRun(cmd, args) {
 }
 
 /**
+ * Where a review's artifacts go: `.pr-review/<pr>/` at the root of the current
+ * worktree. Inside the worktree so read-only agents can open them; `.pr-review/`
+ * is gitignored so they are never committed.
+ * @param {Runner} run
+ * @param {number} prNumber
+ * @returns {string} absolute directory path
+ * @throws {ContextError} when the worktree root cannot be resolved
+ */
+export function artifactDir(run, prNumber) {
+  const root = must(run, "git", ["rev-parse", "--show-toplevel"]).trim();
+  return path.join(root, ".pr-review", String(prNumber));
+}
+
+/**
  * CLI entry: collects the context, writes the diff and rule copies to
- * <git-common-dir>/pr-review/<pr>/ (outside the worktree, never committed),
- * and prints the context with the artifact paths added.
+ * the directory from `artifactDir`, and prints the context with the artifact
+ * paths added.
  */
 function main() {
   try {
@@ -580,10 +648,7 @@ function main() {
       startedAt: Date.now(),
       marker: `pr_${randomBytes(6).toString("hex")}`,
     });
-    const commonDir = path.resolve(
-      must(realRun, "git", ["rev-parse", "--git-common-dir"]).trim()
-    );
-    const outDir = path.join(commonDir, "pr-review", String(context.pr.number));
+    const outDir = artifactDir(realRun, context.pr.number);
     rmSync(outDir, { recursive: true, force: true });
     mkdirSync(path.join(outDir, "rules"), { recursive: true });
     mkdirSync(path.join(outDir, "claude-md"), { recursive: true });

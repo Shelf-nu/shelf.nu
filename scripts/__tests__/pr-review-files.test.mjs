@@ -20,6 +20,7 @@ const AGENTS = [
   "shelf-pr-reviewer-tests",
   "shelf-pr-reviewer-conventions",
   "shelf-pr-reviewer-impact",
+  "shelf-pr-reviewer-security",
 ];
 
 /** Returns the frontmatter of a Markdown file as a flat key/value map. */
@@ -35,14 +36,39 @@ function frontmatter(file) {
   );
 }
 
+/**
+ * Expected tools and model per agent. Security gets `Skill` for reference
+ * checklists and the stronger model; nobody gets Bash, Write, Edit, WebFetch,
+ * WebSearch or Agent.
+ */
+const EXPECTED = {
+  "shelf-pr-reviewer-security": {
+    tools: "Read, Grep, Glob, Skill",
+    model: "opus",
+  },
+};
+const DEFAULT_EXPECTED = { tools: "Read, Grep, Glob", model: "sonnet" };
+const FORBIDDEN_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "WebFetch",
+  "WebSearch",
+  "Agent",
+];
+
 for (const name of AGENTS) {
   const file = `.claude/agents/${name}.md`;
-  test(`${name}: exists, read-only tools, sonnet`, () => {
+  const expected = EXPECTED[name] ?? DEFAULT_EXPECTED;
+  test(`${name}: exists, read-only tools, ${expected.model}`, () => {
     assert.ok(existsSync(path.join(ROOT, file)), `${file} missing`);
     const meta = frontmatter(file);
     assert.equal(meta.name, name);
-    assert.equal(meta.tools, "Read, Grep, Glob");
-    assert.equal(meta.model, "sonnet");
+    assert.equal(meta.tools, expected.tools);
+    assert.equal(meta.model, expected.model);
+    const tools = meta.tools.split(",").map((tool) => tool.trim());
+    for (const tool of FORBIDDEN_TOOLS)
+      assert.ok(!tools.includes(tool), `${name} must not have ${tool}`);
     assert.ok(
       meta.description.length > 40,
       "description explains when to use it"
@@ -71,13 +97,17 @@ test("pr-review skill: name, and every agent it dispatches exists", () => {
   assert.ok(existsSync(path.join(ROOT, file)), `${file} missing`);
   assert.equal(frontmatter(file).name, "pr-review");
   const text = readFileSync(path.join(ROOT, file), "utf8");
-  for (const name of [...AGENTS, "shelf-security-reviewer"]) {
+  for (const name of AGENTS) {
     assert.ok(text.includes(name), `SKILL.md dispatches ${name}`);
     assert.ok(
       existsSync(path.join(ROOT, `.claude/agents/${name}.md`)),
       `${name} agent file exists`
     );
   }
+  assert.ok(
+    !/`shelf-security-reviewer`/.test(text),
+    "SKILL.md dispatches the read-only security specialist, not shelf-security-reviewer"
+  );
   assert.ok(
     text.includes("scripts/pr-review-context.mjs"),
     "SKILL.md runs the context script"

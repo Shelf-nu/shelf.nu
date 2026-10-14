@@ -72,8 +72,10 @@ verified, and the report is a plain-language verdict with numbered findings.
 Read-only; it never posts unless you ask.
 
 - Skill: `.claude/skills/pr-review/SKILL.md`
-- Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact}.md`,
-  `.claude/agents/shelf-pr-finding-validator.md` (read-only, no Bash or network)
+- Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
+  `.claude/agents/shelf-pr-finding-validator.md` (read-only, no Bash or network).
+  Security runs on opus with `Skill` and loads skills only when the diff
+  touches their area. The bugs pass runs the built-in `/code-review`, which has Bash.
 - Setup script: `scripts/pr-review-context.mjs`
 - Tests: `pnpm test:tooling`
 

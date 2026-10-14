@@ -26,14 +26,18 @@ alias prr='claude "/pr-review"'
 ```
 
 It stops with a message on `main`, on a detached HEAD, when the branch has no
-open PR, or when several PRs match.
+open PR, or when several PRs match. With a PR number it also stops when you are
+on a different branch than the PR (`gh pr checkout <n>` first): the reviewers
+read your working tree. A detached HEAD at the PR's head commit is fine.
 
 ## How it works
 
-1. **Setup.** `scripts/pr-review-context.mjs` resolves the PR, takes the diff
+1. **Setup.** `scripts/pr-review-context.mjs` resolves the PR, fetches the
+   base branch (non-interactive; a failed fetch only warns), takes the diff
    from GitHub (so a stale local `main` cannot inflate it), measures it, picks
    a tier, and copies the `.claude/rules` and CLAUDE.md files that apply to
-   the changed paths from the **base** branch.
+   the changed paths from the **base** branch. The diff and copies land in
+   `.pr-review/<n>/` at the worktree root, which is gitignored.
 2. **Intent.** The PR's claims become a checklist: done, not done, or needs a
    human. Files that serve no claim and `fix`/`feat` mislabels are called out.
 3. **Find.** Depends on the tier:
@@ -59,20 +63,35 @@ open PR, or when several PRs match.
 | `/code-review` (built in)       | M, L                                                                      | bugs                                                                 |
 | `shelf-pr-reviewer-tests`       | M, L                                                                      | breaking tests, mocks, test placement                                |
 | `shelf-pr-reviewer-conventions` | M, L                                                                      | `.claude/rules`, CLAUDE.md, reuse of existing helpers and packages   |
-| `shelf-security-reviewer`       | routes, server, schema, migrations, auth, dependencies                    | org scoping, permissions, validation                                 |
+| `shelf-pr-reviewer-security`    | routes, server, schema, migrations, auth, dependencies (\*)               | org scoping, permissions, validation, redirects, Markdoc injection   |
 | `shelf-pr-reviewer-impact`      | server, packages, mobile API, schema, migrations, dependencies, companion | callers, companion drift, query cost, deploy safety, silent failures |
 | `shelf-pr-finding-validator`    | M, L                                                                      | confirms or rejects findings                                         |
 
+(\*) Security also runs when the PR is about sanitizing, permissions, auth or
+rendering user content, whatever files it touches.
+
 At most three run at once. The specialists and the validator have only
-`Read`, `Grep` and `Glob`: they read text the PR author wrote, so they get no
-shell and no network.
+`Read`, `Grep` and `Glob` (security also has `Skill`): they read text the PR
+author wrote, so they get no shell and no network. Security runs on the more
+capable model (opus) and loads the `supabase`, `oauth-oidc-misconfiguration`,
+`two-factor-authentication-best-practices` and
+`supabase-postgres-best-practices` skills only when the diff touches their
+area; skills only load reference material. The bugs pass is the exception: `/code-review` runs with
+Bash and may use read-only `git` and `gh` commands. For a PR from a fork, the
+skill asks you before running it.
 
 ## Trust
 
 PR titles, bodies and diffs are treated as untrusted data and fenced with a
-random marker. Rules are read from the base branch, so a PR cannot weaken the
-rules it is judged by. When a PR edits the reviewer itself (`.claude/`,
-`CLAUDE.md`, the context script), the report warns you.
+random marker; the diff file and the changed files are untrusted too. Only
+text that tries to change a reviewer's verdict, output or process counts as
+prompt injection. Prompts, rules, skills or docs that the PR itself changes
+are what is being reviewed, not an attack.
+
+Rules are read from the base branch, so a PR cannot weaken the rules it is
+judged by. When a PR edits the reviewer itself (the `/pr-review` skill, the
+`shelf-pr-*` and `shelf-security*` agents, `CLAUDE.md` or the context script),
+the report warns you.
 
 ## Changing it
 
