@@ -51,6 +51,7 @@ Existing mirrors:
 | `lib/batch-blockers.ts` → the custody blockers                                              | `apps/webapp/app/components/scanner/drawer/uses/custody-blockers.tsx`                                                            | a pure `packages/*` scanner module (none yet) |
 | `lib/kit-member-custody.ts` → `kitMemberCustodyBlock`                                       | `apps/webapp/app/modules/asset/utils.ts` → `isIndividualKitMember`                                                               | a pure `packages/*` asset module (none yet)   |
 | `lib/archived-assets.ts` → the archived reasons                                             | `apps/webapp/app/components/assets/actions-dropdown.tsx` → the archived disabled reason                                          | `@shelf/labels`                               |
+| `lib/asset-description.ts` → `isAssetDescriptionTooLong` + the limit and message            | `apps/webapp/app/utils/asset-description.ts` + `ASSET_DESCRIPTION_MAX_LENGTH` in `constants.ts`                                  | a pure `packages/*` limits module (none yet)  |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`
 (packages/permissions). If you create a new mirror, add it to this table; when

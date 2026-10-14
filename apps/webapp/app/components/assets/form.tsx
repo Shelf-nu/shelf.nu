@@ -32,7 +32,12 @@ import type {
   AssetEditLoaderData,
   loader,
 } from "~/routes/_layout+/assets.$assetId_.edit";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  assetDescriptionSchema,
+} from "~/utils/asset-description";
 import { resolveCancelTo } from "~/utils/cancel-destination";
+import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
 import type { CustomFieldZodSchema } from "~/utils/custom-fields";
 import { mergedSchema } from "~/utils/custom-fields";
 import { isFormProcessing } from "~/utils/form";
@@ -87,7 +92,7 @@ export const NewAssetFormSchema = z.object({
     .min(2, "Name is required")
     .transform((val) => val.trim()), // We trim to avoid white spaces at start and end
 
-  description: z.string().transform((val) => val.trim()),
+  description: assetDescriptionSchema.transform((val) => val.trim()),
   category: z.string(),
   assetModelId: z.string().optional(),
 
@@ -1146,18 +1151,22 @@ export const AssetForm = ({
             subHeading={
               <p>
                 This is the initial object description. It will be shown on the
-                asset’s overview page. You can always change it. Maximum 1000
-                characters.
+                asset’s overview page. You can always change it. Maximum{" "}
+                {ASSET_DESCRIPTION_MAX_LENGTH_LABEL} characters.
               </p>
             }
             className="border-b-0"
           >
             <Input
               inputType="textarea"
-              maxLength={1000}
+              characterLimit={ASSET_DESCRIPTION_MAX_LENGTH}
               label={"Description"}
-              name="description"
+              name={zo.fields.description()}
               defaultValue={description || ""}
+              error={
+                validationErrors?.description?.message ||
+                zo.errors.description()?.message
+              }
               hideLabel
               placeholder="Add a description for your asset."
               disabled={disabled}

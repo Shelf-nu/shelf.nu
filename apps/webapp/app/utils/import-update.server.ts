@@ -735,9 +735,11 @@ export async function applyBulkUpdatesFromImport({
 
           case "description":
             // Plain scalar, no side-effects. Not clearable via an empty
-            // cell (see compareCoreField's "description" case) — this
+            // cell (see compareCoreField's "description" case). This
             // branch only runs for a change the diff already produced,
-            // i.e. a non-empty cell that differs from the current value.
+            // i.e. a non-empty cell that differs from the current value
+            // and fits the length limit (computeAssetDiffs refuses the
+            // row otherwise).
             description = change.newValue;
             break;
 
