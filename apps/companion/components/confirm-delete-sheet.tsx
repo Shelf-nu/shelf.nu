@@ -35,6 +35,7 @@ import {
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -76,6 +77,7 @@ export default function ConfirmDeleteSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
   const inputRef = useRef<TextInput>(null);
   const [typed, setTyped] = useState("");
 
@@ -110,7 +112,10 @@ export default function ConfirmDeleteSheet({
       // autoFocus prop fires before the modal animation and misses the keyboard.
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {title}

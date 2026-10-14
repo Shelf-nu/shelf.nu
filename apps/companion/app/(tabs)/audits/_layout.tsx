@@ -1,4 +1,5 @@
 import { Stack } from "expo-router";
+import { contentColumnLayout } from "@/components/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { fontSize } from "@/lib/constants";
 
@@ -8,11 +9,18 @@ import { fontSize } from "@/lib/constants";
  */
 export const unstable_settings = { initialRouteName: "index" };
 
+/**
+ * Audit screens sit in the content column on wide windows, except the scanner,
+ * whose camera uses the whole window.
+ */
+const AUDITS_SCREEN_LAYOUT = contentColumnLayout({ except: ["scan"] });
+
 export default function AuditsLayout() {
   const { colors } = useTheme();
 
   return (
     <Stack
+      screenLayout={AUDITS_SCREEN_LAYOUT}
       screenOptions={{
         headerStyle: { backgroundColor: colors.white },
         headerTitleStyle: {
