@@ -39,6 +39,14 @@ ruleTester.run("no-clipped-user-text", rule, {
     `<Pressable onPress={open}><View><Text numberOfLines={1}>{item.description}</Text></View></Pressable>`,
     `<TouchableHighlight onPress={open}><Text numberOfLines={1}>{note.content}</Text></TouchableHighlight>`,
     `<TouchableWithoutFeedback onPress={open}><Text numberOfLines={1}>{comment}</Text></TouchableWithoutFeedback>`,
+    // An onPress that opens something, with only layout between.
+    `<Pressable onPress={() => router.push(href)}><View><Text numberOfLines={2}>{note.content}</Text></View></Pressable>`,
+    // numberOfLines that can be unlimited is a hand-rolled expandable text.
+    `<Text numberOfLines={expanded ? undefined : 3}>{booking.description}</Text>`,
+    `<Text numberOfLines={expanded ? 0 : 3}>{booking.description}</Text>`,
+    `<Text numberOfLines={0}>{booking.description}</Text>`,
+    // A call on something that is not the field.
+    `<Text numberOfLines={1}>{formatCount(notes.length)}</Text>`,
     // TextInput's numberOfLines is the input height.
     `<TextInput multiline numberOfLines={4} value={description} onChangeText={setDescription} />`,
   ],
@@ -70,6 +78,49 @@ ruleTester.run("no-clipped-user-text", rule, {
     {
       code: `<Text numberOfLines={1}>{expanded ? log.message : log.content}</Text>`,
       errors: clipped("message"),
+    },
+    // Other Text components clip the same way.
+    {
+      code: `<Animated.Text numberOfLines={2}>{note.content}</Animated.Text>`,
+      errors: clipped("content"),
+    },
+    // Calls render the field they wrap.
+    {
+      code: `<Text numberOfLines={3}>{stripMarkdown(booking.description)}</Text>`,
+      errors: clipped("description"),
+    },
+    {
+      code: `<Text numberOfLines={3}>{booking.description.trim()}</Text>`,
+      errors: clipped("description"),
+    },
+    // Nested Text lays out inside the clipped parent.
+    {
+      code: `<Text numberOfLines={3}><Text style={styles.label}>Notes: </Text><Text>{note}</Text></Text>`,
+      errors: clipped("note"),
+    },
+    // A screen wrapper that dismisses the keyboard is not a card.
+    {
+      code: `<TouchableWithoutFeedback onPress={Keyboard.dismiss}><View><Text numberOfLines={3}>{booking.description}</Text></View></TouchableWithoutFeedback>`,
+      errors: clipped("description"),
+    },
+    {
+      code: `<Pressable onPress={() => Keyboard.dismiss()}><Text numberOfLines={3}>{booking.description}</Text></Pressable>`,
+      errors: clipped("description"),
+    },
+    // A pressable around a scroll view wraps a screen, not a card.
+    {
+      code: `<Pressable onPress={close}><ScrollView><Text numberOfLines={3}>{booking.description}</Text></ScrollView></Pressable>`,
+      errors: clipped("description"),
+    },
+    // A pressable with no onPress opens nothing.
+    {
+      code: `<Pressable><Text numberOfLines={3}>{booking.description}</Text></Pressable>`,
+      errors: clipped("description"),
+    },
+    // A fixed limit on either branch still clips.
+    {
+      code: `<Text numberOfLines={compact ? 1 : 3}>{booking.description}</Text>`,
+      errors: clipped("description"),
     },
     // A pressable sibling is not an ancestor.
     {

@@ -1638,6 +1638,7 @@ export default function BookingDetailScreen() {
                 <ExpandableText
                   key={booking.id}
                   text={booking.description}
+                  label="description"
                   numberOfLines={3}
                   style={styles.description}
                   testID="booking-description"

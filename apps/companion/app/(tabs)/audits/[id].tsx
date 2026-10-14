@@ -987,6 +987,7 @@ function AuditDetailContent() {
                 <ExpandableText
                   key={audit.id}
                   text={audit.description}
+                  label="description"
                   numberOfLines={3}
                   style={styles.description}
                   testID="audit-description"
