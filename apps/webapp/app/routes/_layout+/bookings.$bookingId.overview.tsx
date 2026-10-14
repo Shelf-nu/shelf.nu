@@ -1991,6 +1991,10 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
         const b = await removeAssets({
           booking: { id, assetIds: [assetId as string] },
+          // The row menu renders only on free-pool rows, so this names the one
+          // row the operator acted on. Without it the asset's kit-driven
+          // slices on this booking would go with it.
+          standaloneAssetIds: [assetId as string],
           firstName: user?.firstName || "",
           lastName: user?.lastName || "",
           displayName: user?.displayName ?? null,

@@ -1158,14 +1158,20 @@ describe("ListAssetContent", () => {
       custodian,
       partOfKit = false,
       isKitAsset = false,
+      isKitDriven,
     }: {
       roles: OrganizationRoles[];
       status: string;
       custodian: boolean;
       /** The asset belongs to a kit somewhere in the workspace. */
       partOfKit?: boolean;
-      /** THIS row is one the kit drives, rendered under its kit. */
+      /** This row is rendered under a kit, which is a presentational fact. */
       isKitAsset?: boolean;
+      /**
+       * Whether the kit actually drives this row (`BookingAsset.assetKitId`).
+       * `undefined` stands for a surface that does not project the field.
+       */
+      isKitDriven?: boolean;
     }) => {
       mockUseOrganizationRoles.mockReturnValue(roles);
       mockRoles = roles;
@@ -1180,6 +1186,7 @@ describe("ListAssetContent", () => {
 
       const item = {
         ...baseAsset,
+        isKitDriven,
         assetKits: partOfKit
           ? [{ kitId: "kit-1", kit: { id: "kit-1", name: "Kit One" } }]
           : [],
@@ -1234,9 +1241,41 @@ describe("ListAssetContent", () => {
         custodian: true,
         partOfKit: true,
         isKitAsset: true,
+        isKitDriven: true,
       });
 
       expect(screen.queryByTestId("asset-actions")).not.toBeInTheDocument();
+    });
+
+    it("hides it under a kit on a surface that does not say who drives the row", () => {
+      // Without the field there is no way to tell a live kit slice from a
+      // detached one, and showing Remove on a live slice takes the asset out
+      // of its kit. Absent means hidden.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: true,
+        isKitDriven: undefined,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).not.toBeInTheDocument();
+    });
+
+    it("shows it on a detached row that still renders under its old kit", () => {
+      // The kit no longer drives these units, so kit removal does not reach
+      // them. Without its own menu the row cannot be acted on at all.
+      renderRowAs({
+        roles: [R.ADMIN],
+        status: "DRAFT",
+        custodian: true,
+        partOfKit: true,
+        isKitAsset: true,
+        isKitDriven: false,
+      });
+
+      expect(screen.queryByTestId("asset-actions")).toBeInTheDocument();
     });
 
     it("shows it on a standalone row whose asset belongs to a kit elsewhere", () => {

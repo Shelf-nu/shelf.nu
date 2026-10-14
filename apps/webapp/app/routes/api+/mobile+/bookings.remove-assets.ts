@@ -227,11 +227,14 @@ export async function action({ request }: ActionFunctionArgs) {
     const explicitStandaloneIdSet = requestedStandaloneAssetIds
       ? new Set(requestedStandaloneAssetIds)
       : null;
+    // Left undefined when the client named nothing: the service then keeps its
+    // whole-asset scope, which is what a client that cannot express row
+    // provenance means by naming an asset.
     const standaloneAssetIds = explicitStandaloneIdSet
       ? requestedAttachedAssetIds.filter((assetId) =>
           explicitStandaloneIdSet.has(assetId)
         )
-      : requestedAttachedAssetIds;
+      : undefined;
 
     // `assets` drives the booking-note phrasing only ("… removed {kits} and
     // {assets} from booking"), NOT what gets detached — so it names everything
@@ -264,15 +267,21 @@ export async function action({ request }: ActionFunctionArgs) {
      *
      * The two cases mirror `removeAssets`'s own scoping. With kits named it
      * deletes the named kits' membership rows plus the kit-less rows of the
-     * standalone bucket; with no kit named it deletes every row of every asset
-     * it was given. Change that scoping and this count has to move with it.
+     * standalone bucket; with no kit named every asset it was given loses a
+     * row, whether that is the asset's every slice or just its free-pool one.
+     * Change that scoping and this count has to move with it.
      */
     const kitAssetIdSet = new Set(kitAssetIds);
+    // Mirrors the service's own fallback: with no explicit bucket, anything
+    // that is not a member of a named kit is the standalone half.
+    const countedStandaloneAssetIds =
+      standaloneAssetIds ??
+      attachedAssetIds.filter((assetId) => !kitAssetIdSet.has(assetId));
     const removedAssetIds =
       kitIds.length > 0
         ? new Set([
             ...attachedAssetIds.filter((assetId) => kitAssetIdSet.has(assetId)),
-            ...standaloneAssetIds,
+            ...countedStandaloneAssetIds,
           ])
         : new Set(attachedAssetIds);
 

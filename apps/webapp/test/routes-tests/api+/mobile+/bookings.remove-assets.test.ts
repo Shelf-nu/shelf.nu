@@ -173,15 +173,19 @@ function serviceCall() {
 }
 
 describe("POST /api/mobile/bookings/remove-assets — removal provenance", () => {
-  it("reads every named id as its own row when the field is absent", async () => {
+  it("leaves the scope whole when the field is absent", async () => {
     // An older app sends no `standaloneAssetIds` at all. Its removals must keep
-    // behaving exactly as they did before the field existed.
+    // behaving exactly as they did before the field existed, which means every
+    // slice of every named asset. The field has to stay undefined to get that:
+    // naming the ids instead would scope the delete to their free-pool rows and
+    // quietly spare the kit-driven ones.
     world({ inOrg: ["a1", "a2"], onBooking: ["a1", "a2"] });
 
     const response = await post({ assetIds: ["a1", "a2"] });
 
     assertIsDataWithResponseInit(response);
-    expect(serviceCall().standaloneAssetIds).toEqual(["a1", "a2"]);
+    expect(serviceCall().standaloneAssetIds).toBeUndefined();
+    expect(serviceCall().booking.assetIds).toEqual(["a1", "a2"]);
   });
 
   it("narrows the delete to the rows the caller says it ticked", async () => {
@@ -206,12 +210,14 @@ describe("POST /api/mobile/bookings/remove-assets — removal provenance", () =>
 
   it("keeps ids the booking does not hold out of the delete scope", async () => {
     // A caller may name any org asset; only rows actually on this booking may
-    // be removed, or the count and the note both overstate what happened.
+    // be removed, or the count and the note both overstate what happened. The
+    // guarantee lives in `booking.assetIds`, which bounds the delete whether or
+    // not the narrowing field is given.
     world({ inOrg: ["a1", "a2"], onBooking: ["a1"] });
 
     await post({ assetIds: ["a1", "a2"] });
 
-    expect(serviceCall().standaloneAssetIds).toEqual(["a1"]);
+    expect(serviceCall().booking.assetIds).toEqual(["a1"]);
   });
 
   it("cannot smuggle an id past the org guard through the narrowing field", async () => {

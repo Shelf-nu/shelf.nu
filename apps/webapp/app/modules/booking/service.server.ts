@@ -13559,10 +13559,14 @@ export async function removeAssets({
   assets?: Array<{ id: string; title: string }>;
   /**
    * Assets whose *standalone* booking row the caller explicitly wants gone,
-   * even if the same asset is also a member of a kit in `kitIds`.
+   * even if the same asset also holds kit-driven rows on this booking.
    *
-   * Only meaningful alongside `kitIds` — with no kits the whole call already
-   * removes every slice of every asset in `booking.assetIds`.
+   * Naming an asset here scopes its deletion to its free-pool row
+   * (`assetKitId: null`), whether or not `kitIds` is also given. Leaving the
+   * field off keeps the whole-asset scope: every slice of every asset in
+   * `booking.assetIds` goes. So a caller that can see WHICH row the operator
+   * acted on must say so, or a removal aimed at one free-pool row takes the
+   * asset out of its kits on this booking too.
    *
    * Omit it and the service falls back to inferring standalone intent from
    * kit membership. That inference cannot see a user who ticked BOTH an
@@ -13734,6 +13738,33 @@ export async function removeAssets({
 
         rowsToDeleteWhere =
           orClauses.length === 1
+            ? { bookingId: id, ...orClauses[0] }
+            : { bookingId: id, OR: orClauses };
+      } else if (standaloneAssetIds) {
+        // No kit named, but the caller can see row provenance. Scope the ids
+        // it named to their free-pool rows and leave any kit-driven slices of
+        // the same asset alone; anything else in the call keeps the
+        // whole-asset scope.
+        const standaloneSet = new Set(standaloneAssetIds);
+        const wholeAssetIds = assetIds.filter(
+          (assetId) => !standaloneSet.has(assetId)
+        );
+
+        const orClauses: Prisma.BookingAssetWhereInput[] = [];
+        if (standaloneAssetIds.length > 0) {
+          orClauses.push({
+            assetId: { in: standaloneAssetIds },
+            assetKitId: null,
+          });
+        }
+        if (wholeAssetIds.length > 0) {
+          orClauses.push({ assetId: { in: wholeAssetIds } });
+        }
+
+        rowsToDeleteWhere =
+          orClauses.length === 0
+            ? { bookingId: id, assetId: { in: assetIds } }
+            : orClauses.length === 1
             ? { bookingId: id, ...orClauses[0] }
             : { bookingId: id, OR: orClauses };
       } else {
