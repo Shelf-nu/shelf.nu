@@ -1,0 +1,24 @@
+appId: com.shelf.companion.carlos
+---
+# Steps, part 2 of 2: submit the tray after the tripod was archived on the
+# server. The server refuses the whole request and names the archived asset,
+# so only that row is marked (and flagged by the archived blocker); the other
+# row waits, unmarked, to be submitted again.
+
+- tapOn:
+    id: "batch-drawer-submit"
+- tapOn: "Select ${SHELF_TEST_CUSTODIAN}"
+- extendedWaitUntil:
+    visible: "Assign .* to ${SHELF_TEST_CUSTODIAN}\\?"
+    timeout: 10000
+- tapOn: "^Assign$"
+- extendedWaitUntil:
+    visible: "Not done"
+    timeout: 30000
+- takeScreenshot: archived-stale-alert
+- tapOn: "OK"
+- extendedWaitUntil:
+    visible: "Archived. Remove it from the list."
+    timeout: 10000
+- assertVisible: "1 asset is archived and can't be put in custody."
+- takeScreenshot: archived-stale-tray

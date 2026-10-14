@@ -30,7 +30,7 @@ import {
 } from "../shared/modal";
 
 type DeleteKitProps = {
-  kit: Pick<Kit, "id" | "name" | "image">;
+  kit: Pick<Kit, "id" | "name">;
   trigger?: ReactElement;
 };
 
@@ -95,9 +95,6 @@ export default function DeleteKit({ kit, trigger }: DeleteKitProps) {
             </AlertDialogCancel>
 
             <Form id={formId} method="delete" action={`/kits/${kit.id}`}>
-              {kit.image && (
-                <input type="hidden" value={kit.image} name="image" />
-              )}
               <input type="hidden" value="delete" name="intent" />
               <Button
                 type="submit"

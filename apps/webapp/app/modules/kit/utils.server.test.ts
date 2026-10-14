@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
 
-import { getKitsWhereInput } from "./utils.server";
+import { getKitsWhereInput, isOwnKitImagePath } from "./utils.server";
 
 describe("getKitsWhereInput", () => {
   const organizationId = "org-1";
@@ -142,5 +142,28 @@ describe("getKitsWhereInput", () => {
       },
     ]);
     expect(where.status).toBe("AVAILABLE");
+  });
+});
+
+describe("isOwnKitImagePath", () => {
+  const kitId = "cmkitcamera0001";
+  const uploader = "5f0c6a2e-1111-4222-8333-444455556666";
+
+  it("accepts a file directly inside the kit's own folder", () => {
+    expect(isOwnKitImagePath(`${uploader}/${kitId}/image-1.jpg`, kitId)).toBe(
+      true
+    );
+  });
+
+  it.each([
+    ["another kit's folder", `${uploader}/cmotherkit0002/image-1.jpg`],
+    ["a nested folder", `${uploader}/${kitId}/sub/image-1.jpg`],
+    ["the kit folder itself", `${uploader}/${kitId}`],
+    ["an empty uploader segment", `/${kitId}/image-1.jpg`],
+    ["an empty file name", `${uploader}/${kitId}/`],
+    ["a parent-directory file name", `${uploader}/${kitId}/..`],
+    ["the kit id in the uploader position", `${kitId}/${uploader}/image-1.jpg`],
+  ])("refuses %s", (_label, path) => {
+    expect(isOwnKitImagePath(path, kitId)).toBe(false);
   });
 });

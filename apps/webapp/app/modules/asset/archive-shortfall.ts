@@ -47,7 +47,7 @@ export function formatModelShortfallMessage(
   );
   return `${MESSAGE_PREFIX}: ${parts.join(
     ", "
-  )}. Those bookings will be refused at reservation or check-out unless their model reservations are reduced. Archive anyway?`;
+  )}. Those bookings can't fill their model reservations for their dates until the reservations are reduced. Archive anyway?`;
 }
 
 /**

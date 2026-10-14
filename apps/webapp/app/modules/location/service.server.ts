@@ -648,8 +648,15 @@ export async function getLocationSubtreeDepth(params: {
 
 export const LOCATION_LIST_INCLUDE = {
   // Asset count comes from the `AssetLocation` pivot rather than a
-  // direct `Location.assets` relation (which doesn't exist).
-  _count: { select: { kits: true, assetLocations: true, children: true } },
+  // direct `Location.assets` relation (which doesn't exist). Archived assets
+  // are out of service and left out, the same as every other inventory count.
+  _count: {
+    select: {
+      kits: true,
+      assetLocations: { where: { asset: { archivedAt: null } } },
+      children: true,
+    },
+  },
   parent: {
     select: {
       id: true,
@@ -760,7 +767,9 @@ export async function getLocationTotalValuation({
   // Prisma's `aggregate({_sum})` cannot express the multiplication, so we drop
   // to `$queryRaw` and keep the same scope (assets joined to the pivot).
   // Column is `value` (Asset.valuation is `@map("value")`). COALESCE
-  // mirrors `getAssetTotalValue`. No `::bigint` cast — truncated floats.
+  // mirrors `getAssetTotalValue`. No `::bigint` cast, it truncates floats.
+  // Archived assets are out of service, so they add nothing to the value
+  // stored here, matching the dashboard and the inventory reports.
   const rows = await db.$queryRaw<{ total: number | null }[]>(
     Prisma.sql`
       SELECT COALESCE(SUM(COALESCE(a.value, 0) * COALESCE(a.quantity, 1)), 0) AS total
@@ -769,6 +778,7 @@ export async function getLocationTotalValuation({
         SELECT al."assetId" FROM "AssetLocation" al
         WHERE al."locationId" = ${locationId}
       )
+      AND a."archivedAt" IS NULL
     `
   );
 
@@ -2214,6 +2224,7 @@ export async function updateLocationAssets({
     await assertAssetsAreNotArchived({
       assetIds: actuallyNewAssetIds,
       organizationId,
+      actorUserId: userId,
     });
 
     /**
@@ -2822,7 +2833,11 @@ export async function updateLocationKits({
           name: true,
           locationId: true,
           location: { select: { id: true, name: true } },
+          // Archived members are frozen (issue #382): their placement stays
+          // where it was and they get no "moved" note, the same as the
+          // kit-side cascade (`cascadeKitLocationToAssets`).
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: {
               asset: {
                 select: {
@@ -2879,11 +2894,20 @@ export async function updateLocationKits({
             // kit might be moving in from another location), then
             // create fresh kit-driven rows here.
             const newKitIds = kitsToAdd.map((k) => k.id);
+            // Active members only: an archived member's placement is frozen.
             await tx.assetLocation.deleteMany({
-              where: { assetKit: { kitId: { in: newKitIds } } },
+              where: {
+                assetKit: {
+                  kitId: { in: newKitIds },
+                  asset: { archivedAt: null },
+                },
+              },
             });
             const assetKitsForKits = await tx.assetKit.findMany({
-              where: { kitId: { in: newKitIds } },
+              where: {
+                kitId: { in: newKitIds },
+                asset: { archivedAt: null },
+              },
               select: { id: true, assetId: true, quantity: true },
             });
             if (assetKitsForKits.length > 0) {
@@ -3045,7 +3069,9 @@ export async function updateLocationKits({
         select: {
           id: true,
           name: true,
+          // Archived members keep their placement and get no note.
           assetKits: {
+            where: { asset: { archivedAt: null } },
             select: { asset: { select: { id: true, title: true } } },
           },
         },
@@ -3078,7 +3104,10 @@ export async function updateLocationKits({
             // created at this location for the same assets survive.
             await tx.assetLocation.deleteMany({
               where: {
-                assetKit: { kitId: { in: removedKitIds } },
+                assetKit: {
+                  kitId: { in: removedKitIds },
+                  asset: { archivedAt: null },
+                },
                 locationId,
                 organizationId,
               },

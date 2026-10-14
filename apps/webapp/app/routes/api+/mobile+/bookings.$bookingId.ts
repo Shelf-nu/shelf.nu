@@ -57,12 +57,14 @@ import {
 } from "~/modules/booking/service.server";
 import { sortCollapsedBookingAssets } from "~/modules/booking/shape-booking-assets";
 import { calculateBookingLifecycleProgress } from "~/modules/booking/utils.server";
+import { findModelRequestShortfallsForBooking } from "~/modules/booking-model-request/service.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import {
   canSeeBooking,
   canWriteBooking,
 } from "~/utils/booking-authorization.server";
+import { canAssignModelUnits } from "~/utils/booking-model-requests";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import {
@@ -194,6 +196,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
                 // spread that builds each row — there is no explicit mapping to
                 // grep for, so do not assume it is unused.
                 availableToBook: true,
+                // A DRAFT booking can hold an asset that was archived after it
+                // was added. The app badges that row "Archived" and greys out
+                // Reserve, which the server refuses for it. Reaches the client
+                // through the same `serializeAssetImage(rest)` spread.
+                archivedAt: true,
                 // Quantity-tracked metadata so the app can render the
                 // check-in / check-out quantity + disposition pickers: `type`
                 // gates the picker to QT assets, `consumptionType` decides
@@ -317,7 +324,11 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       (ba) =>
         ba.asset.type === AssetType.QUANTITY_TRACKED && isManualSourceSlice(ba)
     );
-    const [sourceLocationsById, multiPlacedPoolIds] = await Promise.all([
+    const [
+      sourceLocationsById,
+      multiPlacedPoolIds,
+      modelReservationShortfalls,
+    ] = await Promise.all([
       loadSliceSourceLocations({
         organizationId,
         locationIds: sourcedPoolSlices.map((ba) => ba.sourceLocationId),
@@ -326,6 +337,20 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         organizationId,
         assetIds: sourcedPoolSlices.map((ba) => ba.asset.id),
       }),
+      // Reservations the booking's dates can no longer fill (e.g. a unit was
+      // archived with "Archive anyway"), so the app can warn like the web
+      // page. Measured only while units can still be assigned.
+      canAssignModelUnits(booking.status)
+        ? findModelRequestShortfallsForBooking({
+            booking: {
+              id: booking.id,
+              from: booking.from,
+              to: booking.to,
+              modelRequests: booking.modelRequests,
+            },
+            organizationId,
+          })
+        : [],
     ]);
     type CollapsedRow = {
       assetId: string;
@@ -1002,6 +1027,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         modelRequests,
         modelRequestCount,
         outstandingModelUnitCount,
+        modelReservationShortfalls,
         lifecycleProgress,
         hasAlreadyBookedAssets,
       },

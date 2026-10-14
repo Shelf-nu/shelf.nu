@@ -1,6 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
-import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
+import {
+  archivedAssetsRefusal,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+} from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -8,6 +11,7 @@ import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
@@ -104,6 +108,8 @@ type BookingFlags = {
    */
   hasModelRequests?: boolean;
   hasUnavailableAssets: boolean;
+  /** The booking holds an archived asset; reserve and check-out refuse it. */
+  hasArchivedAssets?: boolean;
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
   hasAssetsInCustody: boolean;
@@ -123,6 +129,12 @@ type BookingFormData = {
      * exist. Empty whenever that flag is false.
      */
     unavailableAssets: UnavailableAssetRow[];
+    /**
+     * The archived assets `bookingFlags.hasArchivedAssets` refuses over, named
+     * on the disabled Reserve and Check out buttons. Optional for callers
+     * outside the booking page, which never carry an archived asset.
+     */
+    archivedAssets?: UnavailableAssetRow[];
     description: string | null;
     status: BookingStatus;
     tags: Pick<Tag, "id" | "name">[];
@@ -144,10 +156,20 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     custodianRef,
     bookingFlags,
     unavailableAssets,
+    archivedAssets,
     description,
     status,
     tags,
   } = booking;
+  const canReinstateAssets = useCanArchiveAssets();
+  /** Why Reserve and Check out are off while an archived asset is on board. */
+  const archivedAssetsReason = bookingFlags?.hasArchivedAssets
+    ? archivedAssetsRefusal({
+        titles: (archivedAssets ?? []).map((asset) => asset.title),
+        fix: "remove-from-booking",
+        canReinstate: canReinstateAssets,
+      })
+    : null;
 
   const bookingStatus = useBookingStatusHelpers(status);
   const {
@@ -391,14 +413,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   (!bookingFlags?.hasAssets &&
                     !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
-                  bookingFlags?.hasUnavailableAssets
+                  bookingFlags?.hasUnavailableAssets ||
+                  archivedAssetsReason
                     ? {
                         // Wording lives in @shelf/labels so the tooltip, the
                         // mobile route's 400, the in-transaction guard and the
                         // companion's inline note can never say four different
                         // things about the same rule (they did, and this copy
                         // carried an "unavailble" typo).
-                        reason: bookingFlags?.hasUnavailableAssets ? (
+                        reason: archivedAssetsReason ? (
+                          archivedAssetsReason
+                        ) : bookingFlags?.hasUnavailableAssets ? (
                           <UnavailableAssetsReason
                             assets={unavailableAssets ?? []}
                           />
@@ -448,13 +473,16 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 const checkoutDisabled =
                   disabled ||
                   isLoadingWorkingHours ||
+                  archivedAssetsReason ||
                   bookingFlags?.hasUnavailableAssets ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasCheckedOutAssets ||
                   bookingFlags?.hasAssetsInCustody ||
                   bookingFlags?.hasKitsInCustody
                     ? {
-                        reason: bookingFlags?.hasAssetsInCustody
+                        reason: archivedAssetsReason
+                          ? archivedAssetsReason
+                          : bookingFlags?.hasAssetsInCustody
                           ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
                           : bookingFlags?.hasKitsInCustody
                           ? "Some kits in this booking are currently in custody. Release their custody before you can check-out"

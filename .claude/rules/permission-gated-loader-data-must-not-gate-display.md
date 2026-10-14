@@ -1,6 +1,8 @@
 ---
 description: Skipping a loader query behind an edit/manage permission is a perf win only if nothing DISPLAYED derives from it — otherwise view-only roles silently lose data
-globs: ["apps/webapp/app/routes/**/*.tsx", "apps/webapp/app/routes/**/*.ts"]
+paths:
+  - "apps/webapp/app/routes/**/*.tsx"
+  - "apps/webapp/app/routes/**/*.ts"
 ---
 
 # Permission-Gated Loader Data Must Not Feed Display
