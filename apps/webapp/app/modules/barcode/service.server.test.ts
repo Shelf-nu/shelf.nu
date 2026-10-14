@@ -658,6 +658,11 @@ describe("getBarcodeByValue", () => {
     expect(await scan("http://www.example.it/ABC123")).toBe("older");
   });
 
+  it("resolves a link stored fully in upper case", async () => {
+    seed([row("ext", "HTTPS://EXAMPLE.IT/ABC123", "ExternalQR")]);
+    expect(await scan("example.it/ABC123")).toBe("ext");
+  });
+
   it("resolves a URL whose host was scanned in upper case", async () => {
     seed([row("ext", "example.it/ABC123", "ExternalQR")]);
     expect(await scan("HTTPS://EXAMPLE.IT/ABC123")).toBe("ext");

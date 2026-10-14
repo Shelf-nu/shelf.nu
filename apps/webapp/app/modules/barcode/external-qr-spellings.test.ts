@@ -22,6 +22,8 @@ describe("externalQrCanonical", () => {
     ["https://example.it/a?b=1#c", "example.it/a?b=1#c"],
     ["http://10.0.0.5:8080/x", "10.0.0.5:8080/x"],
     ["HTTPS://EXAMPLE.IT/ABC123", "example.it/ABC123"],
+    ["http://example.it/x?next=/", "example.it/x?next=/"],
+    ["https://example.it/x#/", "example.it/x#/"],
   ])("reduces %s to %s", (scanned, canonical) => {
     expect(externalQrCanonical(scanned)).toBe(canonical);
   });
@@ -45,7 +47,7 @@ describe("externalQrCanonical", () => {
 });
 
 describe("externalQrSpellings", () => {
-  it("lists every scheme, www and trailing-slash spelling of a URL", () => {
+  it("lists every scheme, www, trailing-slash and host-case spelling of a URL", () => {
     expect(externalQrSpellings("https://example.it/ABC123").sort()).toEqual(
       [
         "example.it/ABC123",
@@ -60,6 +62,28 @@ describe("externalQrSpellings", () => {
         "https://example.it/ABC123/",
         "https://www.example.it/ABC123",
         "https://www.example.it/ABC123/",
+        "EXAMPLE.IT/ABC123",
+        "EXAMPLE.IT/ABC123/",
+        "www.EXAMPLE.IT/ABC123",
+        "www.EXAMPLE.IT/ABC123/",
+        "http://EXAMPLE.IT/ABC123",
+        "http://EXAMPLE.IT/ABC123/",
+        "http://www.EXAMPLE.IT/ABC123",
+        "http://www.EXAMPLE.IT/ABC123/",
+        "https://EXAMPLE.IT/ABC123",
+        "https://EXAMPLE.IT/ABC123/",
+        "https://www.EXAMPLE.IT/ABC123",
+        "https://www.EXAMPLE.IT/ABC123/",
+        "WWW.EXAMPLE.IT/ABC123",
+        "WWW.EXAMPLE.IT/ABC123/",
+        "HTTP://EXAMPLE.IT/ABC123",
+        "HTTP://EXAMPLE.IT/ABC123/",
+        "HTTP://WWW.EXAMPLE.IT/ABC123",
+        "HTTP://WWW.EXAMPLE.IT/ABC123/",
+        "HTTPS://EXAMPLE.IT/ABC123",
+        "HTTPS://EXAMPLE.IT/ABC123/",
+        "HTTPS://WWW.EXAMPLE.IT/ABC123",
+        "HTTPS://WWW.EXAMPLE.IT/ABC123/",
       ].sort()
     );
   });
@@ -67,6 +91,18 @@ describe("externalQrSpellings", () => {
   it("keeps the scanned text itself when it uses an unusual scheme case", () => {
     expect(externalQrSpellings("HTTPS://example.it/X")).toContain(
       "HTTPS://example.it/X"
+    );
+  });
+
+  it("never treats a slash at the end of a query as optional", () => {
+    const spellings = externalQrSpellings("http://example.it/x?next=/");
+    expect(spellings).toContain("https://example.it/x?next=/");
+    expect(spellings).not.toContain("https://example.it/x?next=");
+  });
+
+  it("includes the fully upper-case spelling a QR encoder may store", () => {
+    expect(externalQrSpellings("https://example.it/ABC123")).toContain(
+      "HTTPS://EXAMPLE.IT/ABC123"
     );
   });
 
