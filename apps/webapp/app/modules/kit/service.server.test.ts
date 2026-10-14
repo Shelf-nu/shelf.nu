@@ -1349,8 +1349,10 @@ describe("bulkAssignKitCustody", () => {
     expect(db.kit.findMany).toHaveBeenCalled();
     expect(db.$transaction).toHaveBeenCalled();
 
-    // 15 s, not Prisma's 5 s default: a CSV import hands this every kit at once.
+    // More room than Prisma's 2 s wait and 5 s run defaults: a CSV import hands
+    // this every kit at once.
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 6000,
       timeout: 15000,
     });
   });

@@ -3,8 +3,10 @@
  * which imports a CSV of new assets into the workspace whose page is open.
  *
  * The admin is not a member of that workspace, so whether the file may carry
- * barcodes is that workspace's entitlement: its own `barcodesEnabled` setting,
- * or always allowed when premium features are off (self-hosted).
+ * barcodes is that workspace's entitlement, decided by `canUseBarcodes`. These
+ * tests run with premium features on, where the entitlement is the workspace's
+ * own `barcodesEnabled` setting. The premium-off branch of the helper is
+ * covered in `test/utils/subscription.server.test.ts`.
  *
  * @see {@link file://./../../../../app/routes/_layout+/admin-dashboard+/org.$organizationId.tsx}
  * @see {@link file://./../../../../app/modules/asset/service.server.ts} createAssetsFromContentImport
@@ -39,13 +41,13 @@ vi.mock("~/utils/csv.server", async () => ({
   csvDataFromRequest: vi.fn(),
 }));
 
-// why: the entitlement helper reads the premium-features flag at module load;
-// wrapping the real helper lets one case switch premium features off.
-vi.mock("~/utils/subscription.server", async () => {
-  const actual = await vi.importActual<
-    typeof import("~/utils/subscription.server")
-  >("~/utils/subscription.server");
-  return { ...actual, canUseBarcodes: vi.fn(actual.canUseBarcodes) };
+// why: the premium-features flag comes from the environment; pinning it on
+// makes the real entitlement helper answer from the workspace's own setting.
+vi.mock("~/config/shelf.config", async () => {
+  const actual = await vi.importActual<typeof import("~/config/shelf.config")>(
+    "~/config/shelf.config"
+  );
+  return { config: { ...actual.config, enablePremiumFeatures: true } };
 });
 
 // why: the import itself writes assets; these tests assert what it is asked to do.
@@ -60,7 +62,6 @@ import { db } from "~/database/db.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { csvDataFromRequest } from "~/utils/csv.server";
 import { requireAdmin } from "~/utils/roles.server";
-import { canUseBarcodes } from "~/utils/subscription.server";
 
 /** The admin driving the page. */
 const ADMIN_ID = "admin-1";
@@ -92,7 +93,6 @@ describe("admin org route: content import", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(requireAdmin).mockResolvedValue({ id: ADMIN_ID } as never);
-    vi.mocked(canUseBarcodes).mockImplementation((org) => org.barcodesEnabled);
     vi.mocked(csvDataFromRequest).mockResolvedValue([
       ["title", "barcode_Code128"],
       ["Camera 1", "CAM00001"],
@@ -128,19 +128,6 @@ describe("admin org route: content import", () => {
         organizationId: ORG_ID,
         canUseBarcodes: false,
       })
-    );
-  });
-
-  it("allows barcode columns on an install with premium features off", async () => {
-    givenBarcodesEnabled(false);
-    // Premium features off: every workspace may use barcodes.
-    vi.mocked(canUseBarcodes).mockReturnValue(true);
-
-    await action(contentImportArgs());
-
-    expect(canUseBarcodes).toHaveBeenCalledWith({ barcodesEnabled: false });
-    expect(createAssetsFromContentImport).toHaveBeenCalledWith(
-      expect.objectContaining({ canUseBarcodes: true })
     );
   });
 });

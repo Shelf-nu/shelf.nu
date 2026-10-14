@@ -24,6 +24,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
@@ -4093,13 +4094,6 @@ export async function bulkDeleteKits({
   }
 }
 
-/**
- * Transaction options for {@link bulkAssignKitCustody}. Its work grows with the
- * number of kits and their members, and the CSV import passes every kit in the
- * file at once, which outlasts Prisma's 5 s default.
- */
-const BULK_ASSIGN_KIT_CUSTODY_TRANSACTION_OPTIONS = { timeout: 15000 };
-
 export async function bulkAssignKitCustody({
   kitIds,
   organizationId,
@@ -4433,7 +4427,7 @@ export async function bulkAssignKitCustody({
         })),
         tx
       );
-    }, BULK_ASSIGN_KIT_CUSTODY_TRANSACTION_OPTIONS);
+    }, LONG_TRANSACTION_OPTIONS);
   } catch (cause) {
     const message =
       cause instanceof ShelfError

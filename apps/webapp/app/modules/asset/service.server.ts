@@ -40,6 +40,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // Imported from the dependency-free leaf (NOT `availability.server`) so that
 // importing asset/service.server does NOT drag in the heavy
@@ -1273,13 +1274,6 @@ export function buildAssetKitCreateData({
   };
 }
 
-/**
- * Transaction options for {@link createAsset}. The CSV import calls it once per
- * row on a busy database, where one asset's writes can outlast Prisma's 5 s
- * default. 15 s matches the other long transactions in this module.
- */
-const CREATE_ASSET_TRANSACTION_OPTIONS = { timeout: 15000 };
-
 export async function createAsset({
   title,
   description,
@@ -1712,7 +1706,7 @@ export async function createAsset({
               },
             })
           : created;
-      }, CREATE_ASSET_TRANSACTION_OPTIONS);
+      }, LONG_TRANSACTION_OPTIONS);
 
       // Successfully created asset, exit the retry loop
       return asset;

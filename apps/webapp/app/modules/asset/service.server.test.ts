@@ -2613,7 +2613,7 @@ describe("createAsset transaction budget", () => {
     vitest.clearAllMocks();
   });
 
-  it("gives its transaction 15 seconds instead of Prisma's 5 second default", async () => {
+  it("gives its transaction more room than Prisma's 2 s wait and 5 s run defaults", async () => {
     expect.assertions(1);
 
     await createAsset({
@@ -2623,6 +2623,7 @@ describe("createAsset transaction budget", () => {
     } as unknown as Parameters<typeof createAsset>[0]);
 
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      maxWait: 6000,
       timeout: 15000,
     });
   });
