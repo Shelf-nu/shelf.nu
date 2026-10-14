@@ -12,7 +12,9 @@
  * `numberOfLines` prop whose content renders an identifier or member named
  * description, note(s), comment(s), content or message (any case). The field
  * is found through `a ?? b`, `a ? b : c`, optional chains, template literals,
- * calls such as `stripMarkdown(note)` or `note.trim()`, and nested `<Text>`.
+ * calls such as `stripMarkdown(note)` or `note.trim()`, the value a `.map()`
+ * or `.flatMap()` callback returns (`notes.map((n) => n.content)`), and
+ * nested `<Text>`.
  *
  * Not reported:
  * - A `numberOfLines` that can be unlimited (`0`, `undefined`, `null`, or a
@@ -143,6 +145,9 @@ function userTextField(node) {
       return userTextField(node.consequent) ?? userTextField(node.alternate);
     case "TemplateLiteral":
       return firstField(node.expressions);
+    case "ArrayExpression":
+      // React renders each element of an array child.
+      return firstField(node.elements.filter(Boolean));
     case "CallExpression": {
       // `note.trim()` renders `note`; `stripMarkdown(note)` renders it too.
       const callee = node.callee;
@@ -150,7 +155,7 @@ function userTextField(node) {
         callee.type === "MemberExpression"
           ? userTextField(callee.object)
           : null;
-      return fromReceiver ?? firstField(node.arguments);
+      return fromReceiver ?? mappedField(node) ?? firstField(node.arguments);
     }
     case "JSXElement":
     case "JSXFragment":
@@ -162,6 +167,47 @@ function userTextField(node) {
     default:
       return null;
   }
+}
+
+/** Array methods whose callback's return value is what gets rendered. */
+const MAPPING_METHODS = new Set(["map", "flatMap"]);
+
+/**
+ * The user-text field a `.map()` or `.flatMap()` callback returns, as in
+ * `items.map((item) => item.description)`. Only these methods are followed:
+ * a `.filter()` or `.find()` callback's value is not what gets rendered.
+ *
+ * @param {import("estree").CallExpression} node
+ * @returns The matched field name, or `null`
+ */
+function mappedField(node) {
+  const callee = node.callee;
+  if (
+    callee.type !== "MemberExpression" ||
+    callee.computed ||
+    !MAPPING_METHODS.has(callee.property.name)
+  ) {
+    return null;
+  }
+  const callback = node.arguments[0];
+  if (
+    !callback ||
+    (callback.type !== "ArrowFunctionExpression" &&
+      callback.type !== "FunctionExpression")
+  ) {
+    return null;
+  }
+  if (callback.body.type !== "BlockStatement") {
+    return userTextField(callback.body);
+  }
+  // A block body renders whatever its return statements return.
+  for (const statement of callback.body.body) {
+    if (statement.type === "ReturnStatement" && statement.argument) {
+      const field = userTextField(statement.argument);
+      if (field) return field;
+    }
+  }
+  return null;
 }
 
 /**

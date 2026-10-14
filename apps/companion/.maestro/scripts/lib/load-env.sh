@@ -4,8 +4,13 @@
 #
 # Source this file, then call:
 #   load_maestro_env "$MAESTRO_DIR"   # fills MAESTRO_ENV_FLAGS, exports keys
-#   missing_flow_vars "$flow"         # prints SHELF_TEST_* vars a flow needs
-#                                     # that no env file set
+#   check_flow_vars "$flow"           # sets MISSING_FIXTURE_VARS and
+#                                     # MISSING_CONFIG_VARS for one flow
+#
+# A runner skips a flow whose only missing vars are fixture vars (its fixture
+# is not seeded) and fails a flow missing a config var (test.env is
+# incomplete). A fixture var is one seed-e2e.sh writes; every other
+# SHELF_TEST_* var is configuration that env/test.env must set.
 #
 # Values come from env/test.env, then from each env/e2e*.env file that
 # seed-e2e.sh writes for its fixtures. A fixture file only adds keys: a key
@@ -21,6 +26,8 @@
 MAESTRO_ENV_FLAGS=()
 # Keys loaded so far, one per line, for duplicate and missing-var checks.
 MAESTRO_ENV_KEYS=""
+# Keys seed-e2e.sh writes into its fixture env files, one per line.
+MAESTRO_FIXTURE_KEYS=""
 
 # Loads test.env and the fixture env files into MAESTRO_ENV_FLAGS.
 #
@@ -33,6 +40,9 @@ load_maestro_env() {
     echo "  Copy env/test.env.example to env/test.env and fill in values."
     exit 1
   fi
+
+  MAESTRO_FIXTURE_KEYS="$(grep -oE '^SHELF_TEST_[A-Z0-9_]+=' \
+    "$maestro_dir/scripts/seed-e2e.sh" | tr -d '=' | sort -u)"
 
   local env_file key value
   for env_file in "$test_env" "$maestro_dir"/env/e2e*.env; do
@@ -58,15 +68,23 @@ load_maestro_env() {
   done
 }
 
-# Prints, space-separated, the SHELF_TEST_* vars a flow references that no
-# loaded env file set. Empty output means the flow has what it needs. Only
-# SHELF_TEST_* names count: other ${VARS} are defined inside the flows.
+# Sorts the SHELF_TEST_* vars a flow references that no env file set into
+# MISSING_FIXTURE_VARS (seed-e2e.sh writes them) and MISSING_CONFIG_VARS
+# (env/test.env must set them), each space-separated and empty when nothing
+# is missing. Other ${VARS} are defined inside the flows and are not checked.
 #
 # $1: path to the flow file.
-missing_flow_vars() {
-  local flow="$1" var missing=()
-  for var in $(grep -oE '\$\{SHELF_TEST_[A-Z0-9_]+' "$flow" | cut -c3- | sort -u); do
-    printf '%s\n' "$MAESTRO_ENV_KEYS" | grep -qxF "$var" || missing+=("$var")
-  done
-  echo "${missing[*]:-}"
+check_flow_vars() {
+  local flow="$1" var fixture=() config=()
+  while read -r var; do
+    [ -n "$var" ] || continue
+    printf '%s\n' "$MAESTRO_ENV_KEYS" | grep -qxF "$var" && continue
+    if printf '%s\n' "$MAESTRO_FIXTURE_KEYS" | grep -qxF "$var"; then
+      fixture+=("$var")
+    else
+      config+=("$var")
+    fi
+  done < <(grep -oE '\$\{SHELF_TEST_[A-Z0-9_]+' "$flow" | cut -c3- | sort -u)
+  MISSING_FIXTURE_VARS="${fixture[*]:-}"
+  MISSING_CONFIG_VARS="${config[*]:-}"
 }

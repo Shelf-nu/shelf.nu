@@ -45,6 +45,9 @@ ruleTester.run("no-clipped-user-text", rule, {
     `<Text numberOfLines={expanded ? undefined : 3}>{booking.description}</Text>`,
     `<Text numberOfLines={expanded ? 0 : 3}>{booking.description}</Text>`,
     `<Text numberOfLines={0}>{booking.description}</Text>`,
+    // Only map/flatMap callbacks render what they return.
+    `<Text numberOfLines={1}>{items.filter((item) => item.note).length}</Text>`,
+    `<Text numberOfLines={1}>{items.map((item) => item.name).join(", ")}</Text>`,
     // A call on something that is not the field.
     `<Text numberOfLines={1}>{formatCount(notes.length)}</Text>`,
     // TextInput's numberOfLines is the input height.
@@ -92,6 +95,15 @@ ruleTester.run("no-clipped-user-text", rule, {
     {
       code: `<Text numberOfLines={3}>{booking.description.trim()}</Text>`,
       errors: clipped("description"),
+    },
+    // A map callback renders the field it returns.
+    {
+      code: `<Text numberOfLines={3}>{items.map((item) => item.description).join(", ")}</Text>`,
+      errors: clipped("description"),
+    },
+    {
+      code: `<Text numberOfLines={3}>{entries.flatMap(function (entry) { return [entry.content]; })}</Text>`,
+      errors: clipped("content"),
     },
     // Nested Text lays out inside the clipped parent.
     {

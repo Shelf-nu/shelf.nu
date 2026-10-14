@@ -85,10 +85,17 @@ for flow in "$SUITE_DIR"/*.yaml; do
 
   echo -n "  ▸ $FLOW_NAME ... "
 
-  # A fixture flow whose fixture is not seeded has nothing to run against.
-  MISSING=$(missing_flow_vars "$flow")
-  if [ -n "$MISSING" ]; then
-    echo -e "${YELLOW}SKIP${NC} (not set: $MISSING; seed its fixture with seed-e2e.sh)"
+  # A missing config var fails the flow: test.env is incomplete. A missing
+  # fixture var skips it: its fixture is not seeded.
+  check_flow_vars "$flow"
+  if [ -n "$MISSING_CONFIG_VARS" ]; then
+    echo -e "${RED}FAIL${NC} (not set in env/test.env: $MISSING_CONFIG_VARS)"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    FAILED_TESTS+=("$FLOW_NAME")
+    continue
+  fi
+  if [ -n "$MISSING_FIXTURE_VARS" ]; then
+    echo -e "${YELLOW}SKIP${NC} (fixture not seeded: $MISSING_FIXTURE_VARS; see seed-e2e.sh)"
     SKIP_COUNT=$((SKIP_COUNT + 1))
     continue
   fi
