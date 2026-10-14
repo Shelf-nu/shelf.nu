@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { MarkdownViewer } from "~/components/markdown/markdown-viewer";
+import { SystemNoteViewer } from "~/components/markdown/system-note-viewer";
 import { Button } from "~/components/shared/button";
 import { DateS } from "~/components/shared/date";
 import { Switch } from "~/components/shared/switch";
@@ -55,7 +56,7 @@ const Update = ({ note }: { note: NoteWithUser; when?: boolean }) => (
       <Tag>
         <DateS date={note.createdAt} includeTime />
       </Tag>{" "}
-      <MarkdownViewer content={note.content} encodeRawTagAttributes />
+      <SystemNoteViewer content={note.content} />
     </div>
   </div>
 );

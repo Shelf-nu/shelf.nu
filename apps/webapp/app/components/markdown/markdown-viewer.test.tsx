@@ -99,37 +99,6 @@ describe("MarkdownViewer", () => {
     });
   });
 
-  describe("system notes with raw tag attributes", () => {
-    // why: system notes store user text raw inside tag attributes; the
-    // renderers that show them opt into encoding it.
-    const renderSystemNote = (content: string) =>
-      render(
-        <MemoryRouter>
-          <MarkdownViewer content={content} encodeRawTagAttributes />
-        </MemoryRouter>
-      );
-
-    it("shows both texts of a multi-line description change", () => {
-      const { container } = renderSystemNote(
-        '{% link to="/settings/team/users/u1" text="Jane Doe" /%} updated the asset description {% description oldText="aa" newText="first line\r\nsecond line" /%}.'
-      );
-
-      expect(container.textContent).toContain(
-        "updated the asset description aa to first line\nsecond line."
-      );
-    });
-
-    it("shows a user link whose name has a backslash", () => {
-      const { container } = renderSystemNote(
-        '{% link to="/settings/team/users/u2" text="Customer\\Barbara" /%} checked out the asset.'
-      );
-
-      expect(container.querySelector("a")).toHaveTextContent(
-        "Customer\\Barbara"
-      );
-    });
-  });
-
   it("shows a Markdoc example in an author's code span exactly as typed", () => {
     const { container } = renderNote(
       'Use `{% link to="C:\\tmp" text="x" /%}` here.',

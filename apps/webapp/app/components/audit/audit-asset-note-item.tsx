@@ -71,9 +71,10 @@ export function AuditAssetNoteItem({
 
   // Only allow deletion of COMMENT notes (manual notes), not UPDATE notes (auto-generated)
   /**
-   * `type` is optional on `NoteData`, and an absent type means a manual,
-   * author-written note — legacy rows predate the discriminator. Derived once
-   * so deletion and external-link permission cannot drift apart.
+   * The details loader fetches COMMENT notes only, and `AuditNote.type` is
+   * non-null with a COMMENT default. `type` is absent only on an optimistic
+   * note the user just typed, which is author-written too. Derived once so
+   * deletion and external-link permission cannot drift apart.
    */
   const isAuthorWritten = note.type === "COMMENT" || note.type === undefined;
   const canDelete = isAuthorWritten;
@@ -152,7 +153,6 @@ export function AuditAssetNoteItem({
               content={note.content}
               disablePortal={true}
               allowExternalLinks={isAuthorWritten}
-              encodeRawTagAttributes={!isAuthorWritten}
             />
           </div>
           <div className="mt-4 flex items-center gap-2 text-xs text-gray-500">
