@@ -54,7 +54,21 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    checked by a read-only validator that tries to disprove it.
 5. **Report.** A verdict, an ELI5, then numbered findings: Must fix, Should
    fix, Nits, and "Spotted along the way" for real problems the PR did not
-   cause (each with a suggested follow-up PR).
+   cause (each with a suggested follow-up PR), then "Dismissed".
+
+   Under the Scope and CI lines, **Safe because** names the one fact the
+   change's safety depends on and says whether it was `checked in code` or is
+   `unproven`. A finding that two or more passes found independently carries
+   `found by <n> passes (<names>)`. "Dismissed" lists findings a validator
+   rejected or the review could not confirm, numbered D1, D2, ... with a
+   one-line reason; say "restore D2" to bring one back. Pre-existing nits are
+   not listed.
+
+After the report you can say "fix 1-4", "restore D2", or "prove 3". `prove N`
+is the one exception to read-only: it writes a throwaway test that fails if
+finding N is real, runs only that file (`pnpm webapp:test -- --run <file>`),
+shows the output, says proven or not proven, then deletes the test. It is never
+committed and never runs the full suite.
 
 ## The agents
 

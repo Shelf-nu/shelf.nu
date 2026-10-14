@@ -57,7 +57,7 @@ sections of `.claude/agents/shelf-pr-reviewer-tests.md`,
 `shelf-pr-reviewer-conventions.md`, `shelf-pr-reviewer-security.md` and
 `shelf-pr-reviewer-impact.md`, plus
 the rule copies, and apply them. Also look for bugs: wrong results, crashes,
-missing org scoping. Check each one by opening the cited line; drop what you cannot confirm and drop pre-existing nits. Then go to Stage 5.
+missing org scoping. Check each one by opening the cited line; drop what you cannot confirm and drop pre-existing nits. Keep a dismissed entry for each finding you drop because you could not confirm it (see Stage 4 step 4). Then name the safety fact (below) and go to Stage 5.
 
 ### Tier M and L (agents)
 
@@ -114,20 +114,33 @@ validator.
 If an agent fails or returns no parsable JSON, note it under "Skipped" in
 the report and carry on. Never re-run the whole review.
 
+**Safety fact.** The report's "Safe because" line needs the single fact the
+change's safety depends on. When the impact pass ran, use the `safetyFact`,
+`confidence` and `evidence` from the second json block in its final message.
+Otherwise (tier S, or impact not triggered) write it yourself from your reading
+in Stage 2 and 3. Mark it `checked in code` only when you or an agent opened
+the code that guarantees it; otherwise it is `unproven`.
+
 ## Stage 4: Verify (tier M and L)
 
 1. **Dedup.** Same file, lines within 3 of each other, same problem: merge
-   them, keep the higher severity, and note which passes found it.
+   them, keep the higher severity, and keep a `foundBy` list of every pass
+   that reported the merged finding (for example `bugs`, `security`). Tier S
+   findings have a single pass, so no tag.
 2. **Validators.** Take every unverified `must-fix` and `should-fix`. Group
    them by file, then merge groups until there are at most 3. Dispatch one
    `shelf-pr-finding-validator` per group, in the background and in parallel,
    with the findings JSON fenced by the marker, `diffPath`, and only the rule
    `copyPath`s cited in those findings' `evidence`. When `localHeadMatchesPr`
    is false, add: "The working tree is not the PR head; where the file and the
-   diff disagree, the diff is the PR." Drop `rejected` findings. Apply the
-   validator's `severity` and `introducedByPr`.
+   diff disagree, the diff is the PR." Drop `rejected` findings (and keep each as a dismissed entry, step 4).
+   Apply the validator's `severity` and `introducedByPr`.
 3. **Nits and code-review CONFIRMED findings**: check each yourself by opening
    the cited line. Drop anything you cannot confirm. Drop pre-existing nits. When confirming a code-review finding, set its severity (must-fix / should-fix / nit) using the same definitions as the validator.
+4. **Dismissed list.** Every finding a validator rejected, or that you dropped
+   because you could not confirm it, becomes a dismissed entry: title,
+   `file:line` and a one-line reason. Pre-existing nits are dropped silently
+   and are not listed.
 
 ## Stage 5: Report
 
@@ -144,37 +157,63 @@ per finding, no theory, no jargon a busy engineer has to decode. No em dashes.
 **Intent check:** ✅ <claim> · ❌ <claim>: <why> · 👀 <claim>: <what to check>
 **Scope:** <stats.files> files, <stats.changedLines> changed lines. <unrelated files, or "all files serve the stated goal">
 **CI:** <passing> passing, <failing names>, <pending> pending
+**Safe because:** <the one fact the change's safety depends on> (<checked in code | unproven>)
 
 ### Must fix
 1. **<title>**
    <impact sentence>
-   `<file>:<line>` · Trigger: <trigger> · Fix: <fix>
+   `<file>:<line>`[ · found by <n> passes (<names>)] · Trigger: <trigger> · Fix: <fix>
 
 ### Should fix
 ### Nits
 ### Spotted along the way (not caused by this PR)
 <n>. **<title>**. <impact> `<file>:<line>` → follow-up PR: "<conventional-commit title>"
+### Dismissed
+D1. <title> (`<file>:<line>`): <one-line reason>
 
 **Checked:** <passes run> · **Skipped:** <passes not run and why>
 **Not verifiable from code:** <browser, device, prod-data checks>
 **Took:** <minutes since startedAt> min
 
-Next: "fix 1-4", "post this as a request-changes review", or ask about any item.
+Next: "fix 1-4", "prove 3", "restore D2", "post this as a request-changes review", or ask about any item.
 ```
 
 Rules:
 
 - The header counts exclude "Spotted along the way" items.
 - Number continuously across all sections so the user can say "fix 1-6, skip 7".
-- Omit empty sections, except "Must fix", which says "None." when empty.
+- Omit empty sections ("Dismissed" included), except "Must fix", which says "None." when empty.
 - Verdict: `DO NOT SHIP` when a must-fix breaks security or data, or the PR
   does not do its main claim. `SHIP WITH FIXES` when any must-fix or
   should-fix exists. Otherwise `SHIP`. Pre-existing findings never change it.
 - Must-fix grade problems in "Spotted along the way" still get one line saying
   why they matter.
+- **Found by N passes.** Agreement between independent passes is a confidence
+  signal. When a finding's `foundBy` has 2 or more passes, append
+  ` · found by <n> passes (<names>)` to its `file:line` line. Single-pass
+  findings get no tag.
+- **Dismissed** goes last, after "Spotted along the way". Number entries D1,
+  D2, ... so they never collide with the fix numbering ("fix 1-6" stays
+  unambiguous). Reasons are plain language.
+- **Safe because** names one fact. `checked in code` means you or an agent
+  opened the code that guarantees it; otherwise write `unproven`. When the PR is
+  not safe, name the fact that fails and point at the must-fix by number.
 
 ## After the report
 
-Stop. Do not fix anything until the user asks. If they ask to post: a
+Stop. Do not fix anything until the user asks.
+
+**"restore D<n>":** bring that dismissed entry back as a normal finding with
+the next free number, at the severity it had, and print it in the report shape.
+
+**"prove N":** the ONE user-requested exception to read-only. Write a
+throwaway test that fails if finding N is real, at
+`apps/webapp/test/pr-review-proof-<N>.test.ts` (or next to the code, matching
+repo test conventions). Run only that file with
+`pnpm webapp:test -- --run <file>`. Show the command and its output, then say
+"proven" (the test failed for the reason the finding names) or "not proven".
+Then DELETE the test file. Never commit it and never run the full suite. For
+non-webapp code use the closest equivalent (`node --test` for scripts) with the
+same delete-after rule. If they ask to post: a
 request-changes review uses `gh pr review <n> --request-changes --body-file <file>`,
 a comment uses `gh pr comment`. Show the body first and post only after they confirm.

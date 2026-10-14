@@ -59,6 +59,10 @@ PR's stated intent.
    - `ShelfError` for user-input problems must set `status: 400` and
      `shouldBeCaptured: false`.
    - 5xx errors must not leak secrets through `additionalData`.
+6. **Safety fact.** Name the single fact the change's safety depends on (for
+   example "only DRAFT bookings are touched, and the status check runs inside
+   the same transaction") and check it in code. Open the code that guarantees
+   it. If you cannot find that code, the fact is `unproven`.
 
 ## Do not flag
 
@@ -94,3 +98,17 @@ when. Final message: one fenced `json` block, an array of findings:
 ```
 
 Return `[]` when you find nothing. Ids are `impact-1`, `impact-2`, ...
+
+After the findings array, add a SECOND fenced `json` block with the safety fact
+from checklist item 6. The findings array stays first and keeps its shape:
+
+```json
+{
+  "safetyFact": "Only DRAFT bookings are touched, and the status check runs in the same transaction",
+  "confidence": "checked in code",
+  "evidence": "apps/webapp/app/modules/booking/service.server.ts:210"
+}
+```
+
+`confidence` is `"checked in code"` or `"unproven"`. `evidence` is a `file:line`
+or quoted code.
