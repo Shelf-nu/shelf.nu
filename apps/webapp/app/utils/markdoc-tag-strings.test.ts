@@ -27,7 +27,7 @@ function parsedTags(content: string) {
     .map((node) => ({ tag: node.tag, attributes: node.attributes }));
 }
 
-/** Tag nodes in `content` once encoded the way `MarkdownViewer` encodes it. */
+/** Tag nodes in `content` once encoded the way `SystemNoteViewer` encodes it. */
 function renderedTags(content: string) {
   return parsedTags(encodeRawTagAttributeValues(content));
 }
@@ -230,6 +230,79 @@ describe("encodeRawTagAttributeValues", () => {
       expect(encodeRawTagAttributeValues(content)).toBe(
         `${userLink} wrote {% link text="a\nb"`
       );
+    });
+
+    it("returns notes whose tags hold nothing to encode as the same string", () => {
+      const content = `${userLink} moved\nC:\\temp {% audit_images count=3 ids="a,b" /%}`;
+
+      expect(encodeRawTagAttributeValues(content)).toBe(content);
+    });
+
+    it("keeps closing tags and bare values valid", () => {
+      const content = `{% /tag %}\n{% audit_images count=3 ids="a,b" /%}`;
+
+      expect(encodeRawTagAttributeValues(content)).toBe(content);
+      expect(renderedTags(content)).toContainEqual({
+        tag: "audit_images",
+        attributes: { count: 3, ids: "a,b" },
+      });
+    });
+
+    it("leaves a value holding a Markdoc-style escaped quote as stored", () => {
+      const content = `{% link to="/u" text="say \\"hi\\"\nthere" /%}`;
+
+      expect(encodeRawTagAttributeValues(content)).toBe(content);
+    });
+  });
+
+  describe("text that is not a writer tag", () => {
+    it("copies a stray {% in plain text and encodes the tag after it", () => {
+      const description = wrapDescriptionForNote("aa", "b\nc");
+
+      expect(
+        encodeRawTagAttributeValues(`typed {% "A then ${description}`)
+      ).toBe(
+        'typed {% "A then {% description oldText="aa" newText="b\\nc" /%}'
+      );
+    });
+
+    it("encodes a valid tag that follows an unclosed {%", () => {
+      const content = `Typed {% oops\n\nthen ${wrapDescriptionForNote(
+        "aa",
+        "b\nc"
+      )}`;
+
+      expect(encodeRawTagAttributeValues(content)).toBe(
+        'Typed {% oops\n\nthen {% description oldText="aa" newText="b\\nc" /%}'
+      );
+      expect(renderedTags(content)).toContainEqual({
+        tag: "description",
+        attributes: { oldText: "aa", newText: "b\nc" },
+      });
+    });
+  });
+
+  describe("hostile input", () => {
+    /** Repeats `unit` to about 1 MB and ends it with a line break. */
+    function hostile(unit: string) {
+      return unit.repeat(Math.ceil(1_000_000 / unit.length)) + "\n";
+    }
+
+    it.each([
+      ["quoted values that never close", '{% a="'],
+      ["openers that never close", "{%"],
+      ["attributes that never close", '{% a="x" '],
+      ["tag attributes that never close", '{% t a="x" '],
+      ["quotes that nest tag openers", '{% t a="{% t a="x" b="'],
+    ])("scans %s in linear time", (_label, unit) => {
+      const content = hostile(unit);
+
+      const started = performance.now();
+      const result = encodeRawTagAttributeValues(content);
+      const elapsed = performance.now() - started;
+
+      expect(result).toBe(content);
+      expect(elapsed).toBeLessThan(1000);
     });
   });
 
