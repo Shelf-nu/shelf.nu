@@ -55,15 +55,19 @@ export function unlockOrientationOnTablets(): void {
   const apply = ({ width, height }: ScaledSize) => {
     const tablet = isTabletScreen(width, height);
     if (tablet === unlocked) return;
+    // Recorded before the native call, so requests apply in event order and a
+    // quick fold and unfold never skips the second change.
     unlocked = tablet;
-    // why: a failure only leaves the current lock in place; portrait is the
-    // app's long-standing behaviour, so there is nothing to recover.
     const change = tablet
       ? ScreenOrientation.unlockAsync()
       : ScreenOrientation.lockAsync(
           ScreenOrientation.OrientationLock.PORTRAIT_UP
         );
-    change.catch(() => undefined);
+    // A rejected change rolls back so the next size event retries it, unless
+    // a newer request has already replaced it.
+    change.catch(() => {
+      if (unlocked === tablet) unlocked = !tablet;
+    });
   };
 
   apply(Dimensions.get("screen"));
