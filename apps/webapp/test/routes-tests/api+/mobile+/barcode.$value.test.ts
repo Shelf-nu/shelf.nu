@@ -59,7 +59,12 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: the barcode table lookup decides which workspace holds the code, so
 // each test answers it directly.
-vi.mock("~/modules/barcode/service.server", () => ({
+// The `where` builder stays real so the sibling-workspace query is the one
+// production sends.
+vi.mock("~/modules/barcode/service.server", async (importOriginal) => ({
+  scannedBarcodeWhere: (
+    await importOriginal<typeof import("~/modules/barcode/service.server")>()
+  ).scannedBarcodeWhere,
   getBarcodeByValue: vi.fn(),
 }));
 

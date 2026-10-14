@@ -63,7 +63,12 @@ vitest.mock("~/database/db.server", () => ({
 }));
 
 // why: external service — we mock the barcode lookup
-vitest.mock("~/modules/barcode/service.server", () => ({
+// The `where` builder stays real so the sibling-workspace query is the one
+// production sends.
+vitest.mock("~/modules/barcode/service.server", async (importOriginal) => ({
+  scannedBarcodeWhere: (
+    await importOriginal<typeof import("~/modules/barcode/service.server")>()
+  ).scannedBarcodeWhere,
   getBarcodeByValue: vitest.fn(),
 }));
 

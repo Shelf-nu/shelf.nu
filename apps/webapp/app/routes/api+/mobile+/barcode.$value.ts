@@ -24,7 +24,10 @@ import {
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
 import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
-import { getBarcodeByValue } from "~/modules/barcode/service.server";
+import {
+  getBarcodeByValue,
+  scannedBarcodeWhere,
+} from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
 import { readRawLastPathSegment } from "~/utils/raw-path-param";
@@ -85,8 +88,8 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     const value = readRawLastPathSegment(request, encodedValue);
 
     // Look up barcode within the organization, including asset details
-    // in a single query. getBarcodeByValue handles case-insensitive
-    // matching (tries original case first, then uppercase).
+    // in a single query. getBarcodeByValue matches the upper-case form and,
+    // for External QR codes, other URL spellings of the scanned text.
     const barcode = await getBarcodeByValue({
       value,
       organizationId,
@@ -131,7 +134,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // keeps that from reading as two workspaces and faking an ambiguity.
         const owningOrgIds = await db.barcode.findMany({
           where: {
-            OR: [{ value }, { value: value.toUpperCase() }],
+            ...scannedBarcodeWhere(value),
             organizationId: { in: eligibleOrgIds },
           },
           select: { organizationId: true },

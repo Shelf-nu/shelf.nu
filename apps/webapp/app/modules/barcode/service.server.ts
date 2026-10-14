@@ -14,6 +14,10 @@ import {
   assertAssetsBelongToOrg,
   assertKitsBelongToOrg,
 } from "~/utils/org-validation.server";
+import {
+  externalQrCanonical,
+  externalQrSpellings,
+} from "./external-qr-spellings";
 import { validateBarcodeValue, normalizeBarcodeValue } from "./validation";
 import type { CreateAssetFromContentImportPayload } from "../asset/types";
 
@@ -334,7 +338,29 @@ export async function deleteBarcodes({
 }
 
 /**
- * Get barcode by value within organization
+ * The `where` clause matching every stored barcode a scanned `value` can
+ * resolve to: the exact text, its upper-case form (how Code128, Code39,
+ * DataMatrix and EAN13 are stored), and for External QR codes every spelling
+ * that differs only by URL scheme, `www.` or a trailing slash.
+ */
+export function scannedBarcodeWhere(value: string) {
+  return {
+    OR: [
+      { value: { in: [value, value.toUpperCase()] } },
+      {
+        type: BarcodeType.ExternalQR,
+        value: { in: externalQrSpellings(value) },
+      },
+    ],
+  };
+}
+
+/**
+ * Get barcode by value within organization.
+ *
+ * When several rows match, a row linked to an asset or kit wins over an
+ * unlinked one, then the exact text over its upper-case form over another
+ * URL spelling.
  */
 export async function getBarcodeByValue<
   T = {
@@ -351,21 +377,25 @@ export async function getBarcodeByValue<
   include?: T;
 }): Promise<any> {
   try {
-    // Try to find barcode with original case first (for ExternalQR), then uppercase (for other types)
-    const barcode = await db.barcode.findFirst({
-      where: {
-        OR: [
-          { value: value }, // Try original case first (ExternalQR)
-          { value: value.toUpperCase() }, // Try uppercase (other barcode types)
-        ],
-        organizationId,
-      },
+    const barcodes = await db.barcode.findMany({
+      where: { ...scannedBarcodeWhere(value), organizationId },
       include: include || {
         asset: true,
         kit: true,
       },
     });
-    return barcode;
+    const rank = (barcode: Barcode) =>
+      (barcode.assetId || barcode.kitId ? 0 : 3) +
+      (barcode.value === value
+        ? 0
+        : barcode.value === value.toUpperCase()
+        ? 1
+        : 2);
+    return barcodes.reduce<Barcode | null>(
+      (best, barcode) =>
+        best === null || rank(barcode) < rank(best) ? barcode : best,
+      null
+    );
   } catch (cause) {
     throw new ShelfError({
       cause,
@@ -789,6 +819,17 @@ export function importDataHasBarcodes(
   );
 }
 
+/**
+ * The key two barcodes share when the import must treat them as one code: the
+ * stored text, except that an External QR link drops its URL scheme, `www.`
+ * and trailing slash.
+ */
+function importBarcodeKey(barcode: { type: BarcodeType; value: string }) {
+  return barcode.type === BarcodeType.ExternalQR
+    ? externalQrCanonical(barcode.value) ?? barcode.value
+    : barcode.value;
+}
+
 export async function parseBarcodesFromImportData({
   data,
   userId,
@@ -851,6 +892,7 @@ export async function parseBarcodesFromImportData({
 
     // Collect all barcode values and track which assets use each
     const allBarcodeValues: string[] = [];
+    const externalQrSpellingValues: string[] = [];
     const barcodeAssetsMap = new Map<
       string,
       { title: string; type: BarcodeType; row: number }[]
@@ -859,7 +901,11 @@ export async function parseBarcodesFromImportData({
     barcodePerAsset.forEach((asset) => {
       asset.barcodes.forEach((barcode) => {
         allBarcodeValues.push(barcode.value);
-        const existing = barcodeAssetsMap.get(barcode.value);
+        if (barcode.type === BarcodeType.ExternalQR) {
+          externalQrSpellingValues.push(...externalQrSpellings(barcode.value));
+        }
+        const key = importBarcodeKey(barcode);
+        const existing = barcodeAssetsMap.get(key);
         const entry = {
           title: asset.title,
           type: barcode.type,
@@ -868,7 +914,7 @@ export async function parseBarcodesFromImportData({
         if (existing) {
           existing.push(entry);
         } else {
-          barcodeAssetsMap.set(barcode.value, [entry]);
+          barcodeAssetsMap.set(key, [entry]);
         }
       });
     });
@@ -899,7 +945,13 @@ export async function parseBarcodesFromImportData({
     // Check existing barcodes in the current organization only
     const existingBarcodes = await db.barcode.findMany({
       where: {
-        value: { in: allBarcodeValues },
+        OR: [
+          { value: { in: allBarcodeValues } },
+          {
+            type: BarcodeType.ExternalQR,
+            value: { in: externalQrSpellingValues },
+          },
+        ],
         organizationId, // Only check within current organization
       },
       include: {
@@ -915,7 +967,7 @@ export async function parseBarcodesFromImportData({
 
     if (linkedBarcodes.length > 0) {
       const linkedDetails = linkedBarcodes.map((barcode) => {
-        const sources = barcodeAssetsMap.get(barcode.value);
+        const sources = barcodeAssetsMap.get(importBarcodeKey(barcode));
         const linkedTo =
           barcode.asset?.title || barcode.kit?.name || "Unknown item";
         return `${barcode.value} (${sources?.[0]?.type}) - already linked to "${linkedTo}"`;

@@ -1588,16 +1588,21 @@ describe("parseBarcodesFromImportData", () => {
     expect(result).toHaveLength(2);
     expect(db.barcode.findMany).toHaveBeenCalledWith({
       where: {
-        value: {
-          in: [
-            "ABCD1234",
-            "ABC123",
-            "WXYZ5678",
-            "EFGH5678",
-            "IJKL9012",
-            "DEF456",
-          ],
-        },
+        OR: [
+          {
+            value: {
+              in: [
+                "ABCD1234",
+                "ABC123",
+                "WXYZ5678",
+                "EFGH5678",
+                "IJKL9012",
+                "DEF456",
+              ],
+            },
+          },
+          { type: BarcodeType.ExternalQR, value: { in: [] } },
+        ],
         organizationId: "org-1", // Only check within this organization
       },
       include: {
