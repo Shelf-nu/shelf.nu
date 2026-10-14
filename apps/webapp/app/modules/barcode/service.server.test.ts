@@ -1,5 +1,9 @@
 import { BarcodeType } from "@prisma/client";
 
+import {
+  inMemoryBarcodeTable,
+  type FakeBarcodeRow,
+} from "@helpers/in-memory-barcode-table";
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
 
@@ -565,97 +569,112 @@ describe("updateBarcode", () => {
 });
 
 describe("getBarcodeByValue", () => {
+  const ORG = "org-1";
+  const row = (
+    id: string,
+    value: string,
+    type: FakeBarcodeRow["type"],
+    links: Partial<Pick<FakeBarcodeRow, "assetId" | "kitId">> = {
+      assetId: `asset-${id}`,
+    },
+    organizationId = ORG
+  ): FakeBarcodeRow => ({
+    id,
+    value,
+    type,
+    organizationId,
+    assetId: links.assetId ?? null,
+    kitId: links.kitId ?? null,
+  });
+
+  /** Points both read methods at an in-memory table holding `rows`. */
+  function seed(rows: FakeBarcodeRow[]) {
+    const table = inMemoryBarcodeTable(rows);
+    //@ts-expect-error missing vitest type
+    db.barcode.findFirst.mockImplementation(table.findFirst);
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockImplementation(table.findMany);
+  }
+
+  async function scan(value: string) {
+    const found = await getBarcodeByValue({ value, organizationId: ORG });
+    return found?.id ?? null;
+  }
+
   beforeEach(() => {
     vitest.clearAllMocks();
   });
 
-  it("should find barcode by value", async () => {
-    expect.assertions(2);
-    //@ts-expect-error missing vitest type
-    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
-
-    const result = await getBarcodeByValue({
-      value: "test123",
-      organizationId: "org-1",
-    });
-
-    expect(db.barcode.findFirst).toHaveBeenCalledWith({
-      where: {
-        OR: [{ value: "test123" }, { value: "TEST123" }],
-        organizationId: "org-1",
-      },
-      include: {
-        asset: true,
-        kit: true,
-      },
-    });
-    expect(result).toEqual(mockBarcodeData);
+  it("finds a Code128 code scanned in lower case", async () => {
+    seed([row("c128", "TEST123", "Code128")]);
+    expect(await scan("test123")).toBe("c128");
   });
 
-  it("should return null when barcode not found", async () => {
-    expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.barcode.findFirst.mockResolvedValue(null);
-
-    const result = await getBarcodeByValue({
-      value: "NOTFOUND",
-      organizationId: "org-1",
-    });
-
-    expect(result).toBeNull();
+  it("returns null when no code matches", async () => {
+    seed([row("c128", "TEST123", "Code128")]);
+    expect(await scan("NOTFOUND")).toBeNull();
   });
 
-  it("should use custom include when provided", async () => {
-    expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
+  it("does not look in another workspace", async () => {
+    seed([row("other", "example.it/ABC123", "ExternalQR", undefined, "org-2")]);
+    expect(await scan("https://example.it/ABC123")).toBeNull();
+  });
 
-    const customInclude = {
-      asset: {
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          mainImage: true,
-          category: { select: { name: true } },
-          location: { select: { name: true } },
-        },
-      },
-    };
+  it.each([
+    ["example.it/ABC123", "https://example.it/ABC123"],
+    ["example.it/ABC123", "http://www.example.it/ABC123/"],
+    ["https://example.it/ABC123", "example.it/ABC123"],
+    ["https://www.example.it/ABC123/", "example.it/ABC123"],
+    ["http://example.it/ABC123", "https://example.it/ABC123"],
+  ])(
+    "resolves an External QR stored as %s when %s is scanned",
+    async (stored, scanned) => {
+      seed([row("ext", stored, "ExternalQR")]);
+      expect(await scan(scanned)).toBe("ext");
+    }
+  );
+
+  it("does not treat a different path as the same External QR", async () => {
+    seed([row("ext", "example.it/ABC123", "ExternalQR")]);
+    expect(await scan("https://example.it/ABC124")).toBeNull();
+  });
+
+  it("does not widen the match for Code128 codes", async () => {
+    seed([row("c128", "EXAMPLE.IT/ABC123", "Code128")]);
+    expect(await scan("https://EXAMPLE.IT/ABC123")).toBeNull();
+  });
+
+  it("prefers the exact spelling when several External QR spellings exist", async () => {
+    seed([
+      row("bare", "example.it/ABC123", "ExternalQR"),
+      row("full", "https://example.it/ABC123", "ExternalQR"),
+    ]);
+    expect(await scan("https://example.it/ABC123")).toBe("full");
+    expect(await scan("example.it/ABC123")).toBe("bare");
+  });
+
+  it("prefers a linked code over an unlinked one with the exact spelling", async () => {
+    seed([
+      row("orphan", "https://example.it/ABC123", "ExternalQR", {}),
+      row("linked", "example.it/ABC123", "ExternalQR"),
+    ]);
+    expect(await scan("https://example.it/ABC123")).toBe("linked");
+  });
+
+  it("passes a custom include through to the query", async () => {
+    seed([row("c128", "TEST123", "Code128")]);
+    const customInclude = { asset: { select: { id: true, title: true } } };
 
     await getBarcodeByValue({
       value: "test123",
-      organizationId: "org-1",
+      organizationId: ORG,
       include: customInclude,
     });
 
-    expect(db.barcode.findFirst).toHaveBeenCalledWith({
-      where: {
-        OR: [{ value: "test123" }, { value: "TEST123" }],
-        organizationId: "org-1",
-      },
-      include: customInclude,
-    });
-  });
-
-  it("should try case-insensitive matching with OR clause", async () => {
-    expect.assertions(1);
-    //@ts-expect-error missing vitest type
-    db.barcode.findFirst.mockResolvedValue(mockBarcodeData);
-
-    await getBarcodeByValue({
-      value: "abc123",
-      organizationId: "org-1",
-    });
-
-    // Verify the OR clause includes both original and uppercase
-    expect(db.barcode.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          OR: [{ value: "abc123" }, { value: "ABC123" }],
-        }),
-      })
-    );
+    const call =
+      //@ts-expect-error missing vitest type
+      db.barcode.findMany.mock.calls[0] ?? db.barcode.findFirst.mock.calls[0];
+    expect(call[0].include).toEqual(customInclude);
   });
 });
 
@@ -1724,5 +1743,109 @@ describe("parseBarcodesFromImportData", () => {
     ).rejects.toThrow(
       "Some barcodes are already linked to other assets or kits in your organization"
     );
+  });
+});
+
+describe("parseBarcodesFromImportData with External QR URL spellings", () => {
+  const importRow = (key: string, externalQr: string) => ({
+    key,
+    title: `Asset ${key}`,
+    barcode_ExternalQR: externalQr,
+  });
+
+  function seed(rows: FakeBarcodeRow[]) {
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockImplementation(inMemoryBarcodeTable(rows).findMany);
+  }
+
+  beforeEach(() => {
+    vitest.clearAllMocks();
+  });
+
+  it("stores the External QR text exactly as imported", async () => {
+    seed([]);
+    const result = await parseBarcodesFromImportData({
+      data: [importRow("a", "example.it/ABC123")],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+    expect(result[0].barcodes).toEqual([
+      {
+        type: BarcodeType.ExternalQR,
+        value: "example.it/ABC123",
+        existingId: undefined,
+      },
+    ]);
+  });
+
+  it("rejects two rows whose External QR differs only by scheme", async () => {
+    seed([]);
+    await expect(
+      parseBarcodesFromImportData({
+        data: [
+          importRow("a", "example.it/ABC123"),
+          importRow("b", "https://example.it/ABC123/"),
+        ],
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toMatchObject({
+      message:
+        "Some barcodes appear multiple times in the import data. Each barcode must be unique.",
+      additionalData: {
+        duplicateBarcodes: [
+          {
+            value: "example.it/ABC123",
+            assets: [
+              { title: "Asset a", type: BarcodeType.ExternalQR, row: 2 },
+              { title: "Asset b", type: BarcodeType.ExternalQR, row: 3 },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects an External QR another asset holds with a different scheme", async () => {
+    //@ts-expect-error missing vitest type
+    db.barcode.findMany.mockImplementation(async (args) => {
+      const rows = await inMemoryBarcodeTable([
+        {
+          id: "existing",
+          value: "https://www.example.it/ABC123",
+          type: "ExternalQR",
+          organizationId: "org-1",
+          assetId: "asset-x",
+          kitId: null,
+        },
+      ]).findMany(args);
+      return rows.map((r) => ({ ...r, asset: { title: "Drill" }, kit: null }));
+    });
+
+    await expect(
+      parseBarcodesFromImportData({
+        data: [importRow("a", "example.it/ABC123")],
+        userId: "user-1",
+        organizationId: "org-1",
+      })
+    ).rejects.toThrow(
+      'https://www.example.it/ABC123 (ExternalQR) - already linked to "Drill"'
+    );
+  });
+
+  it("still lets a Code128 and an External QR with unrelated values through", async () => {
+    seed([]);
+    const result = await parseBarcodesFromImportData({
+      data: [
+        { key: "a", title: "A", barcode_Code128: "EXAMPLE1" },
+        importRow("b", "https://example.it/EXAMPLE1"),
+      ],
+      userId: "user-1",
+      organizationId: "org-1",
+    });
+    expect(result.map((r) => r.barcodes[0].value)).toEqual([
+      "EXAMPLE1",
+      "https://example.it/EXAMPLE1",
+    ]);
   });
 });
