@@ -53,6 +53,31 @@ describe("Input characterLimit", () => {
     expect(screen.getByTestId("character-count")).toHaveClass("text-error-600");
   });
 
+  it("announces crossing the limit once, not every keystroke", async () => {
+    const textarea = renderDescription("a".repeat(4998));
+    const user = userEvent.setup();
+
+    // The count itself is not live: it changes on every keystroke.
+    expect(screen.getByTestId("character-count")).not.toHaveAttribute(
+      "aria-live"
+    );
+    const status = screen.getByText(
+      (_, el) => el?.getAttribute("aria-live") === "polite"
+    );
+    expect(status).toHaveTextContent("");
+
+    await user.click(textarea);
+    await user.paste("b");
+    expect(status).toHaveTextContent("");
+
+    await user.paste("cd");
+    expect(status).toHaveTextContent("Over the 5,000 character limit");
+
+    // Typing further keeps the same text, so nothing new is announced.
+    await user.paste("e");
+    expect(status).toHaveTextContent("Over the 5,000 character limit");
+  });
+
   it("keeps the caller's description and adds the counter to it", () => {
     render(
       <>

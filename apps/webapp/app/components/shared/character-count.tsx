@@ -6,10 +6,14 @@ import { tw } from "~/utils/tw";
  * see why a save is refused.
  *
  * Display only: it never stops the user typing. The limit is enforced by the
- * field's validation. It is not a live region, because it changes on every
- * keystroke: the field points at it with `aria-describedby`, so the count is
- * read when the field is focused, and the over-limit message is the field's
- * error.
+ * field's validation.
+ *
+ * The visible count is not a live region, because it changes on every
+ * keystroke; the field points at it with `aria-describedby`, so the count is
+ * read when the field is focused. A separate, visually hidden live region
+ * speaks once, when the text crosses the limit. It stays mounted with empty
+ * text below the limit, because a region added to the page already holding
+ * text is not announced.
  */
 export function CharacterCount({
   count,
@@ -26,17 +30,23 @@ export function CharacterCount({
   id?: string;
 }) {
   const isOver = count > max;
+  const maxLabel = max.toLocaleString("en-US");
   return (
-    <span
-      id={id}
-      className={tw(
-        "text-xs tabular-nums",
-        isOver ? "text-error-600" : "text-gray-500",
-        className
-      )}
-      data-testid="character-count"
-    >
-      {count.toLocaleString("en-US")} / {max.toLocaleString("en-US")}
-    </span>
+    <>
+      <span
+        id={id}
+        className={tw(
+          "text-xs tabular-nums",
+          isOver ? "text-error-600" : "text-gray-500",
+          className
+        )}
+        data-testid="character-count"
+      >
+        {count.toLocaleString("en-US")} / {maxLabel}
+      </span>
+      <span className="sr-only" aria-live="polite">
+        {isOver ? `Over the ${maxLabel} character limit` : ""}
+      </span>
+    </>
   );
 }
