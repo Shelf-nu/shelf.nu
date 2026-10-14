@@ -56,6 +56,7 @@ import {
 } from "@/lib/role-access";
 import { useRoleAccess } from "@/hooks/use-role-access";
 import { fontSize, spacing, borderRadius, formatStatus } from "@/lib/constants";
+import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -1706,9 +1707,8 @@ export default function BookingDetailScreen() {
                 ) : null}
               </View>
 
-              {/* Tag names were already in the payload and shown by web; the
-                  colour they are keyed by was not, and was added with the
-                  chip so the phone can tell two tags apart the way web can. */}
+              {/* Each chip carries its tag's colour as well as its name, so
+                  the phone tells two tags apart the way web does. */}
               {booking.tags?.length ? (
                 <View style={styles.tagRow}>
                   {booking.tags.map((tag) => (
@@ -2843,6 +2843,9 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: colors.white,
     borderRadius: borderRadius.xl,
     width: "75%",
+    // The modal sits outside the content column, so 75% is of the whole
+    // window; the cap keeps a tablet's menu narrower than the column behind it.
+    maxWidth: FORM_MAX_WIDTH,
     overflow: "hidden",
     ...shadows.lg,
   },
