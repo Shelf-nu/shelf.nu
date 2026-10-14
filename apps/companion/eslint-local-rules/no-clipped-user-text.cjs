@@ -200,10 +200,38 @@ function mappedField(node) {
   if (callback.body.type !== "BlockStatement") {
     return userTextField(callback.body);
   }
-  // A block body renders whatever its return statements return.
-  for (const statement of callback.body.body) {
-    if (statement.type === "ReturnStatement" && statement.argument) {
-      const field = userTextField(statement.argument);
+  // A block body renders whatever its return statements return, including
+  // returns inside `if`, `switch`, `try` and loop blocks.
+  return returnedField(callback.body);
+}
+
+/** Nodes whose own `return` statements belong to a different function. */
+const FUNCTION_BOUNDARIES = new Set([
+  "FunctionDeclaration",
+  "FunctionExpression",
+  "ArrowFunctionExpression",
+  "ClassDeclaration",
+  "ClassExpression",
+]);
+
+/**
+ * The first user-text field among the `return` statements of a function
+ * body, at any depth of control flow. Nested functions are not entered: their
+ * returns are not the callback's value.
+ *
+ * @param {import("estree").Node} node - A statement or block to search.
+ * @returns The matched field name, or `null`
+ */
+function returnedField(node) {
+  if (node.type === "ReturnStatement") {
+    return node.argument ? userTextField(node.argument) : null;
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "parent") continue;
+    for (const child of Array.isArray(value) ? value : [value]) {
+      if (!child || typeof child.type !== "string") continue;
+      if (FUNCTION_BOUNDARIES.has(child.type)) continue;
+      const field = returnedField(child);
       if (field) return field;
     }
   }

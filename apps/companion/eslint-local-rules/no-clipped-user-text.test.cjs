@@ -48,6 +48,8 @@ ruleTester.run("no-clipped-user-text", rule, {
     // Only map/flatMap callbacks render what they return.
     `<Text numberOfLines={1}>{items.filter((item) => item.note).length}</Text>`,
     `<Text numberOfLines={1}>{items.map((item) => item.name).join(", ")}</Text>`,
+    // A return inside a nested function is not the callback's value.
+    `<Text numberOfLines={1}>{items.map((item) => { const read = () => item.description; return item.name; })}</Text>`,
     // A call on something that is not the field.
     `<Text numberOfLines={1}>{formatCount(notes.length)}</Text>`,
     // TextInput's numberOfLines is the input height.
@@ -104,6 +106,15 @@ ruleTester.run("no-clipped-user-text", rule, {
     {
       code: `<Text numberOfLines={3}>{entries.flatMap(function (entry) { return [entry.content]; })}</Text>`,
       errors: clipped("content"),
+    },
+    // Returns inside control flow are the callback's value too.
+    {
+      code: `<Text numberOfLines={3}>{items.map((item) => { if (item.active) return item.description; return ""; })}</Text>`,
+      errors: clipped("description"),
+    },
+    {
+      code: `<Text numberOfLines={3}>{items.map((item) => { switch (item.kind) { case "a": return item.note; default: return ""; } })}</Text>`,
+      errors: clipped("note"),
     },
     // Nested Text lays out inside the clipped parent.
     {
