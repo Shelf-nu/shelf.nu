@@ -1,10 +1,14 @@
 import type { ChangeEvent } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import resolveConfig from "tailwindcss/resolveConfig";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelFilterItem } from "~/hooks/use-model-filters";
-import DynamicSelect, { MobileStyles } from "./dynamic-select";
-import { SHEET_MEDIA_QUERY } from "../shared/mobile-dropdown-styles";
+import DynamicSelect, {
+  MobileStyles,
+  PICKER_PHONE_MEDIA_QUERY,
+} from "./dynamic-select";
+import tailwindConfig from "../../../tailwind.config";
 
 // why: controlling navigation state to test component without triggering actual Remix navigation
 vi.mock("react-router", async () => {
@@ -983,15 +987,24 @@ describe("DynamicSelect", () => {
 });
 
 describe("MobileStyles", () => {
+  it("keeps the phone layout to phone widths", () => {
+    const { screens } = resolveConfig(tailwindConfig).theme;
+
+    // The exact complement of `sm`: tablets get the regular dropdown.
+    expect(PICKER_PHONE_MEDIA_QUERY).toBe(
+      `not all and (min-width: ${screens.sm})`
+    );
+  });
+
   it("lifts the panel above its overlay at every width the overlay shows", () => {
     const { container } = render(<MobileStyles open />);
 
-    // The overlay shows below `md` and sits above the panel's own z-index, so
+    // The overlay shows below `sm` and sits above the panel's own z-index, so
     // the panel rule must cover the same widths. Where it does not, the
     // overlay covers the options and a tap on one only closes the select.
-    expect(container.querySelector(".extra-overlay")).toHaveClass("md:hidden");
+    expect(container.querySelector(".extra-overlay")).toHaveClass("sm:hidden");
     expect(container.querySelector("style")?.textContent).toContain(
-      `@media ${SHEET_MEDIA_QUERY} {`
+      `@media ${PICKER_PHONE_MEDIA_QUERY} {`
     );
   });
 });

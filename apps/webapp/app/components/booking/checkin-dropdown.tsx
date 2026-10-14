@@ -10,7 +10,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  MobileDropdownStyles,
+  isSheetViewport,
+} from "../shared/mobile-dropdown-styles";
 
 type CheckinDropdownProps = {
   disabled?: boolean;
@@ -66,13 +69,13 @@ export default function CheckinDropdown({
         open={open}
         defaultOpen={defaultOpen}
         onOpenChange={(openValue) => {
-          if (defaultApplied && window.innerWidth <= 640) {
+          if (defaultApplied && isSheetViewport()) {
             setOpen(openValue);
           }
         }}
       >
         <DropdownMenuTrigger
-          className="hidden sm:flex"
+          className="hidden md:flex"
           onClick={() => {
             setOpen(!open);
           }}
@@ -88,7 +91,7 @@ export default function CheckinDropdown({
         {/* Mobile button */}
         <Button
           type="button"
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           size="sm"
@@ -101,6 +104,7 @@ export default function CheckinDropdown({
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           ref={dropdownRef}
           asChild
           className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"

@@ -27,7 +27,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  MobileDropdownStyles,
+  isSheetViewport,
+} from "../shared/mobile-dropdown-styles";
 import When from "../when/when";
 
 export default function ActionsDropdown({
@@ -119,14 +122,14 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
       <DropdownMenu
         modal={false}
         onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
+          if (defaultApplied && isSheetViewport()) setOpen(open);
         }}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
           className={tw(
-            "actions-dropdown hidden sm:flex",
+            "actions-dropdown hidden md:flex",
             fullWidth ? "w-full" : ""
           )}
           onClick={() => setOpen(!open)}
@@ -147,7 +150,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
         <Button
           type="button"
           variant="secondary"
-          className="actions-dropdown sm:hidden"
+          className="actions-dropdown md:hidden"
           width="full"
           onClick={() => setOpen(true)}
           aria-label="Actions Trigger"
@@ -159,6 +162,7 @@ function ConditionalActionsDropdown({ fullWidth }: { fullWidth?: boolean }) {
 
         <MobileDropdownStyles open={open} />
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"

@@ -1,5 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
+import { isSheetViewport } from "~/components/shared/mobile-dropdown-styles";
 import { useSearchParams } from "~/hooks/search-params";
 
 type UseControlledDropdownMenuReturn = {
@@ -35,12 +36,9 @@ export function useControlledDropdownMenu(
   const [open, setOpen] = useState(false);
   const [defaultApplied, setDefaultApplied] = useState(false);
 
-  // Reactively calculate if menu should auto-open based on current state
+  // A QR scan opens the menu wherever it renders as a bottom sheet (below `md`)
   const shouldAutoOpen =
-    !options?.skipDefault &&
-    typeof window !== "undefined" &&
-    window.innerWidth <= 640 &&
-    refIsQrScan;
+    !options?.skipDefault && isSheetViewport() && refIsQrScan;
 
   // Apply auto-open when conditions are met
   useEffect(() => {

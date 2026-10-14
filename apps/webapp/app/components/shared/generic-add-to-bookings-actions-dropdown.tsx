@@ -59,7 +59,7 @@ const ConditionalActionsDropdown = ({
             type="button"
             variant="primary"
             disabled={disabledTrigger}
-            className="asset-actions hidden sm:flex"
+            className="asset-actions hidden md:flex"
           >
             <span className="flex items-center gap-2">
               {label} <ChevronRightIcon className="chev" />
@@ -76,7 +76,7 @@ const ConditionalActionsDropdown = ({
           type="button"
           variant="primary"
           disabled={disabledTrigger}
-          className="asset-actions sm:hidden"
+          className="asset-actions md:hidden"
           onClick={() => {
             if (disabledTrigger) return;
             setOpen(true);
@@ -91,6 +91,7 @@ const ConditionalActionsDropdown = ({
         <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"

@@ -21,7 +21,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  MobileDropdownStyles,
+  isSheetViewport,
+} from "../shared/mobile-dropdown-styles";
 
 export default function BulkActionsDropdown() {
   const isHydrated = useHydrated();
@@ -77,13 +80,13 @@ function ConditionalDropdown() {
       <DropdownMenu
         modal={false}
         onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
+          if (defaultApplied && isSheetViewport()) setOpen(open);
         }}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="actions-dropdown hidden sm:flex"
+          className="actions-dropdown hidden md:flex"
           onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
@@ -96,7 +99,7 @@ function ConditionalDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="asset-actions flex-1 sm:hidden"
+          className="asset-actions flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           type="button"
@@ -107,6 +110,7 @@ function ConditionalDropdown() {
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"

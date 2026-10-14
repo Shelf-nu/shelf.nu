@@ -157,7 +157,7 @@ function ConditionalActionsDropdown() {
         <PopoverTrigger asChild>
           <Button
             type="button"
-            className="hidden sm:flex"
+            className="hidden md:flex"
             disabled={disabledReason}
           >
             <span className="flex items-center gap-2">
@@ -167,14 +167,14 @@ function ConditionalActionsDropdown() {
         </PopoverTrigger>
 
         {/*
-          Below `sm` the trigger above is hidden and this one opens the sheet.
+          Below `md` the trigger above is hidden and this one opens the sheet.
           It only ever OPENS: the sheet is dismissed by tapping the overlay,
           which Radix reads as a pointer-down outside, and a toggle here would
           reopen what that dismissal just closed.
         */}
         <Button
           type="button"
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabledReason}
         >
@@ -187,6 +187,7 @@ function ConditionalActionsDropdown() {
 
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             // Matches the offsets the shared menu primitive applies, so the
             // panel sits the same distance from the trigger and keeps the same
             // gap from the viewport edge.

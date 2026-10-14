@@ -113,7 +113,7 @@ function ConditionalActionsDropdown({ kit, fullWidth }: Props) {
 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <TriggerButton fullWidth={fullWidth} className="hidden sm:flex" />
+          <TriggerButton fullWidth={fullWidth} className="hidden md:flex" />
         </PopoverTrigger>
 
         {/* Custom mobile trigger that only opens (never toggles) — matches
@@ -121,7 +121,7 @@ function ConditionalActionsDropdown({ kit, fullWidth }: Props) {
             the dim overlay on mobile. */}
         <TriggerButton
           fullWidth={fullWidth}
-          className="sm:hidden"
+          className="md:hidden"
           onClick={() => setOpen(true)}
         />
 
@@ -129,6 +129,7 @@ function ConditionalActionsDropdown({ kit, fullWidth }: Props) {
 
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"

@@ -39,7 +39,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../shared/dropdown";
-import { MobileDropdownStyles } from "../shared/mobile-dropdown-styles";
+import {
+  MobileDropdownStyles,
+  isSheetViewport,
+} from "../shared/mobile-dropdown-styles";
 
 type CheckoutDropdownProps = {
   /** Disables the trigger and the "Scan to check out" option */
@@ -224,13 +227,13 @@ export default function CheckoutDropdown({
         open={open}
         defaultOpen={defaultOpen}
         onOpenChange={(openValue) => {
-          if (defaultApplied && window.innerWidth <= 640) {
+          if (defaultApplied && isSheetViewport()) {
             setOpen(openValue);
           }
         }}
       >
         <DropdownMenuTrigger
-          className="hidden sm:flex"
+          className="hidden md:flex"
           onClick={() => {
             setOpen(!open);
           }}
@@ -253,7 +256,7 @@ export default function CheckoutDropdown({
         <Button
           type="button"
           variant={triggerVariant}
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           size="sm"
@@ -266,6 +269,7 @@ export default function CheckoutDropdown({
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           ref={dropdownRef}
           asChild
           className="order actions-dropdown w-screen rounded-b-none rounded-t bg-white p-0 text-right md:static md:w-56"

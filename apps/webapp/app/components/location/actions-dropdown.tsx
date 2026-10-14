@@ -66,7 +66,7 @@ const ConditionalActionsDropdown = ({
             width={fullWidth ? "full" : "auto"}
             data-test-id="assetActionsButton"
             className={tw(
-              "asset-actions hidden sm:flex",
+              "asset-actions hidden md:flex",
               fullWidth ? "w-full" : ""
             )}
           >
@@ -82,7 +82,7 @@ const ConditionalActionsDropdown = ({
           variant="secondary"
           width={fullWidth ? "full" : "auto"}
           data-test-id="assetActionsButton"
-          className={tw("asset-actions sm:hidden", fullWidth ? "w-full" : "")}
+          className={tw("asset-actions md:hidden", fullWidth ? "w-full" : "")}
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
@@ -94,6 +94,7 @@ const ConditionalActionsDropdown = ({
 
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"

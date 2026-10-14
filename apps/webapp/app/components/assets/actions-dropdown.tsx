@@ -205,7 +205,7 @@ const ConditionalActionsDropdown = () => {
             type="button"
             variant="secondary"
             data-test-id="assetActionsButton"
-            className="asset-actions hidden sm:flex"
+            className="asset-actions hidden md:flex"
           >
             <span className="flex items-center gap-2">
               Actions <ChevronRight className="chev" />
@@ -218,7 +218,7 @@ const ConditionalActionsDropdown = () => {
           type="button"
           variant="secondary"
           data-test-id="assetActionsButton"
-          className="asset-actions sm:hidden"
+          className="asset-actions md:hidden"
           onClick={() => setOpen(true)}
         >
           <span className="flex items-center gap-2">
@@ -229,6 +229,7 @@ const ConditionalActionsDropdown = () => {
         <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"

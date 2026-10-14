@@ -1,4 +1,5 @@
 import { renderHook, fireEvent, waitFor, act } from "@testing-library/react";
+import type { Window as HappyDOMWindow } from "happy-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useControlledDropdownMenu } from "./use-controlled-dropdown-menu";
 
@@ -9,16 +10,24 @@ vi.mock("~/hooks/search-params", () => ({
   useSearchParams: () => [mockSearchParams] as const,
 }));
 
+/** Resizes the test window; `matchMedia` answers for the new width. */
+function setViewportWidth(width: number) {
+  (window as unknown as HappyDOMWindow).happyDOM.setViewport({
+    width,
+    height: 900,
+  });
+}
+
 describe("useControlledDropdownMenu", () => {
   beforeEach(() => {
     mockSearchParams.set("ref", "");
-    vi.stubGlobal("innerWidth", 1024);
+    setViewportWidth(1024);
   });
 
   describe("QR code scanning on mobile", () => {
     it("auto-opens menu when user scans QR code on mobile device", async () => {
-      // User on mobile device (640px or less)
-      vi.stubGlobal("innerWidth", 640);
+      // User on mobile device (below 768px)
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -31,9 +40,32 @@ describe("useControlledDropdownMenu", () => {
       expect(result.current.defaultApplied).toBe(true);
     });
 
+    it("auto-opens menu when user scans QR code on a tablet held upright", async () => {
+      // Below `md` the menu is a bottom sheet, so a tablet gets the phone flow
+      setViewportWidth(712);
+      mockSearchParams.set("ref", "qr");
+
+      const { result } = renderHook(() => useControlledDropdownMenu());
+
+      await waitFor(() => {
+        expect(result.current.open).toBe(true);
+      });
+      expect(result.current.defaultApplied).toBe(true);
+    });
+
+    it("does not auto-open menu when user scans QR code at the md width", () => {
+      setViewportWidth(768);
+      mockSearchParams.set("ref", "qr");
+
+      const { result } = renderHook(() => useControlledDropdownMenu());
+
+      expect(result.current.open).toBe(false);
+      expect(result.current.defaultApplied).toBe(false);
+    });
+
     it("does not auto-open menu when user scans QR code on desktop", () => {
-      // User on desktop device (>640px)
-      vi.stubGlobal("innerWidth", 1024);
+      // User on desktop device (768px and up)
+      setViewportWidth(1024);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -45,7 +77,7 @@ describe("useControlledDropdownMenu", () => {
 
     it("does not auto-open when skipDefault option is enabled", () => {
       // Even on mobile with QR scan
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() =>
@@ -59,7 +91,7 @@ describe("useControlledDropdownMenu", () => {
 
   describe("normal page visits (no QR scan)", () => {
     it("keeps menu closed when visiting page normally on mobile", () => {
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.delete("ref");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -68,7 +100,7 @@ describe("useControlledDropdownMenu", () => {
     });
 
     it("keeps menu closed when visiting page normally on desktop", () => {
-      vi.stubGlobal("innerWidth", 1024);
+      setViewportWidth(1024);
       mockSearchParams.delete("ref");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -77,7 +109,7 @@ describe("useControlledDropdownMenu", () => {
     });
 
     it("keeps menu closed when ref param is not QR scan", () => {
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "other-source");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -89,7 +121,7 @@ describe("useControlledDropdownMenu", () => {
   describe("user closes dropdown by clicking outside", () => {
     it("closes menu when user clicks outside dropdown area", async () => {
       // Setup: menu is open on mobile QR scan
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -121,7 +153,7 @@ describe("useControlledDropdownMenu", () => {
 
     it("keeps menu open when user clicks inside dropdown", async () => {
       // Setup: menu is open
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -147,7 +179,7 @@ describe("useControlledDropdownMenu", () => {
 
     it("keeps menu open when user clicks on alert dialog", async () => {
       // Setup: menu is open
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -194,7 +226,7 @@ describe("useControlledDropdownMenu", () => {
 
     it("allows user to manually close the menu", async () => {
       // Start with auto-opened menu
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -236,7 +268,7 @@ describe("useControlledDropdownMenu", () => {
 
   describe("auto-open behavior", () => {
     it("only auto-opens once even if conditions remain true", async () => {
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result, rerender } = renderHook(() =>
@@ -262,7 +294,7 @@ describe("useControlledDropdownMenu", () => {
     });
 
     it("provides correct defaultOpen value based on conditions", () => {
-      vi.stubGlobal("innerWidth", 640);
+      setViewportWidth(640);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());
@@ -271,7 +303,7 @@ describe("useControlledDropdownMenu", () => {
     });
 
     it("provides correct defaultOpen value when conditions not met", () => {
-      vi.stubGlobal("innerWidth", 1024);
+      setViewportWidth(1024);
       mockSearchParams.set("ref", "qr");
 
       const { result } = renderHook(() => useControlledDropdownMenu());

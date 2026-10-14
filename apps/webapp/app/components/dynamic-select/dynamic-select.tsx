@@ -23,7 +23,6 @@ import Input from "../forms/input";
 import { CheckIcon } from "../icons/library";
 import { Button } from "../shared/button";
 import type { IconType } from "../shared/icons-map";
-import { SHEET_MEDIA_QUERY } from "../shared/mobile-dropdown-styles";
 import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
@@ -656,19 +655,26 @@ export default function DynamicSelect({
 }
 
 /**
+ * Phone widths: every width below Tailwind's `sm` breakpoint (640px), written
+ * as the exact complement of `sm` like `SHEET_MEDIA_QUERY` is of `md`. From
+ * `sm` up, tablets included, the panel is a regular dropdown under its field.
+ */
+export const PICKER_PHONE_MEDIA_QUERY = "not all and (min-width: 640px)";
+
+/**
  * Mobile-specific CSS overrides for the Radix popper used by this select.
  *
  * Lifts the panel above the dim overlay `MobileStyles` renders and pins it to
- * the top of the screen. The overlay shows below `md` (`md:hidden`) and sits
+ * the top of the screen. The overlay shows below `sm` (`sm:hidden`) and sits
  * above the panel's own z-index, so this rule must cover the same widths
- * (`SHEET_MEDIA_QUERY`): wherever the overlay shows without it, the overlay
- * covers the options and a tap on one only closes the select.
+ * (`PICKER_PHONE_MEDIA_QUERY`): wherever the overlay shows without it, the
+ * overlay covers the options and a tap on one only closes the select.
  *
  * Uses React's native `<style>{css}</style>` child form (safe text child)
  * instead of an injected-HTML approach, so there is no XSS concern and the
  * `react/no-danger` rule stays clean.
  */
-const MOBILE_POPPER_CSS = `@media ${SHEET_MEDIA_QUERY} {
+const MOBILE_POPPER_CSS = `@media ${PICKER_PHONE_MEDIA_QUERY} {
   body {
     overflow: hidden;
   }
@@ -697,7 +703,7 @@ export const MobileStyles = ({ open }: { open: boolean }) =>
       <div
         // eslint-disable-next-line tailwindcss/migration-from-tailwind-2
         className={tw(
-          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out md:hidden",
+          "extra-overlay fixed right-0 top-0 z-[999] h-screen w-screen cursor-pointer bg-black bg-opacity-50 backdrop-blur transition duration-300 ease-in-out sm:hidden",
           open ? "visible" : "invisible opacity-0"
         )}
       ></div>
