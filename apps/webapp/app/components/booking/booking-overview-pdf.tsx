@@ -27,18 +27,18 @@ import When from "../when/when";
 type PdfApiResponse = { pdfMeta: PdfDbResult };
 
 /**
+ * The most description characters printed under each asset row. The booking
+ * sheet is a hand-out, so a long description is cut instead of filling pages.
+ */
+const PDF_DESCRIPTION_MAX_LENGTH = 300;
+
+/**
  * Widths of the asset table's columns, in percent, in column order. They sum
  * to 100 and the table is `table-fixed`, so the table is exactly the printable
  * width and no cell's content can push it off the page; long text wraps inside
  * its column instead. The Code column's share is shared with the server, which
  * refuses a barcode picture wider than that cell.
  */
-/**
- * The most description characters printed under each asset row. The booking
- * sheet is a hand-out, so a long description is cut instead of filling pages.
- */
-const PDF_DESCRIPTION_MAX_LENGTH = 300;
-
 const ASSET_TABLE_COLUMNS = [
   { name: "number", percent: 5 },
   { name: "image", percent: 10 },

@@ -6,7 +6,10 @@ import { tw } from "~/utils/tw";
  * see why a save is refused.
  *
  * Display only: it never stops the user typing. The limit is enforced by the
- * field's validation.
+ * field's validation. It is not a live region, because it changes on every
+ * keystroke: the field points at it with `aria-describedby`, so the count is
+ * read when the field is focused, and the over-limit message is the field's
+ * error.
  */
 export function CharacterCount({
   count,
@@ -31,7 +34,6 @@ export function CharacterCount({
         isOver ? "text-error-600" : "text-gray-500",
         className
       )}
-      aria-live="polite"
       data-testid="character-count"
     >
       {count.toLocaleString("en-US")} / {max.toLocaleString("en-US")}

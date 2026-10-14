@@ -4,7 +4,9 @@
  * once the count is over the limit, so the user can see why a save is refused.
  *
  * Display only: it never stops the user typing. The screen's own validation
- * refuses an over-limit save. Matches the web's `CharacterCount` in
+ * refuses an over-limit save. It is not a live region, because it changes on
+ * every keystroke; the screen announces the over-limit message instead.
+ * Matches the web's `CharacterCount` in
  * `apps/webapp/app/components/shared/character-count.tsx`.
  *
  * @see {@link file://../../lib/asset-description.ts} countCharacters and the description limit
@@ -31,7 +33,6 @@ export function CharacterCount({ count, max }: { count: number; max: number }) {
     <Text
       style={[styles.count, isOver && styles.countOver]}
       accessibilityLabel={`${countLabel} of ${maxLabel} characters`}
-      accessibilityLiveRegion="polite"
     >
       {countLabel} / {maxLabel}
     </Text>
