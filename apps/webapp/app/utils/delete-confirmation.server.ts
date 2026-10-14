@@ -8,7 +8,10 @@
  *
  * @see {@link file://../components/bulk-update-dialog/bulk-delete-confirmation.tsx}
  */
-import { deleteConfirmationMatches } from "@shelf/labels";
+import {
+  deleteConfirmationMatches,
+  deleteConfirmationTarget,
+} from "@shelf/labels";
 import { EXPECTED_CONFIRMATION_KEY } from "./delete-confirmation";
 import type { ErrorLabel } from "./error";
 import { ShelfError } from "./error";
@@ -82,7 +85,8 @@ export function assertBulkDeleteConfirmed({
 }
 
 /**
- * Refuses a single delete whose typed confirmation is not the item's name.
+ * Refuses a single delete whose typed confirmation is not the item's name, or
+ * the word "delete" for an item with no name.
  *
  * Called with the item's current name, through {@link assertDeleteConfirmedFor}
  * by the module services, and directly by the admin user delete (an account's
@@ -110,7 +114,9 @@ export function assertDeleteConfirmed({
   throw new ShelfError({
     cause: null,
     title: "Nothing was deleted",
-    message: `Nothing was deleted. Type "${expected}" to confirm.`,
+    message: `Nothing was deleted. Type "${deleteConfirmationTarget(
+      expected
+    )}" to confirm.`,
     label,
     status: 400,
     shouldBeCaptured: false,

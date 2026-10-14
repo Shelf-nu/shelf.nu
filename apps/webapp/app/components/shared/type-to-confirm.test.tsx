@@ -98,10 +98,7 @@ const SURFACES: Surface[] = [
   {
     name: "kit",
     element: (
-      <DeleteKit
-        kit={{ id: "k1", name: "Studio Kit", image: null }}
-        trigger={openButton}
-      />
+      <DeleteKit kit={{ id: "k1", name: "Studio Kit" }} trigger={openButton} />
     ),
     expected: "Studio Kit",
     confirmLabel: /^delete$/i,
@@ -223,6 +220,35 @@ describe.each(SURFACES)("typed confirm on the $name delete", (surface) => {
     // Case and stray spaces do not decide a delete.
     await user.clear(field);
     await user.type(field, `  ${surface.expected.toUpperCase()} `);
+    expect(confirm).toBeEnabled();
+  });
+});
+
+describe("typed confirm on an item with no name", () => {
+  it("asks for the word delete and enables Delete once it is typed", async () => {
+    const { user, dialog } = await openDialog({
+      name: "asset with a blank title",
+      element: (
+        <DeleteAsset asset={{ id: "a2", title: "" }} trigger={openButton} />
+      ),
+      expected: "delete",
+      confirmLabel: /^delete$/i,
+      trigger: /open/i,
+    });
+    const confirm = within(dialog).getByRole("button", { name: /^delete$/i });
+    const field = within(dialog).getByRole("textbox", {
+      name: "Confirmation",
+    });
+
+    expect(dialog).toHaveTextContent("To confirm, type delete below.");
+    expect(field).toHaveAccessibleDescription("To confirm, type delete below.");
+    expect(confirm).toBeDisabled();
+
+    await user.type(field, "   ");
+    expect(confirm).toBeDisabled();
+
+    await user.clear(field);
+    await user.type(field, "Delete ");
     expect(confirm).toBeEnabled();
   });
 });

@@ -30,6 +30,7 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import { useRoleAccess } from "~/hooks/use-role-access";
 import { isFormProcessing } from "~/utils/form";
 
@@ -137,20 +138,31 @@ export function AdjustBookingAssetQuantityDialog({
   const unitLabel = unitOfMeasure || "units";
   const isSubmitting = isFormProcessing(fetcher.state);
 
-  /** Server-side error message from the action response */
-  const serverError =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+  const serverError = outcome.message;
 
-  /** Close on success */
+  // The client-side complaint belongs to one opening too: the operator fixing
+  // the number tomorrow should not be met with yesterday's objection to it.
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (open) {
+      setQuantityError(null);
+    }
+  }, [open]);
+
+  /** Close once this opening's change has been accepted. */
+  useEffect(() => {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setQuantityError(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   /** Submit with client-side validation */
   function handleSubmit() {
@@ -236,7 +248,7 @@ export function AdjustBookingAssetQuantityDialog({
                   <p className="text-xs text-gray-500">
                     {windowFrom && windowTo ? (
                       <>
-                        for <DateS date={windowFrom} /> –{" "}
+                        for <DateS date={windowFrom} /> to{" "}
                         <DateS date={windowTo} />
                       </>
                     ) : (

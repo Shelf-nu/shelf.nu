@@ -34,6 +34,7 @@ import {
 } from "~/components/shared/modal";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import { defaultSourceOption } from "~/modules/asset/custody-source";
 import { isFormProcessing } from "~/utils/form";
@@ -99,7 +100,7 @@ export function QuickAdjustDialog({
   );
   /** Client-side validation error for the quantity field */
   const [quantityError, setQuantityError] = useState<string | null>(null);
-  const fetcher = useFetcher({ key: "adjust-quantity" });
+  const fetcher = useFetcher({ key: `adjust-quantity-${assetId}` });
   const disabled = useDisabled(fetcher);
   const formRef = useRef<HTMLFormElement>(null);
   // Replaces `autoFocus` to satisfy jsx-a11y/no-autofocus. The hook
@@ -125,20 +126,31 @@ export function QuickAdjustDialog({
       ? pickedLocation
       : defaultSourceOption(locationOptions)?.value ?? "";
 
-  /** Server-side error message from the action response */
-  const serverError =
-    fetcher.data?.error != null
-      ? (fetcher.data.error as { message?: string })?.message
-      : null;
+  /**
+   * What the server has said during THIS opening. The fetcher is keyed, so it
+   * keeps handing back its last response after the dialog closes: read
+   * directly, an old refusal reappears and an old success closes the dialog
+   * the moment it opens.
+   */
+  const outcome = useFetcherOutcomeSinceOpen(fetcher, open);
+  const serverError = outcome.message;
 
-  /** Close the dialog and reset the form after a successful submission */
+  // The client-side complaint belongs to one opening too: the operator fixing
+  // the number tomorrow should not be met with yesterday's objection to it.
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data && !fetcher.data.error) {
+    if (open) {
+      setQuantityError(null);
+    }
+  }, [open]);
+
+  /** Close once this opening's adjustment has been accepted. */
+  useEffect(() => {
+    if (outcome.status === "accepted") {
       setOpen(false);
       setQuantityError(null);
       formRef.current?.reset();
     }
-  }, [fetcher.state, fetcher.data, setOpen]);
+  }, [outcome.status, setOpen]);
 
   /**
    * Submits the adjustment form with the given direction and category.
