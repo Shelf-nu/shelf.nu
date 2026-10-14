@@ -44,3 +44,6 @@ export const ASSET_IMPORT_JOB_OPTIONS = {
   retryBackoff: true,
   expireInMinutes: ASSET_IMPORT_LEASE_MINUTES,
 } as const;
+
+/** Maximum number of rows shown in an import preview grid. */
+export const PREVIEW_DISPLAY_LIMIT = 50;
