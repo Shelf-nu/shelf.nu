@@ -66,10 +66,12 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
    not listed.
 
 After the report you can say "fix 1-4", "restore D2", or "prove 3". `prove N`
-is the one exception to read-only: it writes a throwaway test that fails if
-finding N is real, runs only that file (`pnpm webapp:test -- --run <file>`),
-shows the output, says proven or not proven, then deletes the test. It is never
-committed and never runs the full suite.
+is the one exception to read-only: it writes a throwaway test under
+`apps/webapp/test/` that fails if finding N is real, runs only that file
+(`pnpm webapp:test -- --run <file>`), shows the output, and says proven, not
+proven, or inconclusive (the test failed for an unrelated reason such as a setup
+error). It then deletes the test in every case. It refuses when your checkout is
+not the PR head, is never committed, and never runs the full suite.
 
 ## The agents
 
