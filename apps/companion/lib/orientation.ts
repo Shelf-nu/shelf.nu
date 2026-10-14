@@ -10,6 +10,11 @@
  * on launch. Android 16 already ignores the portrait lock on large screens for
  * apps targeting it; this brings older tablets to the same behaviour.
  *
+ * The decision follows the physical screen for as long as the app runs, not
+ * only at launch: a foldable opened while the app is running unlocks, and one
+ * folded back to its outer screen locks to portrait again, since the phone
+ * layouts are only built upright.
+ *
  * `expo-screen-orientation` is a native module, and this file runs from the
  * root layout on every launch, so it is required lazily: an over-the-air bundle
  * that reaches a build whose binary predates the module keeps the portrait lock
@@ -19,20 +24,19 @@
  * @see EAS-UPDATE.md for which builds an over-the-air bundle reaches
  */
 
-import { Dimensions, Platform } from "react-native";
+import { Dimensions, Platform, type ScaledSize } from "react-native";
 import { isTabletScreen } from "@/lib/content-column";
 
 /**
- * Lets an Android tablet follow its rotation. No-op on phones, on iOS, and on
- * a build without the native orientation module.
+ * Lets an Android tablet follow its rotation, and keeps a phone-sized screen
+ * upright. Re-evaluated whenever the screen changes size (a foldable opening
+ * or closing). No-op on iOS and on a build without the native orientation
+ * module.
  * Judged from the physical screen, not the window, so a tablet in split screen
  * still counts as a tablet.
  */
 export function unlockOrientationOnTablets(): void {
   if (Platform.OS !== "android") return;
-
-  const { width, height } = Dimensions.get("screen");
-  if (!isTabletScreen(width, height)) return;
 
   let ScreenOrientation: typeof import("expo-screen-orientation");
   try {
@@ -45,7 +49,24 @@ export function unlockOrientationOnTablets(): void {
     return;
   }
 
-  // why: a failure only leaves the manifest's portrait lock in place, which
-  // is the app's long-standing behaviour, so there is nothing to recover.
-  ScreenOrientation.unlockAsync().catch(() => undefined);
+  // The manifest starts every launch locked to portrait.
+  let unlocked = false;
+
+  const apply = ({ width, height }: ScaledSize) => {
+    const tablet = isTabletScreen(width, height);
+    if (tablet === unlocked) return;
+    unlocked = tablet;
+    // why: a failure only leaves the current lock in place; portrait is the
+    // app's long-standing behaviour, so there is nothing to recover.
+    const change = tablet
+      ? ScreenOrientation.unlockAsync()
+      : ScreenOrientation.lockAsync(
+          ScreenOrientation.OrientationLock.PORTRAIT_UP
+        );
+    change.catch(() => undefined);
+  };
+
+  apply(Dimensions.get("screen"));
+  // Lives as long as the app process, so the subscription is never removed.
+  Dimensions.addEventListener("change", ({ screen }) => apply(screen));
 }
