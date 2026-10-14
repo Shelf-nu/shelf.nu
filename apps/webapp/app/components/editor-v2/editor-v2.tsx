@@ -14,6 +14,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
+import { CharacterCount } from "~/components/shared/character-count";
 import { createEditorSchema } from "~/modules/editor-v2/markdoc-utils";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
@@ -268,13 +269,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
             {label} supports Markdown and Markdoc. {HINT_TEXT}
           </span>
           {maxLength ? (
-            <span
-              className={
-                markdocValue.length > maxLength ? "text-error-600" : undefined
-              }
-            >
-              {markdocValue.length}/{maxLength}
-            </span>
+            <CharacterCount count={markdocValue.length} max={maxLength} />
           ) : null}
         </div>
         <LinkDialog

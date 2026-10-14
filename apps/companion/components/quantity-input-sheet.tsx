@@ -41,6 +41,7 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { formatQuantity } from "@/lib/quantity-format";
 import type { SourcePickerOption } from "@/lib/custody-source-options";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   /** Whether the sheet is shown. */
@@ -150,6 +151,7 @@ export function QuantityInputSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
 
   const [value, setValue] = useState("1");
   const [secondaryValue, setSecondaryValue] = useState("0");
@@ -266,7 +268,10 @@ export function QuantityInputSheet({
       // keyboard (and jsx-a11y/no-autofocus flags it).
       onShow={() => inputRef.current?.focus()}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>{title}</Text>

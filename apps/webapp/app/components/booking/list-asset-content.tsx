@@ -146,12 +146,21 @@ export default function ListAssetContent({
     );
   }, [item, booking.id, booking.bookingAssets, booking.status]);
 
-  const isPartOfKit = (item.assetKits ?? []).length > 0;
-
   // New logic for determining if actions dropdown should be shown
   const canSeeActions = useMemo(() => {
-    // Never show actions if asset is part of a kit
-    if (isPartOfKit) return false;
+    // A kit-driven row belongs to its kit, which owns adjusting and removing
+    // its slices. Keyed on THIS row rather than on the asset's memberships: a
+    // quantity-tracked asset can hold a free-pool row alongside kit-driven
+    // ones, and that free-pool row is the operator's to act on.
+    //
+    // `isKitAsset` only says the row renders under a kit, which is also true of
+    // a detached row the kit no longer drives: kit removal does not reach that
+    // row, so hiding its menu leaves it unactionable. `isKitDriven` is the
+    // governing fact, and an explicit `false` is what releases the menu.
+    // Absent means a surface that does not project the field, where a live
+    // slice is indistinguishable from a detached one, so the menu stays hidden:
+    // offering Remove on a live slice would take the asset out of its kit.
+    if (isKitAsset && item.isKitDriven !== false) return false;
 
     // Members who write every booking see the menu on every row; others only
     // on a booking they hold, within their removable statuses.
@@ -174,7 +183,7 @@ export default function ListAssetContent({
       access: roleAccess,
       bookingStatus: booking.status,
     });
-  }, [isPartOfKit, booking, user?.id, roles, roleAccess]);
+  }, [isKitAsset, item.isKitDriven, booking, user?.id, roles, roleAccess]);
 
   /**
    * Qty-tracked partial dispositioning.

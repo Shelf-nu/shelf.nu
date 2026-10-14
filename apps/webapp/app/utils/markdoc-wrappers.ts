@@ -332,6 +332,13 @@ export function wrapCategoryForNote(
 /**
  * Wraps description text in Markdoc description tag syntax for truncation and popover display
  *
+ * Line breaks and backslashes in the texts are stored raw, like every value
+ * these wrappers place in an attribute. That is not valid Markdoc on its own:
+ * system notes render through `SystemNoteViewer`
+ * (`~/components/markdown/system-note-viewer`), which encodes it before
+ * parsing, and the CSV/PDF export and the companion app read the raw value.
+ * Do not add Markdoc escapes here, or those readers show them literally.
+ *
  * @param oldText - The previous description text (optional)
  * @param newText - The new description text (optional)
  * @returns String with description wrapped in Markdoc tag syntax

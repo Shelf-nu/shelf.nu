@@ -38,6 +38,7 @@ import {
   checkoutSourceOptions,
   defaultCheckoutSource,
 } from "@/lib/custody-source-options";
+import { useSheetColumnStyle } from "@/lib/use-content-gutter";
 
 type Props = {
   visible: boolean;
@@ -63,6 +64,7 @@ export function CheckoutSourceSheet({
 }: Props) {
   const { colors } = useTheme();
   const styles = useStyles();
+  const sheetColumn = useSheetColumnStyle();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   // Rows the operator changed. Only those go out; a row left on its default
   // lets the server record its own, current default.
@@ -95,7 +97,10 @@ export function CheckoutSourceSheet({
       presentationStyle="pageSheet"
       onRequestClose={requestClose}
     >
-      <SafeAreaView style={styles.container} accessibilityViewIsModal={true}>
+      <SafeAreaView
+        style={[styles.container, sheetColumn]}
+        accessibilityViewIsModal={true}
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Where do the units come from?</Text>
           <TouchableOpacity
