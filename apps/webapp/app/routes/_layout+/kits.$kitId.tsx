@@ -36,7 +36,6 @@ import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
   assertKitDeleteConfirmed,
   deleteKit,
-  deleteKitImage,
   emitAssetKitDetachmentNotes,
   fetchAssetKitDetachmentImpact,
   getKit,
@@ -113,6 +112,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assetKits: {
+            // Archived members are out of service and left out of kit custody
+            // and kit bookings (issue #382), so the page's availability badge,
+            // Book and custody actions read the active members only. They
+            // never sit on a live booking either, so the current booking and
+            // the custody card lose nothing. `archivedMemberCount` below says
+            // how many are hidden.
+            where: { asset: { archivedAt: null } },
             select: {
               // The membership id is the kit-slice discriminator booked rows
               // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
@@ -248,8 +254,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    /** Members left out of `kit.assetKits` above because they are archived. */
+    const archivedMemberCount = await db.assetKit.count({
+      where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
+    });
+
     return payload({
       kit: redactedKit,
+      archivedMemberCount,
       currentBooking,
       header,
       modelName,
@@ -321,14 +333,6 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
-    const { image } = parseData(
-      formData,
-      z.object({
-        image: z.string().optional(),
-      }),
-      { additionalData: { userId, organizationId, kitId } }
-    );
-
     switch (intent) {
       case "delete": {
         // The dialog asks for the kit's name; refuse a request that skipped it.
@@ -339,11 +343,9 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
           confirmation,
         });
 
+        // Also removes the kit's stored image file. The image is read from
+        // the kit row, never from the request.
         await deleteKit({ id: kitId, organizationId, actorUserId: userId });
-
-        if (image) {
-          await deleteKitImage({ url: image });
-        }
 
         sendNotification({
           title: "Kit deleted",

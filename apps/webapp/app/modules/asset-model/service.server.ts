@@ -115,7 +115,12 @@ function getAssetModelsWhereInput({
 
 /**
  * Fetches a paginated list of asset models for the given organization.
- * Includes the count of assets associated with each model.
+ *
+ * Each model carries two counts. `_count.assets` is every asset linked to it,
+ * archived ones included: the delete dialog warns about all of them, since
+ * deleting the model unlinks archived assets too. `activeAssetCount` leaves
+ * archived assets out, as every inventory count does, and is what the list
+ * shows.
  */
 export async function getAssetModels(params: {
   organizationId: Organization["id"];
@@ -152,7 +157,30 @@ export async function getAssetModels(params: {
       db.assetModel.count({ where }),
     ]);
 
-    return { assetModels, totalAssetModels };
+    const archivedCounts =
+      assetModels.length > 0
+        ? await db.asset.groupBy({
+            by: ["assetModelId"],
+            where: {
+              organizationId,
+              assetModelId: { in: assetModels.map((model) => model.id) },
+              archivedAt: { not: null },
+            },
+            _count: { _all: true },
+          })
+        : [];
+    const archivedByModelId = new Map(
+      archivedCounts.map((row) => [row.assetModelId, row._count._all])
+    );
+
+    return {
+      assetModels: assetModels.map((model) => ({
+        ...model,
+        activeAssetCount:
+          model._count.assets - (archivedByModelId.get(model.id) ?? 0),
+      })),
+      totalAssetModels,
+    };
   } catch (cause) {
     throw new ShelfError({
       cause,

@@ -31,6 +31,7 @@ import {
   DELETE_CONFIRMATION_FIELD,
   DELETE_CONSEQUENCE_LABELS,
   deleteConfirmationMatches,
+  deleteConfirmationTarget,
   normalizeDeleteConfirmation,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
@@ -42,6 +43,7 @@ import {
   EXPLICIT_REQUIREMENT_ROLE_LABELS,
   explicitRequirementSwitchDescription,
   KIT_MEMBERS_CUSTODY_BLOCKED_REASON,
+  KIT_IN_USE_REINSTATE_REASON,
   KIT_STATUS_LABELS,
   auditAssetStatusLabel,
   auditDeletedAssetLabel,
@@ -49,6 +51,11 @@ import {
   kitMemberCustodyBlockedReason,
   kitMemberCustodyRefusal,
   kitMembersCustodyRefusal,
+  archivedAssetBlockedReason,
+  archivedAssetsLeftOut,
+  archivedAssetsRefusal,
+  kitWithoutActiveAssetsReason,
+  kitsWithoutActiveAssetsRefusal,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -346,6 +353,119 @@ test("the multi-member refusal counts the members and names the first three", ()
   );
 });
 
+test("an archived asset's disabled reason never offers a reinstate the reader lacks", () => {
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true }),
+    "This asset is archived. Reinstate it to make changes."
+  );
+  assert.equal(
+    archivedAssetBlockedReason({ canReinstate: true, action: "book" }),
+    "This asset is archived. Reinstate it to book it."
+  );
+  for (const action of ["change", "book"]) {
+    const reason = archivedAssetBlockedReason({ canReinstate: false, action });
+    assert.equal(
+      reason,
+      "This asset is archived. Ask an admin to reinstate it."
+    );
+    assert.doesNotMatch(reason, /Reinstate it/);
+  }
+  // A reinstate held up by an in-use kit names the way out.
+  assert.match(
+    KIT_IN_USE_REINSTATE_REASON,
+    /Release or check in the kit first/
+  );
+});
+
+test("the archived refusal names the assets and the way out for this reader", () => {
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: true,
+    }),
+    '"Cam A" is archived. Reinstate it to make changes.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "reinstate",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Ask an admin to reinstate it.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A", "Cam B"],
+      fix: "remove-from-list",
+      canReinstate: false,
+    }),
+    '"Cam A" and "Cam B" are archived. Remove them from the list and try again.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["A", "B", "C", "D", "E"],
+      fix: "remove-from-booking",
+      canReinstate: true,
+    }),
+    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
+  );
+  assert.equal(
+    archivedAssetsRefusal({
+      titles: ["Cam A"],
+      fix: "remove-from-booking",
+      canReinstate: false,
+    }),
+    '"Cam A" is archived. Remove it from the booking or ask an admin to reinstate it.'
+  );
+});
+
+test("left-out counts agree in number", () => {
+  assert.equal(archivedAssetsLeftOut(1), "1 archived asset was left out.");
+  assert.equal(archivedAssetsLeftOut(3), "3 archived assets were left out.");
+});
+
+test("a kit with no active asset says whether it is empty or only archived", () => {
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: true }],
+      action: "custody",
+    }),
+    'Kit "Camera Kit" holds only archived assets, so there is nothing to put into custody. Add an active asset to it, or have an admin reinstate one.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: [{ name: "Camera Kit", hasArchivedAssets: false }],
+      action: "booking",
+    }),
+    'Kit "Camera Kit" has no assets, so there is nothing to book. Add assets to it first.'
+  );
+  assert.equal(
+    kitsWithoutActiveAssetsRefusal({
+      kits: ["A", "B", "C", "D"].map((name) => ({
+        name,
+        hasArchivedAssets: true,
+      })),
+      action: "custody",
+    }),
+    '4 kits have no active assets, so there is nothing to put into custody: "A", "B", "C" and 1 more. Add active assets to them first.'
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: true,
+      action: "booking",
+    }),
+    "This kit holds only archived assets. Add an active asset to book this kit."
+  );
+  assert.equal(
+    kitWithoutActiveAssetsReason({
+      hasArchivedAssets: false,
+      action: "custody",
+    }),
+    "This kit has no assets. Add assets to assign custody."
+  );
+});
+
 test("the declarable booking methods are BOOKING_METHOD's values, never quick", () => {
   // The server validates the request field against the tuple and the app sends
   // BOOKING_METHOD values, so the two must list the same words.
@@ -370,11 +490,64 @@ test("a typed delete confirmation matches its name loosely but never blank", () 
   // A different name, a prefix or a different count is refused.
   assert.equal(deleteConfirmationMatches("Camera", "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches("11", 12), false);
-  // Nothing typed, or nothing to match, never unlocks.
+  // Nothing typed never unlocks, whatever the name.
   assert.equal(deleteConfirmationMatches("", "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches(undefined, "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches("", ""), false);
   assert.equal(deleteConfirmationMatches("   ", "  "), false);
+});
+
+test("a nameless item is confirmed by typing the word delete", () => {
+  for (const name of ["", "   ", "\u200B"]) {
+    assert.equal(deleteConfirmationMatches("Delete ", name), true);
+    assert.equal(deleteConfirmationMatches("delete", name), true);
+    assert.equal(deleteConfirmationMatches("", name), false);
+    assert.equal(deleteConfirmationMatches("  ", name), false);
+    assert.equal(deleteConfirmationMatches(undefined, name), false);
+  }
+  // An item with a name still asks for the name, not the word.
+  assert.equal(deleteConfirmationMatches("delete", "Camera Kit"), false);
+});
+
+test("what to type is the name or count, or the word delete for a nameless item", () => {
+  assert.equal(deleteConfirmationTarget("Camera Kit"), "Camera Kit");
+  assert.equal(deleteConfirmationTarget(12), "12");
+  for (const name of ["", "   ", "\u200B", "\uFEFF "]) {
+    assert.equal(deleteConfirmationTarget(name), "delete");
+  }
+});
+
+test("an invisible character between a letter and its accent still matches the composed letter", () => {
+  // "Cafe" + zero-width space + combining acute, shown as "Café"
+  assert.equal(
+    deleteConfirmationMatches("Caf\u00E9", "Cafe\u200B\u0301"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Cafe\u0301", "Caf\u00E9"), true);
+});
+
+test("invisible format characters in a stored name need not be typed", () => {
+  // Zero-width space, non-joiner and joiner, and a byte order mark: none can
+  // be seen in the instruction, so none is asked for.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200BKit"), true);
+  assert.equal(deleteConfirmationMatches("Tripod", "Tripod\u200B"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200CKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200DKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\uFEFFKit"), true);
+  assert.equal(
+    deleteConfirmationMatches("Camera Kit", "Camera \u200BKit"),
+    true
+  );
+  // A pasted name that carries the character matches as well.
+  assert.equal(
+    deleteConfirmationMatches("Camera\u200BKit", "Camera\u200BKit"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Camera", "Camera\u200BKit"), false);
+  // Soft hyphen, word joiner and a left-to-right mark are invisible too.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u00ADKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u2060Kit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "\u200ECameraKit"), true);
 });
 
 test("the confirmation field name is the one the bulk endpoints read", () => {
