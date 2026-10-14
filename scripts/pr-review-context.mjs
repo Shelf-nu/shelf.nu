@@ -332,6 +332,19 @@ const NON_INTERACTIVE_GIT_ENV = {
  * @typedef {(cmd: string, args: string[], options?: {env?: Record<string, string>}) => {code: number, stdout: string, stderr: string}} Runner
  */
 
+/**
+ * Turns a PR URL into the HTTPS clone URL of its repository, used to fetch the
+ * base branch without SSH.
+ * @param {string | undefined} prUrl - e.g. `https://github.com/Shelf-nu/shelf.nu/pull/3191`
+ * @returns {string | null} e.g. `https://github.com/Shelf-nu/shelf.nu.git`, or null when it does not parse
+ */
+export function httpsRepoUrl(prUrl) {
+  const match = /^(https:\/\/github\.com\/[^/]+\/[^/]+)\/pull\/\d+/.exec(
+    prUrl ?? ""
+  );
+  return match ? `${match[1]}.git` : null;
+}
+
 /** A failure the skill reports to the user instead of reviewing. */
 export class ContextError extends Error {
   /**
@@ -472,15 +485,28 @@ export function collectContext({ run, prArg, startedAt, marker }) {
   const base = `origin/${pr.baseRefName}`;
 
   // Rules and the fallback diff read the base branch, so refresh it first.
-  // Failing to fetch (offline, no SSH agent) is not fatal.
-  const fetched = run("git", ["fetch", "origin", pr.baseRefName], {
+  // When the SSH remote fails (no agent in this shell), fetch the public repo
+  // over HTTPS into the same ref. Failing both (offline) is not fatal.
+  let fetched = run("git", ["fetch", "origin", pr.baseRefName], {
     env: NON_INTERACTIVE_GIT_ENV,
   });
+  const httpsRepo = httpsRepoUrl(pr.url);
+  if (fetched.code !== 0 && httpsRepo) {
+    fetched = run(
+      "git",
+      [
+        "fetch",
+        httpsRepo,
+        `+refs/heads/${pr.baseRefName}:refs/remotes/${base}`,
+      ],
+      { env: NON_INTERACTIVE_GIT_ENV }
+    );
+  }
   if (fetched.code !== 0) {
     const age = run("git", ["log", "-1", "--format=%cr", base]);
-    const lastUpdated = age.code === 0 ? age.stdout.trim() : "unknown";
+    const newest = age.code === 0 ? age.stdout.trim() : "unknown";
     warnings.push(
-      `could not fetch ${base} (last updated ${lastUpdated}); rules may be stale`
+      `could not fetch ${base} (its newest local commit is from ${newest}); rules may be stale`
     );
   }
 

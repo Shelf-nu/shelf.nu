@@ -34,7 +34,8 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
 ## How it works
 
 1. **Setup.** `scripts/pr-review-context.mjs` resolves the PR, fetches the
-   base branch (non-interactive; a failed fetch only warns), takes the diff
+   base branch (non-interactive, over HTTPS when SSH fails; a failed fetch
+   only warns), takes the diff
    from GitHub (so a stale local `main` cannot inflate it), measures it, picks
    a tier, and copies the `.claude/rules` and CLAUDE.md files that apply to
    the changed paths from the **base** branch. The diff and copies land in
@@ -59,7 +60,9 @@ read your working tree. A detached HEAD at the PR's head commit is fine.
 
    Under the CI line, **Safe because** names the one fact the
    change's safety depends on and says whether it was `checked in code` or is
-   `unproven`. A finding that two or more passes found independently carries
+   `unproven`. Serious problems the PR did not cause are flagged with 🔴 under
+   the header and listed first in "Spotted along the way". A finding that two
+   or more passes found independently carries
    `found by <n> passes (<names>)`. "Dismissed" lists findings a validator
    rejected or the review could not confirm, numbered D1, D2, ... with a
    one-line reason; say "restore D2" to bring one back. Pre-existing nits are

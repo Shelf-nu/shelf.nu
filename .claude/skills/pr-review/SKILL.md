@@ -48,6 +48,8 @@ when `pr.linkedIssues` is non-empty). Then skim the diff.
    or the reverse? Does the body still match the code?
 4. Tier L only: group the files into buckets (feature, refactor, tests,
    tooling, unrelated) in a small table, and say whether the PR should be split.
+   When every file serves one coherent change, skip the table and say so in
+   one line on the Scope line.
 
 ## Stage 3: Find
 
@@ -115,6 +117,10 @@ validator.
 If an agent fails or returns no parsable JSON, note it under "Skipped" in
 the report and carry on. Never re-run the whole review.
 
+While passes run, print at most one short status line when a pass finishes
+("bugs pass done, 10 findings, validating 5"). Never print a partial report or
+draft findings: the report is printed once, at Stage 5.
+
 **Safety fact.** The report's "Safe because" line needs the single fact the
 change's safety depends on. When the impact pass ran, use the `safetyFact`,
 `confidence` and `evidence` from the second json block in its final message. The first block is the
@@ -156,6 +162,7 @@ per finding, no theory, no jargon a busy engineer has to decode. No em dashes.
 ## PR #<n> "<title>": <SHIP | SHIP WITH FIXES | DO NOT SHIP> (<k> must-fix, <m> should-fix, <j> nits)
 
 <warnings from the context, one line each, prefixed with ⚠️, if any>
+<when "Spotted along the way" has must-fix grade items: 🔴 <count> serious problem(s) not caused by this PR, see <numbers>>
 
 **ELI5:** 2-4 short sentences: what this PR does and whether it does it.
 
@@ -172,7 +179,7 @@ per finding, no theory, no jargon a busy engineer has to decode. No em dashes.
 ### Should fix
 ### Nits
 ### Spotted along the way (not caused by this PR)
-<n>. **<title>**. <impact> `<file>:<line>` → follow-up PR: "<conventional-commit title>"
+<n>. [🔴 ]**<title>**. <impact> `<file>:<line>` → follow-up PR: "<conventional-commit title>"
 
 ### Dismissed
 D1. <title> (`<file>:<line>`): <one-line reason>
@@ -181,7 +188,7 @@ D1. <title> (`<file>:<line>`): <one-line reason>
 **Not verifiable from code:** <browser, device, prod-data checks>
 **Took:** <minutes since startedAt> min
 
-Next: "fix 1-4", "prove 3", "restore D2", "post this as a request-changes review", or ask about any item.
+Next: <only the options that apply, see Rules>
 ```
 
 Rules:
@@ -192,8 +199,14 @@ Rules:
 - Verdict: `DO NOT SHIP` when a must-fix breaks security or data, or the PR
   does not do its main claim. `SHIP WITH FIXES` when any must-fix or
   should-fix exists. Otherwise `SHIP`. Pre-existing findings never change it.
-- Must-fix grade problems in "Spotted along the way" still get one line saying
-  why they matter.
+- Must-fix grade problems in "Spotted along the way" come first in that
+  section, start with 🔴, and get one line saying why they matter.
+- **Next** lists only options that apply, with real numbers: "fix <range>"
+  only when there are findings, "prove <n>" only for a must-fix or should-fix
+  a test could pin, "restore D<n>" only when Dismissed is not empty, "post this
+  as a request-changes review" only for an open PR with findings. With no
+  findings at all, write "Next: nothing to fix." For a merged PR, say fixes go
+  in a follow-up PR instead of offering to post.
 - **Found by N passes.** Agreement between independent passes is a confidence
   signal. When a finding's `foundBy` has 2 or more passes, append
   ` · found by <n> passes (<names>)` to its `file:line` line. Single-pass

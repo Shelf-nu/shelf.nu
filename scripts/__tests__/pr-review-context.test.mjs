@@ -23,6 +23,7 @@ import {
   resolvePrNumber,
   artifactDir,
   ContextError,
+  httpsRepoUrl,
 } from "../pr-review-context.mjs";
 
 test("globToRegExp: ** matches zero or more directories", () => {
@@ -428,17 +429,47 @@ test("collectContext: fetches the base branch non-interactively before reading r
   assert.ok(fetchIndex < rulesIndex, "fetch happens before the rules are read");
 });
 
-test("collectContext: a failed fetch only warns, naming how old origin/main is", () => {
+test("collectContext: SSH and HTTPS fetch both failing only warns, naming how old origin/main is", () => {
   const run = fakeRun([
     ["git fetch origin main", { code: 128, stderr: "Permission denied" }],
+    ["git fetch https://", { code: 128, stderr: "Could not resolve host" }],
     ["git log -1 --format=%cr origin/main", { stdout: "3 days ago\n" }],
     ...baseResponses(),
   ]);
   const { context } = collectContext({ run, startedAt: 0, marker: "m" });
   assert.match(
     context.warnings.join("\n"),
-    /could not fetch origin\/main \(last updated 3 days ago\); rules may be stale/
+    /could not fetch origin\/main \(its newest local commit is from 3 days ago\); rules may be stale/
   );
+});
+
+test("collectContext: a failed SSH fetch falls back to HTTPS without a warning", () => {
+  const calls = [];
+  const inner = fakeRun([
+    ["git fetch origin main", { code: 128, stderr: "Permission denied" }],
+    ["git fetch https://github.com/Shelf-nu/shelf.nu.git", {}],
+    ...baseResponses(),
+  ]);
+  const run = (cmd, args, options) => {
+    calls.push([cmd, ...args].join(" "));
+    return inner(cmd, args, options);
+  };
+  const { context } = collectContext({ run, startedAt: 0, marker: "m" });
+  assert.ok(
+    calls.includes(
+      "git fetch https://github.com/Shelf-nu/shelf.nu.git +refs/heads/main:refs/remotes/origin/main"
+    )
+  );
+  assert.ok(!context.warnings.some((w) => w.includes("could not fetch")));
+});
+
+test("httpsRepoUrl: builds the clone URL from a PR URL, null otherwise", () => {
+  assert.equal(
+    httpsRepoUrl("https://github.com/Shelf-nu/shelf.nu/pull/3191"),
+    "https://github.com/Shelf-nu/shelf.nu.git"
+  );
+  assert.equal(httpsRepoUrl(undefined), null);
+  assert.equal(httpsRepoUrl("not a url"), null);
 });
 
 test("collectContext: refuses to review from a different branch", () => {
