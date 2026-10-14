@@ -31,6 +31,12 @@ describe("describeRoleAudience", () => {
     );
   });
 
+  it("names every role in its own plural", () => {
+    expect(describeRoleAudience(() => true)).toBe(
+      "owners, administrators, managers, self service users and base users"
+    );
+  });
+
   it("returns an empty string when no role matches", () => {
     expect(describeRoleAudience(() => false)).toBe("");
   });

@@ -20,9 +20,9 @@
 import type { OrganizationRole } from "~/utils/permissions/role-access";
 import {
   INVITABLE_ROLES,
-  ROLE_LABELS,
   ROLE_POLICIES,
   isOrganizationRole,
+  labelToRole,
 } from "~/utils/permissions/role-access";
 
 /** Roles an invite may grant, most privileged first. Never includes OWNER. */
@@ -56,10 +56,8 @@ export function isInvitableRole(value: unknown): value is InvitableRole {
  *   invite may grant (OWNER included)
  */
 export function parseInvitableRole(value: string): InvitableRole | null {
-  const text = value.trim().toUpperCase();
-  if (isInvitableRole(text)) return text;
-  return (
-    INVITABLE_ROLES.find((role) => ROLE_LABELS[role].toUpperCase() === text) ??
-    null
-  );
+  const key = value.trim().toUpperCase();
+  if (isInvitableRole(key)) return key;
+  const role = labelToRole(value);
+  return role && isInvitableRole(role) ? role : null;
 }

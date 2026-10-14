@@ -12,6 +12,7 @@ import {
   canRemoveBookingItems,
   isExplicitScanRequired,
   isWorkspaceOwner,
+  labelToRole,
   resolveRoleAccess,
   rolesWhere,
   transfersBookingsOnRoleChange,
@@ -197,5 +198,25 @@ describe("delete drafts only", () => {
       ],
       [false, false, true, true]
     );
+  });
+});
+
+describe("labelToRole", () => {
+  test("reads every role's own label", () => {
+    assert.equal(labelToRole("Owner"), "OWNER");
+    assert.equal(labelToRole("Administrator"), "ADMIN");
+    assert.equal(labelToRole("Manager"), "MANAGER");
+    assert.equal(labelToRole("Self service"), "SELF_SERVICE");
+    assert.equal(labelToRole("Base"), "BASE");
+  });
+
+  test("ignores case and surrounding spaces", () => {
+    assert.equal(labelToRole("  self SERVICE "), "SELF_SERVICE");
+    assert.equal(labelToRole("administrator"), "ADMIN");
+  });
+
+  test("returns undefined for text that is no label", () => {
+    assert.equal(labelToRole("Admin"), undefined);
+    assert.equal(labelToRole(""), undefined);
   });
 });

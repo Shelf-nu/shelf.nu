@@ -34,6 +34,20 @@ export const ROLE_LABELS: Record<OrganizationRole, string> = {
 };
 
 /**
+ * The plural name of each role, for copy that names a group of people
+ * ("owners, administrators and managers"). Spelled out per role because not
+ * every label pluralizes by adding an "s" ("Self service users", not "Self
+ * services").
+ */
+export const ROLE_PLURAL_LABELS: Record<OrganizationRole, string> = {
+  OWNER: "Owners",
+  ADMIN: "Administrators",
+  MANAGER: "Managers",
+  SELF_SERVICE: "Self service users",
+  BASE: "Base users",
+};
+
+/**
  * Whether a value is one of the known organization role names.
  *
  * @param value - Anything, typically an element of a membership's role array

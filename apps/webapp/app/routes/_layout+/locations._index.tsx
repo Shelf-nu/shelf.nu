@@ -162,6 +162,7 @@ export default function LocationsIndexPage() {
                 }
           }
           ItemComponent={ListItemContent}
+          extraItemComponentProps={{ showRowActions }}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -180,8 +181,11 @@ export default function LocationsIndexPage() {
 
 const ListItemContent = ({
   item,
+  extraProps,
 }: {
   item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+  /** Decided once by the page, so the row cells always match the header. */
+  extraProps: { showRowActions: boolean };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -230,13 +234,17 @@ const ListItemContent = ({
     <Td>{item._count.children}</Td>
     <Td>{item._count.assetLocations}</Td>
     <Td>{item._count.kits}</Td>
-    <LocationActionsCell
-      location={{
-        id: item.id,
-        name: item.name,
-        childCount: item._count.children,
-      }}
-    />
+    {extraProps.showRowActions ? (
+      <Td>
+        <LocationQuickActions
+          location={{
+            id: item.id,
+            name: item.name,
+            childCount: item._count.children,
+          }}
+        />
+      </Td>
+    ) : null}
   </>
 );
 
@@ -259,18 +267,4 @@ function useShowLocationRowActions() {
       action: PermissionAction.delete,
     })
   );
-}
-
-/** The row's Actions cell, rendered only when the header column is. */
-function LocationActionsCell({
-  location,
-}: {
-  location: { id: string; name: string; childCount: number };
-}) {
-  const showRowActions = useShowLocationRowActions();
-  return showRowActions ? (
-    <Td>
-      <LocationQuickActions location={location} />
-    </Td>
-  ) : null;
 }

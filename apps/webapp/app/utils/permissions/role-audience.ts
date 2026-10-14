@@ -9,7 +9,7 @@
  * @see {@link file://./role-access.ts}
  */
 import type { RolePolicy } from "./role-access";
-import { ROLE_LABELS, rolesWhere } from "./role-access";
+import { ROLE_PLURAL_LABELS, rolesWhere } from "./role-access";
 
 /**
  * Names, in lower-case plural and most privileged first, the roles whose
@@ -23,8 +23,8 @@ import { ROLE_LABELS, rolesWhere } from "./role-access";
 export function describeRoleAudience(
   predicate: (policy: RolePolicy) => boolean
 ): string {
-  const names = rolesWhere(predicate).map(
-    (role) => `${ROLE_LABELS[role].toLowerCase()}s`
+  const names = rolesWhere(predicate).map((role) =>
+    ROLE_PLURAL_LABELS[role].toLowerCase()
   );
   if (names.length <= 1) return names.join("");
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;

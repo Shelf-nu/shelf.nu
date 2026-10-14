@@ -64,9 +64,9 @@ async function loadReportsIndex({ context, request }: LoaderFunctionArgs) {
 }
 
 /**
- * Loads the reports index page. Every failure, including a refused permission or an
- * unknown report, becomes a response carrying its own status, so a member
- * without report access sees a 403 page rather than a server error.
+ * Loads the reports index page. A failure, such as a refused permission,
+ * becomes a response carrying its own status, so a member without report
+ * access sees a 403 page rather than a server error.
  */
 export async function loader(args: LoaderFunctionArgs) {
   try {
