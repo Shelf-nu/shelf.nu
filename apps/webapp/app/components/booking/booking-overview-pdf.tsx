@@ -11,6 +11,7 @@ import { PDF_CODE_COLUMN_PERCENT } from "~/modules/barcode/pdf-code-image";
 import { BOOKING_ASSET_SORTING_OPTIONS } from "~/modules/booking/constants";
 import type { PdfDbResult } from "~/modules/booking/pdf-helpers";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { truncateText } from "~/utils/truncate-text";
 import { tw } from "~/utils/tw";
 import { resolveUserDisplayName } from "~/utils/user";
 import { AssetCodePrintImage } from "../assets/asset-code-print-image";
@@ -24,6 +25,12 @@ import { Spinner } from "../shared/spinner";
 import When from "../when/when";
 
 type PdfApiResponse = { pdfMeta: PdfDbResult };
+
+/**
+ * The most description characters printed under each asset row. The booking
+ * sheet is a hand-out, so a long description is cut instead of filling pages.
+ */
+const PDF_DESCRIPTION_MAX_LENGTH = 300;
 
 /**
  * Widths of the asset table's columns, in percent, in column order. They sum
@@ -501,7 +508,10 @@ export const BookingPDFPreview = ({
                       <div className="flex items-start gap-4 bg-gray-100 p-4">
                         <div className="w-20 text-xs">Asset Description</div>
                         <div className="flex-1 text-sm">
-                          {asset.description}
+                          {truncateText(
+                            asset.description ?? "",
+                            PDF_DESCRIPTION_MAX_LENGTH
+                          )}
                         </div>
                       </div>
                     </td>

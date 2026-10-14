@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { OrgProvider } from "@/lib/org-context";
 import { ThemeProvider, useTheme } from "@/lib/theme-context";
 import { OfflineBanner } from "@/components/offline-banner";
+import { UpdateAvailableBanner } from "@/components/update-available-banner";
 import AnimatedSplash from "@/components/animated-splash";
 import { useDeepLinkHandler } from "@/lib/deep-links";
 import { useQuickActions } from "@/lib/quick-actions";
@@ -15,6 +16,7 @@ import { getStartPage, getStartPageRoute } from "@/lib/start-page";
 import { preloadScanSound } from "@/lib/scan-sound";
 import { initSentry, trackServerTag } from "@/lib/sentry";
 import { hydrateActiveServer, refreshActiveServerConfig } from "@/lib/server";
+import { unlockOrientationOnTablets } from "@/lib/orientation";
 import * as Sentry from "@sentry/react-native";
 import Constants from "expo-constants";
 
@@ -23,6 +25,9 @@ initSentry();
 
 // Keep the native splash visible until our animated splash is mounted.
 SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Phones stay upright; an Android tablet follows its rotation from launch.
+unlockOrientationOnTablets();
 
 // ── Startup diagnostic (visible in Metro terminal) ──────────────────
 if (__DEV__) {
@@ -78,7 +83,9 @@ function RootLayoutNav() {
     <>
       <StatusBar style={isDark ? "light" : "dark"} />
       <OfflineBanner />
-      <Slot />
+      <UpdateAvailableBanner>
+        <Slot />
+      </UpdateAvailableBanner>
       {!splashComplete && (
         <AnimatedSplash
           isReady={!isLoading}

@@ -1,13 +1,11 @@
 ---
 description: Adding a Companion deep-linkable route (Universal Links / App Links) requires updating the allowlist in FOUR places that must stay in sync — plus the screen must exist. Never claim the whole domain, never hand a claimed path back to the OS via Linking.openURL, and every claimed prefix MUST have a +native-intent mapping or cold starts hang on the splash.
-globs:
-  [
-    "apps/webapp/app/routes/*well-known*",
-    "apps/companion/app.json",
-    "apps/companion/lib/deep-links.ts",
-    "apps/companion/app/**/*.tsx",
-    "apps/companion/app/+native-intent.ts",
-  ]
+paths:
+  - "apps/webapp/app/routes/*well-known*"
+  - "apps/companion/app.json"
+  - "apps/companion/lib/deep-links.ts"
+  - "apps/companion/app/**/*.tsx"
+  - "apps/companion/app/+native-intent.ts"
 ---
 
 # Companion Deep-Link Allowlist Consistency

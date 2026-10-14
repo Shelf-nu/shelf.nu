@@ -207,6 +207,7 @@ import {
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
 import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
+import { removeImageFilesOfDeletedAssets } from "./image-files.server";
 import { validateContentImportRows } from "./import-preflight.server";
 import type {
   MoveAssetLocationUnitsArgs,
@@ -3599,6 +3600,9 @@ export async function deleteAsset({
       return deleted;
     });
 
+    // Not awaited: it reads storage and the workspace's assets, never rejects.
+    void removeImageFilesOfDeletedAssets({ assetIds: [id], organizationId });
+
     // Cancel reminders outside transaction (cleanup operation, not critical for atomicity)
     await Promise.all(deletedAsset.reminders.map(cancelAssetReminderScheduler));
   } catch (cause) {
@@ -5193,6 +5197,20 @@ function extractMainImageName(path: string): string | null {
   }
 }
 
+/**
+ * Removes the images an asset's new photo replaces: every file in the
+ * uploader's folder `<userId>/<assetId>/` except the current photo and its
+ * thumbnail. Best effort, never rejects.
+ *
+ * Only for a replaced photo. A deleted asset's files go through
+ * {@link removeImageFilesOfDeletedAssets}, which covers every uploader's
+ * folder and keeps files another asset of the workspace still shows.
+ *
+ * @param params.userId - The user who uploaded the current photo, which names
+ *   the folder that is cleaned
+ * @param params.assetId - The asset whose photo was replaced
+ * @param params.data.path - Storage path of the current photo
+ */
 export async function deleteOtherImages({
   userId,
   assetId,
@@ -5251,8 +5269,9 @@ export async function deleteOtherImages({
       )
     );
   } catch (cause) {
-    // Image cleanup is non-critical — the asset duplication still succeeds.
-    // Transient Supabase storage errors (e.g., 502) should not pollute Sentry.
+    // Best effort: the new photo is already stored, so a failed cleanup only
+    // leaves a stale file behind. Transient Supabase storage errors (e.g.,
+    // 502) should not pollute Sentry.
     Logger.error(
       new ShelfError({
         cause,
@@ -7629,10 +7648,11 @@ export async function bulkDeleteAssets({
     });
 
     /**
-     * We have to remove the images of assets so we have to make this query first.
-     * `title` is also selected so we can attach it as `meta.title` on the
-     * `ASSET_DELETED` activity events emitted post-delete (useful for
-     * activity feeds where the asset row no longer exists to JOIN against).
+     * Read before the delete: the ids also feed the image file cleanup that
+     * runs once the rows are gone. `title` is also selected so we can attach
+     * it as `meta.title` on the `ASSET_DELETED` activity events emitted
+     * post-delete (useful for activity feeds where the asset row no longer
+     * exists to JOIN against).
      */
     const assets = await db.asset.findMany({
       // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: permanent delete is allowed on archived assets, and their images must be cleaned up
@@ -7640,7 +7660,7 @@ export async function bulkDeleteAssets({
         id: { in: resolvedIds },
         organizationId,
       },
-      select: { id: true, mainImage: true, title: true },
+      select: { id: true, title: true },
     });
 
     // Before any write: the typed count must be the number about to go.
@@ -7688,17 +7708,11 @@ export async function bulkDeleteAssets({
         { timeout: 15000 }
       );
 
-      /** Deleting images of the assets (if any) */
-      const assetsWithImages = assets.filter((asset) => !!asset.mainImage);
-      await Promise.all(
-        assetsWithImages.map((asset) =>
-          deleteOtherImages({
-            userId,
-            assetId: asset.id,
-            data: { path: `main-image-${asset.id}.jpg` },
-          })
-        )
-      );
+      // Not awaited: it reads storage and the workspace's assets, never rejects.
+      void removeImageFilesOfDeletedAssets({
+        assetIds: assets.map((asset) => asset.id),
+        organizationId,
+      });
     } catch (cause) {
       throw new ShelfError({
         cause,

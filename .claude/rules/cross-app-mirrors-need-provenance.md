@@ -1,6 +1,7 @@
 ---
 description: Hand-copied webapp logic in the companion must be marked as a mirror, point at its source, and prefer extraction to packages/*. Companion is the only secondary app today — extend the glob when another appears.
-globs: apps/companion/**
+paths:
+  - "apps/companion/**"
 ---
 
 # Cross-App Mirrors Need Provenance
@@ -49,6 +50,7 @@ Existing mirrors:
 | `lib/custody-scan-quantities.ts` → `unitsFor` + the holder counts                           | `apps/webapp/app/components/scanner/drawer/custody-scan-quantities.ts`                                                           | `@shelf/quantity-control`                     |
 | `lib/batch-blockers.ts` → the custody blockers                                              | `apps/webapp/app/components/scanner/drawer/uses/custody-blockers.tsx`                                                            | a pure `packages/*` scanner module (none yet) |
 | `lib/kit-member-custody.ts` → `kitMemberCustodyBlock`                                       | `apps/webapp/app/modules/asset/utils.ts` → `isIndividualKitMember`                                                               | a pure `packages/*` asset module (none yet)   |
+| `lib/asset-description.ts` → `isAssetDescriptionTooLong` + the limit and message            | `apps/webapp/app/utils/asset-description.ts` + `ASSET_DESCRIPTION_MAX_LENGTH` in `constants.ts`                                  | a pure `packages/*` limits module (none yet)  |
 | `lib/model-reservation-shortfall.ts` → the shortfall notice + row chip                      | `apps/webapp/app/components/booking/booking-model-reservations-section.tsx` → the header notice and `ShortfallChip`              | `@shelf/labels`                               |
 
 The permissions mirror is gone — it was extracted to `@shelf/permissions`

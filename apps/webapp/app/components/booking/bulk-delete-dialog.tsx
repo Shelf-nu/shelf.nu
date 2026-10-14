@@ -5,6 +5,7 @@ import { z } from "zod";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import type { BookingsIndexLoaderData } from "~/routes/_layout+/bookings._index";
 import { isSelectingAllItems } from "~/utils/list";
+import { BookingsListFields } from "./bookings-list-fields";
 import {
   BulkDeleteConfirmation,
   bulkDeleteCount,
@@ -60,6 +61,7 @@ export default function BulkDeleteDialog() {
       }) => (
         <>
           <input type="hidden" value="bulk-delete" name="intent" />
+          <BookingsListFields />
           <BulkDeleteConfirmation
             count={totalSelected}
             disabled={disabled}

@@ -31,6 +31,7 @@ import {
   DELETE_CONFIRMATION_FIELD,
   DELETE_CONSEQUENCE_LABELS,
   deleteConfirmationMatches,
+  deleteConfirmationTarget,
   normalizeDeleteConfirmation,
   ASSET_TYPE_ADJECTIVES,
   ASSET_TYPE_LABELS,
@@ -489,11 +490,64 @@ test("a typed delete confirmation matches its name loosely but never blank", () 
   // A different name, a prefix or a different count is refused.
   assert.equal(deleteConfirmationMatches("Camera", "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches("11", 12), false);
-  // Nothing typed, or nothing to match, never unlocks.
+  // Nothing typed never unlocks, whatever the name.
   assert.equal(deleteConfirmationMatches("", "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches(undefined, "Camera Kit"), false);
   assert.equal(deleteConfirmationMatches("", ""), false);
   assert.equal(deleteConfirmationMatches("   ", "  "), false);
+});
+
+test("a nameless item is confirmed by typing the word delete", () => {
+  for (const name of ["", "   ", "\u200B"]) {
+    assert.equal(deleteConfirmationMatches("Delete ", name), true);
+    assert.equal(deleteConfirmationMatches("delete", name), true);
+    assert.equal(deleteConfirmationMatches("", name), false);
+    assert.equal(deleteConfirmationMatches("  ", name), false);
+    assert.equal(deleteConfirmationMatches(undefined, name), false);
+  }
+  // An item with a name still asks for the name, not the word.
+  assert.equal(deleteConfirmationMatches("delete", "Camera Kit"), false);
+});
+
+test("what to type is the name or count, or the word delete for a nameless item", () => {
+  assert.equal(deleteConfirmationTarget("Camera Kit"), "Camera Kit");
+  assert.equal(deleteConfirmationTarget(12), "12");
+  for (const name of ["", "   ", "\u200B", "\uFEFF "]) {
+    assert.equal(deleteConfirmationTarget(name), "delete");
+  }
+});
+
+test("an invisible character between a letter and its accent still matches the composed letter", () => {
+  // "Cafe" + zero-width space + combining acute, shown as "Café"
+  assert.equal(
+    deleteConfirmationMatches("Caf\u00E9", "Cafe\u200B\u0301"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Cafe\u0301", "Caf\u00E9"), true);
+});
+
+test("invisible format characters in a stored name need not be typed", () => {
+  // Zero-width space, non-joiner and joiner, and a byte order mark: none can
+  // be seen in the instruction, so none is asked for.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200BKit"), true);
+  assert.equal(deleteConfirmationMatches("Tripod", "Tripod\u200B"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200CKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u200DKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\uFEFFKit"), true);
+  assert.equal(
+    deleteConfirmationMatches("Camera Kit", "Camera \u200BKit"),
+    true
+  );
+  // A pasted name that carries the character matches as well.
+  assert.equal(
+    deleteConfirmationMatches("Camera\u200BKit", "Camera\u200BKit"),
+    true
+  );
+  assert.equal(deleteConfirmationMatches("Camera", "Camera\u200BKit"), false);
+  // Soft hyphen, word joiner and a left-to-right mark are invisible too.
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u00ADKit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "Camera\u2060Kit"), true);
+  assert.equal(deleteConfirmationMatches("CameraKit", "\u200ECameraKit"), true);
 });
 
 test("the confirmation field name is the one the bulk endpoints read", () => {

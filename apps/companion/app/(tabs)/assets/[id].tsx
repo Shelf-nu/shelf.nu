@@ -14,7 +14,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  Dimensions,
 } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
@@ -39,6 +38,7 @@ import {
   getQuantityStatusLabel,
   formatCurrency,
 } from "@/lib/constants";
+import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { useDateFormatter } from "@/lib/use-date-formatter";
@@ -1544,6 +1544,9 @@ const useStyles = createStyles((colors, shadows) => ({
     backgroundColor: colors.white,
     borderRadius: borderRadius.xl,
     width: "75%",
+    // The modal sits outside the content column, so 75% is of the whole
+    // window; the cap keeps a tablet's menu narrower than the column behind it.
+    maxWidth: FORM_MAX_WIDTH,
     overflow: "hidden",
     ...shadows.lg,
   },
@@ -1700,8 +1703,10 @@ const useStyles = createStyles((colors, shadows) => ({
     justifyContent: "center",
     alignItems: "center",
   },
+  // Sized against the full-screen overlay rather than a window size read when
+  // the styles are built, so the image follows a rotation or a window resize.
   zoomImage: {
-    width: Dimensions.get("window").width,
-    height: Dimensions.get("window").height * 0.7,
+    width: "100%",
+    height: "70%",
   },
 }));

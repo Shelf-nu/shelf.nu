@@ -84,9 +84,11 @@ import { generateQrObj } from "~/modules/qr/utils.server";
 import { getLastScanForViewer } from "~/modules/scan/service.server";
 import { getTeamMembersForQuantityCustody } from "~/modules/team-member/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
+import { assetDescriptionSchema } from "~/utils/asset-description";
 import { formatAssetValueWithBreakdown } from "~/utils/asset-value";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { getClientHint } from "~/utils/client-hints";
+import { ASSET_DESCRIPTION_MAX_LENGTH } from "~/utils/constants";
 import { formatCurrency } from "~/utils/currency";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
 import { buildCustomFieldLinkHref } from "~/utils/custom-field-link";
@@ -514,8 +516,12 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
       switch (fieldName) {
         case "description": {
+          const { fieldValue: rawDescription } = parseData(
+            formData,
+            z.object({ fieldValue: assetDescriptionSchema.optional() })
+          );
           /** Trim whitespace; treat empty as empty string (Prisma allows it) */
-          const description = (fieldValue ?? "").trim();
+          const description = (rawDescription ?? "").trim();
           await updateAsset({
             id,
             description,
@@ -1087,11 +1093,8 @@ export default function AssetOverview() {
                       name="fieldValue"
                       defaultValue={asset.description ?? ""}
                       className="w-full"
-                      maxLength={1000}
+                      characterLimit={ASSET_DESCRIPTION_MAX_LENGTH}
                     />
-                    <p className="mt-1 text-xs text-gray-400">
-                      Maximum 1000 characters
-                    </p>
                   </div>
                 )}
               />
