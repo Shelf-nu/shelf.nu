@@ -10,16 +10,22 @@
  * @see {@link file://./worker.server.ts}
  * @see {@link file://./failure.server.ts}
  */
-import type { Organization, User } from "@prisma/client";
+import type { AssetImport, Organization, Prisma, User } from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
 import { ASSET_IMPORT_DRAFT_TTL_HOURS } from "./constants";
-import type { StoredImportRow } from "./types";
+import { markImportFailed, markStalledImportIfNeeded } from "./failure.server";
+import type {
+  AssetImportDetailsPayload,
+  AssetImportStatusPayload,
+  ImportWarning,
+  StoredImportRow,
+} from "./types";
 import { validateContentImportFile } from "./validate.server";
 import { enqueueAssetImportStep } from "./worker.server";
 
-export { markImportFailed, markStalledImportIfNeeded } from "./failure.server";
+export { markImportFailed, markStalledImportIfNeeded };
 
 /**
  * Whether an error is the partial unique index on active imports refusing a
@@ -241,4 +247,168 @@ export async function resumeAssetImport({
   }
 
   return { importId };
+}
+
+/**
+ * Columns a status read selects. Never `rows` or `resolved`, which hold the
+ * whole file and are far larger than a poll should carry, and never
+ * `warnings`, which only the status page needs.
+ */
+const STATUS_SELECT = {
+  id: true,
+  organizationId: true,
+  createdById: true,
+  status: true,
+  phase: true,
+  fileName: true,
+  totalRows: true,
+  processedRows: true,
+  errorMessage: true,
+  warningCount: true,
+  completedAt: true,
+  updatedAt: true,
+} satisfies Prisma.AssetImportSelect;
+
+/** The 404 raised when an import is missing, in another workspace or a draft. */
+function importNotFound(): ShelfError {
+  return new ShelfError({
+    cause: null,
+    message: "Import not found.",
+    label: "Asset Import",
+    status: 404,
+    shouldBeCaptured: false,
+  });
+}
+
+/**
+ * Loads an import that has left DRAFT in the active workspace and fails it
+ * first if it stalled.
+ *
+ * @param args.importId - The import to load
+ * @param args.organizationId - Active workspace; other workspaces' imports are
+ * reported as missing
+ * @param args.withWarnings - Also select the stored `warnings`
+ * @returns The import as it is after the stall check
+ * @throws {ShelfError} 404 when it does not exist in the workspace or is
+ * still a DRAFT (a draft is only visible through the upload flow)
+ */
+async function loadVisibleImport({
+  importId,
+  organizationId,
+  withWarnings,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+  withWarnings: boolean;
+}) {
+  const found = await db.assetImport.findFirst({
+    where: { id: importId, organizationId, status: { not: "DRAFT" } },
+    select: { ...STATUS_SELECT, ...(withWarnings ? { warnings: true } : {}) },
+  });
+
+  if (!found) throw importNotFound();
+
+  // why: the stall check reads only id, organizationId, status and updatedAt,
+  // all selected above; the full row type is not needed to run it.
+  const checked = await markStalledImportIfNeeded(
+    found as unknown as AssetImport
+  );
+
+  return {
+    status: checked.status,
+    phase: checked.phase,
+    errorMessage: checked.errorMessage,
+    completedAt: checked.completedAt,
+    processedRows: checked.processedRows,
+    warningCount: checked.warningCount,
+    warnings: checked.warnings,
+    found,
+  };
+}
+
+/**
+ * Builds the status payload from a loaded import.
+ *
+ * @param loaded - Result of {@link loadVisibleImport}
+ * @param userId - The viewer; decides `isMine`
+ */
+function toStatusPayload(
+  loaded: Awaited<ReturnType<typeof loadVisibleImport>>,
+  userId: User["id"]
+): AssetImportStatusPayload {
+  const { found } = loaded;
+  return {
+    id: found.id,
+    status: loaded.status,
+    phase: loaded.phase,
+    fileName: found.fileName,
+    totalRows: found.totalRows,
+    processedRows: loaded.processedRows,
+    errorMessage: loaded.errorMessage,
+    warningCount: loaded.warningCount,
+    completedAt: loaded.completedAt ? loaded.completedAt.toISOString() : null,
+    isMine: found.createdById === userId,
+  };
+}
+
+/**
+ * Reads an import's progress for the status endpoint and the progress UI.
+ * Fails the import first when it stalled. Any member with import permission
+ * can read any import in the workspace; `isMine` tells the UI whether the
+ * viewer started it.
+ *
+ * @param args.importId - The import to read
+ * @param args.organizationId - Active workspace
+ * @param args.userId - The viewer
+ * @returns The status payload; never rows or warnings
+ * @throws {ShelfError} 404 when the import is not in this workspace or is
+ * still a DRAFT
+ */
+export async function getAssetImportStatus({
+  importId,
+  organizationId,
+  userId,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<AssetImportStatusPayload> {
+  const loaded = await loadVisibleImport({
+    importId,
+    organizationId,
+    withWarnings: false,
+  });
+  return toStatusPayload(loaded, userId);
+}
+
+/**
+ * Reads an import's progress plus its stored warnings for the status page.
+ *
+ * @param args.importId - The import to read
+ * @param args.organizationId - Active workspace
+ * @param args.userId - The viewer
+ * @returns The status payload and the warnings (empty when none are stored)
+ * @throws {ShelfError} 404 when the import is not in this workspace or is
+ * still a DRAFT
+ */
+export async function getAssetImportDetails({
+  importId,
+  organizationId,
+  userId,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+  userId: User["id"];
+}): Promise<AssetImportDetailsPayload> {
+  const loaded = await loadVisibleImport({
+    importId,
+    organizationId,
+    withWarnings: true,
+  });
+  return {
+    ...toStatusPayload(loaded, userId),
+    warnings: Array.isArray(loaded.warnings)
+      ? (loaded.warnings as unknown as ImportWarning[])
+      : [],
+  };
 }

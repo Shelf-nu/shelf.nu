@@ -16,6 +16,8 @@ import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ShelfError } from "~/utils/error";
 import {
   confirmAssetImport,
+  getAssetImportDetails,
+  getAssetImportStatus,
   markStalledImportIfNeeded,
   resumeAssetImport,
 } from "./service.server";
@@ -338,6 +340,143 @@ describe("resumeAssetImport", () => {
     expect(db.assetImport.updateMany).toHaveBeenLastCalledWith({
       where: { id: "imp", organizationId: "org", status: "QUEUED" },
       data: { status: "FAILED", errorMessage: "boom" },
+    });
+  });
+});
+
+describe("getAssetImportStatus and getAssetImportDetails", () => {
+  const completedAt = new Date("2026-10-14T10:00:00.000Z");
+
+  /** A loaded import row as the select returns it. */
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "imp",
+      organizationId: "org",
+      createdById: "u",
+      status: "COMPLETED",
+      phase: "FINALIZE",
+      fileName: "assets.csv",
+      totalRows: 10,
+      processedRows: 10,
+      errorMessage: null,
+      warningCount: 1,
+      completedAt,
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns the status with ISO dates and isMine for the creator", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(row() as never);
+
+    const result = await getAssetImportStatus(args);
+
+    expect(result).toEqual({
+      id: "imp",
+      status: "COMPLETED",
+      phase: "FINALIZE",
+      fileName: "assets.csv",
+      totalRows: 10,
+      processedRows: 10,
+      errorMessage: null,
+      warningCount: 1,
+      completedAt: "2026-10-14T10:00:00.000Z",
+      isMine: true,
+    });
+  });
+
+  it("reports isMine false for another member of the workspace", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(row() as never);
+
+    const result = await getAssetImportStatus({ ...args, userId: "other" });
+
+    expect(result.isMine).toBe(false);
+  });
+
+  it("scopes the lookup to the workspace, excludes drafts and never selects rows or warnings", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(row() as never);
+
+    await getAssetImportStatus(args);
+
+    const query = vi.mocked(db.assetImport.findFirst).mock.calls[0][0];
+    expect(query?.where).toEqual({
+      id: "imp",
+      organizationId: "org",
+      status: { not: "DRAFT" },
+    });
+    expect(query?.select).not.toHaveProperty("rows");
+    expect(query?.select).not.toHaveProperty("resolved");
+    expect(query?.select).not.toHaveProperty("warnings");
+  });
+
+  it("404s when the import is not visible in the workspace", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await expect(getAssetImportStatus(args)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it("fails a stalled import and reports it as FAILED", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce(
+        row({
+          status: "RUNNING",
+          completedAt: null,
+          updatedAt: minutesAgo(120),
+        }) as never
+      )
+      .mockResolvedValueOnce(
+        imp({
+          status: "FAILED",
+          phase: "ROWS",
+          errorMessage: "stopped",
+          completedAt: null,
+          processedRows: 4,
+          warningCount: 0,
+        }) as never
+      );
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+
+    const result = await getAssetImportStatus(args);
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toBe("stopped");
+  });
+
+  it("returns the stored warnings with the details", async () => {
+    const warnings = [{ row: 2, title: "Drill", message: "QR code in use" }];
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(
+      row({ warnings }) as never
+    );
+
+    const result = await getAssetImportDetails(args);
+
+    expect(result.warnings).toEqual(warnings);
+    expect(
+      vi.mocked(db.assetImport.findFirst).mock.calls[0][0]?.select
+    ).toMatchObject({ warnings: true });
+  });
+
+  it("returns no warnings when none are stored", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(
+      row({ warnings: null }) as never
+    );
+
+    const result = await getAssetImportDetails(args);
+
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("404s details for an import that is not visible", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await expect(getAssetImportDetails(args)).rejects.toMatchObject({
+      status: 404,
     });
   });
 });
