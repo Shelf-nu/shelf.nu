@@ -255,11 +255,15 @@ export function transfersBookingsOnRoleChange({
 /**
  * The role a human label names, for forms and CSV imports that submit labels.
  *
- * @param label - e.g. "Self service"
+ * Case and surrounding spaces are ignored, because a label typed into a CSV
+ * cell is rarely an exact copy of the one the app shows.
+ *
+ * @param label - e.g. "Self service", " self service ", "ADMINISTRATOR"
  * @returns The role, or `undefined` for an unknown label
  */
 export function labelToRole(label: string): OrganizationRole | undefined {
+  const wanted = label.trim().toLowerCase();
   return (Object.keys(ROLE_LABELS) as OrganizationRole[]).find(
-    (r) => ROLE_LABELS[r] === label
+    (r) => ROLE_LABELS[r].toLowerCase() === wanted
   );
 }

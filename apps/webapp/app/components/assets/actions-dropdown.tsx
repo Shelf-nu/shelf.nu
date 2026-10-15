@@ -176,8 +176,8 @@ const ConditionalActionsDropdown = () => {
    */
   const archivedActionDisabled: { reason: string } | false = isArchived
     ? {
-        // Self-service sees this menu (custody) but can't reinstate, so it is
-        // told who can instead.
+        // Members who see this menu without the archive grant (Manager, self
+        // service) cannot reinstate, so they are told who can instead.
         reason: archivedAssetBlockedReason({ canReinstate: canArchiveAsset }),
       }
     : false;

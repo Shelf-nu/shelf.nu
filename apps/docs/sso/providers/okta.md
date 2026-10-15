@@ -19,7 +19,7 @@ Read the general [SSO prerequisites](../index.md#before-you-start-prerequisites)
 
 - You have a **non-SSO owner account** ready to own the Shelf workspace.
 - You've told your Shelf contact about any existing **standard accounts** on your SSO domain, so they can be converted to SSO (they keep their data, so nothing needs to be deleted). See [Moving existing Shelf users to SSO](#moving-existing-shelf-users-to-sso).
-- You've planned which Okta groups map to which Shelf role (Administrator, Self service, Base).
+- You've planned which Okta groups map to which Shelf role (Administrator, Manager, Self service, Base).
 
 ## 1. Create the app integration [#](#create-app)
 
@@ -108,6 +108,7 @@ Enter the **group name** exactly as it appears in Okta next to each role you use
 | Shelf role        | Example Okta group name |
 | ----------------- | ----------------------- |
 | **Administrator** | `SSO-Shelf-Admins`      |
+| **Manager**       | `SSO-Shelf-Managers`    |
 | **Self service**  | `SSO-Shelf-Staff`       |
 | **Base**          | `SSO-Shelf-Users`       |
 
@@ -116,7 +117,7 @@ Rules to know:
 - **Use the name, not the Okta group ID.** Okta sends names (this is different from Microsoft Entra, where you paste Object IDs).
 - **Multiple groups for one role:** each field accepts several names, separated by commas. Anyone in _any_ of them gets that role.
 - **Matching ignores letter case and surrounding spaces**, but is otherwise exact. Copy the name from Okta to be safe.
-- **Precedence is Administrator > Self service > Base.** A user whose groups match more than one role gets the highest. A user only ever holds one role per workspace.
+- **Precedence is Administrator > Manager > Self service > Base.** A user whose groups match more than one role gets the highest. A user only ever holds one role per workspace.
 - You only need to map the roles you use, but at least one must be mapped. A single group is enough.
 
 ## 8. Test single sign-on [#](#test)

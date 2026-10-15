@@ -203,7 +203,8 @@ export function signupIntentNotice({
 /**
  * Where onboarding sends a freshly onboarded user.
  *
- * Invited users go straight to the workspace that invited them. A Team
+ * Invited users go to `/`, which lands them on their role's own page in the
+ * workspace that invited them (a Manager on bookings, an Admin on assets). A Team
  * intent skips the Personal/Team question and lands on the plan page, but
  * only where plans exist: without premium features that page cannot render,
  * and `/welcome` already knows to send such users on to their assets.
@@ -223,7 +224,7 @@ export function resolveOnboardingDestination({
   premiumFeaturesEnabled: boolean;
 }): string {
   if (redirectViaInvite) {
-    return "/assets";
+    return "/";
   }
   if (premiumFeaturesEnabled && hasTeamPlanIntent(signupIntent)) {
     return `/select-plan?${planIntentSearchParams(signupIntent)}`;

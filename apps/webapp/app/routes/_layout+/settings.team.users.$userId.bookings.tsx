@@ -69,11 +69,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     const cookie = await updateCookieWithPerPage(request, perPageParam);
     const { perPage } = cookie;
 
-    // Scopes to the profile being viewed, NOT the viewer — this route renders
-    // one user's bookings and is gated above by a `teamMemberProfile.read` check
-    // (self-service/base users cannot reach other profiles). Do not substitute
-    // the caller's id here. Resolves all of the viewed user's team-member links
-    // so legacy team-member-linked bookings show, matching their own index.
+    // Scopes to the profile being viewed, NOT the viewer: this route renders
+    // one user's bookings. Only roles that see every booking can open another
+    // member's profile (`teamMemberProfile:read` implies
+    // `bookings.see === "all"`, pinned in
+    // `packages/permissions/src/policies.test.ts`), so no visibility filter
+    // applies here. Do not substitute the caller's id. Resolves all of the
+    // viewed user's team-member links so legacy team-member-linked bookings
+    // show, matching their own index.
     const custodianScope = await resolveCustodianScope({
       userId: selectedUserId,
       organizationId,
