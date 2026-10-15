@@ -81,6 +81,8 @@ declare global {
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
       LATEST_COMPANION_VERSION: string;
+      /** Bearer key for `POST /api/update-drafts`; unset keeps it off. */
+      UPDATE_DRAFTS_API_KEY: string;
     }
   }
 }
