@@ -5,7 +5,7 @@ describe("archivedHiddenEmptyState", () => {
     expect(
       archivedHiddenEmptyState({
         archivedCount: 0,
-        canArchiveAssets: true,
+        canViewArchivedAssets: true,
         place: "kit",
       })
     ).toBeNull();
@@ -15,7 +15,7 @@ describe("archivedHiddenEmptyState", () => {
     expect(
       archivedHiddenEmptyState({
         archivedCount: 1,
-        canArchiveAssets: true,
+        canViewArchivedAssets: true,
         place: "kit",
       })
     ).toEqual({
@@ -25,7 +25,7 @@ describe("archivedHiddenEmptyState", () => {
     expect(
       archivedHiddenEmptyState({
         archivedCount: 3,
-        canArchiveAssets: true,
+        canViewArchivedAssets: true,
         place: "location",
       })?.text
     ).toBe(
@@ -36,7 +36,7 @@ describe("archivedHiddenEmptyState", () => {
   it("never sends a member without the Archived view to it", () => {
     const state = archivedHiddenEmptyState({
       archivedCount: 2,
-      canArchiveAssets: false,
+      canViewArchivedAssets: false,
       place: "location",
     });
     expect(state?.title).toBe("No active assets at this location");

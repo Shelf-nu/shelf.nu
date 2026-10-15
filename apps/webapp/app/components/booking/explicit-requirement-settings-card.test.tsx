@@ -91,7 +91,7 @@ describe("ExplicitCheckoutSettings", () => {
 
     expect(
       screen.getByRole("switch", {
-        name: "Admins",
+        name: "Admins and Managers",
       })
     ).toHaveAttribute("aria-checked", "true");
     expect(
@@ -139,7 +139,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
     const adminSwitch = () =>
       screen.getByRole("switch", {
-        name: "Admins",
+        name: "Admins and Managers",
       });
 
     fireEvent.click(adminSwitch());
@@ -187,7 +187,7 @@ describe("ExplicitCheckoutSettings", () => {
     );
 
     const adminSwitch = screen.getByRole("switch", {
-      name: "Admins",
+      name: "Admins and Managers",
     });
     expect(adminSwitch).toBeDisabled();
     expect(
@@ -213,7 +213,7 @@ describe("ExplicitCheckinSettings", () => {
 
     fireEvent.click(
       screen.getByRole("switch", {
-        name: "Admins",
+        name: "Admins and Managers",
       })
     );
 
@@ -245,7 +245,7 @@ describe("what the cards say", () => {
     ).toBeVisible();
     expect(
       screen.getByText(
-        "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+        "Removes the one-click check-in for Admins and Managers. They check items in by scanning them or by selecting them from the list."
       )
     ).toBeVisible();
     expect(
@@ -273,11 +273,13 @@ describe("what the cards say", () => {
     ).toBeVisible();
     expect(
       screen.getByText(
-        "Removes the one-click check-out for Admins. They check items out by scanning them or by selecting them from the list."
+        "Removes the one-click check-out for Admins and Managers. They check items out by scanning them or by selecting them from the list."
       )
     ).toBeVisible();
     // Both cards name the roles the same way, so the two cards read as one rule.
-    expect(screen.getByRole("switch", { name: "Admins" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Admins and Managers" })
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("switch", { name: "Self Service users" })
     ).toBeInTheDocument();
@@ -287,7 +289,7 @@ describe("what the cards say", () => {
 describe("both cards on one page", () => {
   it("tells the check-in switch from the check-out switch of the same role", () => {
     // Settings > Bookings renders both cards, so two switches are named
-    // "Admins". Each one's description names the direction, which is what a
+    // "Admins and Managers". Each one's description names the direction, which is what a
     // screen reader user hears to tell them apart.
     render(
       <>
@@ -308,13 +310,15 @@ describe("both cards on one page", () => {
       </>
     );
 
-    const admins = screen.getAllByRole("switch", { name: "Admins" });
+    const admins = screen.getAllByRole("switch", {
+      name: "Admins and Managers",
+    });
     expect(admins).toHaveLength(2);
     expect(admins[0]).toHaveAccessibleDescription(
-      "Removes the one-click check-in for Admins. They check items in by scanning them or by selecting them from the list."
+      "Removes the one-click check-in for Admins and Managers. They check items in by scanning them or by selecting them from the list."
     );
     expect(admins[1]).toHaveAccessibleDescription(
-      "Removes the one-click check-out for Admins. They check items out by scanning them or by selecting them from the list."
+      "Removes the one-click check-out for Admins and Managers. They check items out by scanning them or by selecting them from the list."
     );
 
     const selfService = screen.getAllByRole("switch", {

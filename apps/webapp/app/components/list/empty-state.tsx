@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useLoaderData, useLocation } from "react-router";
 
 import { useSearchParams } from "~/hooks/search-params";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import type { SearchableIndexResponse } from "~/modules/types";
 import { NON_FILTER_PARAMS } from "~/utils/filter-params";
 import { tw } from "~/utils/tw";
@@ -68,12 +68,13 @@ export const EmptyState = ({
     plural === "assets" && offersArchivedView && archivedParam === "archived";
 
   /**
-   * Only members who can archive get the view menu (see `useCanArchiveAssets`),
+   * Only members who may see archived assets get the view menu (see
+   * `useCanViewArchivedAssets`),
    * so only they can be sent to it. Pointing BASE / SELF_SERVICE at a control
    * their role does not render would be worse than the original wording, so
    * they get the same fact plus the action actually open to them.
    */
-  const canArchiveAssets = useCanArchiveAssets();
+  const canViewArchivedAssets = useCanViewArchivedAssets();
 
   const filteredTexts = hasSearch
     ? {
@@ -81,11 +82,11 @@ export const EmptyState = ({
         // The server ignores `archived=` for members without the Archived
         // view, so only they are told about it.
         p:
-          searchIsArchivedOnly && canArchiveAssets
+          searchIsArchivedOnly && canViewArchivedAssets
             ? `No archived ${plural} match "${search}". Active ${plural} are hidden from this view. Pick Active or All from the menu on the list title.`
             : !searchMayBeHidingArchived
             ? `Your search for "${search}" did not match any ${plural} in the database.`
-            : canArchiveAssets
+            : canViewArchivedAssets
             ? `No active ${plural} match "${search}". Archived ${plural} are hidden from this view. Pick Archived from the menu on the list title.`
             : `No active ${plural} match "${search}". Archived ${plural} are hidden from your view. Ask an admin to check.`,
       }

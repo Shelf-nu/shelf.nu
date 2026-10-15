@@ -78,6 +78,7 @@ import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
 import { requireAdmin } from "~/utils/roles.server";
+import { hasSsoGroupMappings } from "~/utils/sso-group-roles";
 import { checkDomainSSOStatus } from "~/utils/sso.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
@@ -159,11 +160,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       (org) => ({
         id: org.id,
         name: org.name,
-        hasGroupMappings: Boolean(
-          org.ssoDetails?.adminGroupId ||
-            org.ssoDetails?.selfServiceGroupId ||
-            org.ssoDetails?.baseUserGroupId
-        ),
+        hasGroupMappings: org.ssoDetails
+          ? hasSsoGroupMappings(org.ssoDetails)
+          : false,
         enabledSso: org.enabledSso,
         // A linked workspace always has SSO details; the fallback mirrors the
         // column default.

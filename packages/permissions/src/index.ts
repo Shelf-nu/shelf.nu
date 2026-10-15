@@ -27,7 +27,12 @@
  * implementations live in the sibling modules.
  */
 
-export { ORGANIZATION_ROLES, ROLE_LABELS, isOrganizationRole } from "./roles";
+export {
+  ORGANIZATION_ROLES,
+  ROLE_LABELS,
+  ROLE_PLURAL_LABELS,
+  isOrganizationRole,
+} from "./roles";
 export type { OrganizationRole } from "./roles";
 export { PermissionAction, PermissionEntity } from "./vocabulary";
 export { Role2PermissionMap } from "./matrix";

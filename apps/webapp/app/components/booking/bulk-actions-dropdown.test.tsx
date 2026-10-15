@@ -61,6 +61,7 @@ vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
     open: true,
     defaultOpen: false,
     setOpen: vi.fn(),
+    onOpenChange: vi.fn(),
   }),
 }));
 

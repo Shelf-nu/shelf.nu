@@ -62,9 +62,9 @@ function ExtraInfoTooltip({ children }: { children: ReactNode }) {
         <TooltipTrigger>{children}</TooltipTrigger>
         <TooltipContent side="top" className="max-w-72">
           <p>
-            Your booking is currently reserved, however the admin can choose to
-            reject or close it at any point of time, if there are conflicts with
-            other bookings.
+            Your booking is currently reserved, however an administrator or
+            manager can choose to reject or close it at any point of time, if
+            there are conflicts with other bookings.
           </p>
         </TooltipContent>
       </Tooltip>

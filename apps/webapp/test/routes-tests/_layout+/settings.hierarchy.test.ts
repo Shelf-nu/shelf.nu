@@ -190,9 +190,8 @@ describe("settings hierarchy", () => {
         bookings: "denied",
         emails: "denied",
         customFields: "denied",
-        // BASE holds assetModel:read; the page is reachable read-only by URL
-        // while the layout still refuses it.
-        assetModels: role === "BASE" ? "allowed" : "denied",
+        // The asset-models page needs assetModel:update, which neither holds.
+        assetModels: "denied",
         team: "denied",
         teamUsers: "denied",
         teamInvites: "denied",

@@ -57,7 +57,7 @@ export function loader({ context }: LoaderFunctionArgs) {
   const { disableSignup, disableSSO } = config;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   return data(payload({ title, subHeading, disableSignup, disableSSO }));
@@ -163,10 +163,10 @@ export async function action({ context, request }: ActionFunctionArgs) {
           request,
         });
 
-        // Set the auth session and redirect to the assets page
+        // Set the auth session and redirect to the role's landing page
         context.setSession(authSession);
 
-        return redirect(safeRedirect(redirectTo || "/assets"), {
+        return redirect(safeRedirect(redirectTo || "/"), {
           headers: [
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],

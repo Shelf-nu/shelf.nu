@@ -10,7 +10,6 @@ import { ALL_SELECTED_KEY } from "~/utils/list";
 import {
   PermissionAction,
   PermissionEntity,
-  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -81,13 +80,9 @@ export async function loader({ context, request }: ActionFunctionArgs) {
             organizationId,
           }),
           // The Archived / All views are for members who may see archived
-          // assets (`asset: archive`, issue #382); anyone else downloads the
-          // codes of active assets, whatever the URL says.
-          honorArchivedView: roleHasPermission({
-            roles: [access.role],
-            entity: PermissionEntity.asset,
-            action: PermissionAction.archive,
-          }),
+          // assets (`assets.seeArchived`, issue #382); anyone else downloads
+          // the codes of active assets, whatever the URL says.
+          honorArchivedView: access.policy.assets.seeArchived,
         })
       : { id: { in: assetIds }, organizationId };
 

@@ -175,13 +175,13 @@ describe("join loader — reading the signup link", () => {
     });
   });
 
-  it("still sends a signed-in visitor to their assets, intent or not", async () => {
+  it("still sends a signed-in visitor to their landing page, intent or not", async () => {
     const response = (await loader(
       loaderArgs("http://localhost:3000/join?plan=team&trial=true", true)
     )) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toEqual([]);
   });
 });

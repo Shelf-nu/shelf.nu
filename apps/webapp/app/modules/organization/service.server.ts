@@ -329,6 +329,7 @@ export async function updateOrganization({
   ssoDetails?: {
     selfServiceGroupId: string | null;
     adminGroupId: string | null;
+    managerGroupId: string | null;
     baseUserGroupId: string | null;
   };
   hasSequentialIdsMigrated?: Organization["hasSequentialIdsMigrated"];

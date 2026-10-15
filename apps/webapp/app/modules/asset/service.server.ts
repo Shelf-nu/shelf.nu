@@ -40,6 +40,7 @@ import type {
   SortingOptions,
 } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 // Imported from the dependency-free leaf (NOT `availability.server`) so that
 // importing asset/service.server does NOT drag in the heavy
@@ -1705,7 +1706,7 @@ export async function createAsset({
               },
             })
           : created;
-      });
+      }, LONG_TRANSACTION_OPTIONS);
 
       // Successfully created asset, exit the retry loop
       return asset;
@@ -5716,6 +5717,17 @@ export async function getAllEntriesForCreateAndEdit({
   }
 }
 
+/**
+ * One page of assets for a simple-mode list, plus the data its filter
+ * dropdowns need.
+ *
+ * Reads the filters from `filters` when given, otherwise from the request
+ * URL. `locationIdsOverride` replaces only the location ids the asset query
+ * matches; the dropdown seeds keep reading the URL.
+ *
+ * @returns The page of assets, paging info, and the category, tag, location
+ *   and asset model seeds for the filter dropdowns
+ */
 export async function getPaginatedAndFilterableAssets({
   request,
   organizationId,
@@ -5727,6 +5739,7 @@ export async function getPaginatedAndFilterableAssets({
   bookableScope,
   canSeeAllCustody,
   userId,
+  locationIdsOverride,
   honorArchivedView = false,
 }: {
   request: LoaderFunctionArgs["request"];
@@ -5734,6 +5747,17 @@ export async function getPaginatedAndFilterableAssets({
   // `AssetKit` pivot. Callers still pass a plain `kitId` string here
   // for filtering; the where-builder will map it onto `assetKits.some`.
   kitId?: string | null;
+  /**
+   * Location ids the ASSET QUERY matches, in place of the URL's `location`
+   * values. Omitted, the URL's own values are matched exactly.
+   *
+   * The Locations filter seed still reads the URL, so widening what the list
+   * matches (ticked locations plus their child locations) never changes which
+   * options read as ticked.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: Location["id"][];
   extraInclude?: Prisma.AssetInclude;
   excludeCategoriesQuery?: boolean;
   excludeTagsQuery?: boolean;
@@ -5855,7 +5879,7 @@ export async function getPaginatedAndFilterableAssets({
         bookingTo: bookingTo ?? undefined,
         hideUnavailable,
         unhideAssetsBookigIds,
-        locationIds,
+        locationIds: locationIdsOverride ?? locationIds,
         teamMemberIds: scopedTeamMemberIds,
         extraInclude,
         assetKitFilter,

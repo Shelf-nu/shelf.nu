@@ -51,7 +51,7 @@ function ConditionalDropdown() {
 
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -71,19 +71,25 @@ function ConditionalDropdown() {
         />
       )}
 
-      <BulkDeleteDialog />
+      <When
+        truthy={userHasPermission({
+          roles,
+          entity: PermissionEntity.location,
+          action: PermissionAction.delete,
+        })}
+      >
+        <BulkDeleteDialog />
+      </When>
       <LocationsBulkStartAuditDialog />
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="actions-dropdown hidden sm:flex"
+          className="actions-dropdown hidden md:flex"
           onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
@@ -96,7 +102,7 @@ function ConditionalDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="asset-actions flex-1 sm:hidden"
+          className="asset-actions flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           type="button"
@@ -107,6 +113,7 @@ function ConditionalDropdown() {
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
@@ -134,18 +141,26 @@ function ConditionalDropdown() {
               </DropdownMenuItem>
             </When>
 
-            <DropdownMenuItem
-              className="px-4 py-1 md:p-0"
-              onSelect={(e) => {
-                e.preventDefault();
-              }}
+            <When
+              truthy={userHasPermission({
+                roles,
+                entity: PermissionEntity.location,
+                action: PermissionAction.delete,
+              })}
             >
-              <BulkUpdateDialogTrigger
-                type="trash"
-                label="Delete"
-                onClick={closeMenu}
-              />
-            </DropdownMenuItem>
+              <DropdownMenuItem
+                className="px-4 py-1 md:p-0"
+                onSelect={(e) => {
+                  e.preventDefault();
+                }}
+              >
+                <BulkUpdateDialogTrigger
+                  type="trash"
+                  label="Delete"
+                  onClick={closeMenu}
+                />
+              </DropdownMenuItem>
+            </When>
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
