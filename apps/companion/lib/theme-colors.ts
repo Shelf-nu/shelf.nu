@@ -183,6 +183,10 @@ function buildStatusBadge(c: Colors) {
     AVAILABLE: { bg: c.availableBg, text: c.available },
     IN_CUSTODY: { bg: c.inCustodyBg, text: c.inCustody },
     CHECKED_OUT: { bg: c.checkedOutBg, text: c.checkedOut },
+    // Not an `Asset.status` value: an archived asset shows this one calm badge
+    // instead of its status (see lib/archived-assets.ts). Same pair as the
+    // archived booking badge below.
+    ARCHIVED: { bg: c.borderLight, text: c.muted },
   } as Record<string, { bg: string; text: string }>;
 }
 

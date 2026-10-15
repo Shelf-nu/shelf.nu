@@ -1,6 +1,8 @@
 ---
 description: The `hidden` attribute cannot hide an element that carries a display utility, and role queries cannot see the difference
-globs: ["apps/webapp/**/*.tsx", "apps/companion/**/*.tsx"]
+paths:
+  - "apps/webapp/**/*.tsx"
+  - "apps/companion/**/*.tsx"
 ---
 
 # `hidden` Loses To Any Display Utility

@@ -1,3 +1,4 @@
+/** CSV export route for asset lists, backups, and import-ready downloads. */
 import { AssetIndexMode } from "@prisma/client";
 import { data, type LoaderFunctionArgs } from "react-router";
 import { getAssetIndexSettings } from "~/modules/asset-index-settings/service.server";
@@ -8,7 +9,11 @@ import {
   exportAssetsFromIndexToCsv,
 } from "~/utils/csv.server";
 import { makeShelfError } from "~/utils/error";
-import { error, getCurrentSearchParams } from "~/utils/http.server";
+import {
+  buildContentDisposition,
+  error,
+  getCurrentSearchParams,
+} from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -16,7 +21,12 @@ import {
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanExportAssets } from "~/utils/subscription.server";
 
-export const loader = async ({ context, request }: LoaderFunctionArgs) => {
+/** Exports the requested asset selection as a CSV download. */
+export const loader = async ({
+  context,
+  request,
+  params,
+}: LoaderFunctionArgs) => {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -87,7 +97,14 @@ export const loader = async ({ context, request }: LoaderFunctionArgs) => {
       csvString = await exportAssetsBackupToCsv({ organizationId });
     }
 
-    return csvResponse(csvString);
+    return csvResponse(csvString, {
+      headers: {
+        "content-disposition": buildContentDisposition(null, {
+          fallback: "assets",
+          filename: params.fileName ? `${params.fileName}.csv` : undefined,
+        }),
+      },
+    });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });

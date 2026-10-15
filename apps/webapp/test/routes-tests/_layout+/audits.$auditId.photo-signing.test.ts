@@ -13,7 +13,9 @@
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.activity.tsx}
  * @see {@link file://../../../app/routes/_layout+/audits.$auditId.scan.tsx}
  */
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 
 const { getAuditSessionDetails, requirePermission } = vi.hoisted(() => ({
   getAuditSessionDetails: vi.fn(),
@@ -30,7 +32,7 @@ vi.mock("~/modules/audit/service.server", () => ({
   getAssetsForAuditSession: vi.fn().mockResolvedValue({}),
   getAuditScans: vi.fn().mockResolvedValue([]),
   requireAuditAssignee: vi.fn(),
-  requireAuditAssigneeForBaseSelfService: vi.fn(),
+  requireAuditAssigneeForScopedViewer: vi.fn(),
   updateAuditSession: vi.fn(),
   cancelAuditSession: vi.fn(),
   archiveAuditSession: vi.fn(),
@@ -84,7 +86,7 @@ beforeEach(() => {
   requirePermission.mockResolvedValue({
     organizationId: "org-1",
     userOrganizations: [],
-    isSelfServiceOrBase: false,
+    access: accessFor([OrganizationRoles.ADMIN]),
   });
   getAuditSessionDetails.mockResolvedValue({
     session: { id: "audit-1", name: "Q3 sweep", status: "ACTIVE" },

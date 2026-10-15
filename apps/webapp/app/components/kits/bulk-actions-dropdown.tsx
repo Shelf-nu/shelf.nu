@@ -3,8 +3,9 @@ import { useNavigation } from "react-router";
 import { useHydrated } from "remix-utils/use-hydrated";
 import { selectedBulkItemsAtom } from "~/atoms/list";
 import { useControlledDropdownMenu } from "~/hooks/use-controlled-dropdown-menu";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useUserData } from "~/hooks/use-user-data";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { isFormProcessing } from "~/utils/form";
 import { someKitMemberBlocksCustodyAssignment } from "~/utils/kits";
 import { isSelectingAllItems } from "~/utils/list";
@@ -54,7 +55,7 @@ export default function BulkActionsDropdown() {
 function ConditionalDropdown() {
   const {
     ref: dropdownRef,
-    defaultApplied,
+    onOpenChange,
     open,
     defaultOpen,
     setOpen,
@@ -66,7 +67,8 @@ function ConditionalDropdown() {
   const selectedKits = useAtomValue(selectedBulkItemsAtom);
   const allSelected = isSelectingAllItems(selectedKits);
 
-  const { roles, isSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const user = useUserData();
 
   /**
@@ -96,7 +98,7 @@ function ConditionalDropdown() {
   const selfUserCustody = selectedKits.some(
     (k) => k?.custody?.custodian?.userId === user?.id
   );
-  const disableReleaseCustody = isSelfService && !selfUserCustody;
+  const disableReleaseCustody = assignsSelfOnly && !selfUserCustody;
 
   function closeMenu() {
     setOpen(false);
@@ -146,14 +148,12 @@ function ConditionalDropdown() {
 
       <DropdownMenu
         modal={false}
-        onOpenChange={(open) => {
-          if (defaultApplied && window.innerWidth <= 640) setOpen(open);
-        }}
+        onOpenChange={onOpenChange}
         open={open}
         defaultOpen={defaultOpen}
       >
         <DropdownMenuTrigger
-          className="actions-dropdown hidden sm:flex"
+          className="actions-dropdown hidden md:flex"
           onClick={() => setOpen(!open)}
           asChild
           disabled={disabled}
@@ -166,7 +166,7 @@ function ConditionalDropdown() {
         {/* using custom dropdown menu trigger on mobile which only opens dropdown not toggles menu to avoid conflicts with overlay*/}
         <Button
           variant="secondary"
-          className="asset-actions flex-1 sm:hidden"
+          className="asset-actions flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabled}
           type="button"
@@ -177,6 +177,7 @@ function ConditionalDropdown() {
         <MobileDropdownStyles open={open} />
 
         <DropdownMenuContent
+          data-mobile-sheet
           asChild
           align="end"
           className="order actions-dropdown static w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-[230px] md:rounded-t-[4px]"
@@ -230,7 +231,7 @@ function ConditionalDropdown() {
               <DropdownMenuItem className="border-b py-1 lg:p-0">
                 <BulkUpdateDialogTrigger
                   type="assign-custody"
-                  label={isSelfService ? "Take custody" : "Assign custody"}
+                  label={assignsSelfOnly ? "Take custody" : "Assign custody"}
                   onClick={closeMenu}
                   disabled={
                     !allKitsAvailable ||

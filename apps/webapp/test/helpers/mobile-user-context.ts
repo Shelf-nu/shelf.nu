@@ -2,45 +2,39 @@
  * Builds a `getMobileUserContext` return value for route tests.
  *
  * Route tests mock that function, so every field a route reads must be present
- * on the mock or the route silently sees `undefined`. Build the shape here
- * rather than hand-writing `{ roles: [...] }` literals per test: a permission
- * field that is absent reads as `false`, which quietly inverts an assertion
- * instead of failing it.
+ * on the mock. `access` is resolved by the real `resolveRoleAccess`, so a test
+ * describes a membership and workspace, never a hand-written permission flag:
  *
- * The visibility flags default to what the role alone implies, which is the
- * behaviour with both workspace overrides OFF. A test that cares about an
- * override passes it explicitly:
+ *     mobileUserContext({ roles: ["BASE"], workspace: { baseUserCanSeeBookings: true } })
  *
- *     mobileUserContext({ roles: ["BASE"], canSeeAllBookings: true })
+ * @see {@link file://./role-access.ts}
  */
-
 import { OrganizationRoles } from "@prisma/client";
-import {
-  isSelfServiceOrBaseRole,
-  resolveMostPrivilegedRole,
-} from "~/utils/booking-authorization.server";
+import type { WorkspaceAccessSettings } from "~/utils/permissions/role-access";
+import { accessFor } from "./role-access";
 
+/**
+ * A `getMobileUserContext` return value.
+ *
+ * @param overrides.roles - Every role on the membership (defaults to ADMIN)
+ * @param overrides.workspace - Visibility toggles to switch on; the rest stay off
+ * @param overrides.canUseBarcodes - Defaults to `true`
+ * @param overrides.canUseAudits - Defaults to `true`
+ * @returns The context, with `access` resolved from the roles and toggles
+ */
 export function mobileUserContext(
   overrides: {
     roles?: OrganizationRoles[];
+    workspace?: Partial<WorkspaceAccessSettings>;
     canUseBarcodes?: boolean;
     canUseAudits?: boolean;
-    canSeeAllCustody?: boolean;
-    canSeeAllBookings?: boolean;
   } = {}
 ) {
   const roles = overrides.roles ?? [OrganizationRoles.ADMIN];
-  const effectiveRole = resolveMostPrivilegedRole(roles);
-  const restricted = isSelfServiceOrBaseRole(effectiveRole);
-
   return {
-    role: roles[0] ?? OrganizationRoles.BASE,
     roles,
-    effectiveRole,
-    isSelfServiceOrBase: restricted,
+    access: accessFor(roles, overrides.workspace),
     canUseBarcodes: overrides.canUseBarcodes ?? true,
     canUseAudits: overrides.canUseAudits ?? true,
-    canSeeAllCustody: overrides.canSeeAllCustody ?? !restricted,
-    canSeeAllBookings: overrides.canSeeAllBookings ?? !restricted,
   };
 }

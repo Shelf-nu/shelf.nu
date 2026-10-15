@@ -9,10 +9,11 @@
  * already-claimed, org + user assignment) and any notes/events stay in parity
  * with web for free.
  *
- * Permission gate: `qr` / `update` — Role2PermissionMap only grants BASE and
- * SELF_SERVICE `qr:read`, and ADMIN/OWNER short-circuit to allow-all in
- * `hasPermission`, so this is effectively ADMIN/OWNER only, exactly like the
- * web claim route's `requirePermission` gate.
+ * Permission gate: `qr` / `update` in the caller's current organization. Only
+ * Administrators and Owners hold it. The web claim route applies the same
+ * permission, judged in the workspace its form names
+ * (`requirePermissionInOrganization`), since the web user picks the
+ * destination there.
  *
  * @see {@link file://./../../qr+/_private+/$qrId_.claim.tsx} — the mirrored web route
  * @see {@link file://./../../../modules/qr/service.server.ts} — claimQrCode

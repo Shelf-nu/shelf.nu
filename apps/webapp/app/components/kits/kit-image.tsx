@@ -1,3 +1,14 @@
+/**
+ * Kit image: a kit's stored image in a fixed-size box, with an optional
+ * full-size preview dialog.
+ *
+ * Kit images are served on signed URLs that expire. When the stored URL has
+ * expired, the component asks `/api/kit/refresh-image` to re-sign the kit's
+ * stored image (the server reads it from the kit, so only the id is sent),
+ * which also saves the new URL on the kit, and shows it once it arrives.
+ *
+ * @see {@link file://../../routes/api+/kit.refresh-image.ts}
+ */
 import type { ImgHTMLAttributes } from "react";
 import { useEffect, useState } from "react";
 import type { Kit } from "@prisma/client";
@@ -20,6 +31,13 @@ type KitImageProps = ImgHTMLAttributes<HTMLImageElement> & {
   withPreview?: boolean;
 };
 
+/**
+ * Renders a kit's image, refreshing an expired signed URL.
+ *
+ * @param props.kit - The kit's id, stored image URL, its expiry and alt text
+ * @param props.withPreview - Open the full image in a dialog on click
+ * @param props.className - Classes of the wrapping box (size, shape)
+ */
 export default function KitImage({
   className,
   kit,
@@ -32,11 +50,15 @@ export default function KitImage({
 
   const updatedKitImage = fetcher.data?.error ? null : fetcher.data?.kit.image;
   const [isLoading, setIsLoading] = useState(true);
-  const handleImageLoad = () => {
+  // Settles the spinner on load AND on error: a URL that fails (an expired
+  // signed URL, waiting for its refresh) would otherwise spin forever.
+  const handleImageSettled = () => {
     setIsLoading(false);
   };
+  // The refreshed URL outranks the stored one: the stored `image` is the
+  // expired URL that triggered the refresh.
   const url =
-    image ?? updatedKitImage ?? "/static/images/asset-placeholder.jpg";
+    updatedKitImage ?? image ?? "/static/images/asset-placeholder.jpg";
 
   useEffect(function refreshImageIfExpired() {
     let timerId: ReturnType<typeof setTimeout> | undefined;
@@ -50,7 +72,7 @@ export default function KitImage({
         const jitter = Math.random() * 3000;
         timerId = setTimeout(() => {
           void fetcher.submit(
-            { kitId, image },
+            { kitId },
             {
               method: "post",
               action: "/api/kit/refresh-image",
@@ -129,7 +151,8 @@ export default function KitImage({
             withPreview && "cursor-pointer"
           )}
           alt={alt}
-          onLoad={handleImageLoad}
+          onLoad={handleImageSettled}
+          onError={handleImageSettled}
           loading="lazy"
           decoding="async"
           {...rest}

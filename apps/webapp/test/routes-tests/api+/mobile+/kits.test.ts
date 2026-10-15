@@ -13,6 +13,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { accessFor } from "@helpers/role-access";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
@@ -93,7 +94,7 @@ beforeEach(() => {
   requireOrganizationAccessMock.mockResolvedValue(FAKE_ORG_ID);
   requireMobilePermissionMock.mockResolvedValue(undefined);
   getMobileUserContextMock.mockResolvedValue({
-    canSeeAllCustody: true,
+    access: accessFor(["ADMIN"]),
   } as Awaited<ReturnType<typeof getMobileUserContext>>);
 });
 
@@ -149,5 +150,28 @@ describe("GET /api/mobile/kits — kit images", () => {
     for (const kit of body.kits) {
       expect(kit).not.toHaveProperty("organizationId");
     }
+  });
+});
+
+describe("GET /api/mobile/kits: member count", () => {
+  it("counts only members still in service, so an archived member is not an asset of the kit", async () => {
+    const kit = storedKit({ id: "kit-1", image: null, imageExpiration: null });
+    findManyMock.mockResolvedValueOnce([kit] as never);
+    countMock.mockResolvedValueOnce(1);
+    refreshExpiredKitImagesMock.mockResolvedValueOnce([kit]);
+
+    await loader(
+      createLoaderArgs({
+        request: new Request("http://localhost:3000/api/mobile/kits"),
+      })
+    );
+
+    expect(findManyMock.mock.calls[0][0]).toMatchObject({
+      select: {
+        _count: {
+          select: { assetKits: { where: { asset: { archivedAt: null } } } },
+        },
+      },
+    });
   });
 });

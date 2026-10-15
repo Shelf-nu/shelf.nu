@@ -19,12 +19,17 @@ import { Switch } from "~/components/forms/switch";
 import { ChevronRight, HandleIcon, PlusIcon } from "~/components/icons/library";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
 import {
   parseColumnName,
   type Column,
 } from "~/modules/asset-index-settings/helpers";
+import {
+  findModelViewInapplicableParams,
+  stripModelViewInapplicableParams,
+} from "~/modules/asset-model/view-params";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
@@ -43,6 +48,7 @@ import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
 import { SaveFilterButton } from "./saved-filter-presets";
+import When from "../../when/when";
 
 export interface Sort {
   name: string;
@@ -51,10 +57,27 @@ export interface Sort {
   cfType?: string;
 }
 
+/**
+ * The advanced index's Filter and Sort controls.
+ *
+ * Sort is unmounted on the model view. Its options are asset columns and it
+ * writes `sortBy`, which orders a list of assets; the model view renders a
+ * rollup ordered by `modelSortBy`, so every option in that popover would apply
+ * and change nothing. The model view sorts from its column headers instead.
+ *
+ * Filter stays: the rollup is built from the same filtered asset set as the
+ * list, so every filter applies to it unchanged, bar the quick filters this
+ * view hides the toggles for, which Filter strips from the URL via
+ * {@link stripModelViewInapplicableParams}.
+ *
+ * @see {@link file://./asset-model-sort-header.tsx}
+ */
 export function AdvancedFilteringAndSorting() {
+  const { isModelView } = useAssetIndexView();
+
   return (
     <>
-      <AdvancedFilter /> <AdvancedSorting />
+      <AdvancedFilter /> {isModelView ? null : <AdvancedSorting />}
     </>
   );
 }
@@ -82,6 +105,7 @@ function AdvancedFilter() {
   // Acting user's resolved pref timezone — seeds new date filters with the
   // user's local "today" rather than the server/UTC day (avoids off-by-one).
   const { timeZone } = useFormatPrefs();
+  const { isModelView } = useAssetIndexView();
   const disabled = useDisabled();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -94,12 +118,16 @@ function AdvancedFilter() {
 
   const availableColumns = getAvailableColumns(columns, filters, "filter");
 
-  // "Low stock" quick filter — a standalone `lowStockOnly` URL param
+  // "Low stock" quick filter: a standalone `lowStockOnly` URL param
   // (QUANTITY_TRACKED assets at/below their reorder threshold). Surfaced INSIDE
   // this Filter popover rather than as a separate top-bar button. It's
   // independent of the column-filter apply model (toggles immediately) and
   // counts toward the trigger's active badge so it's visible when collapsed.
-  const lowStockActive = searchParams.get("lowStockOnly") === "true";
+  // Reads as inactive on the model view, which renders no toggle for it, so the
+  // badge, the empty-state copy and the clear control describe the controls
+  // actually on screen for the render before the strip below lands.
+  const lowStockActive =
+    !isModelView && searchParams.get("lowStockOnly") === "true";
   const activeFilterCount = initialFilters.length + (lowStockActive ? 1 : 0);
 
   function toggleLowStock() {
@@ -137,6 +165,47 @@ function AdvancedFilter() {
     setHasUnappliedChanges(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relevantSearchParamsString]);
+
+  /**
+   * Which params the model view cannot express are sitting in the URL.
+   *
+   * A bookmark, a shared link or the restored filter cookie can put one there
+   * without the user ever choosing it on this view. Joined into a string so the
+   * effect below depends on WHICH params are present rather than on a fresh
+   * array identity every render.
+   */
+  const staleModelViewParams =
+    findModelViewInapplicableParams(searchParams).join(",");
+
+  /**
+   * Strips those params while the model view is the one on screen.
+   *
+   * This view hides the controls that set them, so a param left in the URL is
+   * state with no way back off: it counts as an active filter, and it takes
+   * effect again the moment the user returns to the list. Declared after the
+   * URL-sync effect above so that effect still seeds the column filters from
+   * the URL on the render this one navigates away from.
+   */
+  useEffect(() => {
+    if (!isModelView || !staleModelViewParams) {
+      return;
+    }
+
+    // Preserve any in-progress (unapplied) column-filter edits, exactly as
+    // `toggleLowStock` / `applyFilters` / `clearAllFilters` do.
+    isApplyingInternally.current = true;
+    // Replaces rather than pushes: this rewrites a URL the user never typed, so
+    // a history entry for it would send Back to a URL this effect strips again,
+    // leaving Back with nothing to do. `page` stays put because the rollup
+    // ignores these params, so no row moved.
+    setSearchParams(
+      (prev) => {
+        stripModelViewInapplicableParams(prev);
+        return prev;
+      },
+      { replace: true }
+    );
+  }, [isModelView, staleModelViewParams, setSearchParams]);
 
   function clearAllFilters() {
     setFilters([]);
@@ -374,25 +443,33 @@ function AdvancedFilter() {
 
             {/* Low-stock quick filter — deliberately small and de-emphasized so
                 it does not compete with the column filters above. Toggles the
-                `lowStockOnly` param immediately (independent of the Apply flow). */}
-            <button
-              type="button"
-              onClick={toggleLowStock}
-              aria-pressed={lowStockActive}
-              className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[12px] font-normal text-gray-500 hover:bg-gray-50"
-            >
-              <FakeCheckbox
-                checked={lowStockActive}
-                className={tw(
-                  "size-[14px]",
-                  lowStockActive ? "text-primary" : "text-white"
-                )}
-              />
-              Low stock only
-              <span className="text-gray-500">
-                — at or below reorder threshold
-              </span>
-            </button>
+                `lowStockOnly` param immediately (independent of the Apply flow).
+
+                Hidden in the model view: low stock selects QUANTITY_TRACKED
+                assets at or below their reorder threshold, and asset models are
+                an INDIVIDUAL-only concept, so the two predicates can never both
+                hold. Offering it there is a control that can only ever empty the
+                list. */}
+            <When truthy={!isModelView}>
+              <button
+                type="button"
+                onClick={toggleLowStock}
+                aria-pressed={lowStockActive}
+                className="flex w-full items-center gap-2 border-b px-4 py-2 text-left text-[12px] font-normal text-gray-500 hover:bg-gray-50"
+              >
+                <FakeCheckbox
+                  checked={lowStockActive}
+                  className={tw(
+                    "size-[14px]",
+                    lowStockActive ? "text-primary" : "text-white"
+                  )}
+                />
+                Low stock only
+                <span className="text-gray-500">
+                  — at or below reorder threshold
+                </span>
+              </button>
+            </When>
 
             <div className="flex items-center justify-between px-4 py-3">
               <div>

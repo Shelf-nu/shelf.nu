@@ -1,0 +1,72 @@
+appId: com.shelf.companion.carlos
+---
+# Steps: the Scan tab flags an archived asset before submit, in every batch
+# mode, and leaves an active one clean. No login (see ../01-owner.yaml).
+
+# The deep link, not the tab: a "Scan" text elsewhere on the previous screen
+# can take a plain text tap.
+- openLink: "shelf://scanner"
+- tapOn:
+    text: "Allow"
+    optional: true
+- extendedWaitUntil:
+    visible: "Scanner action: Assign.*"
+    timeout: 15000
+# Start from a closed manual entry and an empty list.
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- tapOn:
+    text: "Clear all scanned items"
+    optional: true
+
+# ── Assign custody ───────────────────────────────────────────────────
+- tapOn: "Scanner action: Assign.*"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ARCHIVED_QR_ID}
+- pressKey: enter
+# The scan card says "Archived, so it can't be put in custody." for a moment;
+# the tray below is what stays, so the flow asserts that.
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    id: "dev-scan-input"
+    optional: true
+- inputText: ${SHELF_TEST_ACTIVE_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "2 items scanned"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+# One blocker, naming only the archived row; submit stays off until it goes.
+- assertVisible: "1 asset is archived and can't be put in custody."
+- assertVisible: "Asset • Archived"
+- assertVisible:
+    id: "batch-drawer-submit"
+    enabled: false
+- takeScreenshot: archived-scanner-assign
+- tapOn: "Clear all scanned items"
+
+# ── Update location ──────────────────────────────────────────────────
+- tapOn: "Scanner action: Location.*"
+- tapOn:
+    id: "dev-scan-toggle"
+- tapOn:
+    id: "dev-scan-input"
+- inputText: ${SHELF_TEST_ARCHIVED_QR_ID}
+- pressKey: enter
+- extendedWaitUntil:
+    visible: "1 item scanned"
+    timeout: 15000
+- tapOn:
+    text: "Close manual entry"
+    optional: true
+- assertVisible: "1 asset is archived and can't be moved."
+- takeScreenshot: archived-scanner-location
+- tapOn: "Clear all scanned items"

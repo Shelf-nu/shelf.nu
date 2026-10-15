@@ -13,10 +13,12 @@ import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";
 import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
+import { readImportRowErrors } from "~/utils/import-row-errors";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
+import { ImportRowErrorsTable } from "../shared/import-row-errors-table";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -360,26 +362,10 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
 
-  /**
-   * Row-level import problems, narrowed out of the error payload.
-   *
-   * `additionalData` is typed as `SerializableValue`, which is wide enough to
-   * include objects, so its members cannot be rendered or compared until they
-   * have been checked here.
-   */
-  const rowErrors = Array.isArray(data?.error?.additionalData?.rowErrors)
-    ? (data.error.additionalData.rowErrors as {
-        row: number;
-        title: string;
-        message: string;
-      }[])
-    : null;
-
-  /** How many problems the file actually had, when more were found than sent. */
-  const totalRowErrors =
-    typeof data?.error?.additionalData?.totalErrors === "number"
-      ? data.error.additionalData.totalErrors
-      : null;
+  /** Row-level import problems, narrowed out of the error payload. */
+  const { rowErrors, totalRowErrors } = readImportRowErrors(
+    data?.error?.additionalData
+  );
   //
 
   // Focus the "I AGREE" confirmation input when the dialog opens (replaces
@@ -596,46 +582,10 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
               ) : null}
 
               {rowErrors ? (
-                <>
-                  <table className="mt-4 w-full rounded-md border text-left text-sm">
-                    <thead className="bg-error-100 text-xs">
-                      <tr>
-                        <th scope="col" className="px-2 py-1">
-                          Row
-                        </th>
-                        <th scope="col" className="px-2 py-1">
-                          Problem
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rowErrors.map((rowError) => (
-                        <tr
-                          // One row can carry more than one problem (a bad
-                          // quantity and a bad custom field), so the row
-                          // number alone is not a unique key.
-                          key={`${rowError.row}-${rowError.message}`}
-                        >
-                          <td className="px-2 py-1">
-                            {rowError.row > 0 ? rowError.row : "File"}
-                          </td>
-                          <td className="px-2 py-1">{rowError.message}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <When
-                    truthy={
-                      totalRowErrors !== null &&
-                      totalRowErrors > rowErrors.length
-                    }
-                  >
-                    <p className="mt-2 text-sm text-gray-600">
-                      Showing the first {rowErrors.length} of {totalRowErrors}{" "}
-                      problems. Fix these and upload again to see the rest.
-                    </p>
-                  </When>
-                </>
+                <ImportRowErrorsTable
+                  rowErrors={rowErrors}
+                  totalRowErrors={totalRowErrors}
+                />
               ) : null}
 
               <p className="mt-2">

@@ -70,6 +70,7 @@ describe("resolveLocationAssetIds", () => {
 
   it("returns explicit ids untouched", async () => {
     const ids = await resolveLocationAssetIds({
+      honorArchivedView: false,
       ids: ["a1", "a2"],
       organizationId: ORG,
       locationId: LOC,
@@ -83,6 +84,7 @@ describe("resolveLocationAssetIds", () => {
 
   it("applies the submitted search and category filters", async () => {
     await resolveLocationAssetIds({
+      honorArchivedView: false,
       ids: [ALL_SELECTED_KEY],
       organizationId: ORG,
       locationId: LOC,
@@ -97,6 +99,7 @@ describe("resolveLocationAssetIds", () => {
 
   it("still scopes to the location", async () => {
     await resolveLocationAssetIds({
+      honorArchivedView: false,
       ids: [ALL_SELECTED_KEY],
       organizationId: ORG,
       locationId: LOC,
@@ -112,6 +115,7 @@ describe("resolveLocationAssetIds", () => {
     // builder emits CUSTODY_FILTER_REFUSED and select-all silently resolves
     // nothing — invisible while the builder was mocked.
     await resolveLocationAssetIds({
+      honorArchivedView: false,
       ids: [ALL_SELECTED_KEY],
       organizationId: ORG,
       locationId: LOC,
@@ -126,6 +130,7 @@ describe("resolveLocationAssetIds", () => {
     // The old shape took `request` and read `request.url`. Passing one now must
     // not resurrect that path — an unfiltered select-all is the data-loss case.
     await resolveLocationAssetIds({
+      honorArchivedView: false,
       ids: [ALL_SELECTED_KEY],
       organizationId: ORG,
       locationId: LOC,
@@ -137,6 +142,43 @@ describe("resolveLocationAssetIds", () => {
     const where = blob(assetWhere());
     expect(where).toContain("laptop");
     expect(where).not.toContain("ignored");
+  });
+});
+
+describe("resolveLocationAssetIds: archived view", () => {
+  beforeEach(() => {
+    assetFindMany.mockReset().mockResolvedValue([]);
+  });
+
+  it.each([
+    ["", null],
+    ["archived=archived", { not: null }],
+    ["archived=all", undefined],
+  ])(
+    "select all covers the view the list showed (%s)",
+    async (params, expected) => {
+      await resolveLocationAssetIds({
+        honorArchivedView: true,
+        ids: [ALL_SELECTED_KEY],
+        organizationId: ORG,
+        locationId: LOC,
+        currentSearchParams: params,
+      });
+
+      expect(assetWhere().archivedAt).toEqual(expected);
+    }
+  );
+
+  it("keeps a member without the archive grant on active assets", async () => {
+    await resolveLocationAssetIds({
+      honorArchivedView: false,
+      ids: [ALL_SELECTED_KEY],
+      organizationId: ORG,
+      locationId: LOC,
+      currentSearchParams: "archived=archived",
+    });
+
+    expect(assetWhere().archivedAt).toBeNull();
   });
 });
 

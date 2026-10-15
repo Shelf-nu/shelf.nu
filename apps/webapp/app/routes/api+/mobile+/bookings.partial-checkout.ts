@@ -9,11 +9,13 @@ import {
   assertMobileCanUseBookings,
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
-import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import { CLIENT_DECLARED_BOOKING_METHODS } from "~/modules/booking/checkout-method";
 import {
-  resolveMostPrivilegedRole,
-  validateBookingOwnership,
-} from "~/utils/booking-authorization.server";
+  mobileSourceLocationsSchema,
+  sourceSubmissionFromRecord,
+} from "~/modules/booking/checkout-source-location";
+import { partialCheckoutBooking } from "~/modules/booking/service.server";
+import { validateBookingOwnership } from "~/utils/booking-authorization.server";
 import { getClientHint, type ClientHint } from "~/utils/client-hints";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -32,10 +34,13 @@ import {
  *
  * @param args - Remix action args; `request` carries the JSON body
  *   `{ bookingId: string; assetIds: string[]; checkouts?: Array<{ assetId: string;
- *   bookingAssetId?: string | null; quantity: number }>; timeZone?: string }` and
- *   mobile auth headers. The optional `checkouts` field enables partial
- *   (sub-quantity) check-outs for PARTIAL-tracked assets; legacy clients omit it
- *   and get INDIVIDUAL semantics driven by `assetIds` alone.
+ *   bookingAssetId?: string | null; quantity: number }>; method?: "scanned" |
+ *   "selected"; timeZone?: string }` and mobile auth headers. The optional
+ *   `checkouts` field enables partial (sub-quantity) check-outs for
+ *   PARTIAL-tracked assets; legacy clients omit it and get INDIVIDUAL semantics
+ *   driven by `assetIds` alone. `method` says how the app collected the rows;
+ *   the server cannot tell a scan from a tick on this route, so a bundle that
+ *   sends nothing is recorded with `method: null`.
  * @returns JSON `{ success, checkedOutCount, remainingCount, isComplete, booking }`
  *   on success, or `{ error: { message } }` with the appropriate status on failure.
  * @throws Never throws to the caller — errors are normalized via
@@ -55,7 +60,14 @@ export async function action({ request }: ActionFunctionArgs) {
 
     await assertMobileCanUseBookings(organizationId);
 
-    const { bookingId, assetIds, checkouts, timeZone } = await parseMobileBody(
+    const {
+      bookingId,
+      assetIds,
+      checkouts,
+      method,
+      timeZone,
+      sourceLocations,
+    } = await parseMobileBody(
       z.object({
         bookingId: z.string().min(1),
         // Optional: a QT-only check-out sends its quantities in `checkouts` with
@@ -83,7 +95,24 @@ export async function action({ request }: ActionFunctionArgs) {
             })
           )
           .optional(),
+        /**
+         * How the app collected the rows: the Scan to Check Out path sends
+         * `"scanned"`, Select to Check Out sends `"selected"`. Optional so
+         * older bundles keep working, and an unknown value is recorded as
+         * `null` too: the field only labels the batch, so it never refuses a
+         * hand-over.
+         */
+        method: z
+          .enum(CLIENT_DECLARED_BOOKING_METHODS)
+          .optional()
+          .catch(undefined),
         timeZone: z.string().optional(),
+        /**
+         * Where each pool's units leave from, keyed by `bookingAssetId` or
+         * `assetId` (`null` = Unplaced). Only read for a slice going out for
+         * the first time; an app that omits it gets the default.
+         */
+        sourceLocations: mobileSourceLocationsSchema,
       }),
       request,
       "Booking"
@@ -113,15 +142,16 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Cross-user IDOR guard: SELF_SERVICE holds `booking:checkout` in the
     // permission map, so the role gate above passes for ANY booking id in the
-    // organization — they may only check out bookings they created or are
-    // custodian of. No-op for ADMIN/OWNER. `partialCheckoutBooking` does not check
-    // ownership itself, so without this the route is more permissive than web.
-    // Mirrors the guard added to bookings.fulfil-and-checkout.ts in 918d53d51.
-    const { roles } = await getMobileUserContext(user.id, organizationId);
+    // organization. They may only check out bookings they created or are
+    // custodian of. No-op when `access.bookings.writeAll`.
+    // `partialCheckoutBooking` does not check ownership itself, so without this
+    // the route is more permissive than web. Mirrors the guard on
+    // bookings.fulfil-and-checkout.ts.
+    const { access } = await getMobileUserContext(user.id, organizationId);
     validateBookingOwnership({
       booking: existingBooking,
       userId: user.id,
-      role: resolveMostPrivilegedRole(roles),
+      access,
       action: "check out",
     });
 
@@ -132,6 +162,9 @@ export async function action({ request }: ActionFunctionArgs) {
       checkouts,
       userId: user.id,
       hints,
+      // Never guessed: a bundle that declared no method is recorded as null.
+      provenance: { surface: "phone", method: method ?? null },
+      sourceLocations: sourceSubmissionFromRecord(sourceLocations),
     });
 
     return data({

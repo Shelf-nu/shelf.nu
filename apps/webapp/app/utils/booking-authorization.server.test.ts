@@ -14,22 +14,26 @@
  *
  * @see {@link file://./booking-authorization.server.ts}
  */
+import type { BookingStatus } from "@prisma/client";
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
+import { accessFor } from "@helpers/role-access";
 import {
+  assertCanAddBookingItems,
+  assertCanDeleteBooking,
+  assertCanDuplicateBooking,
+  assertCanDownloadBookingDocuments,
+  bookingAddableStatusClause,
   bookingWriteScopeClause,
   canSeeBooking,
   canSeeBookingCustodian,
+  isBookingCustodian,
   resolveBookingCustodianName,
-  resolveMostPrivilegedRole,
   validateBookingOwnership,
   WITHHELD_CUSTODIAN_NAME,
 } from "./booking-authorization.server";
-import {
-  ROLE_PRECEDENCE,
-  SSO_ASSIGNABLE_ROLE_PRECEDENCE,
-} from "./role-precedence";
+import type { RoleAccess } from "./permissions/role-access";
 
 const ME = "user-me";
 const SOMEONE_ELSE = "user-victim";
@@ -39,7 +43,7 @@ describe("canSeeBooking", () => {
     it("allows a booking held via the user link", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: ME, custodianTeamMember: null },
           userId: ME,
         })
@@ -55,7 +59,7 @@ describe("canSeeBooking", () => {
     it("allows a legacy booking held via the team-member link alone", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: ME },
@@ -68,7 +72,7 @@ describe("canSeeBooking", () => {
     it("refuses another user's booking on both links", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: SOMEONE_ELSE,
             custodianTeamMember: { userId: SOMEONE_ELSE },
@@ -81,7 +85,7 @@ describe("canSeeBooking", () => {
     it("refuses a booking whose team member belongs to another user", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: SOMEONE_ELSE },
@@ -99,7 +103,7 @@ describe("canSeeBooking", () => {
     it("refuses a booking whose team member has no user attached", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: {
             custodianUserId: null,
             custodianTeamMember: { userId: null },
@@ -112,7 +116,7 @@ describe("canSeeBooking", () => {
     it("refuses an unassigned booking", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: null, custodianTeamMember: null },
           userId: ME,
         })
@@ -122,7 +126,7 @@ describe("canSeeBooking", () => {
     it("refuses when the team-member relation was not selected", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: false,
+          access: accessFor([OrganizationRoles.BASE]),
           booking: { custodianUserId: SOMEONE_ELSE },
           userId: ME,
         })
@@ -134,7 +138,22 @@ describe("canSeeBooking", () => {
     it("allows another user's booking", () => {
       expect(
         canSeeBooking({
-          canSeeAllBookings: true,
+          access: accessFor([OrganizationRoles.ADMIN]),
+          booking: {
+            custodianUserId: SOMEONE_ELSE,
+            custodianTeamMember: { userId: SOMEONE_ELSE },
+          },
+          userId: ME,
+        })
+      ).toBe(true);
+    });
+
+    it("allows another user's booking when a restricted role's workspace toggle is on", () => {
+      expect(
+        canSeeBooking({
+          access: accessFor([OrganizationRoles.SELF_SERVICE], {
+            selfServiceCanSeeBookings: true,
+          }),
           booking: {
             custodianUserId: SOMEONE_ELSE,
             custodianTeamMember: { userId: SOMEONE_ELSE },
@@ -195,16 +214,16 @@ function rowMatches(
  * Runs the submit-time gate and reports whether it let the caller through.
  *
  * @param row - The candidate booking.
- * @param role - The caller's effective role.
+ * @param access - The caller's access.
  * @returns `true` when {@link validateBookingOwnership} does not throw.
  */
-function gateAllows(row: BookingRow, role: OrganizationRoles): boolean {
+function gateAllows(row: BookingRow, access: RoleAccess): boolean {
   try {
     validateBookingOwnership({
       booking: row,
       userId: ME,
-      role,
-      action: "add items to",
+      access,
+      action: "test",
     });
     return true;
   } catch {
@@ -215,7 +234,8 @@ function gateAllows(row: BookingRow, role: OrganizationRoles): boolean {
 /**
  * The point of the clause: it is the query-side mirror of the submit-time gate.
  * Any row a picker offers must be one the action will accept, or the user hits
- * a 403 dead end — so these two must agree on EVERY row, for EVERY role.
+ * a 403 dead end, so these two must agree on EVERY row, for EVERY role and
+ * workspace toggle.
  */
 describe("bookingWriteScopeClause", () => {
   const ROWS: Array<{ label: string; row: BookingRow }> = [
@@ -247,106 +267,204 @@ describe("bookingWriteScopeClause", () => {
     OrganizationRoles.ADMIN,
     OrganizationRoles.OWNER,
   ];
+  const TOGGLES = [
+    {},
+    { selfServiceCanSeeBookings: true, baseUserCanSeeBookings: true },
+  ];
 
   for (const role of ROLES) {
-    for (const { label, row } of ROWS) {
-      it(`agrees with validateBookingOwnership for ${role} on a booking ${label}`, () => {
-        const clause = bookingWriteScopeClause({ userId: ME, role }) as
-          | Record<string, unknown>
-          | undefined;
-
-        expect(rowMatches(clause, row)).toBe(gateAllows(row, role));
-      });
+    for (const workspace of TOGGLES) {
+      for (const { label, row } of ROWS) {
+        it(`agrees with validateBookingOwnership for ${role} (toggles ${JSON.stringify(
+          workspace
+        )}) on a booking ${label}`, () => {
+          const access = accessFor([role], workspace);
+          const clause = bookingWriteScopeClause({ userId: ME, access }) as
+            | Record<string, unknown>
+            | undefined;
+          expect(rowMatches(clause, row)).toBe(gateAllows(row, access));
+        });
+      }
     }
   }
 
   it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
     "returns no restriction for %s",
     (role) => {
-      expect(bookingWriteScopeClause({ userId: ME, role })).toBeUndefined();
+      expect(
+        bookingWriteScopeClause({ userId: ME, access: accessFor([role]) })
+      ).toBeUndefined();
     }
   );
 
   it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
-    "restricts %s to bookings they created or hold",
+    "restricts %s to bookings they created or hold, even with the see-toggle on",
     (role) => {
-      expect(bookingWriteScopeClause({ userId: ME, role })).toEqual({
-        OR: [{ creatorId: ME }, { custodianUserId: ME }],
-      });
+      expect(
+        bookingWriteScopeClause({
+          userId: ME,
+          access: accessFor([role], {
+            selfServiceCanSeeBookings: true,
+            baseUserCanSeeBookings: true,
+          }),
+        })
+      ).toEqual({ OR: [{ creatorId: ME }, { custodianUserId: ME }] });
     }
   );
 
-  /**
-   * The clause allow-lists ADMIN / OWNER rather than deny-listing the two
-   * restricted roles, so a role added to `OrganizationRoles` later lands in the
-   * RESTRICTED branch by default. That direction is the safe one: the picker
-   * under-offers, which someone notices, instead of offering rows no rule
-   * covered.
-   */
-  it("restricts an unrecognised role rather than waving it through", () => {
-    const futureRole = "AUDITOR" as OrganizationRoles;
-
-    expect(bookingWriteScopeClause({ userId: ME, role: futureRole })).toEqual({
-      OR: [{ creatorId: ME }, { custodianUserId: ME }],
-    });
-  });
-
-  it("covers every role in the enum, so a new one cannot slip past unreviewed", () => {
-    // Fails the moment `OrganizationRoles` grows a member: whoever adds it has
-    // to decide which side of this clause it belongs on.
-    expect(Object.values(OrganizationRoles).sort()).toEqual([
-      OrganizationRoles.ADMIN,
-      OrganizationRoles.BASE,
-      OrganizationRoles.OWNER,
-      OrganizationRoles.SELF_SERVICE,
-    ]);
+  it("restricts a membership with no known role rather than waving it through", () => {
+    expect(
+      bookingWriteScopeClause({
+        userId: ME,
+        access: accessFor(["AUDITOR" as OrganizationRoles]),
+      })
+    ).toEqual({ OR: [{ creatorId: ME }, { custodianUserId: ME }] });
   });
 });
 
-describe("resolveMostPrivilegedRole", () => {
-  it("prefers OWNER over anything else", () => {
-    expect(
-      resolveMostPrivilegedRole([
-        OrganizationRoles.SELF_SERVICE,
-        OrganizationRoles.OWNER,
-        OrganizationRoles.ADMIN,
-      ])
-    ).toBe(OrganizationRoles.OWNER);
+describe("validateBookingOwnership", () => {
+  const others = { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE };
+
+  it("refuses SELF_SERVICE on someone else's booking even when the workspace lets them see it", () => {
+    expect(() =>
+      validateBookingOwnership({
+        booking: others,
+        userId: ME,
+        access: accessFor([OrganizationRoles.SELF_SERVICE], {
+          selfServiceCanSeeBookings: true,
+        }),
+        action: "edit",
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
   });
 
-  it("prefers ADMIN when it is not first in the array", () => {
-    // The bug this exists for: `roles[0]` on a [SELF_SERVICE, ADMIN]
-    // membership resolves to SELF_SERVICE, and the ownership guard then
-    // refuses an actual admin.
-    expect(
-      resolveMostPrivilegedRole([
-        OrganizationRoles.SELF_SERVICE,
-        OrganizationRoles.ADMIN,
-      ])
-    ).toBe(OrganizationRoles.ADMIN);
+  it("lets a mixed [SELF_SERVICE, ADMIN] membership write any booking", () => {
+    expect(() =>
+      validateBookingOwnership({
+        booking: others,
+        userId: ME,
+        access: accessFor([
+          OrganizationRoles.SELF_SERVICE,
+          OrganizationRoles.ADMIN,
+        ]),
+        action: "edit",
+      })
+    ).not.toThrow();
+  });
+});
+
+describe("assertCanDeleteBooking", () => {
+  const mine = (status: BookingStatus) => ({
+    creatorId: ME,
+    custodianUserId: null,
+    status,
   });
 
-  it("returns the single role when there is only one", () => {
-    expect(resolveMostPrivilegedRole([OrganizationRoles.BASE])).toBe(
-      OrganizationRoles.BASE
-    );
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "holds %s to its own DRAFT bookings",
+    (role) => {
+      const access = accessFor([role]);
+      expect(() =>
+        assertCanDeleteBooking({ access, booking: mine("DRAFT"), userId: ME })
+      ).not.toThrow();
+      expect(() =>
+        assertCanDeleteBooking({
+          access,
+          booking: mine("RESERVED"),
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it("refuses a restricted role on someone else's draft", () => {
+    expect(() =>
+      assertCanDeleteBooking({
+        access: accessFor([OrganizationRoles.BASE]),
+        booking: {
+          creatorId: SOMEONE_ELSE,
+          custodianUserId: SOMEONE_ELSE,
+          status: "DRAFT",
+        },
+        userId: ME,
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
   });
 
-  it("falls back to BASE for an empty membership rather than undefined", () => {
-    expect(resolveMostPrivilegedRole([])).toBe(OrganizationRoles.BASE);
+  it("lets ADMIN delete any booking in any status", () => {
+    expect(() =>
+      assertCanDeleteBooking({
+        access: accessFor([OrganizationRoles.ADMIN]),
+        booking: {
+          creatorId: SOMEONE_ELSE,
+          custodianUserId: null,
+          status: "ONGOING",
+        },
+        userId: ME,
+      })
+    ).not.toThrow();
   });
+});
 
-  it("shares its order with SSO, minus OWNER", () => {
-    // SSO must never confer ownership — pinned so the exclusion cannot be
-    // "tidied away" when someone edits the shared order.
-    expect(ROLE_PRECEDENCE[0]).toBe(OrganizationRoles.OWNER);
-    expect(SSO_ASSIGNABLE_ROLE_PRECEDENCE).not.toContain(
-      OrganizationRoles.OWNER
-    );
-    expect([...SSO_ASSIGNABLE_ROLE_PRECEDENCE]).toEqual(
-      ROLE_PRECEDENCE.filter((r) => r !== OrganizationRoles.OWNER)
-    );
-  });
+/**
+ * Duplicating a booking.
+ *
+ * `booking:create` is every role's, so this guard is all that keeps a copy in
+ * reach. The copy keeps the source custodian, which is why a self-only role
+ * must hold the source, not merely have created it.
+ */
+describe("assertCanDuplicateBooking", () => {
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "lets %s duplicate a booking it holds",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: ME },
+          userId: ME,
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s on a booking it created for someone else",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: ME, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each([OrganizationRoles.BASE, OrganizationRoles.SELF_SERVICE])(
+    "refuses %s on another member's booking",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it.each([OrganizationRoles.ADMIN, OrganizationRoles.OWNER])(
+    "lets %s duplicate any booking",
+    (role) => {
+      expect(() =>
+        assertCanDuplicateBooking({
+          access: accessFor([role]),
+          booking: { creatorId: SOMEONE_ELSE, custodianUserId: SOMEONE_ELSE },
+          userId: ME,
+        })
+      ).not.toThrow();
+    }
+  );
 });
 
 /**
@@ -490,4 +608,163 @@ describe("canSeeBookingCustodian", () => {
       canSeeBookingCustodian({ canSeeAllCustody: true, booking, userId: ME })
     ).toBe(true);
   });
+});
+
+describe("isBookingCustodian", () => {
+  it("matches the user link", () => {
+    expect(
+      isBookingCustodian({
+        booking: { custodianUserId: "me", custodianTeamMember: null },
+        userId: "me",
+      })
+    ).toBe(true);
+  });
+
+  it("matches a booking held through the team-member link alone", () => {
+    expect(
+      isBookingCustodian({
+        booking: {
+          custodianUserId: null,
+          custodianTeamMember: { userId: "me" },
+        },
+        userId: "me",
+      })
+    ).toBe(true);
+  });
+
+  it("refuses another user's booking on both links", () => {
+    expect(
+      isBookingCustodian({
+        booking: {
+          custodianUserId: "other",
+          custodianTeamMember: { userId: "other" },
+        },
+        userId: "me",
+      })
+    ).toBe(false);
+  });
+});
+
+describe("assertCanDownloadBookingDocuments", () => {
+  const notMine = { custodianUserId: "someone-else" };
+
+  it.each([OrganizationRoles.OWNER, OrganizationRoles.ADMIN])(
+    "%s downloads any booking's documents",
+    (role) => {
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: notMine,
+          userId: "me",
+          action: "view",
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "%s downloads only as the custodian",
+    (role) => {
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: { custodianUserId: "me" },
+          userId: "me",
+          action: "view",
+        })
+      ).not.toThrow();
+      expect(() =>
+        assertCanDownloadBookingDocuments({
+          access: accessFor([role]),
+          booking: notMine,
+          userId: "me",
+          action: "view",
+        })
+      ).toThrow(expect.objectContaining({ status: 403 }));
+    }
+  );
+
+  it("is not widened by the booking see-toggle", () => {
+    expect(() =>
+      assertCanDownloadBookingDocuments({
+        access: accessFor([OrganizationRoles.SELF_SERVICE], {
+          selfServiceCanSeeBookings: true,
+        }),
+        booking: notMine,
+        userId: "me",
+        action: "view",
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+});
+
+describe("assertCanAddBookingItems", () => {
+  const OPEN_AFTER_DRAFT = ["RESERVED", "ONGOING", "OVERDUE"] as const;
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "lets %s add items to a DRAFT",
+    (role) => {
+      expect(() =>
+        assertCanAddBookingItems({
+          access: accessFor([role]),
+          bookingStatus: "DRAFT",
+        })
+      ).not.toThrow();
+    }
+  );
+
+  it.each(
+    [OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE].flatMap((role) =>
+      OPEN_AFTER_DRAFT.map((status) => [role, status] as const)
+    )
+  )("refuses %s adding items to a %s booking with a 403", (role, status) => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([role]),
+        bookingStatus: status,
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+
+  it.each(
+    [OrganizationRoles.OWNER, OrganizationRoles.ADMIN].flatMap((role) =>
+      OPEN_AFTER_DRAFT.map((status) => [role, status] as const)
+    )
+  )("lets %s add items to a %s booking", (role, status) => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([role]),
+        bookingStatus: status,
+      })
+    ).not.toThrow();
+  });
+
+  it("refuses everyone on a closed booking", () => {
+    expect(() =>
+      assertCanAddBookingItems({
+        access: accessFor([OrganizationRoles.OWNER]),
+        bookingStatus: "COMPLETE",
+      })
+    ).toThrow(expect.objectContaining({ status: 403 }));
+  });
+});
+
+describe("bookingAddableStatusClause", () => {
+  it.each([OrganizationRoles.OWNER, OrganizationRoles.ADMIN])(
+    "adds no filter for %s, who may add to every open status",
+    (role) => {
+      expect(
+        bookingAddableStatusClause({ access: accessFor([role]) })
+      ).toBeUndefined();
+    }
+  );
+
+  it.each([OrganizationRoles.SELF_SERVICE, OrganizationRoles.BASE])(
+    "limits %s to drafts",
+    (role) => {
+      expect(bookingAddableStatusClause({ access: accessFor([role]) })).toEqual(
+        { status: { in: ["DRAFT"] } }
+      );
+    }
+  );
 });

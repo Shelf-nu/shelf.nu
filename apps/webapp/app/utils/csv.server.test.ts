@@ -274,7 +274,7 @@ describe("buildCsvBackupDataFromAssets", () => {
         id: "asset-1",
         description: "Line 1\nLine 2",
         category: null,
-        location: null,
+        assetLocations: [],
         custody: null,
         notes: [{ content: null }],
         tags: [{ name: "tag-1" }],
@@ -294,7 +294,7 @@ describe("buildCsvBackupDataFromAssets", () => {
         '"asset-1"',
         '"Line 1Line 2"',
         '"{}"',
-        '"{}"',
+        '"[]"',
         '"{}"',
         '"[{""content"":""""}]"',
         '"[{""name"":""tag-1""}]"',
@@ -316,6 +316,56 @@ describe("buildCsvBackupDataFromAssets", () => {
     expect(buildCsvBackupDataFromAssets({ assets, keysToSkip: [] })).toEqual([
       ['"asset-1"', '"MacBook Pro; 16-inch"', '"He said ""hello"" to me"'],
     ]);
+  });
+
+  describe("assetLocations", () => {
+    /** A placement row as `fetchAssetsForExport` loads it. */
+    const placement = (
+      locationName: string,
+      quantity: number,
+      assetKitId: string | null = null
+    ) => ({
+      id: `al-${locationName}`,
+      assetId: "asset-1",
+      locationId: `loc-${locationName}`,
+      organizationId: "org-1",
+      quantity,
+      assetKitId,
+      location: { id: `loc-${locationName}`, name: locationName },
+    });
+
+    /** The exported `assetLocations` cell, the row's third column. */
+    const cellFor = (type: string, assetLocations: unknown[]) =>
+      buildCsvBackupDataFromAssets({
+        assets: [{ id: "asset-1", type, assetLocations }],
+        keysToSkip: [],
+      })[0]?.[2];
+
+    it("writes a pool's placements as JSON names and quantities", () => {
+      expect(
+        cellFor("QUANTITY_TRACKED", [
+          placement("Simulation Suite A", 99),
+          placement("Simulation Suite B", 44),
+        ])
+      ).toBe(
+        '"[{""location"":""Simulation Suite A"",""quantity"":99},{""location"":""Simulation Suite B"",""quantity"":44}]"'
+      );
+    });
+
+    it("writes an individual asset's placement as one entry", () => {
+      expect(cellFor("INDIVIDUAL", [placement("Studio", 1)])).toBe(
+        '"[{""location"":""Studio"",""quantity"":1}]"'
+      );
+    });
+
+    it("leaves a pool's kit-driven placements out", () => {
+      expect(
+        cellFor("QUANTITY_TRACKED", [
+          placement("Warehouse", 5),
+          placement("Van 2", 3, "ak-1"),
+        ])
+      ).toBe('"[{""location"":""Warehouse"",""quantity"":5}]"');
+    });
   });
 });
 
@@ -348,6 +398,52 @@ describe("backup export -> backup import round trip", () => {
       category: { name: "CPU" },
       tags: [{ name: "tag-1" }],
     });
+  });
+
+  it("restores a pool's placements by location name", async () => {
+    expect(
+      await roundTrip({
+        id: "asset-1",
+        title: "Pens",
+        type: "QUANTITY_TRACKED",
+        quantity: 143,
+        assetLocations: [
+          {
+            id: "al-1",
+            quantity: 99,
+            assetKitId: null,
+            location: { id: "loc-1", name: "Suite A; north" },
+          },
+          {
+            id: "al-2",
+            quantity: 44,
+            assetKitId: null,
+            location: { id: "loc-2", name: 'Suite "B"' },
+          },
+          {
+            id: "al-3",
+            quantity: 10,
+            assetKitId: "ak-1",
+            location: { id: "loc-3", name: "Kit van" },
+          },
+        ],
+      })
+    ).toEqual({
+      id: "asset-1",
+      title: "Pens",
+      type: "QUANTITY_TRACKED",
+      quantity: "143",
+      assetLocations: [
+        { location: "Suite A; north", quantity: 99 },
+        { location: 'Suite "B"', quantity: 44 },
+      ],
+    });
+  });
+
+  it("restores an unplaced asset without placements", async () => {
+    expect(
+      await roundTrip({ id: "asset-1", title: "Loose", assetLocations: [] })
+    ).toEqual({ id: "asset-1", title: "Loose" });
   });
 
   it("restores text carrying the delimiter, a quote, or both", async () => {

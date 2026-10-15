@@ -33,6 +33,13 @@ vi.mock("~/modules/api/mobile-auth.server", () => ({
 
 // why: the lock helper issues a raw `SELECT ... FOR UPDATE`; the test drives
 // the quantity validation through its resolved value instead of a DB.
+// why: the archived freeze reads the asset's archive state through the
+// database; none of these fixtures are archived (issue #382).
+vi.mock("~/utils/org-validation.server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/utils/org-validation.server")>()),
+  assertAssetsAreNotArchived: vi.fn(),
+}));
+
 vi.mock("~/modules/consumption-log/quantity-lock.server", () => ({
   lockAssetForQuantityUpdate: vi.fn(),
 }));
@@ -59,6 +66,8 @@ import { lockAssetForQuantityUpdate } from "~/modules/consumption-log/quantity-l
 import { recordEvent } from "~/modules/activity-event/service.server";
 import { createNote } from "~/modules/note/service.server";
 import { action } from "~/routes/api+/mobile+/asset.update-location";
+import { ShelfError } from "~/utils/error";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 
 /** Shape of the `data()` result the route action returns. */
 type DataResult<T> = { data: T; init: ResponseInit | null };
@@ -92,6 +101,19 @@ const tx = {
     create: vi.fn(),
   },
   asset: { findUniqueOrThrow: vi.fn() },
+  // The collapse re-homes custody taken from a dropped placement: the route
+  // reads the operator custody rows before and after the pivot write and
+  // re-points any row whose location no longer holds its units.
+  custody: {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
+    create: vi.fn(),
+    delete: vi.fn(),
+  },
+  // The custody source read also counts units out on bookings per location;
+  // none are out in these tests.
+  bookingAsset: { findMany: vi.fn() },
 };
 
 /**
@@ -143,6 +165,10 @@ beforeEach(() => {
   // because the route derives the collapse events, the primary event and the
   // note from THIS read rather than from the pre-transaction one.
   tx.assetLocation.findMany.mockResolvedValue(qtyAsset().assetLocations);
+  // No custody out by default, so the re-home has nothing to move.
+  tx.custody.findMany.mockResolvedValue([]);
+  tx.bookingAsset.findMany.mockResolvedValue([]);
+  tx.custody.findFirst.mockResolvedValue(null);
   tx.asset.findUniqueOrThrow.mockResolvedValue({
     id: "asset-1",
     title: "Cords",
@@ -151,6 +177,35 @@ beforeEach(() => {
 });
 
 describe("POST /api/mobile/asset/update-location", () => {
+  it("takes custody from the collapsed placement along to the new location", async () => {
+    // Read order under the lock: the route's own placements read, then the
+    // custody sources before the write, then after it.
+    tx.assetLocation.findMany
+      .mockResolvedValueOnce(qtyAsset().assetLocations)
+      .mockResolvedValueOnce([{ locationId: "loc-storage", quantity: 10 }])
+      .mockResolvedValueOnce([{ locationId: "loc-van", quantity: 10 }]);
+    tx.custody.findMany.mockResolvedValue([
+      {
+        id: "custody-1",
+        teamMemberId: "tm-1",
+        locationId: "loc-storage",
+        quantity: 3,
+        createdAt: new Date("2026-09-01T00:00:00.000Z"),
+      },
+    ]);
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(200);
+    expect(tx.custody.update).toHaveBeenCalledWith({
+      where: { id: "custody-1" },
+      data: { locationId: "loc-van", sourceUnknown: false },
+    });
+  });
+
   it("places a partial quantity and reports it back", async () => {
     const { body, status } = await callAction({
       assetId: "asset-1",
@@ -210,6 +265,64 @@ describe("POST /api/mobile/asset/update-location", () => {
     expect(tx.assetLocation.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ quantity: 10 }),
     });
+  });
+
+  it("refuses an archived asset even when the request changes nothing (issue #382)", async () => {
+    // Already at the requested location with the same quantity: without the
+    // early check the no-op short-circuit would answer success for an asset
+    // every other request is refused on.
+    // why: the guard reports the asset archived.
+    vi.mocked(assertAssetsAreNotArchived).mockRejectedValueOnce(
+      new ShelfError({
+        cause: null,
+        title: "Asset is archived",
+        message: "Archived assets are read-only.",
+        label: "Assets",
+        status: 400,
+        shouldBeCaptured: false,
+      })
+    );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-storage",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenCalledWith({
+      assetIds: ["asset-1"],
+      organizationId: "org-1",
+    });
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
+  });
+
+  it("re-checks under the row lock for an archive that lands mid-request (issue #382)", async () => {
+    // why: the early read finds the asset active; the locked read inside the
+    // write transaction finds it archived.
+    vi.mocked(assertAssetsAreNotArchived)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(
+        new ShelfError({
+          cause: null,
+          title: "Asset is archived",
+          message: "Archived assets are read-only.",
+          label: "Assets",
+          status: 400,
+          shouldBeCaptured: false,
+        })
+      );
+
+    const { status } = await callAction({
+      assetId: "asset-1",
+      locationId: "loc-van",
+    });
+
+    expect(status).toBe(400);
+    expect(assertAssetsAreNotArchived).toHaveBeenLastCalledWith(
+      { assetIds: ["asset-1"], organizationId: "org-1" },
+      expect.anything()
+    );
+    expect(tx.assetLocation.create).not.toHaveBeenCalled();
   });
 
   it("rejects a quantity above the asset's total pool", async () => {

@@ -12,8 +12,8 @@
  *
  * Transitions:
  *   - Enter low   (`isLow && lowStockNotifiedAt == null`): send the low-stock
- *     alert (in-app to the acting user + email to owner AND admins), then
- *     stamp `lowStockNotifiedAt`.
+ *     alert (in-app to the acting user + email to the inventory-alert
+ *     audience), then stamp `lowStockNotifiedAt`.
  *   - Recover     (`!isLow && lowStockNotifiedAt != null`): clear the stamp,
  *     then send the "back in stock" recovered notice (in-app + email).
  *   - Otherwise   → no-op (already-notified-and-still-low, or fine-and-was-fine).
@@ -39,7 +39,7 @@
  * failure can never roll back a committed stock change.
  *
  * @see {@link file://./service.server.ts} - adjustQuantity that triggers this check
- * @see {@link file://../organization/service.server.ts} - getOrganizationAdminsForNotification
+ * @see {@link file://../organization/service.server.ts} - getOrganizationNotificationAudience
  * @see {@link file://../../utils/emitter/send-notification.server.ts} - notification emitter
  * @see {@link file://../../emails/low-stock-alert.tsx} - low-stock alert email template
  * @see {@link file://../../emails/low-stock-recovered.tsx} - recovered email template
@@ -65,7 +65,7 @@ import {
 } from "~/emails/low-stock-recovered";
 import { sendEmail } from "~/emails/mail.server";
 import { buildLowStockWhere } from "~/modules/asset/utils.server";
-import { getOrganizationAdminsForNotification } from "~/modules/organization/service.server";
+import { getOrganizationNotificationAudience } from "~/modules/organization/service.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { resolveFormatPrefs } from "~/utils/date-format";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
@@ -219,8 +219,9 @@ function toMinimumChange(
 }
 
 /**
- * Sends the low-stock alert (or back-in-stock notice) to every OWNER and ADMIN
- * of the organization, rendered once per recipient so each copy greets them,
+ * Sends the low-stock alert (or back-in-stock notice) to every member whose
+ * role receives inventory alerts (`notifications.inventoryAlerts`), rendered
+ * once per recipient so each copy greets them,
  * names their address in the footer and prints dates in their format.
  *
  * Besides the organization and the recipients it loads the facts the mail
@@ -238,7 +239,7 @@ function toMinimumChange(
  *     can't abort the loop for the remaining recipients.
  *
  * @param params.variant - "alert" (crossed into low stock) or "recovered"
- * @param params.organizationId - Organization whose owner and admins receive the email
+ * @param params.organizationId - Organization whose inventory-alert audience receives the email
  * @param params.assetId - Asset the notice is about
  * @param params.assetTitle - Asset display title
  * @param params.available - Current available quantity (total minus in-custody)
@@ -282,7 +283,10 @@ async function sendLowStockEmails({
         where: { id: organizationId },
         select: { name: true, customEmailFooter: true },
       }),
-      getOrganizationAdminsForNotification({ organizationId }),
+      getOrganizationNotificationAudience({
+        organizationId,
+        audience: "inventoryAlerts",
+      }),
       optionalRead(
         () => loadLatestMovementRows(assetId),
         "newest consumption log rows",
@@ -305,6 +309,7 @@ async function sendLowStockEmails({
             where: {
               organizationId,
               id: { not: assetId },
+              archivedAt: null,
               ...buildLowStockWhere(),
             },
           }),
@@ -494,7 +499,7 @@ async function runLowStockCheck({
   const asset = await db.asset.findFirst({
     // org-scoped: scope the low-stock lookup to the caller's org
     // (cross-org IDOR guard).
-    where: { id: assetId, organizationId },
+    where: { id: assetId, organizationId, archivedAt: null },
     select: {
       id: true,
       title: true,
