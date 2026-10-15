@@ -44,7 +44,9 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       userId: authSession.userId,
       request,
       entity: PermissionEntity.assetModel,
-      action: PermissionAction.read,
+      // `update`, matching the parent layout: this is the management list,
+      // not the read access that lets a role pick a model elsewhere.
+      action: PermissionAction.update,
     });
 
     const searchParams = getCurrentSearchParams(request);
@@ -103,6 +105,11 @@ export default function AssetModelsIndexPage() {
     entity: PermissionEntity.assetModel,
     action: PermissionAction.delete,
   });
+  const canCreateAssetModel = userHasPermission({
+    roles,
+    entity: PermissionEntity.assetModel,
+    action: PermissionAction.create,
+  });
 
   return (
     <>
@@ -114,14 +121,16 @@ export default function AssetModelsIndexPage() {
             define default values and track groups of identical items.
           </p>
         </div>
-        <Button
-          to="new"
-          role="link"
-          aria-label="new asset model"
-          data-test-id="createNewAssetModel"
-        >
-          New asset model
-        </Button>
+        {canCreateAssetModel ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label="new asset model"
+            data-test-id="createNewAssetModel"
+          >
+            New asset model
+          </Button>
+        ) : null}
       </div>
       <List
         bulkActions={

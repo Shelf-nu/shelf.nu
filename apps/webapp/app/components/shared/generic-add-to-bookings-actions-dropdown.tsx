@@ -59,7 +59,7 @@ const ConditionalActionsDropdown = ({
             type="button"
             variant="primary"
             disabled={disabledTrigger}
-            className="asset-actions hidden sm:flex"
+            className="asset-actions hidden md:flex"
           >
             <span className="flex items-center gap-2">
               {label} <ChevronRightIcon className="chev" />
@@ -76,7 +76,7 @@ const ConditionalActionsDropdown = ({
           type="button"
           variant="primary"
           disabled={disabledTrigger}
-          className="asset-actions sm:hidden"
+          className="asset-actions md:hidden"
           onClick={() => {
             if (disabledTrigger) return;
             setOpen(true);
@@ -91,6 +91,7 @@ const ConditionalActionsDropdown = ({
         <MobileDropdownStyles open={open} />
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             ref={popoverContentRef}
             tabIndex={-1}
             align="end"
@@ -101,7 +102,7 @@ const ConditionalActionsDropdown = ({
             }}
             className="order actions-dropdown static z-[99] !mt-0 w-screen rounded-b-none rounded-t-[4px] border border-gray-300 bg-white p-0 text-right md:static md:mt-auto md:w-[230px] md:rounded-t-[4px]"
           >
-            <div className="order fixed bottom-0  left-0 w-screen rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:w-full md:rounded-t-[4px]">
+            <div className="order fixed bottom-0 left-0 max-h-[85dvh] w-screen overflow-y-auto rounded-b-none rounded-t-[4px] bg-white p-0 text-right md:static md:max-h-none md:w-full md:overflow-visible md:rounded-t-[4px]">
               {links &&
                 links.map((link) => (
                   <div className="px-0 py-1 md:p-0" key={link.label}>

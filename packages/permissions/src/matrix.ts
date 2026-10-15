@@ -15,7 +15,8 @@ import { PermissionAction, PermissionEntity } from "./vocabulary";
  * everything regardless of what their entries say (e.g. no role's entry lists
  * `qr:update`, yet both hold it), and that short-circuit lives in
  * {@link roleHasPermission}. Reading the map alone gives the wrong answer for
- * two of the four roles: ADMIN and OWNER hold more than their entries list.
+ * the two roles the resolver allows everything (ADMIN and OWNER): they hold
+ * more than their entries list.
  * Call the resolver instead.
  *
  * The outer key is required: every role must have a complete entry, so a
@@ -285,6 +286,94 @@ export const Role2PermissionMap: {
       PermissionAction.read,
       PermissionAction.update,
     ],
+    [PermissionEntity.userData]: [
+      PermissionAction.read,
+      PermissionAction.update,
+    ],
+    [PermissionEntity.update]: [PermissionAction.read],
+    [PermissionEntity.commandPaletteSearch]: [PermissionAction.read],
+  },
+  /**
+   * The Manager holds no allow-all shortcut: every grant is listed.
+   * Bookings, custody and audits as an Administrator; read-only catalogue,
+   * team and locations; notes, reminders and non-registered members to
+   * support the hand-overs and audits it runs.
+   */
+  MANAGER: {
+    [PermissionEntity.asset]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.reports]: [],
+    [PermissionEntity.assetIndexSettings]: [
+      PermissionAction.read,
+      PermissionAction.update, // per-user column and mode settings only
+    ],
+    [PermissionEntity.booking]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.checkout,
+      PermissionAction.checkin,
+      PermissionAction.archive,
+      PermissionAction.manageAssets,
+      PermissionAction.manageKits,
+      PermissionAction.cancel,
+      PermissionAction.extend,
+      PermissionAction.export,
+    ],
+    [PermissionEntity.bookingNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.auditNote]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.audit]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+      PermissionAction.archive,
+    ],
+    [PermissionEntity.qr]: [PermissionAction.read],
+    [PermissionEntity.category]: [],
+    [PermissionEntity.customField]: [],
+    [PermissionEntity.location]: [PermissionAction.read],
+    [PermissionEntity.locationNote]: [],
+    [PermissionEntity.tag]: [],
+    [PermissionEntity.teamMember]: [PermissionAction.read],
+    [PermissionEntity.teamMemberProfile]: [PermissionAction.read],
+    [PermissionEntity.workspace]: [],
+    [PermissionEntity.dashboard]: [],
+    [PermissionEntity.generalSettings]: [],
+    [PermissionEntity.workingHours]: [PermissionAction.read],
+    [PermissionEntity.subscription]: [],
+    [PermissionEntity.kit]: [PermissionAction.read, PermissionAction.custody],
+    [PermissionEntity.note]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.delete, // own notes only; the service scopes delete to the author
+    ],
+    [PermissionEntity.scan]: [PermissionAction.read],
+    [PermissionEntity.custody]: [PermissionAction.read],
+    [PermissionEntity.assetReminders]: [
+      PermissionAction.create,
+      PermissionAction.read,
+      PermissionAction.update,
+      PermissionAction.delete,
+    ],
+    [PermissionEntity.teamMemberNote]: [],
+    [PermissionEntity.nonRegisteredMember]: [
+      PermissionAction.read,
+      PermissionAction.create,
+      PermissionAction.update,
+    ],
+    [PermissionEntity.assetModel]: [PermissionAction.read],
+    [PermissionEntity.emailSettings]: [],
     [PermissionEntity.userData]: [
       PermissionAction.read,
       PermissionAction.update,

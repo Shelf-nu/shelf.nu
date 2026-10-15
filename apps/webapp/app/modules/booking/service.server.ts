@@ -62,7 +62,7 @@ import { partialCheckoutAssetsSchema } from "~/components/scanner/drawer/uses/pa
 import { db, type ExtendedPrismaClient } from "~/database/db.server";
 import { bookingUpdatesTemplateString } from "~/emails/bookings-updates-template";
 import { sendEmail } from "~/emails/mail.server";
-import type { BookingForEmail } from "~/emails/types";
+import type { BookingEmailActor, BookingForEmail } from "~/emails/types";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import {
   ACTIVE_BOOKING_STATUSES,
@@ -221,6 +221,7 @@ import {
   completedBookingEmailContent,
   deletedBookingEmailContent,
   extendBookingEmailContent,
+  resolveBookingEmailActor,
   revertedToDraftEmailContent,
   sendBookingUpdatedEmail,
   sendCheckinReminder,
@@ -281,7 +282,7 @@ const label: ErrorLabel = "Booking";
  * Sends an individual personalized email to each resolved notification
  * recipient. Each email includes a per-recipient footer that explains
  * why the person received the notification (e.g., "you are the custodian",
- * "you are an admin"), driven by `recipient.reason`.
+ * "you manage bookings in the workspace"), driven by `recipient.reason`.
  *
  * Emails are fired concurrently (non-awaited `sendEmail` calls) to avoid
  * blocking the booking flow on slow SMTP delivery.
@@ -296,8 +297,11 @@ const label: ErrorLabel = "Booking";
  * @param booking - The booking data used to render the email template
  * @param subject - Email subject line
  * @param buildText - Builds the plain-text body from a recipient's resolved prefs
+ *   and the actor, passed together so the text and HTML lines always agree
  * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
- * @param hints - Acting user's hints — only the null-field fallback for recipients
+ * @param hints - Acting user's hints, only the null-field fallback for recipients
+ * @param actor - Who acted and when, shown under the heading and handed to
+ *   `buildText` for the plain-text body
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
@@ -307,13 +311,23 @@ async function sendBookingEmailToAllRecipients({
   buildText,
   buildHeading,
   hints,
+  actor,
   templateProps,
 }: {
   recipients: NotificationRecipient[];
   booking: BookingForEmail;
   subject: string;
-  /** Built per recipient with their resolved prefs. */
-  buildText: (prefs: ResolvedFormatPrefs) => string;
+  /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
+  actor: BookingEmailActor | undefined;
+  /**
+   * Built per recipient. Spread `textArgs` into the text builder: it carries
+   * the recipient's resolved prefs and the actor, so the plain-text body gets
+   * the same actor line as the HTML.
+   */
+  buildText: (textArgs: {
+    prefs: ResolvedFormatPrefs;
+    actor: BookingEmailActor | undefined;
+  }) => string;
   /** Built per recipient with their resolved prefs. */
   buildHeading: (prefs: ResolvedFormatPrefs) => string;
   /** Acting user's hints — only the null-field fallback for recipients. */
@@ -335,6 +349,7 @@ async function sendBookingEmailToAllRecipients({
     const html = await bookingUpdatesTemplateString({
       booking,
       heading: buildHeading(recipientPrefs),
+      actor,
       assetCount: booking._count.bookingAssets,
       prefs: recipientPrefs,
       recipientReason: recipient.reason,
@@ -345,7 +360,7 @@ async function sendBookingEmailToAllRecipients({
     sendEmail({
       to: recipient.email,
       subject,
-      text: buildText(recipientPrefs),
+      text: buildText({ prefs: recipientPrefs, actor }),
       html,
     });
   }
@@ -2674,24 +2689,30 @@ export async function reserveBooking({
           modelName: req.assetModel.name,
         }));
 
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Reserved by",
+      });
+
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: bookingFound,
         subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           assetReservedEmailContent({
+            ...textArgs,
             bookingName: bookingFound.name,
             assetsCount: bookingFound._count.bookingAssets,
             custodian,
             from,
             to,
-            prefs,
             bookingId: bookingFound.id,
             customEmailFooter: bookingFound.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
+        actor,
         templateProps: {
           assets: bookingFound.bookingAssets,
           // Forward any outstanding `BookingModelRequest` rows so the
@@ -6929,24 +6950,32 @@ export async function checkinBooking({
         updatedBooking.custodianTeamMember?.name ||
         "";
 
+      // "Completed by", not "Checked in by": the person who completes the
+      // booking may not be the one who scanned every item back.
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Completed by",
+      });
+
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           completedBookingEmailContent({
+            ...textArgs,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
             from: updatedBooking.from!,
             to: updatedBooking.to!,
             bookingId: updatedBooking.id,
-            prefs,
             customEmailFooter: updatedBooking.organization.customEmailFooter,
           }),
         buildHeading: () =>
           `Your booking has been completed: "${updatedBooking.name}"`,
         hints,
+        actor,
       });
     }
 
@@ -12351,25 +12380,31 @@ export async function cancelBooking({
         ? resolveUserDisplayName(booking.custodianUser)
         : booking.custodianTeamMember?.name ?? "";
 
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Cancelled by",
+      });
+
       await sendBookingEmailToAllRecipients({
         recipients,
         booking,
         subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           cancelledBookingEmailContent({
+            ...textArgs,
             bookingName: booking.name,
             assetsCount: booking._count.bookingAssets,
             custodian,
             from: booking.from!,
             to: booking.to!,
             bookingId: booking.id,
-            prefs,
             customEmailFooter: booking.organization.customEmailFooter,
             cancellationReason: cancellationReason || undefined,
           }),
         buildHeading: () =>
           `Your booking has been cancelled: "${booking.name}"`,
         hints,
+        actor,
         templateProps: {
           cancellationReason: cancellationReason || undefined,
         },
@@ -12508,24 +12543,30 @@ export async function revertBookingToDraft({
           ? resolveUserDisplayName(draftBooking.custodianUser)
           : draftBooking.custodianTeamMember?.name ?? "";
 
+        const actor = await resolveBookingEmailActor({
+          userId,
+          label: "Reverted by",
+        });
+
         await sendBookingEmailToAllRecipients({
           recipients,
           booking: draftBooking,
           subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             revertedToDraftEmailContent({
+              ...textArgs,
               bookingName: draftBooking.name,
               assetsCount: draftBooking._count.bookingAssets,
               custodian,
               from: draftBooking.from!,
               to: draftBooking.to!,
               bookingId: draftBooking.id,
-              prefs,
               customEmailFooter: draftBooking.organization.customEmailFooter,
             }),
           buildHeading: () =>
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
           hints,
+          actor,
         });
       }
     } catch (cause) {
@@ -12888,18 +12929,23 @@ export async function extendBooking({
         ? resolveUserDisplayName(updatedBooking.custodianUser)
         : updatedBooking.custodianTeamMember?.name ?? "";
 
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Extended by",
+      });
+
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: updatedBooking,
         subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           extendBookingEmailContent({
+            ...textArgs,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
             from: updatedBooking.from!,
             to: updatedBooking.to!,
-            prefs,
             bookingId: updatedBooking.id,
             oldToDate: booking.to,
             customEmailFooter: updatedBooking.organization.customEmailFooter,
@@ -12909,6 +12955,7 @@ export async function extendBooking({
             includeTime: true,
           })} to ${formatDate(newEndDate, prefs, { includeTime: true })}`,
         hints,
+        actor,
       });
     }
 
@@ -14611,23 +14658,29 @@ export async function deleteBooking(
         ? resolveUserDisplayName(b.custodianUser)
         : b.custodianTeamMember?.name ?? "";
 
+      const actor = await resolveBookingEmailActor({
+        userId,
+        label: "Deleted by",
+      });
+
       await sendBookingEmailToAllRecipients({
         recipients,
         booking: b,
         subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           deletedBookingEmailContent({
+            ...textArgs,
             bookingName: b.name,
             assetsCount: b._count.bookingAssets,
             custodian,
             from: b.from as Date,
             to: b.to as Date,
             bookingId: b.id,
-            prefs,
             customEmailFooter: b.organization.customEmailFooter,
           }),
         buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
+        actor,
         templateProps: {
           hideViewButton: true,
         },
@@ -16158,6 +16211,13 @@ export async function bulkDeleteBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
+    // Resolved once so every deleted booking's email names the same person
+    // and moment.
+    const actor =
+      bookings.length > 0
+        ? await resolveBookingEmailActor({ userId, label: "Deleted by" })
+        : undefined;
+
     // Resolve notification recipients and send personalized emails for each deleted booking
     for (const b of bookings) {
       const recipients = await getBookingNotificationRecipients({
@@ -16177,18 +16237,19 @@ export async function bulkDeleteBookings({
           recipients,
           booking: b,
           subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             deletedBookingEmailContent({
+              ...textArgs,
               bookingName: b.name,
               assetsCount: b.bookingAssets.length,
               custodian,
               from: b.from as Date,
               to: b.to as Date,
               bookingId: b.id,
-              prefs,
             }),
           buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
+          actor,
           templateProps: {
             hideViewButton: true,
           },
@@ -16672,6 +16733,13 @@ export async function bulkCancelBookings({
       bookingsWithSchedulerReference.map((booking) => cancelScheduler(booking))
     );
 
+    // Resolved once so every cancelled booking's email names the same person
+    // and moment.
+    const actor =
+      bookings.length > 0
+        ? await resolveBookingEmailActor({ userId, label: "Cancelled by" })
+        : undefined;
+
     // Resolve notification recipients and send personalized cancellation emails
     for (const b of bookings) {
       const recipients = await getBookingNotificationRecipients({
@@ -16691,19 +16759,20 @@ export async function bulkCancelBookings({
           recipients,
           booking: b,
           subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             cancelledBookingEmailContent({
+              ...textArgs,
               bookingName: b.name,
               assetsCount: b._count.bookingAssets,
               custodian,
               from: b.from as Date,
               to: b.to as Date,
               bookingId: b.id,
-              prefs,
               customEmailFooter: b.organization.customEmailFooter,
             }),
           buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
+          actor,
         });
       }
     }

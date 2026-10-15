@@ -4,7 +4,8 @@
  * Code confirmation: a new account records the signup link's intent on its
  * signup event, and the cookie is handed on to onboarding. `redirectTo` only
  * decides where an onboarded account lands; every other account lands on
- * `/assets`, whose layout sends it to onboarding. A login ignores the intent.
+ * `/`, whose role landing page sits inside the layout that sends it to
+ * onboarding. A login ignores the intent.
  *
  * @see {@link file://./../../../app/routes/_auth+/otp.tsx}
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
@@ -113,11 +114,11 @@ describe("otp action — confirming the code", () => {
     );
   });
 
-  it("lands on the assets page and sets only the workspace cookie without an intent", async () => {
+  it("lands on the role landing page and sets only the workspace cookie without an intent", async () => {
     const response = (await action(confirmArgs())) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toEqual([
       "selected-organization-id=org",
     ]);
@@ -134,7 +135,7 @@ describe("otp action — confirming the code", () => {
     )) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()[0]).toBe(
       "selected-organization-id=org"
     );
@@ -160,12 +161,12 @@ describe("otp action — confirming the code", () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
-  it("sends a new account to /assets, and so to onboarding, whatever the redirectTo", async () => {
+  it("sends a new account to /, and so to onboarding, whatever the redirectTo", async () => {
     const response = (await action(
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(createUser).toHaveBeenCalledTimes(1);
     // The intent still travels on for onboarding to consume.
     await expect(signupIntentSetBy(response)).resolves.toEqual({
@@ -173,7 +174,7 @@ describe("otp action — confirming the code", () => {
     });
   });
 
-  it("sends an account that has not onboarded to /assets, whatever the redirectTo", async () => {
+  it("sends an account that has not onboarded to /, whatever the redirectTo", async () => {
     vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: false,
@@ -183,7 +184,7 @@ describe("otp action — confirming the code", () => {
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(createUser).not.toHaveBeenCalled();
   });
 
@@ -200,14 +201,14 @@ describe("otp action — confirming the code", () => {
       )
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toEqual([
       "selected-organization-id=org",
     ]);
   });
 
   it("never follows a redirectTo off our origin", async () => {
-    // Onboarded, so the only thing keeping it on /assets is safeRedirect.
+    // Onboarded, so the only thing keeping it on / is safeRedirect.
     vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
@@ -217,6 +218,6 @@ describe("otp action — confirming the code", () => {
       confirmArgs(await intentCookie({ redirectTo: "https://evil.example/x" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
   });
 });

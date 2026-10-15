@@ -64,9 +64,9 @@ export const ImportContent = () => {
 
       <WarningBox className="my-4">
         <>
-          <strong>IMPORTANT</strong>: Do not use data exported from asset backup
-          to import assets. You must use the template provided above or you will
-          get corrupted data.
+          <strong>IMPORTANT</strong>: Use the template provided above, or a file
+          exported as Import-ready from the asset index. Any other file will
+          produce corrupted data.
         </>
       </WarningBox>
 

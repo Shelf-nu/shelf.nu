@@ -11,6 +11,7 @@ import _ from "lodash";
 import { z } from "zod";
 import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { filterOperatorSchema } from "~/components/assets/assets-index/advanced-filters/schema";
+import { db } from "~/database/db.server";
 import { buildAssetStatusWhere } from "~/modules/asset/search.server";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { CUSTODY_FILTER_REFUSED } from "~/utils/custody-filter";
@@ -675,14 +676,49 @@ export function applyCustodianAllowList(
     : kept;
 }
 
+/**
+ * Low-stock fragment: QUANTITY_TRACKED assets at or below their minimum, the
+ * same rows as the advanced index's `lowStockOnly` SQL. A function, not a
+ * constant, because the field reference comes from the live client.
+ */
+export function buildLowStockWhere(): Prisma.AssetWhereInput {
+  return {
+    type: "QUANTITY_TRACKED",
+    minQuantity: { not: null },
+    quantity: { lte: db.asset.fields.minQuantity },
+  };
+}
+
+/**
+ * Prisma `where` clause for "select all" and bulk actions, built from a
+ * serialized list query string.
+ *
+ * It mirrors the simple-mode list filters (search, status, category, tag,
+ * location, custodian), always scoped to the organization, so a bulk action
+ * acts on the rows the list showed.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  locationIdsOverride,
   honorArchivedView = false,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Location ids the clause matches, in place of the `location` values in
+   * `currentSearchParams`. Omitted, the URL's own values are matched exactly.
+   *
+   * For surfaces whose visible list widens the ticked locations (to include
+   * their child locations): pass the same resolved set the list used, so
+   * "select all" acts on exactly the rows the user was shown.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: string[];
   /**
    * Required, with no default, so every call site states an answer.
    *
@@ -718,7 +754,8 @@ export function getAssetsWhereInput({
     honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
   );
 
-  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+  const { categoriesIds, tagsIds, search } = paramsValues;
+  const locationIds = locationIdsOverride ?? paramsValues.locationIds;
 
   const teamMemberIds = applyCustodianAllowList(
     paramsValues.teamMemberIds ?? [],
@@ -729,6 +766,11 @@ export function getAssetsWhereInput({
     searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
       ? null
       : (searchParams.get("status") as AssetStatus | null);
+
+  // First writer of `where.AND`; every later writer spreads it.
+  if (searchParams.get("lowStockOnly") === "true") {
+    where.AND = [buildLowStockWhere()];
+  }
 
   if (search) {
     where.title = {

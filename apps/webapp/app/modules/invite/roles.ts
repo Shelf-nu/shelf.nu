@@ -22,6 +22,7 @@ import {
   INVITABLE_ROLES,
   ROLE_POLICIES,
   isOrganizationRole,
+  labelToRole,
 } from "~/utils/permissions/role-access";
 
 /** Roles an invite may grant, most privileged first. Never includes OWNER. */
@@ -41,4 +42,22 @@ export type InvitableRole = OrganizationRole;
  */
 export function isInvitableRole(value: unknown): value is InvitableRole {
   return isOrganizationRole(value) && ROLE_POLICIES[value].membership.invitable;
+}
+
+/**
+ * Reads a role a person typed, as in a CSV import cell, into an invitable role.
+ *
+ * Accepts the role key in any case (`manager`, `SELF_SERVICE`) and the label
+ * the app shows for it (`Self service`, `Administrator`), so a file written
+ * from what people see in the UI imports as-is. Surrounding spaces are ignored.
+ *
+ * @param value - The raw cell text
+ * @returns The invitable role, or `null` when the text names no role an
+ *   invite may grant (OWNER included)
+ */
+export function parseInvitableRole(value: string): InvitableRole | null {
+  const key = value.trim().toUpperCase();
+  if (isInvitableRole(key)) return key;
+  const role = labelToRole(value);
+  return role && isInvitableRole(role) ? role : null;
 }

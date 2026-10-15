@@ -14,16 +14,10 @@
  * asset is drawn, matching the web's `ArchivedBadge`: its underlying status
  * ("Available") is true but misleading, because the asset cannot be used.
  *
- * The reasons are role-aware. Members who hold `asset: archive` (admins and
- * owners) can reinstate the asset themselves; everyone else is told to ask an
- * admin, because "reinstate it" names an action they do not have.
- *
- * MIRROR of the web's archived wording, cosmetic only: the reason in
- * `apps/webapp/app/components/assets/actions-dropdown.tsx` ("This asset is
- * archived. Reinstate it to make changes."), made role-aware here, and the
- * web's "remove from booking" refusal. The server enforces every rule on the
- * write. Extraction target: `@shelf/labels` (`archivedAssetBlockedReason`,
- * `archivedAssetsRefusal`), so both apps read one string.
+ * The role-aware reasons both apps show (why an archived asset's actions are
+ * off, why a booking holding one cannot be reserved) come from `@shelf/labels`
+ * (`archivedAssetBlockedReason`, `archivedAssetsRefusal`). This module holds
+ * only the phone's own scan-list wording.
  *
  * This module must stay free of React Native, Expo and `@/` imports: its test
  * runs under Node's test runner.
@@ -32,6 +26,10 @@
  * @see {@link file://./batch-blockers.ts} the scanner's "asset-archived" blocker
  */
 
+import {
+  archivedAssetsLeftOut,
+  kitWithoutActiveAssetsReason,
+} from "@shelf/labels";
 import type { BatchScanAction } from "./batch-blockers";
 
 /** The badge key an archived asset shows instead of its status. */
@@ -74,65 +72,24 @@ export function assetBadgeStatus(
   return isArchivedAsset(asset) ? ARCHIVED_BADGE_STATUS : asset.status;
 }
 
-/** Who is reading the reason: can they reinstate the asset themselves? */
-type ArchivedAudience = {
-  /** True for members holding `asset: archive` (admins and owners). */
-  canReinstate: boolean;
-};
-
 /**
- * Why an archived asset's actions are off, for its own screen.
+ * Why a kit's Assign Custody is off, or `undefined` while it can be assigned.
  *
- * @param audience - Whether the reader can reinstate it
- * @returns One sentence for the notice and the disabled actions' hint
+ * Kit custody leaves archived members out, so a kit with no active member
+ * (only archived ones, or none at all) has nothing to hand over and the server
+ * refuses it. The web kit page turns the action off with the same words.
+ *
+ * @param members - Every member of the kit, archived ones included
+ * @returns The reason from `@shelf/labels`, or `undefined`
  */
-export function archivedAssetReason({ canReinstate }: ArchivedAudience) {
-  return canReinstate
-    ? "This asset is archived. Reinstate it to make changes."
-    : "This asset is archived. Ask an admin to reinstate it.";
-}
-
-/** How many archived assets a reason names before summarising the rest. */
-const NAMED_IN_REASON = 3;
-
-/**
- * Names for a sentence: `"A"`, `"A" and "B"`, `"A", "B", "C" and 2 more`.
- *
- * @param titles - At least one asset title
- * @returns The quoted list
- */
-function quotedTitles(titles: string[]): string {
-  const named = titles.slice(0, NAMED_IN_REASON).map((title) => `"${title}"`);
-  const rest = titles.length - named.length;
-  if (rest > 0) return `${named.join(", ")} and ${rest} more`;
-  if (named.length === 1) return named[0];
-  return `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`;
-}
-
-/**
- * Why a draft booking that holds archived assets cannot be reserved. Names
- * the assets, so they can be found in a long list.
- *
- * Removing them is always offered: anyone who can edit the booking can do
- * that, while reinstating is for admins only. Same words as the web's
- * "remove from booking" refusal (`archivedAssetsRefusal` with
- * `fix: "remove-from-booking"` in `@shelf/labels`).
- *
- * @param titles - Titles of the archived assets the booking holds
- * @param audience - Whether the reader can reinstate them
- * @returns The reason shown above the disabled Reserve button
- */
-export function archivedAssetsInBookingReason(
-  titles: string[],
-  { canReinstate }: ArchivedAudience
-) {
-  const them = titles.length === 1 ? "it" : "them";
-  const subject = `${quotedTitles(titles)} ${
-    titles.length === 1 ? "is" : "are"
-  } archived.`;
-  return canReinstate
-    ? `${subject} Remove ${them} from the booking or reinstate ${them}.`
-    : `${subject} Remove ${them} from the booking or ask an admin to reinstate ${them}.`;
+export function kitAssignCustodyBlockedReason(
+  members: readonly MaybeArchived[]
+): string | undefined {
+  if (members.some((member) => !isArchivedAsset(member))) return undefined;
+  return kitWithoutActiveAssetsReason({
+    hasArchivedAssets: members.length > 0,
+    action: "custody",
+  });
 }
 
 /**
@@ -199,17 +156,16 @@ export function markArchivedRows<T extends MarkableRow>(
 }
 
 /**
- * The sentence shown after a duplicate when the server left archived assets
- * out of the copy.
+ * The sentence a success message adds when the server left archived assets
+ * out: the archived members of a kit added to a booking, or the archived
+ * assets a duplicated booking did not copy.
  *
- * @param count - `droppedArchivedCount` from the duplicate response
- * @returns The note, or `null` when nothing was left out
+ * @param count - The server's count; absent from servers that predate it,
+ *   and then read as none
+ * @returns The sentence, or `null` when nothing was left out
  */
-export function droppedArchivedNote(count: number | undefined): string | null {
-  if (!count || count <= 0) return null;
-  return count === 1
-    ? "1 archived asset was left out of the copy. Archived assets can't be booked."
-    : `${count} archived assets were left out of the copy. Archived assets can't be booked.`;
+export function archivedLeftOutNote(count: number | undefined): string | null {
+  return count && count > 0 ? archivedAssetsLeftOut(count) : null;
 }
 
 /**

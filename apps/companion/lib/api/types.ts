@@ -478,7 +478,14 @@ export type ScannedKit = {
   name: string;
   status: string;
   image: string | null;
+  /** Active members: archived ones are not counted. */
   _count: { assets: number };
+  /**
+   * Archived members, left out of `assets` and `_count`. Absent from servers
+   * that predate it, and then read as none.
+   */
+  archivedAssetCount?: number;
+  /** Active members only. */
   assets: { id: string; status: string; availableToBook: boolean }[];
 };
 
@@ -1002,6 +1009,22 @@ export type CheckoutDisposition = {
 };
 
 /**
+ * A model reservation the booking's dates can no longer fill, for example
+ * after a unit of the model was archived. Sent only while units can still be
+ * assigned.
+ */
+export type BookingModelShortfall = {
+  assetModelId: string;
+  modelName: string;
+  /** Units of the reservation still unassigned. */
+  outstanding: number;
+  /** Units the booking can still get for its dates, after its named units. */
+  available: number;
+  /** Units the reservation is promised beyond what the pool holds. */
+  short: number;
+};
+
+/**
  * A book-by-model reservation on a booking: intent to reserve `quantity` units
  * of an `AssetModel` without picking specific assets upfront. `outstanding` is
  * how many are still waiting to be assigned via scan-to-assign;
@@ -1083,6 +1106,11 @@ export type BookingDetail = {
   modelRequestCount: number;
   /** Total units still to assign across all model requests. */
   outstandingModelUnitCount: number;
+  /**
+   * Reservations the booking's dates can no longer fill. Absent from servers
+   * that predate it, and then read as none.
+   */
+  modelReservationShortfalls?: BookingModelShortfall[];
   /**
    * True when any asset on this booking is already booked for the same window
    * — the third rule web's Reserve button disables on, and the one the client

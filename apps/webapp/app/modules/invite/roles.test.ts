@@ -12,7 +12,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { INVITABLE_ROLES, isInvitableRole } from "./roles";
+import { INVITABLE_ROLES, isInvitableRole, parseInvitableRole } from "./roles";
 
 // @vitest-environment node
 
@@ -49,5 +49,27 @@ describe("isInvitableRole", () => {
     ["null", null],
   ])("rejects %s", (_label, value) => {
     expect(isInvitableRole(value)).toBe(false);
+  });
+});
+
+describe("parseInvitableRole", () => {
+  it.each([
+    ["the key", "MANAGER", "MANAGER"],
+    ["the key in lower case", "self_service", "SELF_SERVICE"],
+    ["the label", "Manager", "MANAGER"],
+    ["a label with a space", "Self service", "SELF_SERVICE"],
+    ["a label that differs from the key", "Administrator", "ADMIN"],
+    ["surrounding spaces", "  base  ", "BASE"],
+  ])("reads %s", (_label, value, expected) => {
+    expect(parseInvitableRole(value)).toBe(expected);
+  });
+
+  it.each([
+    ["the owner key", "OWNER"],
+    ["the owner label", "Owner"],
+    ["an unknown role", "Superuser"],
+    ["an empty cell", ""],
+  ])("refuses %s", (_label, value) => {
+    expect(parseInvitableRole(value)).toBeNull();
   });
 });

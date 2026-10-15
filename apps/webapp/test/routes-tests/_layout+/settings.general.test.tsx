@@ -16,10 +16,7 @@ import {
   getOwnerSubscriptionInfo,
   userHasActiveSubscription,
 } from "~/utils/stripe.server";
-import {
-  canExportAssets,
-  canHideShelfBranding,
-} from "~/utils/subscription.server";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 
 // why: mock parseFormData to avoid actual file upload in tests
 vi.mock("@remix-run/form-data-parser", () => ({
@@ -60,7 +57,6 @@ vi.mock("~/utils/roles.server", () => ({
 }));
 
 vi.mock("~/utils/subscription.server", () => ({
-  canExportAssets: vi.fn(),
   canHideShelfBranding: vi.fn(),
 }));
 
@@ -80,7 +76,6 @@ const getOrganizationTierLimitMock = vi.mocked(getOrganizationTierLimit);
 const getOrganizationAdminsMock = vi.mocked(getOrganizationAdmins);
 const updateOrganizationMock = vi.mocked(updateOrganization);
 const requirePermissionMock = vi.mocked(requirePermission);
-const canExportAssetsMock = vi.mocked(canExportAssets);
 const canHideShelfBrandingMock = vi.mocked(canHideShelfBranding);
 const getOwnerSubscriptionInfoMock = vi.mocked(getOwnerSubscriptionInfo);
 const userHasActiveSubscriptionMock = vi.mocked(userHasActiveSubscription);
@@ -151,7 +146,6 @@ describe("settings.general loader", () => {
     } as any);
 
     getOrganizationAdminsMock.mockResolvedValue([]);
-    canExportAssetsMock.mockReturnValue(true);
     canHideShelfBrandingMock.mockReturnValue(true);
     // why: mock Stripe subscription functions to return default values
     getOwnerSubscriptionInfoMock.mockResolvedValue({
@@ -689,5 +683,58 @@ describe("settings.general SSO settings refusals", () => {
     const response = await postSso(OrganizationRoles.OWNER);
 
     expect(response.init?.status).toBe(400);
+  });
+});
+
+describe("settings.general SSO settings write", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.user.findUniqueOrThrow.mockResolvedValue({ tierId: "tier_2" });
+  });
+
+  it("writes every group mapping, the Manager group included", async () => {
+    const ssoOrganization = { ...baseOrganization(), enabledSso: true };
+    requirePermissionMock.mockResolvedValue({
+      organizationId: "org-1",
+      currentOrganization: ssoOrganization,
+      role: OrganizationRoles.OWNER,
+      access: accessFor([OrganizationRoles.OWNER]),
+      organizations: [ssoOrganization],
+      userOrganizations: [],
+      canUseBarcodes: false,
+    } as any);
+
+    const body = new URLSearchParams({
+      intent: "sso",
+      id: "org-1",
+      adminGroupId: "grp-admin",
+      managerGroupId: "grp-manager",
+      selfServiceGroupId: "grp-self-service",
+      baseUserGroupId: "grp-base",
+    });
+
+    await action(
+      createActionArgs({
+        context: mockContext,
+        request: new Request("http://localhost/settings/general", {
+          method: "POST",
+          body,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }),
+        params: {},
+      })
+    );
+
+    expect(updateOrganizationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "org-1",
+        ssoDetails: {
+          adminGroupId: "grp-admin",
+          managerGroupId: "grp-manager",
+          selfServiceGroupId: "grp-self-service",
+          baseUserGroupId: "grp-base",
+        },
+      })
+    );
   });
 });

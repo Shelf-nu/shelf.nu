@@ -33,9 +33,8 @@ import When from "../when/when";
  * import errors or success state.
  *
  * @param intent - The form intent value sent to the action
- * @param url - Optional custom action URL for the form
  */
-export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
+export const FileForm = ({ intent }: { intent: string }) => {
   // Widened to `string` so toUpperCase() doesn't need a cast.
   // The "I AGREE" check happens at submit time.
   const [agreed, setAgreed] = useState("");
@@ -72,7 +71,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
       method="post"
       ref={formRef}
       encType="multipart/form-data"
-      action={url ? url : undefined}
     >
       <Input
         type="file"

@@ -32,17 +32,20 @@ export const BOOKING_ID = "booking-1";
 const R = OrganizationRoles;
 
 /**
- * The four roles alone, plus one mixed membership in both orders. Web paths
+ * The five roles alone, plus mixed memberships in both orders. Web paths
  * resolve the most privileged role and mobile paths mostly do too, but a path
  * that still reads `roles[0]` answers the two orders differently.
  */
 export const CHECKINOUT_ROLE_SETS: OrganizationRoles[][] = [
   [R.OWNER],
   [R.ADMIN],
+  [R.MANAGER],
   [R.SELF_SERVICE],
   [R.BASE],
   [R.SELF_SERVICE, R.ADMIN],
   [R.ADMIN, R.SELF_SERVICE],
+  [R.SELF_SERVICE, R.MANAGER],
+  [R.MANAGER, R.SELF_SERVICE],
 ];
 
 /**

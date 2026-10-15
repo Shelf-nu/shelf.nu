@@ -88,18 +88,27 @@ ARCH_STAND="ce2earchstand000000001"    # active, for a scan that goes stale
 ARCH_LENS="ce2earchlens0000000001"     # archived kit member
 ARCH_LIGHT="ce2earchlight000000001"    # active kit member
 ARCH_KIT="ce2earchkit00000000001"
+ARCH_FILTER="ce2earchfilter00000001"   # archived, the only member of ARCH_KIT_DORMANT
+ARCH_KIT_DORMANT="ce2earchkitdormant0001" # holds only archived assets
+ARCH_MODEL="ce2earchmodel000000001"    # model whose reservation falls short
+ARCH_PROJECTOR="ce2earchprojector00001" # active unit of ARCH_MODEL
+ARCH_SPARE="ce2earchspare000000001"    # archived unit of ARCH_MODEL
+ARCH_BOOKING_SHORT="ce2earchbookingshort01" # reserves 2 units of ARCH_MODEL, 1 left
 ARCH_BOOKING="ce2earchbooking0000001"     # owner's draft
 ARCH_BOOKING_SS="ce2earchbookingss00001"  # self-service member's draft
 ARCH_AUDIT="ce2earchaudit000000001"
 # Cleanup is keyed on these ids only: the fixture's own bookings, plus any
 # booking holding one of its assets (the copies the duplicate flow makes).
 # Nothing is matched by name, so no other booking in the workspace is touched.
-ARCH_ASSET_IDS_SQL="'${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}'"
-ARCH_BOOKING_IDS_SQL="'${ARCH_BOOKING}','${ARCH_BOOKING_SS}'"
+ARCH_ASSET_IDS_SQL="'${ARCH_CAMERA}','${ARCH_TRIPOD}','${ARCH_STAND}','${ARCH_LENS}','${ARCH_LIGHT}','${ARCH_FILTER}','${ARCH_PROJECTOR}','${ARCH_SPARE}'"
+ARCH_BOOKING_IDS_SQL="'${ARCH_BOOKING}','${ARCH_BOOKING_SS}','${ARCH_BOOKING_SHORT}'"
+ARCH_KIT_IDS_SQL="'${ARCH_KIT}','${ARCH_KIT_DORMANT}'"
 ARCH_CAMERA_QR="e2earchqr001"
 ARCH_TRIPOD_QR="e2earchqr002"
 ARCH_STAND_QR="e2earchqr003"
 ARCH_KIT_QR="e2earchqrkit"
+ARCH_KIT_DORMANT_QR="e2earchqrkit2"
+ARCH_QR_IDS_SQL="'${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}','${ARCH_KIT_DORMANT_QR}'"
 
 # Long-description fixture. Six short lines, so the text is tall but not long;
 # the last line is what a collapsed screen hides.
@@ -290,26 +299,35 @@ DELETE FROM "Booking" WHERE id IN (${ARCH_BOOKING_IDS_SQL})
    OR ("organizationId"='${ORG_ID}' AND id IN (
      SELECT "bookingId" FROM "BookingAsset" WHERE "assetId" IN (${ARCH_ASSET_IDS_SQL})));
 DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
-DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
-DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
+DELETE FROM "Qr" WHERE id IN (${ARCH_QR_IDS_SQL});
+DELETE FROM "Kit" WHERE id IN (${ARCH_KIT_IDS_SQL});
 DELETE FROM "Asset" WHERE id IN (${ARCH_ASSET_IDS_SQL});
+DELETE FROM "AssetModel" WHERE id='${ARCH_MODEL}';
 
-INSERT INTO "Asset" (id,title,"organizationId","userId",value,"archivedAt","updatedAt") VALUES
-  ('${ARCH_CAMERA}','E2E Archived Camera','${ORG_ID}','${OWNER_ID}',1000,NOW(),NOW()),
-  ('${ARCH_TRIPOD}','E2E Active Tripod','${ORG_ID}','${OWNER_ID}',100,NULL,NOW()),
-  ('${ARCH_STAND}','E2E Active Stand','${ORG_ID}','${OWNER_ID}',50,NULL,NOW()),
-  ('${ARCH_LENS}','E2E Archived Lens','${ORG_ID}','${OWNER_ID}',500,NOW(),NOW()),
-  ('${ARCH_LIGHT}','E2E Active Light','${ORG_ID}','${OWNER_ID}',200,NULL,NOW());
-INSERT INTO "Kit" (id,name,"organizationId","createdById","updatedAt")
-VALUES ('${ARCH_KIT}','E2E Archive Kit','${ORG_ID}','${OWNER_ID}',NOW());
+INSERT INTO "AssetModel" (id,name,"organizationId","userId","createdAt","updatedAt")
+VALUES ('${ARCH_MODEL}','E2E Short Model','${ORG_ID}','${OWNER_ID}',NOW(),NOW());
+INSERT INTO "Asset" (id,title,"organizationId","userId",value,"archivedAt","assetModelId","updatedAt") VALUES
+  ('${ARCH_CAMERA}','E2E Archived Camera','${ORG_ID}','${OWNER_ID}',1000,NOW(),NULL,NOW()),
+  ('${ARCH_TRIPOD}','E2E Active Tripod','${ORG_ID}','${OWNER_ID}',100,NULL,NULL,NOW()),
+  ('${ARCH_STAND}','E2E Active Stand','${ORG_ID}','${OWNER_ID}',50,NULL,NULL,NOW()),
+  ('${ARCH_LENS}','E2E Archived Lens','${ORG_ID}','${OWNER_ID}',500,NOW(),NULL,NOW()),
+  ('${ARCH_LIGHT}','E2E Active Light','${ORG_ID}','${OWNER_ID}',200,NULL,NULL,NOW()),
+  ('${ARCH_FILTER}','E2E Archived Filter','${ORG_ID}','${OWNER_ID}',40,NOW(),NULL,NOW()),
+  ('${ARCH_PROJECTOR}','E2E Active Projector','${ORG_ID}','${OWNER_ID}',800,NULL,'${ARCH_MODEL}',NOW()),
+  ('${ARCH_SPARE}','E2E Archived Projector','${ORG_ID}','${OWNER_ID}',800,NOW(),'${ARCH_MODEL}',NOW());
+INSERT INTO "Kit" (id,name,"organizationId","createdById","updatedAt") VALUES
+  ('${ARCH_KIT}','E2E Archive Kit','${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${ARCH_KIT_DORMANT}','E2E Archived-Only Kit','${ORG_ID}','${OWNER_ID}',NOW());
 INSERT INTO "AssetKit" (id,"assetId","kitId","organizationId","updatedAt") VALUES
   ('${ARCH_KIT}_lens','${ARCH_LENS}','${ARCH_KIT}','${ORG_ID}',NOW()),
-  ('${ARCH_KIT}_light','${ARCH_LIGHT}','${ARCH_KIT}','${ORG_ID}',NOW());
+  ('${ARCH_KIT}_light','${ARCH_LIGHT}','${ARCH_KIT}','${ORG_ID}',NOW()),
+  ('${ARCH_KIT_DORMANT}_filter','${ARCH_FILTER}','${ARCH_KIT_DORMANT}','${ORG_ID}',NOW());
 INSERT INTO "Qr" (id,"kitId","assetId","organizationId","userId","updatedAt") VALUES
   ('${ARCH_CAMERA_QR}',NULL,'${ARCH_CAMERA}','${ORG_ID}','${OWNER_ID}',NOW()),
   ('${ARCH_TRIPOD_QR}',NULL,'${ARCH_TRIPOD}','${ORG_ID}','${OWNER_ID}',NOW()),
   ('${ARCH_STAND_QR}',NULL,'${ARCH_STAND}','${ORG_ID}','${OWNER_ID}',NOW()),
-  ('${ARCH_KIT_QR}','${ARCH_KIT}',NULL,'${ORG_ID}','${OWNER_ID}',NOW());
+  ('${ARCH_KIT_QR}','${ARCH_KIT}',NULL,'${ORG_ID}','${OWNER_ID}',NOW()),
+  ('${ARCH_KIT_DORMANT_QR}','${ARCH_KIT_DORMANT}',NULL,'${ORG_ID}','${OWNER_ID}',NOW());
 
 -- Drafts start tomorrow, so reserving them asks no early-start question.
 INSERT INTO "Booking" (id,name,status,"organizationId","creatorId","custodianUserId",
@@ -318,6 +336,13 @@ INSERT INTO "Booking" (id,name,status,"organizationId","creatorId","custodianUse
    NOW()+interval '1 day',NOW()+interval '2 days',NOW()),
   ('${ARCH_BOOKING_SS}','E2E Archive Draft SS','DRAFT','${ORG_ID}','${SS_ID}','${SS_ID}',
    NULLIF('${SS_TM}',''),NOW()+interval '1 day',NOW()+interval '2 days',NOW());
+-- Reserves 2 units of E2E Short Model while only 1 is active: 1 short.
+INSERT INTO "Booking" (id,name,status,"organizationId","creatorId","custodianUserId",
+                       "from","to","updatedAt") VALUES
+  ('${ARCH_BOOKING_SHORT}','E2E Short Reservation','RESERVED','${ORG_ID}','${OWNER_ID}','${OWNER_ID}',
+   NOW()+interval '1 day',NOW()+interval '2 days',NOW());
+INSERT INTO "BookingModelRequest" (id,"bookingId","assetModelId",quantity,"createdAt","updatedAt","fulfilledQuantity")
+VALUES ('${ARCH_BOOKING_SHORT}_req','${ARCH_BOOKING_SHORT}','${ARCH_MODEL}',2,NOW(),NOW(),0);
 INSERT INTO "BookingAsset" (id,"bookingId","assetId") VALUES
   ('${ARCH_BOOKING}_camera','${ARCH_BOOKING}','${ARCH_CAMERA}'),
   ('${ARCH_BOOKING}_tripod','${ARCH_BOOKING}','${ARCH_TRIPOD}'),
@@ -341,11 +366,15 @@ SHELF_TEST_ACTIVE_ASSET_ID=${ARCH_TRIPOD}
 SHELF_TEST_ACTIVE_QR_ID=${ARCH_TRIPOD_QR}
 SHELF_TEST_SECOND_ACTIVE_QR_ID=${ARCH_STAND_QR}
 SHELF_TEST_ARCHIVED_KIT_ID=${ARCH_KIT}
+SHELF_TEST_ARCHIVED_KIT_QR_ID=${ARCH_KIT_QR}
+SHELF_TEST_ONLY_ARCHIVED_KIT_ID=${ARCH_KIT_DORMANT}
+SHELF_TEST_ONLY_ARCHIVED_KIT_QR_ID=${ARCH_KIT_DORMANT_QR}
+SHELF_TEST_SHORT_BOOKING_ID=${ARCH_BOOKING_SHORT}
 SHELF_TEST_ARCHIVED_BOOKING_ID=${ARCH_BOOKING}
 SHELF_TEST_ARCHIVED_BOOKING_SS_ID=${ARCH_BOOKING_SS}
 SHELF_TEST_ARCHIVED_AUDIT_ID=${ARCH_AUDIT}
 ENV
-    echo "✓ Seeded the archived-assets fixture (2 archived, 3 active, kit, 2 drafts, audit) in '${WORKSPACE}'."
+    echo "✓ Seeded the archived-assets fixture (4 archived, 4 active, 2 kits, 2 drafts, a short reservation, audit) in '${WORKSPACE}'."
     echo "  wrote $ARCH_ENV_OUT"
     ;;
   archived-stale)
@@ -362,9 +391,10 @@ DELETE FROM "Booking" WHERE id IN (${ARCH_BOOKING_IDS_SQL})
    OR ("organizationId"='${ORG_ID}' AND id IN (
      SELECT "bookingId" FROM "BookingAsset" WHERE "assetId" IN (${ARCH_ASSET_IDS_SQL})));
 DELETE FROM "AuditSession" WHERE id='${ARCH_AUDIT}';
-DELETE FROM "Qr" WHERE id IN ('${ARCH_CAMERA_QR}','${ARCH_TRIPOD_QR}','${ARCH_STAND_QR}','${ARCH_KIT_QR}');
-DELETE FROM "Kit" WHERE id='${ARCH_KIT}';
+DELETE FROM "Qr" WHERE id IN (${ARCH_QR_IDS_SQL});
+DELETE FROM "Kit" WHERE id IN (${ARCH_KIT_IDS_SQL});
 DELETE FROM "Asset" WHERE id IN (${ARCH_ASSET_IDS_SQL});
+DELETE FROM "AssetModel" WHERE id='${ARCH_MODEL}';
 COMMIT;
 SQL
     rm -f "$ARCH_ENV_OUT"

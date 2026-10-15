@@ -54,6 +54,7 @@ import { userHasPermission } from "@/lib/permissions";
 import {
   ARCHIVED_BADGE_STATUS,
   archivedIdsFromError,
+  archivedLeftOutNote,
   archivedScanNote,
   assetBadgeStatus,
   isArchivedAsset,
@@ -62,6 +63,7 @@ import {
 import {
   computeBlockers,
   blockedQrIds,
+  kitBlockerFacts,
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
@@ -192,8 +194,13 @@ type ScannedItem = {
   assetModelId?: string | null;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
-  /** Kits only: number of contained assets (shown in the drawer row). */
+  /** Kits only: number of active members (shown in the drawer row). */
   assetCount?: number;
+  /**
+   * Kits only: archived members, left out of `assetCount`. A kit with some
+   * and no active member raises the "kit-only-archived" blocker.
+   */
+  archivedAssetCount?: number;
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
   /** Assets only: the asset's type. Absent on servers that predate it. */
@@ -1268,11 +1275,7 @@ function ScannerContent() {
               mainImage: kit.image,
               category: null,
               kitId: null,
-              assetCount: kit._count.assets,
-              hasAssetsInCustody: kit.assets.some(
-                (a) => a.status === "IN_CUSTODY"
-              ),
-              hasUnavailableAssets: kit.assets.some((a) => !a.availableToBook),
+              ...kitBlockerFacts(kit),
             };
 
             setBookingCheckinItems((prev) => [kitItem, ...prev]);
@@ -1346,10 +1349,7 @@ function ScannerContent() {
             mainImage: kit.image,
             category: null,
             kitId: null,
-            assetCount: kit._count.assets,
-            hasAssetsInCustody: kit.assets.some(
-              (a) => a.status === "IN_CUSTODY"
-            ),
+            ...kitBlockerFacts(kit),
           };
 
           setScannedItems((prev) => [newKitItem, ...prev]);
@@ -2128,7 +2128,7 @@ function ScannerContent() {
           text: "Add",
           onPress: async () => {
             setIsBookingSubmitting(true);
-            const { error, errorDetails } = await api.addScannedToBooking(
+            const { data, error, errorDetails } = await api.addScannedToBooking(
               currentOrg.id,
               bookingId,
               assetIds,
@@ -2147,11 +2147,16 @@ function ScannerContent() {
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
+            // A kit is booked with its active members; say how many archived
+            // ones stayed out, as the web does, so the count does not look short.
+            const leftOutNote = archivedLeftOutNote(
+              data?.archivedKitMembersLeftOut
+            );
             Alert.alert(
               "Done",
               `Added ${count} item${count === 1 ? "" : "s"} to "${
                 bookingName || "the booking"
-              }".`,
+              }".${leftOutNote ? ` ${leftOutNote}` : ""}`,
               [
                 {
                   text: "OK",

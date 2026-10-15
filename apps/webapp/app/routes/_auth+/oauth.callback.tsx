@@ -110,12 +110,12 @@ export async function action({ request, context }: ActionFunctionArgs) {
           formatPrefs,
         });
 
-        // Set the auth session and redirect to the assets page
+        // Set the auth session and redirect to the role's landing page
         context.setSession(authSession);
 
         // If org exists (SCIM SSO case), redirect to that org
         if (org?.id) {
-          return redirect(safeRedirect(redirectTo || "/assets"), {
+          return redirect(safeRedirect(redirectTo || "/"), {
             headers: [setCookie(await setSelectedOrganizationIdCookie(org.id))],
           });
         }
@@ -138,7 +138,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           return redirect("/sso-pending-assignment");
         }
 
-        return redirect(safeRedirect(redirectTo || "/assets"));
+        return redirect(safeRedirect(redirectTo || "/"));
       }
     }
 
@@ -161,7 +161,7 @@ export function loader({ context }: LoaderFunctionArgs) {
   const subHeading = "Please wait while we connect your account";
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   return data(payload({ title, subHeading }));
@@ -175,7 +175,7 @@ export default function LoginCallback() {
   const fetcher = useFetcher<typeof action>();
   const { data } = fetcher;
   const [searchParams] = useSearchParams();
-  const redirectTo = searchParams.get("redirectTo") ?? "/assets";
+  const redirectTo = searchParams.get("redirectTo") ?? "/";
 
   useEffect(() => {
     const {

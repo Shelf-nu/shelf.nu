@@ -17,10 +17,16 @@ import { Filters } from "~/components/list/filters";
 import { Pagination } from "~/components/list/pagination";
 import { Button } from "~/components/shared/button";
 import { useSearchParams } from "~/hooks/search-params";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useUserData } from "~/hooks/use-user-data";
 import { NOTE_TYPE_FILTER_ITEMS } from "~/modules/note/note-filters";
 import type { loader } from "~/routes/_layout+/assets.$assetId.activity";
 import { isFormProcessing } from "~/utils/form";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { ActionsDropdown } from "./actions-dropdown";
 import { NewNote } from "./new";
 import type { NoteWithUser } from "./note";
@@ -33,6 +39,10 @@ import { Note } from "./note";
  * so the activity stream can be searched, filtered by type, and paginated like
  * every other list in the app. Notes are rendered as cards (not table rows),
  * so this composes the toolbar primitives directly rather than via `<List>`.
+ *
+ * The new-note form needs `note:create`, and the actions menu on the caller's
+ * own note needs `note:delete`. Both are cosmetic: the note routes enforce the
+ * same grants server-side.
  */
 export const Notes = () => {
   const { asset, items, search, hasNotes, page } =
@@ -41,6 +51,18 @@ export const Notes = () => {
 
   /* Using user data here for the Note component generated for frontend only as per the optimistic UI approach */
   const user = useUserData();
+
+  const roles = useOrganizationRoles();
+  const canCreateNote = userHasPermission({
+    roles,
+    entity: PermissionEntity.note,
+    action: PermissionAction.create,
+  });
+  const canDeleteNote = userHasPermission({
+    roles,
+    entity: PermissionEntity.note,
+    action: PermissionAction.delete,
+  });
 
   /** `userId` is the author, which decides who may delete the note */
   const notes = items as (NoteWithUser & { userId: string | null })[];
@@ -116,7 +138,9 @@ export const Notes = () => {
         ) : null}
       </Filters>
 
-      <NewNote fetcher={fetcher} />
+      {/* The fragment keeps this child an element: ListContentWrapper does
+          not accept a bare `null` child. */}
+      <>{canCreateNote ? <NewNote fetcher={fetcher} /> : null}</>
 
       {hasResults ? (
         <>
@@ -126,17 +150,22 @@ export const Notes = () => {
               <Note
                 key={optimisticNote.id}
                 note={optimisticNote}
-                actionsDropdown={<ActionsDropdown noteId={optimisticNote.id} />}
+                actionsDropdown={
+                  canDeleteNote ? (
+                    <ActionsDropdown noteId={optimisticNote.id} />
+                  ) : undefined
+                }
               />
             )}
             {/* Render the current page of notes. Deleting only ever removes
-                the caller's own note, so the menu shows on those alone. */}
+                the caller's own note, so the menu shows on those alone, and
+                only for a caller who holds `note:delete`. */}
             {notes.map((note) => (
               <Note
                 key={note.id}
                 note={note}
                 actionsDropdown={
-                  user && note.userId === user.id ? (
+                  canDeleteNote && user && note.userId === user.id ? (
                     <ActionsDropdown noteId={note.id} />
                   ) : undefined
                 }

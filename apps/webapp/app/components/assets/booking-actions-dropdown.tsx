@@ -51,7 +51,8 @@ export default function BookingActionsDropdown() {
 
   const disabledTrigger = asset.archivedAt
     ? {
-        // Base and Self-service can't reinstate, so they are told who can.
+        // Members without the archive grant (Manager, self service, base)
+        // cannot reinstate, so they are told who can.
         reason: archivedAssetBlockedReason({ canReinstate, action: "book" }),
       }
     : availableToBook

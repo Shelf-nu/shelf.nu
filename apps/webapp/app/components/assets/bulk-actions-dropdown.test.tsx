@@ -61,6 +61,7 @@ vi.mock("~/hooks/use-controlled-dropdown-menu", () => ({
     open: true,
     defaultOpen: true,
     setOpen: vi.fn(),
+    onOpenChange: vi.fn(),
   }),
 }));
 
@@ -71,7 +72,10 @@ vi.mock("~/hooks/use-organization-roles", () => ({
   useOrganizationRoles: () => [OrganizationRoles.ADMIN],
 }));
 vi.mock("~/hooks/use-role-access", () => ({
-  useRoleAccess: () => ({ custody: { assign: "anyone" } }),
+  useRoleAccess: () => ({
+    custody: { assign: "anyone" },
+    policy: { assets: { seeArchived: true } },
+  }),
 }));
 vi.mock("~/hooks/use-user-data", () => ({
   useUserData: () => ({ id: "user-1" }),

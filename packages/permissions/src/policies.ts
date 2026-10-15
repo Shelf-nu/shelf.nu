@@ -70,6 +70,11 @@ type RolePolicyShape = {
      * to them on an active booking).
      */
     listScope: "all" | "bookable";
+    /**
+     * May open the Archived and All views of an asset list. Seeing is not
+     * acting: archiving and reinstating stay on the `asset: archive` grant.
+     */
+    seeArchived: boolean;
   };
   custody: {
     /** Whose custody the role may see. */
@@ -157,7 +162,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: true,
       documentsForOthers: true,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: true },
     custody: { see: "all", assign: "anyone" },
     audits: { scope: "all", manageOthers: true },
     notifications: {
@@ -198,7 +203,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: true,
       documentsForOthers: true,
     },
-    assets: { listScope: "all" },
+    assets: { listScope: "all", seeArchived: true },
     custody: { see: "all", assign: "anyone" },
     audits: { scope: "all", manageOthers: true },
     notifications: {
@@ -223,6 +228,54 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       ownsWorkspace: false,
     },
   },
+  /**
+   * Runs bookings, custody and audits for the whole workspace without
+   * administering it: the Administrator's booking, custody and audit reach,
+   * and none of its catalogue, settings, team or billing rights.
+   */
+  MANAGER: {
+    rank: 3,
+    workspaceOverride: null,
+    bookings: {
+      see: "all",
+      write: "all",
+      removableItemStatuses: OPEN_STATUSES,
+      manageItemsAfterDraft: true,
+      partialScanAsCustodian: false,
+      bypassTimeLimits: true,
+      explicitScanSetting: "admin",
+      deleteOnlyDrafts: false,
+      custodianPicker: "anyone",
+      showBulkActions: true,
+      documentsForOthers: true,
+    },
+    assets: { listScope: "all", seeArchived: true },
+    custody: { see: "all", assign: "anyone" },
+    audits: { scope: "all", manageOthers: true },
+    notifications: {
+      orgBookingBroadcasts: true,
+      reservationAlertsAdmins: false,
+      manageBookingRecipients: true,
+      inventoryAlerts: false,
+      selectableAsRecipient: true,
+    },
+    ui: {
+      landing: "/bookings",
+      defaultAssetIndexMode: "ADVANCED",
+      advancedAssetIndex: true,
+    },
+    membership: {
+      // Equal to ADMIN: an Administrator changed to Manager keeps the
+      // ownership columns (a creator reference, granting no access).
+      ownershipTier: 2,
+      changeRequiresOwner: false,
+      canReceiveTransfers: false,
+      eligibleAsNewOwner: false,
+      invitable: true,
+      ssoAssignable: true,
+      ownsWorkspace: false,
+    },
+  },
   SELF_SERVICE: {
     rank: 2,
     workspaceOverride: "selfService",
@@ -239,7 +292,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "bookable" },
+    assets: { listScope: "bookable", seeArchived: false },
     custody: { see: "own-unless-workspace-allows", assign: "self" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {
@@ -280,7 +333,7 @@ export const ROLE_POLICIES: Record<OrganizationRole, RolePolicy> = {
       showBulkActions: false,
       documentsForOthers: false,
     },
-    assets: { listScope: "bookable" },
+    assets: { listScope: "bookable", seeArchived: false },
     custody: { see: "own-unless-workspace-allows", assign: "none" },
     audits: { scope: "assigned", manageOthers: false },
     notifications: {

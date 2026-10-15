@@ -255,7 +255,7 @@ describe("onboarding action — consuming the signup intent", () => {
     );
   });
 
-  it("sends an invited user to their workspace whatever the link said", async () => {
+  it("sends an invited user to their role's page whatever the link said", async () => {
     vi.mocked(getUserByID).mockResolvedValue({
       ...USER,
       createdWithInvite: true,
@@ -275,7 +275,7 @@ describe("onboarding action — consuming the signup intent", () => {
     );
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toContain(
       "selected-organization-id=org-123"
     );

@@ -30,6 +30,7 @@ import {
   useCsvExport,
   useReportRowHandlers,
 } from "~/components/reports";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
   resolveTimeframe,
   bookingComplianceReport,
@@ -58,7 +59,8 @@ import type {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -91,7 +93,7 @@ export const handle = {
  * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
  *   when the caller lacks `reports: read`
  */
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+async function loadReport({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -126,12 +128,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
 
   // Check permissions. `currentOrganization` supplies the workspace currency
   // for the reports whose KPI strings carry money values.
-  const { organizationId, currentOrganization } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.reports,
-    action: PermissionAction.read,
-  });
+  const { organizationId, currentOrganization, access } =
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.reports,
+      action: PermissionAction.read,
+    });
 
   // Parse search params for filters
   const url = new URL(request.url);
@@ -296,6 +299,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
       break;
 
+    case "audit-completion":
+      reportData = await auditCompletionReport({
+        organizationId,
+        userId,
+        assignedOnly: !access.audits.seeAll,
+        timeframe,
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
+      });
+      break;
+
     default:
       throw new ShelfError({
         cause: null,
@@ -314,6 +328,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: reportData.report.description,
     },
   });
+}
+
+/**
+ * Loads the report page. Every failure, including a refused permission or an
+ * unknown report, becomes a response carrying its own status, so a member
+ * without report access sees a 403 page rather than a server error.
+ */
+export async function loader(args: LoaderFunctionArgs) {
+  try {
+    return await loadReport(args);
+  } catch (cause) {
+    const reason = makeShelfError(cause, {
+      userId: args.context.getSession().userId,
+    });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportPage() {
