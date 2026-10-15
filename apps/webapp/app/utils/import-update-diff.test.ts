@@ -1944,21 +1944,19 @@ describe("analyzeUpdateHeaders — content-importer vocabulary (Task 2)", () => 
 });
 
 // ---------------------------------------------------------------------------
-// isBackupExportHeaderRow — workspace backup export detection (final review)
+// isBackupExportHeaderRow: legacy workspace backup file detection
 //
-// The workspace backup export (`exportAssetsBackupToCsv`) writes raw Prisma
-// field/relation names as headers, with `category` / `tags` / `assetModel`
-// cells containing JSON blobs. This branch's case-insensitive identifier
-// matching + `sequentialId` alias means that file can now slip past the
-// "no identifier column" guard — this predicate catches it before its JSON
+// A legacy workspace backup file carries raw Prisma field/relation names as
+// headers, with `category` / `tags` / `assetModel` cells containing JSON
+// blobs. Case-insensitive identifier matching lets its `id` column pass the
+// "no identifier column" guard, so this predicate catches it before its JSON
 // cells get proposed as literal new entities.
 // ---------------------------------------------------------------------------
 
 describe("isBackupExportHeaderRow", () => {
   it("detects a raw backup-export header row", () => {
-    // Representative subset of `Object.keys(asset)` from
-    // `exportAssetsBackupToCsv` — id/title plus relation keys whose cells
-    // are JSON blobs.
+    // Representative subset of a legacy backup file's header row: id/title
+    // plus relation keys whose cells are JSON blobs.
     const headers = [
       "id",
       "title",
