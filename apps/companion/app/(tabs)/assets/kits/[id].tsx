@@ -47,7 +47,11 @@ import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
 import { useKitActions } from "@/hooks/use-kit-actions";
 import { userHasPermission } from "@/lib/permissions";
-import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
+import {
+  assetBadgeStatus,
+  isArchivedAsset,
+  kitAssignCustodyBlockedReason,
+} from "@/lib/archived-assets";
 
 /**
  * Kit detail screen, resolved from the `id` route param scoped to the current
@@ -233,11 +237,7 @@ export default function KitDetailScreen() {
             isActionLoading={isActionLoading}
             canCustody={canCustody}
             canUpdate={canUpdate}
-            assignBlockedReason={
-              activeMembers.length === 0 && archivedMembers.length > 0
-                ? "Every asset in this kit is archived, so there is nothing to put in custody."
-                : undefined
-            }
+            assignBlockedReason={kitAssignCustodyBlockedReason(members)}
           />
 
           {/* ── Details ────────────────────────────────── */}

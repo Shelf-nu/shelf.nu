@@ -79,13 +79,17 @@ export const bookingsApi = {
     assetIds: string[],
     kitIds: string[]
   ) =>
-    apiFetch<{ success: boolean }>(
-      `/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`,
-      {
-        method: "POST",
-        body: JSON.stringify({ bookingId, assetIds, kitIds }),
-      }
-    ),
+    apiFetch<{
+      success: boolean;
+      /**
+       * Archived members of the kits that stayed out of the booking. Absent
+       * from servers that predate it, and then read as none.
+       */
+      archivedKitMembersLeftOut?: number;
+    }>(`/api/mobile/bookings/add-scanned-assets?orgId=${orgId}`, {
+      method: "POST",
+      body: JSON.stringify({ bookingId, assetIds, kitIds }),
+    }),
 
   /** Check out a booking (RESERVED -> ONGOING) */
   checkoutBooking: (

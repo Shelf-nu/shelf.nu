@@ -10,12 +10,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  archivedAssetReason,
-  archivedAssetsInBookingReason,
   archivedIdsFromError,
+  archivedLeftOutNote,
   assetBadgeStatus,
-  droppedArchivedNote,
   isArchivedAsset,
+  kitAssignCustodyBlockedReason,
   markArchivedRows,
 } from "./archived-assets";
 
@@ -43,52 +42,6 @@ test("the badge says Archived instead of the live status", () => {
   assert.equal(
     assetBadgeStatus({ status: "IN_CUSTODY", archivedAt: null }),
     "IN_CUSTODY"
-  );
-});
-
-test("admins are told to reinstate, everyone else to ask an admin", () => {
-  assert.equal(
-    archivedAssetReason({ canReinstate: true }),
-    "This asset is archived. Reinstate it to make changes."
-  );
-  assert.equal(
-    archivedAssetReason({ canReinstate: false }),
-    "This asset is archived. Ask an admin to reinstate it."
-  );
-});
-
-test("the reserve reason names the archived assets and fits the reader", () => {
-  assert.equal(
-    archivedAssetsInBookingReason(["Old camera"], { canReinstate: true }),
-    '"Old camera" is archived. Remove it from the booking or reinstate it.'
-  );
-  assert.equal(
-    archivedAssetsInBookingReason(["Old camera", "Old lens"], {
-      canReinstate: false,
-    }),
-    '"Old camera" and "Old lens" are archived. Remove them from the booking or ask an admin to reinstate them.'
-  );
-});
-
-test("a long list names three and counts the rest", () => {
-  assert.equal(
-    archivedAssetsInBookingReason(["A", "B", "C", "D", "E"], {
-      canReinstate: true,
-    }),
-    '"A", "B", "C" and 2 more are archived. Remove them from the booking or reinstate them.'
-  );
-});
-
-test("a duplicate that dropped nothing says nothing", () => {
-  assert.equal(droppedArchivedNote(0), null);
-  assert.equal(droppedArchivedNote(undefined), null);
-  assert.equal(
-    droppedArchivedNote(1),
-    "1 archived asset was left out of the copy. Archived assets can't be booked."
-  );
-  assert.equal(
-    droppedArchivedNote(3),
-    "3 archived assets were left out of the copy. Archived assets can't be booked."
   );
 });
 
@@ -150,4 +103,36 @@ test("an archived refusal clears the errors an earlier submit left on the other 
 test("a refusal that names no archived rows leaves the list as it was", () => {
   const rows = [{ type: "asset" as const, targetId: "asset-1" }];
   assert.equal(markArchivedRows(rows, []), rows);
+});
+
+test("a kit with an active member can be put in custody", () => {
+  assert.equal(
+    kitAssignCustodyBlockedReason([
+      { archivedAt: "2026-10-09T13:44:00.000Z" },
+      { archivedAt: null },
+    ]),
+    undefined
+  );
+});
+
+test("a kit holding only archived assets says so, and so does an empty one", () => {
+  // Kit custody leaves archived members out, so the server refuses both.
+  assert.equal(
+    kitAssignCustodyBlockedReason([{ archivedAt: "2026-10-09T13:44:00.000Z" }]),
+    "This kit holds only archived assets. Add an active asset to assign custody."
+  );
+  assert.equal(
+    kitAssignCustodyBlockedReason([]),
+    "This kit has no assets. Add assets to assign custody."
+  );
+});
+
+test("a success message says how many archived assets were left out", () => {
+  assert.equal(archivedLeftOutNote(1), "1 archived asset was left out.");
+  assert.equal(archivedLeftOutNote(3), "3 archived assets were left out.");
+});
+
+test("nothing left out, or a server that predates the count, adds no sentence", () => {
+  assert.equal(archivedLeftOutNote(0), null);
+  assert.equal(archivedLeftOutNote(undefined), null);
 });
