@@ -122,13 +122,28 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
         // The workspace comes from the form, not the selected one, so the
         // caller is judged by their role in it: a non-member, or a member
         // without `qr:update`, cannot claim a code into it.
-        await requirePermissionInOrganization({
+        const { organizations } = await requirePermissionInOrganization({
           userId,
           request,
           organizationId,
           entity: PermissionEntity.qr,
           action: PermissionAction.update,
         });
+
+        // A membership can be hidden from its own member (an SSO user's
+        // personal workspace). The claim page never offers it, so a claim
+        // into it is refused too.
+        if (!organizations.some((org) => org.id === organizationId)) {
+          throw new ShelfError({
+            cause: null,
+            title: "Not allowed",
+            message: "You cannot claim this QR code into that workspace.",
+            additionalData: { qrId, organizationId, userId },
+            label: "QR",
+            status: 403,
+            shouldBeCaptured: false,
+          });
+        }
 
         await claimQrCode({
           id: qrId,

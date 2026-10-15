@@ -1,19 +1,19 @@
 // @vitest-environment node
 /**
- * Who may claim an unclaimed QR code, through either web door, and which
- * workspaces the claim page offers.
+ * Who may claim an unclaimed QR code on the web, and which workspaces the
+ * claim page offers.
  *
- * The claim page and the link page both post a claim with the target workspace
- * in the FORM, not the selected one, so each action must judge the caller by
- * their role in that workspace: a non-member must not claim a code into a
- * stranger's workspace, and a member without `qr:update` (every role below
- * Administrator) must not claim one into their own.
+ * The claim page posts the target workspace in the FORM, not the selected one,
+ * so the action judges the caller by their role in that workspace: a
+ * non-member must not claim a code into a stranger's workspace, a member
+ * without `qr:update` (every role below Administrator) must not claim one into
+ * their own, and nobody may claim into a workspace hidden from them (an SSO
+ * user's personal workspace).
  *
  * The permission check runs for real; only the membership lookup and the claim
  * write are stubbed.
  *
  * @see {@link file://./../../../../app/routes/qr+/_private+/$qrId_.claim.tsx}
- * @see {@link file://./../../../../app/routes/qr+/_private+/$qrId_.link.tsx}
  * @see {@link file://./../../../../app/routes/api+/mobile+/qr.claim.ts} the mobile twin, gated the same way
  */
 import { OrganizationRoles } from "@prisma/client";
@@ -23,11 +23,7 @@ import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { claimQrCode } from "~/modules/qr/service.server";
-import {
-  action as claimAction,
-  loader as claimLoader,
-} from "~/routes/qr+/_private+/$qrId_.claim";
-import { action as linkAction } from "~/routes/qr+/_private+/$qrId_.link";
+import { action, loader } from "~/routes/qr+/_private+/$qrId_.claim";
 
 // why: the claim page reads the QR code to confirm it is still unclaimed; the
 // other reads and writes these cases depend on are behind the mocked services
@@ -69,61 +65,46 @@ const SELECTED_WORKSPACE = "workspace-currently-selected";
  * `rolesInTarget` in the one the form names.
  *
  * @param rolesInTarget - Roles in the target workspace; `null` for no membership
+ * @param targetHidden - Whether the target is a membership the caller cannot
+ *   see, as an SSO user's personal workspace is
  */
-function givenMemberships(rolesInTarget: OrganizationRoles[] | null) {
+function givenMemberships(
+  rolesInTarget: OrganizationRoles[] | null,
+  { targetHidden = false } = {}
+) {
+  const memberships = [
+    {
+      organization: { id: SELECTED_WORKSPACE },
+      roles: [OrganizationRoles.ADMIN],
+    },
+    ...(rolesInTarget
+      ? [{ organization: { id: TARGET_WORKSPACE }, roles: rolesInTarget }]
+      : []),
+  ];
+
   vi.mocked(getSelectedOrganization).mockResolvedValue({
     organizationId: SELECTED_WORKSPACE,
-    organizations: [],
-    currentOrganization: {},
-    userOrganizations: [
-      {
-        organization: { id: SELECTED_WORKSPACE },
-        roles: [OrganizationRoles.ADMIN],
-      },
-      ...(rolesInTarget
-        ? [{ organization: { id: TARGET_WORKSPACE }, roles: rolesInTarget }]
-        : []),
-    ],
+    currentOrganization: { id: SELECTED_WORKSPACE },
+    organizations: memberships
+      .map((membership) => membership.organization)
+      .filter((org) => !(targetHidden && org.id === TARGET_WORKSPACE)),
+    userOrganizations: memberships,
   } as never);
 }
 
-/** The two web doors that post a claim, with the extra fields each form sends. */
-const doors: {
-  name: string;
-  action: typeof claimAction | typeof linkAction;
-  url: string;
-  fields: Record<string, string>;
-}[] = [
-  {
-    name: "claim page",
-    action: claimAction,
-    url: "http://localhost/qr/qr-1/claim",
-    fields: {},
-  },
-  {
-    name: "link page",
-    action: linkAction,
-    url: "http://localhost/qr/qr-1/link",
-    fields: { linkTo: "new" },
-  },
-];
-
-describe.each(doors)("$name claim action", (door) => {
+describe("claim action", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   /** Posts the claim form naming the target workspace. */
   async function postClaim() {
-    return door.action(
+    return action(
       createActionArgs({
-        request: new Request(door.url, {
+        request: new Request("http://localhost/qr/qr-1/claim", {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            organizationId: TARGET_WORKSPACE,
-            ...door.fields,
-          }),
+          body: new URLSearchParams({ organizationId: TARGET_WORKSPACE }),
         }),
         params: { qrId: "qr-1" },
         context: { getSession: () => ({ userId: "user-1" }) } as never,
@@ -163,6 +144,13 @@ describe.each(doors)("$name claim action", (door) => {
     }
   );
 
+  it("refuses an owner whose workspace in the form is hidden from them", async () => {
+    givenMemberships([OrganizationRoles.OWNER], { targetHidden: true });
+
+    expect(refusalStatus(await postClaim())).toBe(403);
+    expect(claimQrCode).not.toHaveBeenCalled();
+  });
+
   it("claims the code for an administrator of the workspace in the form", async () => {
     givenMemberships([OrganizationRoles.ADMIN]);
 
@@ -200,7 +188,7 @@ describe("claim page loader", () => {
       ],
     } as never);
 
-    const result = await claimLoader(
+    const result = await loader(
       createLoaderArgs({
         request: new Request("http://localhost/qr/qr-1/claim"),
         params: { qrId: "qr-1" },
