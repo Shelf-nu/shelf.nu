@@ -102,6 +102,8 @@ describe("CLIENT_HINT_CHECK_SCRIPT", () => {
         writtenCookies.push(value);
       },
     };
+    // why: the node test env has no window, and a real reload would navigate
+    // away; the spy records whether the script asks for a reload.
     const reload = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     new Function("document", "window", "navigator", CLIENT_HINT_CHECK_SCRIPT)(
