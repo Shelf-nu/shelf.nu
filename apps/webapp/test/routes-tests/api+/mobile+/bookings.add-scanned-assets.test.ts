@@ -475,6 +475,20 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
     expect(body.archivedKitMembersLeftOut).toBe(0);
     expect(db.assetKit.count).not.toHaveBeenCalled();
   });
+
+  it("writes nothing when the archived count fails", async () => {
+    // The count is read before the write, so an error response always means
+    // the booking is unchanged.
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+    ] as never);
+    vi.mocked(db.assetKit.count).mockRejectedValueOnce(new Error("db down"));
+
+    const response = await post({ kitIds: ["kit-1"] });
+
+    expect(response).toHaveProperty("init.status", 500);
+    expect(addScannedAssetsToBookingMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/mobile/bookings/add-scanned-assets — reads are scoped to the scan", () => {

@@ -310,26 +310,27 @@ export async function action({ request }: ActionFunctionArgs) {
     // would write a note saying it had been added when nothing was.
     const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
 
-    const [, archivedKitMembersLeftOut] = await Promise.all([
-      addScannedAssetsToBooking({
-        assetIds: standaloneAssetIds,
-        kitSlices,
-        kitIds: kitIdsAdded,
-        bookingId,
-        organizationId,
-        userId: user.id,
-        // Re-checks the add rule against the locked status inside the write.
-        access,
-      }),
-      // The archived members of the kits this scan added stay out of the
-      // booking; the phone's success message says how many, as the web's
-      // does. A kit the scan skipped added nothing, so it reports nothing.
-      countArchivedKitMembers({
-        kitIds: kitIdsAdded,
-        organizationId,
-        existingAssetKitIds,
-      }),
-    ]);
+    // The archived members of the kits this scan added stay out of the
+    // booking; the phone's success message says how many, as the web's does.
+    // A kit the scan skipped added nothing, so it reports nothing. Read before
+    // the write, so a failed count can never report an error for a booking
+    // that did change.
+    const archivedKitMembersLeftOut = await countArchivedKitMembers({
+      kitIds: kitIdsAdded,
+      organizationId,
+      existingAssetKitIds,
+    });
+
+    await addScannedAssetsToBooking({
+      assetIds: standaloneAssetIds,
+      kitSlices,
+      kitIds: kitIdsAdded,
+      bookingId,
+      organizationId,
+      userId: user.id,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
+    });
 
     /**
      * What the scan did NOT put on the booking, because the booking already
