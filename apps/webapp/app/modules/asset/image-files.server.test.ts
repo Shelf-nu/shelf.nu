@@ -215,9 +215,8 @@ describe("removeImageFilesOfDeletedAssets", () => {
 
   it("checks only the workspace the assets were deleted from", async () => {
     assetImageStorage.upload("uploader-a/asset-1/main-image-100.jpg");
-    // An asset in another workspace showing the same file, as a backup
-    // restore into that workspace can leave behind. Rare enough that the
-    // check does not scan every workspace's assets for it.
+    // An asset in another workspace showing the same file. Rare enough that
+    // the check does not scan every workspace's assets for it.
     assetImageStorage.setRemainingAssets([
       {
         organizationId: "org-2",
