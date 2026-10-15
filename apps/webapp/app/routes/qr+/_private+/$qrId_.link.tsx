@@ -34,7 +34,10 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
-import { requirePermission } from "~/utils/roles.server";
+import {
+  requirePermission,
+  requirePermissionInOrganization,
+} from "~/utils/roles.server";
 
 export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
@@ -105,6 +108,17 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
             linkTo: z.enum(["new", "existing"]),
           })
         );
+        // The workspace comes from the form, not the selected one, so the
+        // caller is judged by their role in it: a non-member, or a member
+        // without `qr:update`, cannot claim a code into it.
+        await requirePermissionInOrganization({
+          userId,
+          request,
+          organizationId,
+          entity: PermissionEntity.qr,
+          action: PermissionAction.update,
+        });
+
         await claimQrCode({
           id: qrId,
           organizationId,
