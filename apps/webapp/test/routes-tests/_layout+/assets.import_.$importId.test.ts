@@ -6,7 +6,7 @@
  * acts on a FAILED import of the active workspace. The real service runs
  * against a mocked database.
  *
- * @see {@link file://./../../../app/routes/_layout+/assets.import.$importId.tsx}
+ * @see {@link file://./../../../app/routes/_layout+/assets.import_.$importId.tsx}
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { permissionContext } from "@helpers/role-access";
@@ -14,7 +14,7 @@ import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import { enqueueAssetImportStep } from "~/modules/asset-import/worker.server";
-import { action, loader } from "~/routes/_layout+/assets.import.$importId";
+import { action, loader } from "~/routes/_layout+/assets.import_.$importId";
 import { ShelfError } from "~/utils/error";
 import { requirePermission } from "~/utils/roles.server";
 
@@ -76,7 +76,7 @@ async function load(importId = "imp-1") {
   );
 }
 
-describe("assets.import.$importId", () => {
+describe("assets.import_.$importId", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(requirePermission).mockResolvedValue(

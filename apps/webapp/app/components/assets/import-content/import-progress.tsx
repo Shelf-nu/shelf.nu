@@ -7,7 +7,7 @@
  * its warnings, or the failure with a resume button.
  *
  * @see {@link file://./../../../routes/api+/asset-imports.$importId.ts} Polled endpoint
- * @see {@link file://./../../../routes/_layout+/assets.import.$importId.tsx} Page and resume action
+ * @see {@link file://./../../../routes/_layout+/assets.import_.$importId.tsx} Page and resume action
  * @see {@link file://./../../../modules/asset-import/types.ts} Payload types
  */
 import { useEffect, useRef, useState } from "react";
@@ -95,17 +95,30 @@ export function useAssetImportStatus(
   return status;
 }
 
-/** Text for the running phase. */
-function phaseText(status: AssetImportStatusPayload) {
-  switch (status.phase) {
-    case "PREPARE":
-      return "Preparing categories, locations and tags";
-    case "ROWS":
-      return `Imported ${status.processedRows} of ${status.totalRows} assets`;
-    case "FINALIZE":
-      return "Finishing up";
+/**
+ * Text of the live region. It changes only when the status or phase changes,
+ * never on a row count update, so a screen reader announces transitions
+ * without chattering on every poll.
+ */
+function announcement(status: AssetImportStatusPayload) {
+  switch (status.status) {
+    case "QUEUED":
+      return "Waiting to start...";
+    case "RUNNING":
+      switch (status.phase) {
+        case "PREPARE":
+          return "Preparing categories, locations and tags";
+        case "FINALIZE":
+          return "Finishing up";
+        default:
+          return "Importing assets";
+      }
+    case "COMPLETED":
+      return `${status.totalRows} assets imported`;
+    case "FAILED":
+      return status.errorMessage ?? "The import stopped.";
     default:
-      return "Importing";
+      return "";
   }
 }
 
@@ -158,21 +171,36 @@ export function ImportProgress({
     <div className="mx-auto w-full max-w-screen-sm text-left">
       <h3>{status.fileName ?? "Asset import"}</h3>
 
+      {/* One region, always mounted, so its text changes are announced. */}
+      <p
+        aria-live="polite"
+        className={
+          status.status === "FAILED"
+            ? "mt-4 text-red-600"
+            : status.status === "COMPLETED"
+            ? "mt-4 font-medium text-green-700"
+            : "mt-4"
+        }
+      >
+        {announcement(status)}
+      </p>
+
       {status.status === "QUEUED" ? (
-        <div className="mt-4">
-          <p aria-live="polite">Waiting to start...</p>
+        <div>
           <Progress className="mt-2" value={0} aria-label="Import progress" />
         </div>
       ) : null}
 
       {status.status === "RUNNING" ? (
-        <div className="mt-4">
-          <p aria-live="polite">{phaseText(status)}</p>
+        <div>
           <Progress
             className="mt-2"
             value={percent}
             aria-label="Import progress"
           />
+          <p className="mt-2 text-sm text-gray-700">
+            Imported {status.processedRows} of {status.totalRows} assets
+          </p>
           <p className="mt-2 text-sm text-gray-600">
             You can leave this page. We will email you when it is done.
           </p>
@@ -180,10 +208,7 @@ export function ImportProgress({
       ) : null}
 
       {status.status === "COMPLETED" ? (
-        <div className="mt-4">
-          <p aria-live="polite" className="font-medium text-green-700">
-            {status.totalRows} assets imported
-          </p>
+        <div>
           <div className="mt-4 flex gap-3">
             <Button to="/assets">View assets</Button>
             <Button to="/assets/import" variant="secondary">
@@ -206,10 +231,7 @@ export function ImportProgress({
       ) : null}
 
       {status.status === "FAILED" ? (
-        <div className="mt-4">
-          <p aria-live="polite" className="text-red-600">
-            {status.errorMessage ?? "The import stopped."}
-          </p>
+        <div>
           <p className="mt-1 text-sm text-gray-600">
             Imported {status.processedRows} of {status.totalRows} before it
             stopped.

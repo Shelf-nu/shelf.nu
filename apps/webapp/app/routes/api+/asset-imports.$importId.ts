@@ -7,7 +7,7 @@
  * never carries the stored rows or warnings.
  *
  * @see {@link file://./../../modules/asset-import/service.server.ts}
- * @see {@link file://./../_layout+/assets.import.$importId.tsx}
+ * @see {@link file://./../_layout+/assets.import_.$importId.tsx}
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { data } from "react-router";

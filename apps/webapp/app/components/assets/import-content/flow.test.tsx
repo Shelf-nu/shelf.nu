@@ -7,7 +7,7 @@
  *
  * @see {@link file://./flow.tsx}
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRoutesStub } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -133,5 +133,70 @@ describe("ContentImportFlow", () => {
     expect(
       screen.getByRole("button", { name: /preview import/i })
     ).toBeDisabled();
+  });
+
+  describe("confirming", () => {
+    /** Renders the flow; the second submit (confirm) answers with `confirmResult`. */
+    function renderWithConfirm(confirmResult: unknown) {
+      const confirmBodies: URLSearchParams[] = [];
+      let calls = 0;
+      const Stub = createRoutesStub([
+        {
+          path: "/",
+          Component: ContentImportFlow,
+          // why: no server in a component test; the first submit is the
+          // upload, the next is the confirm and its body is recorded
+          action: async ({ request }) => {
+            calls += 1;
+            if (calls === 1) {
+              return { error: null, intent: "preview", preview: PREVIEW };
+            }
+            confirmBodies.push(new URLSearchParams(await request.text()));
+            return confirmResult;
+          },
+        },
+      ]);
+      render(<Stub initialEntries={["/"]} />);
+      return confirmBodies;
+    }
+
+    /** Opens the confirm dialog and confirms with the typed phrase. */
+    async function confirm(user: ReturnType<typeof userEvent.setup>) {
+      await uploadFile(user);
+      await user.click(
+        await screen.findByRole("button", { name: "Import 2 assets" })
+      );
+      await user.type(screen.getByLabelText("Confirmation"), "i agree");
+      await user.click(screen.getByRole("button", { name: "Import" }));
+    }
+
+    it("submits intent=confirm with the draft import id", async () => {
+      const user = userEvent.setup();
+      const bodies = renderWithConfirm({ error: null });
+
+      await confirm(user);
+
+      await waitFor(() => expect(bodies).toHaveLength(1));
+      expect(bodies[0].get("intent")).toBe("confirm");
+      expect(bodies[0].get("importId")).toBe("import-1");
+    });
+
+    it("shows a refused confirm inside the dialog", async () => {
+      const user = userEvent.setup();
+      renderWithConfirm({
+        error: {
+          title: "Import error",
+          message: "Another import is already running",
+          label: "Assets",
+        },
+      });
+
+      await confirm(user);
+
+      const dialog = await screen.findByRole("alertdialog");
+      expect(
+        await within(dialog).findByText("Another import is already running")
+      ).toBeInTheDocument();
+    });
   });
 });

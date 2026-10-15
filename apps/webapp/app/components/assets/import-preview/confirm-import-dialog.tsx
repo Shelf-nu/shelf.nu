@@ -44,6 +44,13 @@ type ConfirmImportDialogProps = {
   onConfirm: (confirmation: string) => void;
   /** Server error to show inside the dialog. */
   error?: { message?: string } | null;
+  /**
+   * Richer error content (e.g. tables of problems). Replaces the plain
+   * `error` box when set.
+   */
+  errorDetails?: React.ReactNode;
+  /** Called whenever the dialog closes, e.g. to clear a stale server error. */
+  onClose?: () => void;
 };
 
 /**
@@ -61,6 +68,8 @@ export function ConfirmImportDialog({
   isSubmitting,
   onConfirm,
   error,
+  errorDetails,
+  onClose,
 }: ConfirmImportDialogProps) {
   const [agreed, setAgreed] = useState("");
   const confirmed = agreed === CONFIRMATION_PHRASE;
@@ -70,6 +79,7 @@ export function ConfirmImportDialog({
       onOpenChange={(open) => {
         if (!open) {
           setAgreed("");
+          onClose?.();
         }
       }}
     >
@@ -85,7 +95,11 @@ export function ConfirmImportDialog({
           <AlertDialogDescription>
             Type <b>"{CONFIRMATION_PHRASE}"</b> below to confirm.
           </AlertDialogDescription>
-          {error ? (
+          {errorDetails ? (
+            <div className="max-h-64 overflow-y-auto rounded-md border border-red-200 bg-red-50 p-3 text-sm">
+              {errorDetails}
+            </div>
+          ) : error ? (
             <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-600">
               {error.message || "Something went wrong. Please try again."}
             </div>

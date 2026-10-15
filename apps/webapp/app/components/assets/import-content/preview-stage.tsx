@@ -23,7 +23,7 @@ import { NewEntitiesNotice } from "../import-preview/new-entities-notice";
 /** The slice of the confirm fetcher the stage uses. */
 type ConfirmFetcher = Pick<
   ReturnType<typeof useFetcherWithReset<typeof action>>,
-  "state" | "data" | "submit"
+  "state" | "data" | "submit" | "reset"
 >;
 
 /** Props for {@link PreviewStage}. */
@@ -34,8 +34,6 @@ type PreviewStageProps = {
   onReset: () => void;
   /** Posts `intent=confirm` with the draft's `importId`. */
   confirmFetcher: ConfirmFetcher;
-  /** Called with the typed confirmation phrase when the user confirms. */
-  onConfirm?: (confirmation: string) => void;
 };
 
 /**
@@ -48,7 +46,6 @@ export function PreviewStage({
   preview,
   onReset,
   confirmFetcher,
-  onConfirm,
 }: PreviewStageProps) {
   const isConfirming = useDisabled(confirmFetcher);
   const { counts, newEntities, totalRows } = preview;
@@ -98,9 +95,13 @@ export function PreviewStage({
           description="The import runs in the background. You can leave this page; we will email you when it finishes."
           confirmLabel={isConfirming ? "Starting..." : "Import"}
           isSubmitting={isConfirming}
-          error={confirmFetcher.data?.error ?? null}
-          onConfirm={(confirmation) => {
-            onConfirm?.(confirmation);
+          errorDetails={
+            confirmFetcher.data?.error ? (
+              <ImportErrorDetails error={confirmFetcher.data.error} />
+            ) : null
+          }
+          onClose={() => confirmFetcher.reset()}
+          onConfirm={() => {
             void confirmFetcher.submit(
               { intent: "confirm", importId: preview.importId },
               { method: "post" }
@@ -111,13 +112,6 @@ export function PreviewStage({
           Choose a different file
         </Button>
       </div>
-
-      {/* The dialog shows the message; the tables of problems (re-validation failures) go here. */}
-      {confirmFetcher.data?.error?.additionalData ? (
-        <div className="rounded-md border border-red-200 bg-red-50 p-4">
-          <ImportErrorDetails error={confirmFetcher.data.error} />
-        </div>
-      ) : null}
     </div>
   );
 }

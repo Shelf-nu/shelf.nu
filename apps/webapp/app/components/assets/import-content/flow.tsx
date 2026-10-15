@@ -31,22 +31,18 @@ type FlowState = {
   selectedFile: File | null;
   /** Server preview of the uploaded file; set once the stage is `preview`. */
   preview: ContentImportPreview | null;
-  /** Confirmation phrase the user typed in the confirm dialog. */
-  agreed: string;
 };
 
 /** Transitions of {@link FlowState}. */
 type FlowAction =
   | { type: "file_selected"; file: File }
   | { type: "preview_loaded"; preview: ContentImportPreview }
-  | { type: "set_agreed"; agreed: string }
   | { type: "reset" };
 
 const INITIAL_FLOW_STATE: FlowState = {
   stage: "upload",
   selectedFile: null,
   preview: null,
-  agreed: "",
 };
 
 /**
@@ -63,8 +59,6 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
       return { ...INITIAL_FLOW_STATE, selectedFile: action.file };
     case "preview_loaded":
       return { ...state, stage: "preview", preview: action.preview };
-    case "set_agreed":
-      return { ...state, agreed: action.agreed };
     case "reset":
       return INITIAL_FLOW_STATE;
     default:
@@ -158,7 +152,6 @@ export function ContentImportFlow() {
           preview={preview}
           onReset={handleReset}
           confirmFetcher={confirmFetcher}
-          onConfirm={(agreed) => dispatch({ type: "set_agreed", agreed })}
         />
       ) : null}
     </>
