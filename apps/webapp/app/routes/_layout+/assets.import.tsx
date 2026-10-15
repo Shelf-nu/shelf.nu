@@ -7,6 +7,7 @@ import { data, Link, redirect } from "react-router";
 import { z } from "zod";
 import { ImportContent } from "~/components/assets/import-content/index";
 import Header from "~/components/layout/header";
+import { MAX_BACKGROUND_IMPORT_FILE_BYTES } from "~/modules/asset-import/constants";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
 import { confirmAssetImport } from "~/modules/asset-import/service.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
@@ -61,7 +62,10 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       return redirect(`/assets/import/${importId}`);
     }
 
-    const csvData = await csvDataFromRequest({ request });
+    const csvData = await csvDataFromRequest({
+      request,
+      maxFileSize: MAX_BACKGROUND_IMPORT_FILE_BYTES,
+    });
     if (csvData.length < 2) {
       throw new ShelfError({
         cause: null,

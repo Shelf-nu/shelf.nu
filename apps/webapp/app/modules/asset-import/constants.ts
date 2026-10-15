@@ -10,6 +10,16 @@
 /** Rows written per transaction. One chunk is one pg-boss job. */
 export const ASSET_IMPORT_CHUNK_SIZE = 100;
 
+/**
+ * The largest file the background import accepts, in data rows. Each row is
+ * stored on the draft until the import completes and imported in chunks of
+ * ASSET_IMPORT_CHUNK_SIZE, so time and draft size grow linearly with it.
+ */
+export const MAX_BACKGROUND_IMPORT_ROWS = 10_000;
+
+/** The largest CSV upload the background import accepts, in bytes (10 MB). */
+export const MAX_BACKGROUND_IMPORT_FILE_BYTES = 10 * 1024 * 1024;
+
 /** How often the browser asks for progress while an import is queued or running. */
 export const ASSET_IMPORT_POLL_INTERVAL_SECONDS = 2;
 

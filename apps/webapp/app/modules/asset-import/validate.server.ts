@@ -20,6 +20,7 @@ import {
 } from "~/modules/barcode/service.server";
 import { validateImportQrCodes } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
+import { MAX_BACKGROUND_IMPORT_ROWS } from "./constants";
 
 /**
  * Validates a parsed import file without writing anything.
@@ -54,6 +55,7 @@ export async function validateContentImportFile({
   const { errors: rowErrors, totalErrors } = validateContentImportRows({
     data,
     existingCustomFields,
+    maxRows: MAX_BACKGROUND_IMPORT_ROWS,
   });
 
   if (rowErrors.length > 0) {

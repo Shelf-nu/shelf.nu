@@ -225,9 +225,11 @@ deleted entity in PREPARE and continues.
 
 ## Limits
 
-- File size: 2 MB, the default limit of the multipart parser.
-- Rows: 1000 data rows (`MAX_CONTENT_IMPORT_ROWS` in
-  `modules/asset/import-preflight.server.ts`).
+- File size: 10 MB (`MAX_BACKGROUND_IMPORT_FILE_BYTES` in
+  `modules/asset-import/constants.ts`, passed to `csvDataFromRequest`).
+- Rows: 10,000 data rows (`MAX_BACKGROUND_IMPORT_ROWS`). The admin dashboard
+  import still runs synchronously and keeps the 1,000-row
+  `MAX_CONTENT_IMPORT_ROWS` and the parser's 2 MB default.
 - Row errors reported per preview are capped by `MAX_REPORTED_ROW_ERRORS`.
 
 ## Where the code lives
