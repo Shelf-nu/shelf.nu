@@ -26,6 +26,23 @@ describe("asset index column metadata", () => {
     expect(positions).toEqual(expectedPositions);
   });
 
+  it("registers unit of measure as a hidden-by-default column right after quantity", () => {
+    expect(fixedFields).toContain("unitOfMeasure");
+    expect(columnsLabelsMap.unitOfMeasure).toBe("Unit of measure");
+
+    const quantityColumn = defaultFields.find(
+      (column) => column.name === "quantity"
+    );
+    const unitColumn = defaultFields.find(
+      (column) => column.name === "unitOfMeasure"
+    );
+    expect(unitColumn).toEqual({
+      name: "unitOfMeasure",
+      visible: false,
+      position: (quantityColumn?.position ?? -1) + 1,
+    });
+  });
+
   it("registers min quantity as a fixed, hidden-by-default field with a label", () => {
     expect(fixedFields).toContain("minQuantity");
     expect(columnsLabelsMap.minQuantity).toBe("Min quantity");

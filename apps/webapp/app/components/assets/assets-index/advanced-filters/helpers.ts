@@ -57,6 +57,7 @@ export function getUIFieldType({
   switch (column.name) {
     case "id":
     case "name":
+    case "unitOfMeasure":
       fieldType = "string";
       break;
     case "custody":

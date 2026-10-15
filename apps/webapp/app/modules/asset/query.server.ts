@@ -1492,6 +1492,7 @@ type DirectAssetField =
   | "availableToBook"
   | "type"
   | "quantity"
+  | "unitOfMeasure"
   | "minQuantity";
 
 const directAssetFields: Record<DirectAssetField, string> = {
@@ -1506,6 +1507,7 @@ const directAssetFields: Record<DirectAssetField, string> = {
   availableToBook: "assetAvailableToBook",
   type: "assetType",
   quantity: "assetQuantity",
+  unitOfMeasure: "assetUnitOfMeasure",
   minQuantity: "assetMinQuantity",
 };
 
@@ -1813,6 +1815,7 @@ function isTextColumn(fieldName: string): boolean {
     "sequentialId",
     "name",
     "description",
+    "unitOfMeasure",
   ];
   return textColumns.includes(fieldName as DirectAssetField);
 }
@@ -2896,6 +2899,7 @@ export function buildAdvancedAssetsQuery({
           a."updatedAt" AS "assetUpdatedAt",
           a.value AS "assetValue",
           a.quantity AS "assetQuantity",
+          a."unitOfMeasure" AS "assetUnitOfMeasure",
           a."minQuantity" AS "assetMinQuantity",
           a.title AS "assetTitle",
           a."sequentialId" AS "assetSequentialId",
