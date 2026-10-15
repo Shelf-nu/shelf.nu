@@ -1,33 +1,20 @@
 /**
- * @file Import content components for CSV asset import.
- * Provides the main ImportContent layout and FileForm for file upload
- * with client-side validation, preview, and confirmation flow.
+ * @file Content import page body.
  *
- * @see {@link file://./../../routes/_layout+/assets.import.tsx} Route handler
+ * Renders the import instructions (CSV rules, custom fields, QR codes,
+ * barcodes, quantity-tracked columns) followed by the upload, preview and
+ * confirm flow. Confirming queues a background import and leaves this page for
+ * its progress view.
+ *
+ * @see {@link file://./flow.tsx} Upload, preview and confirm stages
+ * @see {@link file://./../../../routes/_layout+/assets.import.tsx} Route handler
  */
-import type { ChangeEvent } from "react";
-import { useRef, useState } from "react";
-import { useAutoFocus } from "~/hooks/use-auto-focus";
-import { useDisabled } from "~/hooks/use-disabled";
-import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import type { action } from "~/routes/_layout+/assets.import";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
-import Input from "../forms/input";
-import { ImportErrorDetails } from "./import-preview/import-error-details";
-import Icon from "../icons/icon";
-import { Button } from "../shared/button";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "../shared/modal";
-import { WarningBox } from "../shared/warning-box";
-import When from "../when/when";
+import { ContentImportFlow } from "./flow";
+import Icon from "../../icons/icon";
+import { Button } from "../../shared/button";
+import { WarningBox } from "../../shared/warning-box";
+import When from "../../when/when";
 
 /**
  * Main content component for the CSV asset import page.
@@ -72,7 +59,7 @@ export const ImportContent = () => {
         >
           CSV template
         </Button>{" "}
-        — each row becomes a new asset.
+        - each row becomes a new asset.
       </p>
 
       <WarningBox className="my-4">
@@ -99,15 +86,15 @@ export const ImportContent = () => {
               </li>
               <li>
                 Columns like <b>kit, category, location & custodian</b>{" "}
-                represent the name of the related entry — if it doesn't exist,
+                represent the name of the related entry - if it doesn't exist,
                 we'll create it
               </li>
               <li>
-                <b>Tags</b> can be comma-separated — missing tags will be
+                <b>Tags</b> can be comma-separated - missing tags will be
                 created automatically
               </li>
               <li>
-                Each row creates a <b>new</b> asset — existing assets will not
+                Each row creates a <b>new</b> asset - existing assets will not
                 be merged or overwritten
               </li>
               <li>
@@ -138,13 +125,13 @@ export const ImportContent = () => {
                 <b>multiline text</b>
               </li>
               <li>
-                <b>date</b> — must be YYYY-MM-DD
+                <b>date</b> - must be YYYY-MM-DD
               </li>
               <li>
-                <b>amount</b> — currency values, no symbols (e.g., 1234.56)
+                <b>amount</b> - currency values, no symbols (e.g., 1234.56)
               </li>
               <li>
-                <b>number</b> — numeric values including negatives
+                <b>number</b> - numeric values including negatives
               </li>
             </ul>
             <p className="mt-1 text-[14px] text-gray-600">
@@ -169,17 +156,17 @@ export const ImportContent = () => {
             </p>
             <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
               <li>
-                <b>Existing code</b> — the QR code must already exist in Shelf
+                <b>Existing code</b> - the QR code must already exist in Shelf
               </li>
               <li>
-                <b>No duplicates</b> — each qrId must be unique per asset
+                <b>No duplicates</b> - each qrId must be unique per asset
               </li>
               <li>
-                <b>No linked codes</b> — the qrId must not already be linked to
+                <b>No linked codes</b> - the qrId must not already be linked to
                 another asset or kit
               </li>
               <li>
-                <b>QR ownership</b> — the code must be unclaimed or belong to
+                <b>QR ownership</b> - the code must be unclaimed or belong to
                 your organization
               </li>
             </ul>
@@ -206,21 +193,21 @@ export const ImportContent = () => {
               </p>
               <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
                 <li>
-                  <b>barcode_Code128</b> — 4-40 characters, supports letters,
+                  <b>barcode_Code128</b> - 4-40 characters, supports letters,
                   numbers, and symbols
                 </li>
                 <li>
-                  <b>barcode_Code39</b> — 4-43 characters
+                  <b>barcode_Code39</b> - 4-43 characters
                 </li>
                 <li>
-                  <b>barcode_DataMatrix</b> — 4-100 characters
+                  <b>barcode_DataMatrix</b> - 4-100 characters
                 </li>
                 <li>
-                  <b>barcode_ExternalQR</b> — 1-2048 characters (URLs, text, or
+                  <b>barcode_ExternalQR</b> - 1-2048 characters (URLs, text, or
                   any external QR content)
                 </li>
                 <li>
-                  <b>barcode_EAN13</b> — 13-digit product identification codes
+                  <b>barcode_EAN13</b> - 13-digit product identification codes
                 </li>
               </ul>
               <p className="mt-1 text-[14px] text-gray-600">
@@ -251,39 +238,39 @@ export const ImportContent = () => {
             </p>
             <ul className="list-inside list-disc pl-2 text-[14px] text-gray-600">
               <li>
-                <b>type</b> — <code>INDIVIDUAL</code> (the default if the column
+                <b>type</b> - <code>INDIVIDUAL</code> (the default if the column
                 is missing or the cell is blank) or{" "}
                 <code>QUANTITY_TRACKED</code>. On <b>update</b> imports, the
-                cell is silently ignored — type cannot be changed once an asset
+                cell is silently ignored - type cannot be changed once an asset
                 exists.
               </li>
               <li>
-                <b>quantity</b> — required, must be a positive integer when{" "}
+                <b>quantity</b> - required, must be a positive integer when{" "}
                 <code>type = QUANTITY_TRACKED</code>. Ignored on{" "}
                 <code>INDIVIDUAL</code> rows.
               </li>
               <li>
-                <b>minQuantity</b> — optional non-negative integer; sets the
+                <b>minQuantity</b> - optional non-negative integer; sets the
                 low-stock alert threshold. Ignored on <code>INDIVIDUAL</code>{" "}
                 rows.
               </li>
               <li>
-                <b>unitOfMeasure</b> — optional free-text label (e.g.{" "}
+                <b>unitOfMeasure</b> - optional free-text label (e.g.{" "}
                 <code>boxes</code>, <code>liters</code>, <code>kg</code>).
                 Markdoc injection characters (<code>{"{"}</code>, <code>%</code>
                 , <code>{"}"}</code>) are stripped.
               </li>
               <li>
-                <b>consumptionType</b> — required when{" "}
+                <b>consumptionType</b> - required when{" "}
                 <code>type = QUANTITY_TRACKED</code>. <code>ONE_WAY</code>{" "}
                 (consumed on checkout, no return) or <code>TWO_WAY</code>{" "}
                 (returned with a consumption report). Ignored on{" "}
                 <code>INDIVIDUAL</code> rows.
               </li>
               <li>
-                <b>assetModel</b> — optional asset model name; created
+                <b>assetModel</b> - optional asset model name; created
                 automatically (case-insensitive lookup) if it doesn't exist yet.{" "}
-                <b>INDIVIDUAL rows only</b> — on a <code>QUANTITY_TRACKED</code>{" "}
+                <b>INDIVIDUAL rows only</b> - on a <code>QUANTITY_TRACKED</code>{" "}
                 row during update, the cell is skipped with a warning and the
                 rest of the row still applies.
               </li>
@@ -308,7 +295,7 @@ export const ImportContent = () => {
             <h5 className="font-semibold">Good to know</h5>
             <ul className="list-inside list-disc text-[14px] text-gray-600">
               <li>
-                The first row is used as column headers — it won't be imported
+                The first row is used as column headers - it won't be imported
               </li>
               <li>
                 Your file is checked before anything is imported. If any row is
@@ -332,166 +319,7 @@ export const ImportContent = () => {
         .
       </p>
 
-      <FileForm intent={"content"} />
+      <ContentImportFlow />
     </div>
-  );
-};
-
-/**
- * File upload form with confirmation dialog for CSV asset import.
- * Handles file selection, "I AGREE" confirmation, and displays
- * import errors or success state.
- *
- * @param intent - The form intent value sent to the action
- * @param url - Optional custom action URL for the form
- */
-export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
-  // Widened to `string` so toUpperCase() doesn't need a cast.
-  // The "I AGREE" check happens at submit time.
-  const [agreed, setAgreed] = useState("");
-  const formRef = useRef<HTMLFormElement>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const fetcher = useFetcherWithReset<typeof action>();
-
-  const { data } = fetcher;
-  const isSubmitting = useDisabled(fetcher);
-  const disabled = isSubmitting || agreed !== "I AGREE";
-  const isSuccessful = data && !data.error;
-
-  // Focus the "I AGREE" confirmation input when the dialog opens (replaces
-  // `autoFocus`). Re-focuses each time the dialog re-opens; skipped while
-  // the success state is showing.
-  const agreeInputRef = useAutoFocus<HTMLInputElement>({
-    when: isDialogOpen && !isSuccessful,
-  });
-
-  /** We use a controlled field for the file, because of the confirmation dialog we have.
-   * That way we can disabled the confirmation dialog button until a file is selected
-   */
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event?.target?.files?.[0];
-    if (selectedFile) {
-      setSelectedFile(selectedFile);
-    }
-  };
-
-  return (
-    <fetcher.Form
-      className="mt-4 w-full"
-      method="post"
-      ref={formRef}
-      encType="multipart/form-data"
-      action={url ? url : undefined}
-    >
-      <Input
-        type="file"
-        name="file"
-        label="Select a csv file"
-        required
-        onChange={handleFileSelect}
-        accept=".csv"
-      />
-      <input type="hidden" name="intent" value={intent} />
-
-      <AlertDialog
-        onOpenChange={(open) => {
-          setIsDialogOpen(open);
-          if (!open) {
-            // Reset form state when dialog is closed
-            setAgreed("");
-            fetcher.reset();
-          }
-        }}
-      >
-        <AlertDialogTrigger asChild>
-          <Button
-            type="button"
-            title={"Confirm asset import"}
-            disabled={!selectedFile}
-            className="my-4"
-          >
-            Confirm asset import
-          </Button>
-        </AlertDialogTrigger>
-        <AlertDialogContent className="max-w-[600px]">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirm asset import</AlertDialogTitle>
-            {!isSuccessful ? (
-              <>
-                <AlertDialogDescription>
-                  You need to type: <b>"I AGREE"</b> in the field below to
-                  accept the import. By doing this you agree that you have read
-                  the requirements and you understand the limitations and
-                  consequences of using this feature.
-                </AlertDialogDescription>
-                <Input
-                  type="text"
-                  label={"Confirmation"}
-                  ref={agreeInputRef}
-                  name="agree"
-                  value={agreed}
-                  onChange={(e) => setAgreed(e.target.value.toUpperCase())}
-                  placeholder="I AGREE"
-                  pattern="^I AGREE$" // We use a regex to make sure the user types the exact string
-                  required
-                  onKeyDown={(e) => {
-                    if (e.key == "Enter") {
-                      e.preventDefault();
-                      // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                      if (!disabled) {
-                        void fetcher.submit(formRef.current);
-                      }
-                    }
-                  }}
-                />
-              </>
-            ) : null}
-          </AlertDialogHeader>
-
-          {data?.error ? <ImportErrorDetails error={data.error} /> : null}
-
-          <When truthy={isSuccessful}>
-            <div>
-              <b className="text-green-500">Success!</b>
-              <p>Your assets have been imported.</p>
-            </div>
-          </When>
-
-          <AlertDialogFooter>
-            {isSuccessful ? (
-              <div className="flex gap-2">
-                <AlertDialogCancel asChild>
-                  <Button type="button" variant="secondary" width="full">
-                    Close
-                  </Button>
-                </AlertDialogCancel>
-                <Button to="/assets" width="full" className="whitespace-nowrap">
-                  View new assets
-                </Button>
-              </div>
-            ) : (
-              <>
-                <AlertDialogCancel asChild>
-                  <Button type="button" variant="secondary">
-                    Cancel
-                  </Button>
-                </AlertDialogCancel>
-                <Button
-                  type="submit"
-                  onClick={() => {
-                    // Because we use a Dialog the submit buttons is outside of the form so we submit using the fetcher directly
-                    void fetcher.submit(formRef.current);
-                  }}
-                  disabled={disabled}
-                >
-                  {isSubmitting ? "Importing..." : "Import"}
-                </Button>
-              </>
-            )}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </fetcher.Form>
   );
 };

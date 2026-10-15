@@ -5,7 +5,7 @@ import type {
 } from "react-router";
 import { data, Link, redirect } from "react-router";
 import { z } from "zod";
-import { ImportContent } from "~/components/assets/import-content";
+import { ImportContent } from "~/components/assets/import-content/index";
 import Header from "~/components/layout/header";
 import { buildContentImportPreview } from "~/modules/asset-import/preview.server";
 import { confirmAssetImport } from "~/modules/asset-import/service.server";

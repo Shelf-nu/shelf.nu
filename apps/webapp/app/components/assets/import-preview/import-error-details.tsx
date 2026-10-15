@@ -6,7 +6,7 @@
  * kit custody conflicts, incorrect headers and per-row errors. Used by the
  * admin upload dialog and by the preview stage of the content import.
  *
- * @see {@link file://./../import-content.tsx} Upload dialog consumer
+ * @see {@link file://./../import-content-file-form.tsx} Admin upload dialog consumer
  * @see {@link file://./../../../utils/import-row-errors.ts} Row error shape
  */
 import type { DuplicateBarcode } from "~/modules/barcode/service.server";

@@ -7,6 +7,7 @@
  * @see {@link file://./../api+/asset-imports.$importId.ts} the polled status endpoint
  * @see {@link file://./../../modules/asset-import/service.server.ts}
  */
+import { useMemo } from "react";
 import type {
   ActionFunctionArgs,
   LoaderFunctionArgs,
@@ -14,6 +15,7 @@ import type {
 } from "react-router";
 import { data, Link, useLoaderData } from "react-router";
 import { z } from "zod";
+import { ImportProgress } from "~/components/assets/import-content/import-progress";
 import Header from "~/components/layout/header";
 import {
   getAssetImportDetails,
@@ -116,19 +118,25 @@ export const handle = {
   ),
 };
 
-/** Plain-text status until the progress UI replaces it. */
+/** Progress page: follows the import until it completes or fails. */
 export default function AssetImportProgress() {
   const { import: assetImport } = useLoaderData<typeof loader>();
+  // Stable between renders: the hook tells a newer loader payload from an
+  // older poll by identity.
+  const { initial, warnings } = useMemo(() => {
+    const { warnings, ...status } = assetImport;
+    return { initial: status, warnings };
+  }, [assetImport]);
 
   return (
     <div className="h-full">
       <Header />
       <div className="mx-auto h-auto w-full px-4 py-10">
-        <p>
-          {assetImport.fileName ?? "Import"}: {assetImport.status} (
-          {assetImport.processedRows} of {assetImport.totalRows} rows)
-        </p>
-        {assetImport.errorMessage ? <p>{assetImport.errorMessage}</p> : null}
+        <ImportProgress
+          importId={assetImport.id}
+          initial={initial}
+          warnings={warnings}
+        />
       </div>
     </div>
   );
