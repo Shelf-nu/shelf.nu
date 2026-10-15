@@ -10,15 +10,12 @@ import { useRef, useState } from "react";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import type { DuplicateBarcode } from "~/modules/barcode/service.server";
-import type { QRCodePerImportedAsset } from "~/modules/qr/service.server";
 import type { action } from "~/routes/_layout+/assets.import";
-import { readImportRowErrors } from "~/utils/import-row-errors";
 import { useBarcodePermissions } from "~/utils/permissions/use-barcode-permissions";
 import Input from "../forms/input";
+import { ImportErrorDetails } from "./import-preview/import-error-details";
 import Icon from "../icons/icon";
 import { Button } from "../shared/button";
-import { ImportRowErrorsTable } from "../shared/import-row-errors-table";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -30,7 +27,6 @@ import {
   AlertDialogTrigger,
 } from "../shared/modal";
 import { WarningBox } from "../shared/warning-box";
-import { Table, Td, Th, Tr } from "../table";
 import When from "../when/when";
 
 /**
@@ -362,12 +358,6 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
   const disabled = isSubmitting || agreed !== "I AGREE";
   const isSuccessful = data && !data.error;
 
-  /** Row-level import problems, narrowed out of the error payload. */
-  const { rowErrors, totalRowErrors } = readImportRowErrors(
-    data?.error?.additionalData
-  );
-  //
-
   // Focus the "I AGREE" confirmation input when the dialog opens (replaces
   // `autoFocus`). Re-focuses each time the dialog re-opens; skipped while
   // the success state is showing.
@@ -459,141 +449,7 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
             ) : null}
           </AlertDialogHeader>
 
-          <When truthy={!!data?.error}>
-            <div className="overflow-y-scroll">
-              <h5 className="text-red-500">{data?.error?.title}</h5>
-              <p className="text-red-500">{data?.error?.message}</p>
-              {data?.error?.additionalData?.duplicateCodes ? (
-                <BrokenQrCodesTable
-                  title="Duplicate codes"
-                  data={
-                    data.error.additionalData
-                      .duplicateCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.nonExistentCodes ? (
-                <BrokenQrCodesTable
-                  title="Non existent codes"
-                  data={
-                    data.error.additionalData
-                      .nonExistentCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.linkedCodes ? (
-                <BrokenQrCodesTable
-                  title="Already linked codes"
-                  data={
-                    data.error.additionalData
-                      .linkedCodes as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-              {data?.error?.additionalData?.connectedToOtherOrgs ? (
-                <BrokenQrCodesTable
-                  title="Some codes do not belong to this organization"
-                  data={
-                    data.error.additionalData
-                      .connectedToOtherOrgs as QRCodePerImportedAsset[]
-                  }
-                />
-              ) : null}
-
-              {data?.error?.additionalData?.duplicateBarcodes ? (
-                <DuplicateBarcodesTable
-                  data={
-                    data.error.additionalData
-                      .duplicateBarcodes as DuplicateBarcode[]
-                  }
-                />
-              ) : null}
-
-              {data?.error?.additionalData?.kitCustodyConflicts ? (
-                <table className="mt-4 w-full rounded-md border text-left text-sm">
-                  <thead className="bg-error-100 text-xs">
-                    <tr>
-                      <th scope="col" className="px-2 py-1">
-                        Asset
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Custodian
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Kit
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Issue
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(
-                      data.error.additionalData.kitCustodyConflicts as Array<{
-                        asset: string;
-                        custodian: string;
-                        kit: string;
-                        issue: string;
-                      }>
-                    ).map((conflict) => (
-                      <tr
-                        // Compose a stable key from the conflict fields —
-                        // the backend can surface the same asset twice
-                        // for different issues, so include `issue` too.
-                        key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
-                        className="border-b"
-                      >
-                        <td className="px-2 py-1">{conflict.asset}</td>
-                        <td className="px-2 py-1">{conflict.custodian}</td>
-                        <td className="px-2 py-1">{conflict.kit}</td>
-                        <td className="px-2 py-1">{conflict.issue}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : null}
-
-              {Array.isArray(data?.error?.additionalData?.defectedHeaders) ? (
-                <table className="mt-4 w-full rounded-md border text-left text-sm">
-                  <thead className="bg-error-100 text-xs">
-                    <tr>
-                      <th scope="col" className="px-2 py-1">
-                        Incorrect Header
-                      </th>
-                      <th scope="col" className="px-2 py-1">
-                        Error
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data?.error?.additionalData?.defectedHeaders?.map(
-                      (data: {
-                        incorrectHeader: string;
-                        errorMessage: string;
-                      }) => (
-                        <tr key={data.incorrectHeader}>
-                          <td className="px-2 py-1">{data.incorrectHeader}</td>
-                          <td className="px-2 py-1">{data.errorMessage}</td>
-                        </tr>
-                      )
-                    )}
-                  </tbody>
-                </table>
-              ) : null}
-
-              {rowErrors ? (
-                <ImportRowErrorsTable
-                  rowErrors={rowErrors}
-                  totalRowErrors={totalRowErrors}
-                />
-              ) : null}
-
-              <p className="mt-2">
-                Please fix your CSV file and try again. If the issue persists,
-                don't hesitate to get in touch with us.
-              </p>
-            </div>
-          </When>
+          {data?.error ? <ImportErrorDetails error={data.error} /> : null}
 
           <When truthy={isSuccessful}>
             <div>
@@ -639,69 +495,3 @@ export const FileForm = ({ intent, url }: { intent: string; url?: string }) => {
     </fetcher.Form>
   );
 };
-
-function BrokenQrCodesTable({
-  title,
-  data,
-}: {
-  title: string;
-  data: QRCodePerImportedAsset[];
-}) {
-  return (
-    <div className="mt-3">
-      <h5>{title}</h5>
-      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
-        <thead>
-          <Tr>
-            <Th>Asset title</Th>
-            <Th>QR ID</Th>
-          </Tr>
-        </thead>
-        <tbody>
-          {data.map((code: { title: string; qrId: string }) => (
-            <Tr key={code.title}>
-              <Td>{code.title}</Td>
-              <Td>{code.qrId}</Td>
-            </Tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
-  );
-}
-
-function DuplicateBarcodesTable({ data }: { data: DuplicateBarcode[] }) {
-  return (
-    <div className="mt-3">
-      <h5>Duplicate barcodes</h5>
-      <Table className="mt-1 [&_td]:p-1 [&_th]:p-1">
-        <thead>
-          <Tr>
-            <Th>Barcode</Th>
-            <Th>Used by assets</Th>
-          </Tr>
-        </thead>
-        <tbody>
-          {data.map((barcode) => (
-            <Tr key={barcode.value}>
-              <Td className="align-top">{barcode.value}</Td>
-              <Td className="whitespace-normal">
-                <ul className="list-disc pl-4">
-                  {barcode.assets.map((asset) => (
-                    // CSV `row` number is unique per imported asset
-                    // within a single error payload, so it's a stable
-                    // key (include title+type to be extra safe if the
-                    // same row ever surfaces under multiple barcodes).
-                    <li key={`${asset.row}-${asset.type}-${asset.title}`}>
-                      {asset.title} ({asset.type}): Line {asset.row}
-                    </li>
-                  ))}
-                </ul>
-              </Td>
-            </Tr>
-          ))}
-        </tbody>
-      </Table>
-    </div>
-  );
-}

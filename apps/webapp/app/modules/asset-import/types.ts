@@ -89,6 +89,8 @@ export type ImportGridRow = {
   key: string;
   /** Leftmost cell, e.g. the spreadsheet row number or the asset ID. */
   label: string;
+  /** Optional smaller line under the label, e.g. the asset ID under its title. */
+  sublabel?: string;
   cells: Record<string, ImportGridCell>;
 };
 
