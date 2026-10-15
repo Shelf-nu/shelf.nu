@@ -32,6 +32,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { getArchivedFilterFromParams } from "~/modules/asset/utils.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   BarcodeField,
@@ -472,7 +473,12 @@ async function resolveExportAssets({
       // bookableScope: an export is never scoped to a bookable subset.
       null,
       timeZone,
-      lowStockOnly
+      lowStockOnly,
+      // Mirror the flag-OFF export's honorArchivedView behavior: a select-all
+      // export reproduces the index's Active/Archived/All view, while
+      // hand-picked rows export regardless of archive state so a ticked
+      // archived row is never dropped by the "active" default (issue #382).
+      takeAll ? getArchivedFilterFromParams(searchParams) : "all"
     );
     const sortBy = searchParams.getAll("sortBy");
     const { orderByInner, customFieldSortings } = parseSortingOptions(sortBy);
