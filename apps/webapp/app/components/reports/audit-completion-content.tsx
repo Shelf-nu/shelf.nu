@@ -9,7 +9,7 @@
  *
  * Status renders through the shared `AuditStatusBadgeWithOverdue`, which
  * derives overdue-ness (due date past, session still open) as a separate red
- * chip beside the status badge — overdue is a schedule fact, not a status.
+ * chip beside the status badge. Overdue is a schedule fact, not a status.
  *
  * @see {@link file://../../routes/_layout+/reports.$reportId.tsx}
  * @see {@link file://../../modules/reports/audit-completion.server.ts}
@@ -58,7 +58,12 @@ const AUDIT_COMPLETION_COLUMNS: ColumnDef<AuditCompletionRow>[] = [
   {
     accessorKey: "missingAssetCount",
     header: "Missing",
-    cell: ({ row }) => <MissingCell value={row.original.missingAssetCount} />,
+    cell: ({ row }) => (
+      <MissingCell
+        value={row.original.missingAssetCount}
+        isCancelled={row.original.isCancelled}
+      />
+    ),
   },
   {
     accessorKey: "unexpectedAssetCount",
@@ -93,25 +98,40 @@ const AUDIT_COMPLETION_COLUMNS: ColumnDef<AuditCompletionRow>[] = [
 ];
 
 /**
- * Accuracy cell: a brand-color bar whose width is the found/expected rate,
- * next to the percentage. Brand color, no judgment — the width shows the
- * magnitude (see the progress-bar rule in `.claude/rules/reports-styling.md`).
- * Null accuracy (session expected 0 assets) renders as "—".
- *
- * @param accuracy - found/expected as a whole percentage, or null
- */
-/**
  * Missing-asset count for a session. Null means the session has not
- * completed yet — the counter still measures "not scanned", so the cell
- * says that instead of branding in-progress audits as having lost assets.
+ * completed: the counter still measures "not scanned", so the cell says that
+ * instead of branding in-progress audits as having lost assets. A cancelled
+ * session will never be scanned, so it says "Cancelled" instead.
+ *
+ * @param value - Missing count, or null before completion
+ * @param isCancelled - Whether the session was cancelled
  */
-function MissingCell({ value }: { value: number | null }) {
+function MissingCell({
+  value,
+  isCancelled,
+}: {
+  value: number | null;
+  isCancelled: boolean;
+}) {
   if (value === null) {
-    return <span className="text-xs text-gray-600">Not scanned</span>;
+    return (
+      <span className="text-xs text-gray-600">
+        {isCancelled ? "Cancelled" : "Not scanned"}
+      </span>
+    );
   }
   return <NumberCell value={value} />;
 }
 
+/**
+ * Accuracy cell: a brand-color bar whose width is the found/expected rate,
+ * next to the percentage. Brand color, no judgment: the width shows the
+ * magnitude (see the progress-bar rule in `.claude/rules/reports-styling.md`).
+ * Null accuracy (unfinished session, or 0 expected assets) renders a
+ * placeholder.
+ *
+ * @param accuracy - found/expected as a whole percentage, or null
+ */
 function AccuracyCell({ accuracy }: { accuracy: number | null }) {
   if (accuracy === null) {
     return <span className="text-gray-600">—</span>;
@@ -141,7 +161,7 @@ type Props = {
   totalRows: number;
   /** Human-readable label for the selected timeframe (e.g. "Last 30 days"). */
   timeframeLabel?: string;
-  /** Called when a row is clicked — navigates to the audit detail page. */
+  /** Called when a row is clicked. Navigates to the audit detail page. */
   onRowClick?: (row: AuditCompletionRow) => void;
 };
 
@@ -170,8 +190,8 @@ export function AuditCompletionContent({
   timeframeLabel,
   onRowClick,
 }: Props) {
-  // The rate KPI carries no rawValue when there are no measurable sessions —
-  // null here renders "—", never 0% (the null-not-zero convention).
+  // The rate KPI carries no rawValue when there are no measurable sessions.
+  // Null here renders a placeholder, never 0% (the null-not-zero convention).
   const rateRaw = kpis.find((k) => k.id === "completion_rate")?.rawValue;
   const completionRate = typeof rateRaw === "number" ? rateRaw : null;
 

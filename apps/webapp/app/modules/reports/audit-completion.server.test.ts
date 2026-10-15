@@ -1,5 +1,5 @@
 /**
- * Audit Completion Report — Query & KPI Tests
+ * Audit Completion Report: Query & KPI Tests
  *
  * Covers the public `auditCompletionReport` function: that completion and
  * cancellation are read from their timestamp columns (never `status`, which
@@ -53,6 +53,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     startedAt: new Date("2026-04-02T09:00:00Z"),
     dueDate: new Date("2026-04-20T00:00:00Z"),
     completedAt: new Date("2026-04-10T12:00:00Z"),
+    cancelledAt: null,
     createdBy: { firstName: "Jane", lastName: "Doe", displayName: "JD" },
     ...overrides,
   };
@@ -61,7 +62,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
 /**
  * Stubs the four `auditSession.count` calls by the distinguishing key of
  * each where shape. The shapes themselves are pinned by the where-clause
- * tests below — this helper only routes values to them.
+ * tests below; this helper only routes values to them.
  */
 function stubCounts({
   windowTotal = 0,
@@ -116,7 +117,7 @@ describe("auditCompletionReport", () => {
     const completedWhere = findCountWhere((w) => "completedAt" in w);
     expect(completedWhere).toBeDefined();
     expect(completedWhere!.completedAt).toEqual({ not: null });
-    // Archiving rewrites `status`, so the predicate must not reference it —
+    // Archiving rewrites `status`, so the predicate must not reference it:
     // an ARCHIVED session that finished still counts as completed.
     expect(completedWhere).not.toHaveProperty("status");
   });
@@ -156,7 +157,7 @@ describe("auditCompletionReport", () => {
     expect(totalWhere).toBeDefined();
     expect(totalWhere!.cancelledAt).toBeNull();
     // A cancelled audit that is later archived keeps `cancelledAt` while its
-    // status becomes ARCHIVED — a status-based exclusion would re-admit it.
+    // status becomes ARCHIVED; a status-based exclusion would re-admit it.
     expect(totalWhere).not.toHaveProperty("status");
   });
 
@@ -228,8 +229,8 @@ describe("auditCompletionReport", () => {
     });
 
     expect(result.rows[0].accuracy).toBe(80);
-    // 0 expected assets means there is nothing to be accurate against —
-    // null, not 0%, so the UI renders "—" instead of a failing score.
+    // 0 expected assets means there is nothing to be accurate against:
+    // null, not 0%, so the UI renders a placeholder instead of a failing score.
     expect(result.rows[1].accuracy).toBeNull();
   });
 
@@ -349,23 +350,19 @@ describe("auditCompletionReport", () => {
   });
 });
 
-describe("auditCompletionReport — assignment scoping", () => {
+describe("auditCompletionReport row lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // why: every query resolves empty — these tests assert only the WHERE
-    // shapes the report sends, not result math.
-    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as any);
-    vi.mocked(db.auditSession.count).mockResolvedValue(0 as any);
+    stubCounts({});
     vi.mocked(db.auditSession.aggregate).mockResolvedValue({
       _sum: { missingAssetCount: null },
-    } as any);
+    } as never);
   });
 
-  it("counts a session with both timestamps as cancelled, not completed", async () => {
-    // A cancellation that races the completion write can leave both
-    // `completedAt` and `cancelledAt` set; the cancellation wins so the
-    // completed count can never exceed the never-cancelled total.
-    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as any);
+  it("keeps the completed predicate inside the never-cancelled total", async () => {
+    // Completed and Assets Missing both exclude cancelled sessions, so the
+    // completed count is a subset of the rate's denominator.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as never);
 
     await auditCompletionReport({
       organizationId: "org-1",
@@ -374,25 +371,22 @@ describe("auditCompletionReport — assignment scoping", () => {
       timeframe: TIMEFRAME,
     });
 
-    const countWheres = vi
-      .mocked(db.auditSession.count)
-      .mock.calls.map((c) => (c[0] as any).where);
-    const completedWhere = countWheres.find(
-      (w) => w.completedAt && w.completedAt.not === null
-    );
-    expect(completedWhere.cancelledAt).toBeNull();
-    const aggWhere = (
-      vi.mocked(db.auditSession.aggregate).mock.calls[0][0] as any
+    const completedWhere = findCountWhere((w) => "completedAt" in w);
+    expect(completedWhere?.cancelledAt).toBeNull();
+    const aggregateWhere = (
+      vi.mocked(db.auditSession.aggregate).mock.calls[0][0] as {
+        where: Record<string, unknown>;
+      }
     ).where;
-    expect(aggWhere.completedAt).toEqual({ not: null });
-    expect(aggWhere.cancelledAt).toBeNull();
+    expect(aggregateWhere.completedAt).toEqual({ not: null });
+    expect(aggregateWhere.cancelledAt).toBeNull();
   });
 
   it("reports missing and accuracy as null until a session completes", async () => {
     // The missing counter starts at the expected count and counts DOWN while
-    // scanning, so an in-progress session must read "not scanned", never
-    // "lost every asset" — and a 0/19 accuracy score before completion would
-    // brand an audit nobody finished as a failure.
+    // scanning, so an in-progress session reads "not scanned", never "lost
+    // every asset", and a 0/19 accuracy score before completion would brand
+    // an audit nobody finished as a failure.
     vi.mocked(db.auditSession.findMany).mockResolvedValue([
       makeSession({
         id: "in-progress",
@@ -401,8 +395,9 @@ describe("auditCompletionReport — assignment scoping", () => {
         foundAssetCount: 0,
         missingAssetCount: 19,
         completedAt: null,
+        cancelledAt: null,
       }),
-    ] as any);
+    ] as never);
 
     const payload = await auditCompletionReport({
       organizationId: "org-1",
@@ -413,6 +408,43 @@ describe("auditCompletionReport — assignment scoping", () => {
 
     expect(payload.rows[0].missingAssetCount).toBeNull();
     expect(payload.rows[0].accuracy).toBeNull();
+    expect(payload.rows[0].isCancelled).toBe(false);
+  });
+
+  it("flags cancelled sessions from cancelledAt, even once archived", async () => {
+    // Archiving rewrites `status`, so the flag reads the timestamp.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([
+      makeSession({
+        id: "cancelled-archived",
+        status: "ARCHIVED",
+        missingAssetCount: 12,
+        completedAt: null,
+        cancelledAt: new Date("2026-04-05T10:00:00Z"),
+      }),
+    ] as never);
+
+    const payload = await auditCompletionReport({
+      organizationId: "org-1",
+      userId: "user-1",
+      assignedOnly: false,
+      timeframe: TIMEFRAME,
+    });
+
+    expect(payload.rows[0].isCancelled).toBe(true);
+    expect(payload.rows[0].missingAssetCount).toBeNull();
+  });
+});
+
+describe("auditCompletionReport assignment scoping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // why: every query resolves empty; these tests assert only the WHERE
+    // shapes the report sends, not result math.
+    vi.mocked(db.auditSession.findMany).mockResolvedValue([] as never);
+    stubCounts({});
+    vi.mocked(db.auditSession.aggregate).mockResolvedValue({
+      _sum: { missingAssetCount: null },
+    } as never);
   });
 
   it("scopes every query to assigned audits when assignedOnly is set", async () => {
@@ -423,16 +455,16 @@ describe("auditCompletionReport — assignment scoping", () => {
       timeframe: TIMEFRAME,
     });
 
-    // The audits index applies assignments.some.userId for these roles; the
-    // report must never list a session its viewer cannot open.
+    // The audits index applies assignments.some.userId for viewers who
+    // cannot see every audit; the report never lists a session its viewer
+    // cannot open.
     for (const call of [
       ...vi.mocked(db.auditSession.findMany).mock.calls,
       ...vi.mocked(db.auditSession.count).mock.calls,
       ...vi.mocked(db.auditSession.aggregate).mock.calls,
     ]) {
-      expect((call[0] as any).where.assignments).toEqual({
-        some: { userId: "user-1" },
-      });
+      const { where } = call[0] as { where: Record<string, unknown> };
+      expect(where.assignments).toEqual({ some: { userId: "user-1" } });
     }
   });
 
@@ -445,7 +477,8 @@ describe("auditCompletionReport — assignment scoping", () => {
     });
 
     for (const call of vi.mocked(db.auditSession.findMany).mock.calls) {
-      expect((call[0] as any).where.assignments).toBeUndefined();
+      const { where } = call[0] as { where: Record<string, unknown> };
+      expect(where.assignments).toBeUndefined();
     }
   });
 });

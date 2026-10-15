@@ -1,7 +1,7 @@
 /**
- * Audit Completion Report — Server-Side Data Fetching
+ * Audit Completion Report: Server-Side Data Fetching
  *
- * Builds the Audit Completion report from `AuditSession` directly — the
+ * Builds the Audit Completion report from `AuditSession` directly: the
  * authoritative base table whose counters
  * (`expectedAssetCount`/`foundAssetCount`/`missingAssetCount`/
  * `unexpectedAssetCount`) and lifecycle timestamps the audit service
@@ -12,7 +12,7 @@
  *   `status` to ARCHIVED (from COMPLETED or CANCELLED) while leaving the
  *   timestamps intact, so a status-based predicate silently drops every
  *   archived session from the metric it belongs to.
- * - **Cancelled** likewise means `cancelledAt IS NOT NULL` — a cancelled
+ * - **Cancelled** likewise means `cancelledAt IS NOT NULL`. A cancelled
  *   session that is later archived must stay excluded from the totals.
  *
  * Lives in its own module (not `helpers.server.ts`) so the audits category
@@ -40,12 +40,12 @@ import { USER_NAME_SELECT } from "../user/fields";
 /** Arguments for {@link auditCompletionReport}. */
 interface AuditCompletionArgs {
   organizationId: string;
-  /** Acting user — the subject of assignment scoping below. */
+  /** Acting user, the subject of assignment scoping below. */
   userId: string;
   /** Limit the report to audits assigned to `userId`, the same reach the
    * audits index applies. Callers pass `!access.audits.seeAll`. */
   assignedOnly: boolean;
-  /** Window applied to `AuditSession.createdAt` — a session belongs to the
+  /** Window applied to `AuditSession.createdAt`. A session belongs to the
    * period it was created in, regardless of when it finished. */
   timeframe: ResolvedTimeframe;
   page?: number;
@@ -59,11 +59,11 @@ interface AuditCompletionArgs {
  * volume (total non-cancelled sessions), throughput (completed sessions and
  * the completion rate), follow-up pressure (overdue sessions), and the
  * headline finding (assets missing across completed sessions). Rows list
- * every session created in the window — cancelled and archived included, so
- * the table reconciles with the audits index — newest first.
+ * every session created in the window, newest first, cancelled and archived
+ * included so the table reconciles with the audits index.
  *
  * Orgs without the audits add-on simply have no sessions; the report renders
- * its standard empty state with zero KPIs and a "—" rate.
+ * its standard empty state with zero KPIs and an empty rate.
  *
  * @param args - Report parameters
  * @returns Complete report payload
@@ -124,6 +124,7 @@ export async function auditCompletionReport(
           startedAt: true,
           dueDate: true,
           completedAt: true,
+          cancelledAt: true,
           createdBy: { select: USER_NAME_SELECT },
         },
       }),
@@ -131,16 +132,15 @@ export async function auditCompletionReport(
       // matching what the table lists.
       db.auditSession.count({ where: windowWhere }),
       // Total for the KPI/rate: sessions that were never cancelled.
-      // `cancelledAt`, not `status` — archiving a cancelled session
+      // `cancelledAt`, not `status`: archiving a cancelled session
       // rewrites its status to ARCHIVED but keeps the timestamp.
       db.auditSession.count({
         where: { ...windowWhere, cancelledAt: null },
       }),
-      // Completed: `completedAt`, not `status` — archiving a completed
+      // Completed: `completedAt`, not `status`: archiving a completed
       // session rewrites its status to ARCHIVED but keeps the timestamp.
-      // `cancelledAt: null` besides: a cancellation that raced the
-      // completion write leaves both timestamps set, and the cancellation
-      // wins here so completed can never exceed the never-cancelled total.
+      // `cancelledAt: null` keeps this count a subset of the never-cancelled
+      // total above, so the completion rate can never exceed 100%.
       db.auditSession.count({
         where: {
           ...windowWhere,
@@ -148,7 +148,7 @@ export async function auditCompletionReport(
           cancelledAt: null,
         },
       }),
-      // Overdue: past due and still open — neither finished nor cancelled.
+      // Overdue: past due and still open, neither finished nor cancelled.
       db.auditSession.count({
         where: {
           ...windowWhere,
@@ -162,8 +162,8 @@ export async function auditCompletionReport(
       // missing counter still shrinks as scanning proceeds.
       db.auditSession.aggregate({
         _sum: { missingAssetCount: true },
-        // Same completed-family guard as the count above: a cancellation
-        // that raced the completion write wins.
+        // Same completed-and-never-cancelled predicate as the count above,
+        // so the sum and the Completed KPI cover the same sessions.
         where: {
           ...windowWhere,
           completedAt: { not: null },
@@ -185,11 +185,14 @@ export async function auditCompletionReport(
       missingAssetCount:
         session.completedAt !== null ? session.missingAssetCount : null,
       unexpectedAssetCount: session.unexpectedAssetCount,
-      // Null when the session expected 0 assets — nothing to be accurate
-      // against, and null (not 0%) renders as "—" instead of a failing score.
-      // Accuracy is only meaningful once the session finished; an unfinished
-      // session would read as a failing score while people are still
-      // scanning. Also null when the session expected 0 assets.
+      // Lets the Missing cell say "Cancelled" instead of "Not scanned" for a
+      // session nobody will finish. Read from the timestamp: archiving
+      // rewrites `status`.
+      isCancelled: session.cancelledAt !== null,
+      // Null until the session completes (an unfinished session would read
+      // as a failing score while people are still scanning) and when it
+      // expected 0 assets (nothing to be accurate against). Null renders as
+      // an empty cell, never 0%.
       accuracy:
         session.completedAt !== null && session.expectedAssetCount > 0
           ? Math.round(
@@ -243,8 +246,8 @@ export async function auditCompletionReport(
  * Assemble the KPI cards from the pre-computed counts.
  *
  * The completion rate follows the null-not-zero convention: with no
- * measurable sessions there is no rate, so the card shows "—" and carries no
- * `rawValue` — 0% would misread as "every audit failed to finish".
+ * measurable sessions there is no rate, so the card shows a placeholder and
+ * carries no `rawValue`. 0% would misread as "every audit failed to finish".
  *
  * @param counts - Window-scoped counts computed by the report queries
  * @returns KPI cards in display order

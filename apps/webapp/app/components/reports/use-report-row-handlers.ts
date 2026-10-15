@@ -33,7 +33,7 @@ export type ReportRowHandlers = {
   onKitRowClick: (row: { kitId: string }) => void;
   /** Navigate to an audit session detail page. Audit rows carry the
    *  session id as their row `id`, so any row shape qualifies
-   *  structurally — only wire this to rows whose `id` IS an audit
+   *  structurally. Only wire this to rows whose `id` IS an audit
    *  session id. */
   onAuditRowClick: (row: { id: string }) => void;
 };

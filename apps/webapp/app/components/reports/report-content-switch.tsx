@@ -317,7 +317,7 @@ function getEmptyStateDescription(reportId: string): string {
       return "No activity has been recorded for your assets in this timeframe. Activity appears when assets are updated, booked, or custody changes.";
     case "audit-completion":
       // Orgs without the audits add-on simply have no sessions, so this
-      // doubles as their empty state — keep it about finding data.
+      // doubles as their empty state. Keep it about finding data.
       return "No audit sessions were created within the selected timeframe. Try selecting a longer period to see completed audits and their findings.";
     default:
       return "Try selecting a different timeframe to find data for this report.";

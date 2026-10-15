@@ -337,8 +337,8 @@ export const loader = async ({
       case "audit-completion": {
         const reportData = await auditCompletionReport({
           organizationId,
-          // The CSV must carry the same assignment scoping as the page —
-          // an export is just the page's data in a file.
+          // The CSV carries the same assignment scoping as the page: an
+          // export is just the page's data in a file.
           userId,
           assignedOnly: !access.audits.seeAll,
           timeframe,

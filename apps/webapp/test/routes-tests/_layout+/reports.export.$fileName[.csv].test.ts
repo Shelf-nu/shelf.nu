@@ -14,6 +14,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import type { Mock } from "vitest";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
+import { auditCompletionReport } from "~/modules/reports/audit-completion.server";
 import {
   assetActivityReport,
   assetDistributionReport,
@@ -29,6 +30,7 @@ import {
 } from "~/modules/reports/helpers.server";
 import type {
   AssetDistributionRow,
+  AuditCompletionRow,
   MonthlyBookingTrendRow,
   ReportPayload,
   ResolvedTimeframe,
@@ -44,7 +46,7 @@ vi.mock("~/utils/roles.server", () => ({
   requirePermission: vi.fn(),
 }));
 
-// why: same as the helpers mock below — the audit report builder queries
+// why: same as the helpers mock below. The audit report builder queries
 // Prisma, and importing it for real loads `~/database/db.server`, whose
 // module-level `$connect()` rejects (unhandled) with no database around.
 vi.mock("~/modules/reports/audit-completion.server", () => ({
@@ -141,6 +143,8 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       // The loader threads the workspace currency into the money-KPI-bearing
       // report functions, so the permission result must carry it.
       currentOrganization: { currency: "USD" },
+      // The audit report reads the caller's audit reach to scope its rows.
+      access: { audits: { seeAll: true } },
     } as any);
     assetDistributionReportMock.mockResolvedValue({
       distributionBreakdown: arabicBreakdown,
@@ -328,6 +332,16 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
         mock: vi.mocked(assetDistributionReport),
         expected: { organizationId: "org-1", currency: "USD" },
       },
+      {
+        reportId: "audit-completion",
+        query: "",
+        mock: vi.mocked(auditCompletionReport),
+        expected: {
+          organizationId: "org-1",
+          userId: "user-123",
+          assignedOnly: false,
+        },
+      },
     ];
 
     beforeEach(() => {
@@ -404,6 +418,105 @@ describe("app/routes/_layout+/reports.export.$fileName[.csv] loader", () => {
       const args = vi.mocked(monthlyBookingTrendsReport).mock.calls[0][0];
       expect(args).not.toHaveProperty("categoryId");
       expect(args).not.toHaveProperty("locationId");
+    });
+  });
+
+  describe("audit-completion", () => {
+    const runAuditExport = () =>
+      loader(
+        createLoaderArgs({
+          request: new Request(
+            "http://localhost:3000/reports/export/audit-completion-2026-08-28.csv?reportId=audit-completion"
+          ),
+          params: { fileName: "audit-completion-2026-08-28" },
+          context,
+        })
+      );
+
+    const auditRow = (
+      overrides: Partial<AuditCompletionRow> = {}
+    ): AuditCompletionRow => ({
+      id: "audit-1",
+      name: "Q3 Warehouse",
+      status: "COMPLETED",
+      expectedAssetCount: 10,
+      foundAssetCount: 8,
+      missingAssetCount: 2,
+      unexpectedAssetCount: 1,
+      isCancelled: false,
+      accuracy: 80,
+      createdByName: "Jane Doe",
+      startedAt: null,
+      dueDate: null,
+      completedAt: null,
+      ...overrides,
+    });
+
+    const payloadWith = (rows: AuditCompletionRow[]) => ({
+      report: {
+        id: "audit-completion",
+        title: "Audit Completion",
+        description: "",
+      },
+      filters: {
+        timeframe: {
+          preset: "last_30d" as const,
+          from: new Date("2026-07-25T00:00:00.000Z"),
+          to: new Date("2026-08-24T00:00:00.000Z"),
+          label: "Last 30 days",
+        },
+        filters: [],
+      },
+      kpis: [],
+      rows,
+      computedMs: 0,
+      totalRows: rows.length,
+      page: 1,
+      pageSize: 10000,
+    });
+
+    it("limits the export to assigned audits when the caller cannot see every audit", async () => {
+      requirePermissionMock.mockResolvedValue({
+        organizationId: "org-1",
+        currentOrganization: { currency: "USD" },
+        access: { audits: { seeAll: false } },
+      } as unknown as Awaited<ReturnType<typeof requirePermission>>);
+      vi.mocked(auditCompletionReport).mockResolvedValue(payloadWith([]));
+
+      await runAuditExport();
+
+      expect(auditCompletionReport).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "user-123", assignedOnly: true })
+      );
+    });
+
+    it("writes one row per session, leaving unfinished values empty", async () => {
+      vi.mocked(auditCompletionReport).mockResolvedValue(
+        payloadWith([
+          auditRow(),
+          auditRow({
+            id: "audit-2",
+            name: "Q4 Office",
+            status: "ACTIVE",
+            missingAssetCount: null,
+            accuracy: null,
+          }),
+        ])
+      );
+
+      const response = (await runAuditExport()) as unknown as Response;
+      const rows = (await response.text())
+        .replace(/^\uFEFF/, "")
+        .trim()
+        .split("\n");
+
+      expect(rows[0]).toBe(
+        "Audit ID,Name,Status,Expected,Found,Missing,Unexpected,Accuracy,Created By,Started,Due Date,Completed"
+      );
+      expect(rows[1]).toBe(
+        "audit-1,Q3 Warehouse,Completed,10,8,2,1,80%,Jane Doe,,,"
+      );
+      expect(rows[2]).toBe("audit-2,Q4 Office,Active,10,8,,1,,Jane Doe,,,");
     });
   });
 });
