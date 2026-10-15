@@ -83,8 +83,10 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
+import { accessFor } from "@helpers/role-access";
 import { db } from "~/database/db.server";
 import { loader } from "~/routes/api+/assets.get-assets-for-bulk-qr-download";
+import { requirePermission } from "~/utils/roles.server";
 
 const ASSET_COUNT = 20;
 const assets = Array.from({ length: ASSET_COUNT }, (_, index) => ({
@@ -201,6 +203,30 @@ describe("bulk QR download select-all", () => {
     expect(db.asset.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: { in: ["asset-0", "asset-1"] }, organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("resolves in simple mode for a role without the advanced index", async () => {
+    // A demoted member's saved mode can still be ADVANCED, and advanced search
+    // matches custodian names, which BASE may not be allowed to see.
+    (requirePermission as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      organizationId: "org-1",
+      role: "BASE",
+      access: accessFor(["BASE"]),
+      currentOrganization: {
+        qrIdDisplayPreference: "qrId",
+        showShelfBranding: true,
+      },
+    });
+    bulkMocks.resolveAssetIdsForBulkOperation.mockResolvedValue([]);
+    (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    await runSelectAll("s=Jane");
+
+    expect(bulkMocks.resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        settings: expect.objectContaining({ mode: "SIMPLE" }),
       })
     );
   });

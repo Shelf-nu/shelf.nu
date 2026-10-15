@@ -75,12 +75,21 @@ export async function loader({ context, request }: ActionFunctionArgs) {
      */
     let resolvedIds = assetIds;
     if (assetIds.includes(ALL_SELECTED_KEY)) {
-      const settings = await getAssetIndexSettings({
+      const savedSettings = await getAssetIndexSettings({
         userId,
         organizationId,
         canUseBarcodes,
         role,
       });
+      /**
+       * Advanced filtering is a per-role capability, and the saved mode can
+       * outlive it (a demoted member keeps ADVANCED until they next open
+       * /assets). Advanced search also matches custodian names, so a role
+       * without the capability always resolves in simple mode.
+       */
+      const settings = access.policy.ui.advancedAssetIndex
+        ? savedSettings
+        : { ...savedSettings, mode: "SIMPLE" as const };
       // Date filters truncate the day in the member's own time zone.
       const { timeZone } = await resolveUserFormatPrefsById(
         userId,
