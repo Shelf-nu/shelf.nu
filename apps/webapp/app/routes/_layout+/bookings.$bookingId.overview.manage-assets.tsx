@@ -316,22 +316,11 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         action: PermissionAction.update,
       });
 
-    /**
-     * With "Include assets from child locations" on, each ticked location
-     * matches itself plus everything nested under it. `undefined` (the
-     * checkbox is off, or nothing is ticked) leaves the list on the ticked
-     * locations exactly. The action's select-all resolves the same URL through
-     * the same function, so it acts on the set this list shows.
-     */
     const searchParams = getCurrentSearchParams(request);
-    const locationIdsOverride = await resolveLocationFilterIds({
-      organizationId,
-      searchParams,
-    });
 
-    // getPaginatedAndFilterableAssets + getBooking both only need
-    // `organizationId` (from requirePermission above). They're
-    // independent — parallelise to cut a serial DB round-trip.
+    // The asset list, the booking and the checkbox flag only need
+    // `organizationId` (from requirePermission above) and the URL, so they
+    // run in parallel.
     const [
       {
         search,
@@ -350,19 +339,29 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       booking,
       tickedLocationHasChildren,
     ] = await Promise.all([
-      getPaginatedAndFilterableAssets({
-        request,
-        organizationId,
-        // Ignores the custodian-filter seed — scope it rather than fetch a
-        // roster nobody renders.
-        canSeeAllCustody: false,
-        locationIdsOverride,
-        extraInclude: {
-          assetLocations: {
-            select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
-          },
-        },
-      }),
+      /**
+       * With "Include assets from child locations" on, each ticked location
+       * matches itself plus everything nested under it. `undefined` (the
+       * checkbox is off, or nothing is ticked) leaves the list on the ticked
+       * locations exactly. The action's select-all resolves the same URL
+       * through the same function, so it acts on the set this list shows.
+       */
+      resolveLocationFilterIds({ organizationId, searchParams }).then(
+        (locationIdsOverride) =>
+          getPaginatedAndFilterableAssets({
+            request,
+            organizationId,
+            // Ignores the custodian-filter seed: scope it rather than fetch a
+            // roster nobody renders.
+            canSeeAllCustody: false,
+            locationIdsOverride,
+            extraInclude: {
+              assetLocations: {
+                select: { quantity: true, location: LOCATION_WITH_HIERARCHY },
+              },
+            },
+          })
+      ),
       getBooking({
         id,
         organizationId,
