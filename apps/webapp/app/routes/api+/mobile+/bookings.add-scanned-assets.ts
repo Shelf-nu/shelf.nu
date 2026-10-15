@@ -52,8 +52,9 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *       archivedKitMembersLeftOut: number,
  *     }
  *
- * `archivedKitMembersLeftOut` counts the scanned kits' archived members, which
- * a kit add leaves out of the booking (memberships already on it excepted).
+ * `archivedKitMembersLeftOut` counts the archived members of the kits this
+ * scan added, which a kit add leaves out of the booking (memberships already
+ * on it excepted). A kit the scan skipped reports none.
  *
  * A scan can legitimately put nothing on the booking — every item scanned may
  * already be there — so `added` and `skipped` are what tell a client whether
@@ -208,12 +209,11 @@ export async function action({ request }: ActionFunctionArgs) {
         .map((row) => row.assetKitId)
         .filter((id): id is string => id !== null)
     );
-    const [resolvedKitSlices, archivedKitMembersLeftOut] = await Promise.all([
-      buildKitSlicesForBooking({ kitIds, organizationId, existingAssetKitIds }),
-      // The scanned kits' archived members stay out of the booking; the
-      // phone's success message says how many, as the web's does.
-      countArchivedKitMembers({ kitIds, organizationId, existingAssetKitIds }),
-    ]);
+    const resolvedKitSlices = await buildKitSlicesForBooking({
+      kitIds,
+      organizationId,
+      existingAssetKitIds,
+    });
 
     /**
      * Every asset this scan touches: the ids scanned directly, plus each
@@ -310,16 +310,26 @@ export async function action({ request }: ActionFunctionArgs) {
     // would write a note saying it had been added when nothing was.
     const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
 
-    await addScannedAssetsToBooking({
-      assetIds: standaloneAssetIds,
-      kitSlices,
-      kitIds: kitIdsAdded,
-      bookingId,
-      organizationId,
-      userId: user.id,
-      // Re-checks the add rule against the locked status inside the write.
-      access,
-    });
+    const [, archivedKitMembersLeftOut] = await Promise.all([
+      addScannedAssetsToBooking({
+        assetIds: standaloneAssetIds,
+        kitSlices,
+        kitIds: kitIdsAdded,
+        bookingId,
+        organizationId,
+        userId: user.id,
+        // Re-checks the add rule against the locked status inside the write.
+        access,
+      }),
+      // The archived members of the kits this scan added stay out of the
+      // booking; the phone's success message says how many, as the web's
+      // does. A kit the scan skipped added nothing, so it reports nothing.
+      countArchivedKitMembers({
+        kitIds: kitIdsAdded,
+        organizationId,
+        existingAssetKitIds,
+      }),
+    ]);
 
     /**
      * What the scan did NOT put on the booking, because the booking already

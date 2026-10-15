@@ -19,7 +19,6 @@ import {
   createSsoRequiredError,
   getLegacyLoginDecisionForUser,
 } from "~/modules/auth/sso-enforcement.server";
-import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { ShelfError } from "~/utils/error";
 import {
   type PermissionAction,
@@ -534,30 +533,32 @@ export const MOBILE_ASSET_SELECT = {
  * endpoints fetch this select shape and then call
  * `shapeMobileKitResponse` to flatten the pivot rows.
  *
- * Read a row only through `shapeMobileKitResponse`: its `_count.assetKits`
- * counts the ARCHIVED members, unlike `KIT_ACTIVE_MEMBER_COUNT` elsewhere.
+ * Every member is selected, archived ones included, with its `archivedAt`:
+ * `shapeMobileKitResponse` splits them into the active members the phone
+ * lists and counts, and the archived count it reports apart.
  */
 export const MOBILE_KIT_SELECT = {
   id: true,
   name: true,
   status: true,
   image: true,
-  // The archived members, counted but not listed: a kit holding only archived
-  // assets has nothing to book or hand over, and the phone flags it before
-  // submit. Its active member count is the length of `assetKits` below.
-  _count: {
-    select: { assetKits: { where: { asset: { archivedAt: { not: null } } } } },
-  },
   // why: per-asset status powers the "kit has assets in custody" blocker;
   // availableToBook powers the scan-to-booking "kit has unavailable assets"
-  // blocker, both mirroring the web scanner drawers. Archived members are left
-  // out (the count above reports them): the server books, hands over and moves
-  // a kit with its active members only, so an archived member must not block
-  // the kit on the phone either.
+  // blocker, both mirroring the web scanner drawers. `archivedAt` lets the
+  // shaper keep archived members out of both: the server books, hands over and
+  // moves a kit with its active members only, so an archived member must not
+  // block the kit on the phone. A kit holding only archived assets has nothing
+  // to book or hand over, and the phone flags it from the archived count.
   assetKits: {
-    where: KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where,
     select: {
-      asset: { select: { id: true, status: true, availableToBook: true } },
+      asset: {
+        select: {
+          id: true,
+          status: true,
+          availableToBook: true,
+          archivedAt: true,
+        },
+      },
     },
   },
 } as const;
@@ -592,9 +593,9 @@ export type MobileKitResponse = {
  * expected by the companion app's scanner. Returns `null` if the input is
  * `null` so callers can pass through directly.
  *
- * `assetKits` holds the active members only and `AssetKit` is unique per
- * asset and kit, so its length is the active member count; the row's
- * `_count.assetKits` is the archived member count.
+ * `assetKits` holds every member, one row per asset (`AssetKit` is unique per
+ * asset and kit). The active ones become `assets` and `_count.assets`; the
+ * archived ones are only counted, as `archivedAssetCount`.
  *
  * @param kit Kit row selected via `MOBILE_KIT_SELECT`, or `null`
  * @returns The legacy mobile response shape, or `null`
@@ -605,21 +606,32 @@ export function shapeMobileKitResponse(
     name: string;
     status: string;
     image: string | null;
-    _count: { assetKits: number };
     assetKits: Array<{
-      asset: { id: string; status: string; availableToBook: boolean };
+      asset: {
+        id: string;
+        status: string;
+        availableToBook: boolean;
+        archivedAt: Date | null;
+      };
     }>;
   } | null
 ): MobileKitResponse | null {
   if (!kit) return null;
+  const assets = kit.assetKits
+    .filter((ak) => ak.asset.archivedAt === null)
+    .map(({ asset: { id, status, availableToBook } }) => ({
+      id,
+      status,
+      availableToBook,
+    }));
   return {
     id: kit.id,
     name: kit.name,
     status: kit.status,
     image: kit.image,
-    _count: { assets: kit.assetKits.length },
-    archivedAssetCount: kit._count.assetKits,
-    assets: kit.assetKits.map((ak) => ak.asset),
+    _count: { assets: assets.length },
+    archivedAssetCount: kit.assetKits.length - assets.length,
+    assets,
   };
 }
 

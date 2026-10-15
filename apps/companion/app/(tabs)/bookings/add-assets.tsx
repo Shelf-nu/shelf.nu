@@ -15,7 +15,6 @@
  * @see {@link file://./[id].tsx} the booking detail that launches this.
  */
 
-import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
@@ -39,6 +38,7 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
+import { archivedLeftOutNote } from "@/lib/archived-assets";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -356,10 +356,8 @@ export default function AddBookingAssetsScreen() {
     router.back();
     // A kit is booked with its active members; say how many archived ones
     // stayed out, as the web does, so the booking does not look short.
-    const leftOut = data?.archivedKitMembersLeftOut ?? 0;
-    if (leftOut > 0) {
-      Alert.alert("Added to booking", archivedAssetsLeftOut(leftOut));
-    }
+    const leftOutNote = archivedLeftOutNote(data?.archivedKitMembersLeftOut);
+    if (leftOutNote) Alert.alert("Added to booking", leftOutNote);
   };
 
   // ── Book-by-model reserve / edit / remove ────────────────────────────────

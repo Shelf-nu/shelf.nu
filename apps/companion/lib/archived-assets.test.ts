@@ -11,6 +11,7 @@ import { test } from "node:test";
 
 import {
   archivedIdsFromError,
+  archivedLeftOutNote,
   assetBadgeStatus,
   isArchivedAsset,
   kitAssignCustodyBlockedReason,
@@ -124,4 +125,14 @@ test("a kit holding only archived assets says so, and so does an empty one", () 
     kitAssignCustodyBlockedReason([]),
     "This kit has no assets. Add assets to assign custody."
   );
+});
+
+test("a success message says how many archived assets were left out", () => {
+  assert.equal(archivedLeftOutNote(1), "1 archived asset was left out.");
+  assert.equal(archivedLeftOutNote(3), "3 archived assets were left out.");
+});
+
+test("nothing left out, or a server that predates the count, adds no sentence", () => {
+  assert.equal(archivedLeftOutNote(0), null);
+  assert.equal(archivedLeftOutNote(undefined), null);
 });

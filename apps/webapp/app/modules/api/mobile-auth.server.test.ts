@@ -14,7 +14,6 @@ import {
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import type * as SsoEnforcementModule from "~/modules/auth/sso-enforcement.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
-import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import type * as StorageServer from "~/utils/storage.server";
 import { createSignedUrl } from "~/utils/storage.server";
 import { recordMobileActivity } from "./mobile-usage.server";
@@ -137,20 +136,26 @@ function custodyRow(
 }
 
 describe("MOBILE_KIT_SELECT", () => {
-  it("lists only active members and counts the archived ones apart", () => {
-    // The phone derives the kit's blockers from these members. An archived
-    // member the server would not book must not refuse the kit on the phone.
-    const activeOnly = { asset: { archivedAt: null } };
-    expect(MOBILE_KIT_SELECT.assetKits.where).toEqual(activeOnly);
-    expect(KIT_ACTIVE_MEMBER_COUNT.select.assetKits.where).toEqual(activeOnly);
-    expect(MOBILE_KIT_SELECT._count.select.assetKits.where).toEqual({
-      asset: { archivedAt: { not: null } },
-    });
+  it("selects every member with its archivedAt, so the shaper can split them", () => {
+    // Filtering here would hide the archived members the phone must count.
+    expect(MOBILE_KIT_SELECT.assetKits).not.toHaveProperty("where");
+    expect(MOBILE_KIT_SELECT.assetKits.select.asset.select.archivedAt).toBe(
+      true
+    );
+    expect(MOBILE_KIT_SELECT).not.toHaveProperty("_count");
   });
 });
 
 describe("shapeMobileKitResponse", () => {
   const member = { id: "asset-1", status: "AVAILABLE", availableToBook: true };
+  const archivedMember = (id: string) => ({
+    asset: {
+      id,
+      status: "AVAILABLE",
+      availableToBook: true,
+      archivedAt: new Date("2026-10-01T00:00:00Z"),
+    },
+  });
   const kit = {
     id: "kit-1",
     name: "Camera kit",
@@ -158,13 +163,16 @@ describe("shapeMobileKitResponse", () => {
     image: null,
   };
 
-  it("counts the listed members and reports the archived ones apart", () => {
-    // A row selected with MOBILE_KIT_SELECT: one active member listed, two
-    // archived members counted.
+  it("lists and counts the active members and reports the archived ones apart", () => {
+    // One active member, two archived ones: the phone lists and counts the
+    // active one, and an archived member never raises a kit blocker.
     const shaped = shapeMobileKitResponse({
       ...kit,
-      _count: { assetKits: 2 },
-      assetKits: [{ asset: member }],
+      assetKits: [
+        { asset: { ...member, archivedAt: null } },
+        archivedMember("asset-2"),
+        archivedMember("asset-3"),
+      ],
     });
 
     expect(shaped?._count).toEqual({ assets: 1 });
@@ -176,12 +184,12 @@ describe("shapeMobileKitResponse", () => {
     // What the phone's "kit holds only archived assets" blocker keys on.
     const shaped = shapeMobileKitResponse({
       ...kit,
-      _count: { assetKits: 3 },
-      assetKits: [],
+      assetKits: [archivedMember("asset-2"), archivedMember("asset-3")],
     });
 
     expect(shaped?._count.assets).toBe(0);
-    expect(shaped?.archivedAssetCount).toBe(3);
+    expect(shaped?.assets).toEqual([]);
+    expect(shaped?.archivedAssetCount).toBe(2);
   });
 });
 

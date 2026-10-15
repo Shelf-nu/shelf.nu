@@ -1,5 +1,4 @@
 import {
-  archivedAssetsLeftOut,
   archivedAssetsRefusal,
   BOOKING_RESERVE_BLOCKED_LABELS,
   DELETE_CONSEQUENCE_LABELS,
@@ -44,7 +43,11 @@ import {
 import { useOrg } from "@/lib/org-context";
 import { useAuth } from "@/lib/auth-context";
 import { userHasPermission } from "@/lib/permissions";
-import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
+import {
+  archivedLeftOutNote,
+  assetBadgeStatus,
+  isArchivedAsset,
+} from "@/lib/archived-assets";
 import {
   MODEL_SHORTFALL_NOTICE,
   modelShortfallLabel,
@@ -924,10 +927,8 @@ function BookingDetailScreen({ id }: { id: string }) {
             router.push(`/(tabs)/bookings/edit?id=${dup.booking.id}`);
             // Archived assets cannot be booked, so the copy left them out.
             // Say so, as the web does, instead of letting it look complete.
-            const dropped = dup.droppedArchivedCount ?? 0;
-            if (dropped > 0) {
-              Alert.alert("Booking duplicated", archivedAssetsLeftOut(dropped));
-            }
+            const droppedNote = archivedLeftOutNote(dup.droppedArchivedCount);
+            if (droppedNote) Alert.alert("Booking duplicated", droppedNote);
           },
         },
       ]

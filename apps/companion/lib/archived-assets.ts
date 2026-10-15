@@ -26,7 +26,10 @@
  * @see {@link file://./batch-blockers.ts} the scanner's "asset-archived" blocker
  */
 
-import { kitWithoutActiveAssetsReason } from "@shelf/labels";
+import {
+  archivedAssetsLeftOut,
+  kitWithoutActiveAssetsReason,
+} from "@shelf/labels";
 import type { BatchScanAction } from "./batch-blockers";
 
 /** The badge key an archived asset shows instead of its status. */
@@ -150,6 +153,19 @@ export function markArchivedRows<T extends MarkableRow>(
       ? { ...row, submitError: undefined }
       : row
   );
+}
+
+/**
+ * The sentence a success message adds when the server left archived assets
+ * out: the archived members of a kit added to a booking, or the archived
+ * assets a duplicated booking did not copy.
+ *
+ * @param count - The server's count; absent from servers that predate it,
+ *   and then read as none
+ * @returns The sentence, or `null` when nothing was left out
+ */
+export function archivedLeftOutNote(count: number | undefined): string | null {
+  return count && count > 0 ? archivedAssetsLeftOut(count) : null;
 }
 
 /**

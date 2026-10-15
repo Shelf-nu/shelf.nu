@@ -1,4 +1,3 @@
-import { archivedAssetsLeftOut } from "@shelf/labels";
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import {
   View,
@@ -55,6 +54,7 @@ import { userHasPermission } from "@/lib/permissions";
 import {
   ARCHIVED_BADGE_STATUS,
   archivedIdsFromError,
+  archivedLeftOutNote,
   archivedScanNote,
   assetBadgeStatus,
   isArchivedAsset,
@@ -2149,12 +2149,14 @@ function ScannerContent() {
             playScanSound();
             // A kit is booked with its active members; say how many archived
             // ones stayed out, as the web does, so the count does not look short.
-            const leftOut = data?.archivedKitMembersLeftOut ?? 0;
+            const leftOutNote = archivedLeftOutNote(
+              data?.archivedKitMembersLeftOut
+            );
             Alert.alert(
               "Done",
               `Added ${count} item${count === 1 ? "" : "s"} to "${
                 bookingName || "the booking"
-              }".${leftOut > 0 ? ` ${archivedAssetsLeftOut(leftOut)}` : ""}`,
+              }".${leftOutNote ? ` ${leftOutNote}` : ""}`,
               [
                 {
                   text: "OK",

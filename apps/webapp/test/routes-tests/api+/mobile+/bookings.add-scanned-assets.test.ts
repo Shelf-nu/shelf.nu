@@ -458,6 +458,23 @@ describe("POST /api/mobile/bookings/add-scanned-assets — what the response rep
       }),
     });
   });
+
+  it("reports no archived members for a kit the scan skipped", async () => {
+    // Re-scanning a kit the booking already holds adds nothing, so nothing
+    // was left out by this scan, whatever archived members the kit has.
+    bookingHoldsKitMemberships(["ak1"]);
+    assetKitFindManyMock.mockResolvedValue([
+      { id: "ak1", assetId: "asset-1", quantity: 1, kitId: "kit-1" },
+    ] as never);
+
+    const response = await post({ kitIds: ["kit-1"] });
+
+    const body = successBody(response);
+    expect(body.skipped.kits).toBe(1);
+    // The count is never asked, so no archived member of the kit is reported.
+    expect(body.archivedKitMembersLeftOut).toBe(0);
+    expect(db.assetKit.count).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/mobile/bookings/add-scanned-assets — reads are scoped to the scan", () => {
