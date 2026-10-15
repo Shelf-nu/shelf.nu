@@ -937,6 +937,28 @@ describe("getAssetsWhereInput archived default", () => {
   });
 });
 
+describe("getAssetsWhereInput status filter", () => {
+  it("filters by a real asset status", () => {
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=IN_CUSTODY",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBe("IN_CUSTODY");
+  });
+
+  it("ignores advanced-mode syntax instead of handing it to Prisma", () => {
+    // A stale advanced-mode URL reaching a simple-mode select-all.
+    const where = getAssetsWhereInput({
+      organizationId: "org-1",
+      currentSearchParams: "status=is:AVAILABLE",
+      allowedTeamMemberIds: "all",
+    });
+    expect(where.status).toBeUndefined();
+    expect(JSON.stringify(where)).not.toContain("is:AVAILABLE");
+  });
+});
+
 describe("getInitialPlacementNoteContent", () => {
   /** The name-bearing subset both create routes pass through from `asset.user`. */
   const user = {

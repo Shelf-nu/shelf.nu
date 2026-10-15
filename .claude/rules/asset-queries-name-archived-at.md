@@ -15,8 +15,8 @@ forgets them quietly offers or counts them again, and typecheck cannot tell.
 - Pickers, counts, KPIs, availability pools, anything that starts NEW work →
   `archivedAt: null`.
 - Surfaces that show assets already part of a record or a physical label (the
-  asset's own pages, a booking holding it, audits, QR scan, history reports,
-  backup export), guards that read the archive state, and ID
+  asset's own pages, a booking holding it, audits, QR scan, history reports),
+  guards that read the archive state, and ID
   allocation → reach archived on purpose, with a reason:
 
 ```ts
