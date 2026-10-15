@@ -3,14 +3,14 @@
  * archived and why it cannot be changed.
  *
  * Shown on an archived asset's own screen, which archiving turns read-only.
- * The words come from `lib/archived-assets.ts`, which makes them role-aware.
+ * The words come from `@shelf/labels` (`archivedAssetBlockedReason`), which
+ * makes them role-aware.
  * An optional action (Reinstate, for members who hold `asset: archive`) sits
  * on the right.
  *
  * Deliberately not an error or a warning colour: archiving is a normal,
  * reversible state, not a fault.
  *
- * @see {@link file://../../lib/archived-assets.ts} the wording
  * @see {@link file://../../app/(tabs)/assets/[id].tsx} the consumer
  */
 import { memo } from "react";

@@ -14,6 +14,7 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
 } from "~/modules/booking/service.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
@@ -48,7 +49,12 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *       success: true,
  *       added:   { assets: number, kitSlices: number, kits: number },
  *       skipped: { assets: number, kits: number },
+ *       archivedKitMembersLeftOut: number,
  *     }
+ *
+ * `archivedKitMembersLeftOut` counts the archived members of the kits this
+ * scan added, which a kit add leaves out of the booking (memberships already
+ * on it excepted). A kit the scan skipped reports none.
  *
  * A scan can legitimately put nothing on the booking — every item scanned may
  * already be there — so `added` and `skipped` are what tell a client whether
@@ -198,14 +204,15 @@ export async function action({ request }: ActionFunctionArgs) {
      * memberships. The mobile client sends kit ids only — the web drawer
      * resolves the same slices in the browser and posts them.
      */
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((row) => row.assetKitId)
+        .filter((id): id is string => id !== null)
+    );
     const resolvedKitSlices = await buildKitSlicesForBooking({
       kitIds,
       organizationId,
-      existingAssetKitIds: new Set(
-        booking.bookingAssets
-          .map((row) => row.assetKitId)
-          .filter((id): id is string => id !== null)
-      ),
+      existingAssetKitIds,
     });
 
     /**
@@ -303,6 +310,17 @@ export async function action({ request }: ActionFunctionArgs) {
     // would write a note saying it had been added when nothing was.
     const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
 
+    // The archived members of the kits this scan added stay out of the
+    // booking; the phone's success message says how many, as the web's does.
+    // A kit the scan skipped added nothing, so it reports nothing. Read before
+    // the write, so a failed count can never report an error for a booking
+    // that did change.
+    const archivedKitMembersLeftOut = await countArchivedKitMembers({
+      kitIds: kitIdsAdded,
+      organizationId,
+      existingAssetKitIds,
+    });
+
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
@@ -343,6 +361,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assets: skippedAssetIds.size,
         kits: skippedKitIds.size,
       },
+      archivedKitMembersLeftOut,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

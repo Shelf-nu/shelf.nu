@@ -38,6 +38,7 @@ import {
 } from "@/lib/api";
 import { useOrg } from "@/lib/org-context";
 import { markBookingDirty } from "@/lib/booking-refresh";
+import { archivedLeftOutNote } from "@/lib/archived-assets";
 import { fontSize, spacing, borderRadius, hitSlop } from "@/lib/constants";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
@@ -339,7 +340,7 @@ export default function AddBookingAssetsScreen() {
   const handleAdd = async () => {
     if (!currentOrg || !bookingId || totalSelected === 0) return;
     setIsSubmitting(true);
-    const { error: err } = await api.addScannedToBooking(
+    const { data, error: err } = await api.addScannedToBooking(
       currentOrg.id,
       bookingId,
       Array.from(selectedAssetIds),
@@ -353,6 +354,10 @@ export default function AddBookingAssetsScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     markBookingDirty(bookingId);
     router.back();
+    // A kit is booked with its active members; say how many archived ones
+    // stayed out, as the web does, so the booking does not look short.
+    const leftOutNote = archivedLeftOutNote(data?.archivedKitMembersLeftOut);
+    if (leftOutNote) Alert.alert("Added to booking", leftOutNote);
   };
 
   // ── Book-by-model reserve / edit / remove ────────────────────────────────
