@@ -189,6 +189,41 @@ describe("writeImportChunk", () => {
     expect(recordEvents).not.toHaveBeenCalled();
   });
 
+  it("stores warnings found before the transaction with the chunk", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
+    const imageWarning = {
+      row: 2,
+      title: "Asset a1",
+      message:
+        'Image "https://x.test/a.jpg" could not be downloaded; the asset was imported without an image.',
+    };
+
+    const result = await writeImportChunk(
+      args({ rows: [row("a1")], extraWarnings: [imageWarning] })
+    );
+
+    expect(result.warnings).toEqual([imageWarning]);
+    // Appended inside the chunk's transaction, with the rows.
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(tx.$executeRaw.mock.calls[0]).toContain(
+      JSON.stringify([imageWarning])
+    );
+  });
+
+  it("drops warnings found before the transaction when the chunk was already committed", async () => {
+    tx.assetImport.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await writeImportChunk(
+      args({
+        rows: [row("a1")],
+        extraWarnings: [{ row: 2, title: "Asset a1", message: "Skipped" }],
+      })
+    );
+
+    expect(result.warnings).toEqual([]);
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+  });
+
   it("sets the signed image of rows that have one", async () => {
     tx.assetImport.updateMany.mockResolvedValue({ count: 1 });
     const expiry = new Date("2026-10-17T00:00:00Z");

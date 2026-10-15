@@ -8,6 +8,7 @@
  */
 import { Prisma } from "@prisma/client";
 import type { AssetImport } from "@prisma/client";
+import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
@@ -186,6 +187,31 @@ describe("runFinalizeStep", () => {
         data: expect.objectContaining({ status: "COMPLETED" }),
       })
     );
+  });
+
+  it("rethrows a transient database error instead of storing a warning", async () => {
+    vi.mocked(bulkAssignKitCustody).mockRejectedValue(
+      new ShelfError({
+        cause: new PrismaClientKnownRequestError("pool timeout", {
+          code: "P2024",
+          clientVersion: "test",
+        }),
+        message: "Something went wrong while assigning custody",
+        label: "Kit",
+      })
+    );
+
+    await expect(
+      runFinalizeStep(imp([row(2, { kit: "Kit A", custodian: "Sam" })]))
+    ).rejects.toThrow("Something went wrong while assigning custody");
+
+    expect(appendImportWarnings).not.toHaveBeenCalled();
+    expect(db.assetImport.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "COMPLETED" }),
+      })
+    );
+    expect(sendAssetImportFinishedEmail).not.toHaveBeenCalled();
   });
 
   it("completes the import, clears its rows and emails the creator", async () => {

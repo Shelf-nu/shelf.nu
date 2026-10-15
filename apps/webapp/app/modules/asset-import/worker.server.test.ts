@@ -8,7 +8,7 @@
  */
 import type { AssetImport } from "@prisma/client";
 import type PgBoss from "pg-boss";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
@@ -16,7 +16,10 @@ import { ShelfError } from "~/utils/error";
 import { scheduler } from "~/utils/scheduler.server";
 import { createSignedUrl, uploadImageFromUrl } from "~/utils/storage.server";
 import { writeImportChunk } from "./chunk-writer.server";
-import { ASSET_IMPORT_JOB_OPTIONS } from "./constants";
+import {
+  ASSET_IMPORT_IMAGE_BUDGET_MS,
+  ASSET_IMPORT_JOB_OPTIONS,
+} from "./constants";
 import { runFinalizeStep } from "./finalize.server";
 import { claimImportLease, releaseImportLease } from "./lease.server";
 import { runPrepareStep, userCanStillImport } from "./prepare.server";
@@ -608,7 +611,149 @@ describe("handleAssetImportJob", () => {
     );
 
     expect(writeImportChunk).toHaveBeenCalledWith(
-      expect.objectContaining({ imagePaths: {} })
+      expect.objectContaining({
+        imagePaths: {},
+        extraWarnings: [
+          {
+            row: 2,
+            title: "Asset a1",
+            message:
+              'Image "https://x.test/a.jpg" could not be downloaded; the asset was imported without an image.',
+          },
+        ],
+      })
     );
+  });
+
+  it("fetches a failing image URL once per chunk and warns for every row using it", async () => {
+    loads(
+      imp({
+        status: "RUNNING",
+        totalRows: 3,
+        rows: [
+          storedRow({
+            assetId: "a1",
+            rowNumber: 2,
+            imageUrl: "https://dead.test/x.jpg",
+          }),
+          storedRow({
+            assetId: "a2",
+            rowNumber: 3,
+            imageUrl: "https://dead.test/x.jpg",
+          }),
+          storedRow({
+            assetId: "a3",
+            rowNumber: 4,
+            imageUrl: "https://dead.test/x.jpg",
+          }),
+        ],
+      })
+    );
+    // A failed download comes back as null, not a throw.
+    vi.mocked(uploadImageFromUrl).mockResolvedValue(null);
+    vi.mocked(writeImportChunk).mockResolvedValue({
+      applied: true,
+      nextProcessedRows: 3,
+      warnings: [],
+    });
+
+    await handleAssetImportJob(
+      job({ importId: "imp", step: "ROWS", chunkIndex: 0 })
+    );
+
+    expect(uploadImageFromUrl).toHaveBeenCalledTimes(1);
+    const { extraWarnings } = vi.mocked(writeImportChunk).mock.calls[0][0];
+    expect(extraWarnings?.map((w) => w.row)).toEqual([2, 3, 4]);
+    expect(extraWarnings?.[0].message).toContain("could not be downloaded");
+  });
+
+  it("warns for an invalid image URL without fetching it", async () => {
+    loads(
+      imp({
+        status: "RUNNING",
+        totalRows: 1,
+        rows: [storedRow({ assetId: "a1", imageUrl: "ftp://x.test/a.jpg" })],
+      })
+    );
+    vi.mocked(writeImportChunk).mockResolvedValue({
+      applied: true,
+      nextProcessedRows: 1,
+      warnings: [],
+    });
+
+    await handleAssetImportJob(
+      job({ importId: "imp", step: "ROWS", chunkIndex: 0 })
+    );
+
+    expect(uploadImageFromUrl).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(writeImportChunk).mock.calls[0][0].extraWarnings
+    ).toHaveLength(1);
+  });
+
+  describe("image time budget", () => {
+    beforeEach(() => {
+      // why: the budget is measured with Date.now(); only Date is faked so
+      // promises and pg-boss mocks behave normally.
+      vi.useFakeTimers({ toFake: ["Date"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("skips the remaining images once the budget is spent and warns for each", async () => {
+      loads(
+        imp({
+          status: "RUNNING",
+          totalRows: 3,
+          rows: [
+            storedRow({
+              assetId: "a1",
+              rowNumber: 2,
+              imageUrl: "https://x.test/1.jpg",
+            }),
+            storedRow({
+              assetId: "a2",
+              rowNumber: 3,
+              imageUrl: "https://x.test/2.jpg",
+            }),
+            storedRow({
+              assetId: "a3",
+              rowNumber: 4,
+              imageUrl: "https://x.test/3.jpg",
+            }),
+          ],
+        })
+      );
+      // The first image takes longer than the whole budget.
+      vi.mocked(uploadImageFromUrl).mockImplementation(() => {
+        vi.setSystemTime(Date.now() + ASSET_IMPORT_IMAGE_BUDGET_MS + 1);
+        return Promise.resolve("u/a1/main-image-import");
+      });
+      vi.mocked(writeImportChunk).mockResolvedValue({
+        applied: true,
+        nextProcessedRows: 3,
+        warnings: [],
+      });
+
+      await handleAssetImportJob(
+        job({ importId: "imp", step: "ROWS", chunkIndex: 0 })
+      );
+
+      expect(uploadImageFromUrl).toHaveBeenCalledTimes(1);
+      const call = vi.mocked(writeImportChunk).mock.calls[0][0];
+      expect(Object.keys(call.imagePaths)).toEqual(["a1"]);
+      expect(call.extraWarnings).toEqual([
+        expect.objectContaining({
+          row: 3,
+          message: expect.stringContaining("ran out of time for images"),
+        }),
+        expect.objectContaining({
+          row: 4,
+          message: expect.stringContaining("ran out of time for images"),
+        }),
+      ]);
+    });
   });
 });

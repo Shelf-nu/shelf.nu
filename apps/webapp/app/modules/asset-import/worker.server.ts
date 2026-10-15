@@ -38,6 +38,7 @@ import type { ImportedImage } from "./chunk-writer.server";
 import { writeImportChunk } from "./chunk-writer.server";
 import {
   ASSET_IMPORT_CHUNK_SIZE,
+  ASSET_IMPORT_IMAGE_BUDGET_MS,
   ASSET_IMPORT_JOB_OPTIONS,
   ASSET_IMPORT_POLL_INTERVAL_SECONDS,
 } from "./constants";
@@ -51,7 +52,11 @@ import {
 } from "./lease.server";
 import { runPrepareStep, userCanStillImport } from "./prepare.server";
 import { nextStepAfter, resolvedOf, storedRowsOf } from "./progress.server";
-import type { AssetImportJobData, StoredImportRow } from "./types";
+import type {
+  AssetImportJobData,
+  ImportWarning,
+  StoredImportRow,
+} from "./types";
 
 const label = "Asset Import";
 
@@ -149,6 +154,46 @@ function userFacingMessage(cause: unknown): string {
   return IMPORT_FAILED_MESSAGE;
 }
 
+/** Images of one chunk, and a warning per row whose image was left out. */
+type ChunkImages = {
+  /** Signed image per asset id. */
+  images: Record<string, ImportedImage>;
+  /** One warning per row imported without its image. */
+  warnings: ImportWarning[];
+};
+
+/**
+ * Warning for a row whose image could not be downloaded or stored.
+ *
+ * @param row - The row
+ * @param imageUrl - The image cell
+ */
+function imageFailedWarning(
+  row: StoredImportRow,
+  imageUrl: string
+): ImportWarning {
+  return {
+    row: row.rowNumber,
+    title: row.title,
+    message: `Image "${imageUrl}" could not be downloaded; the asset was imported without an image.`,
+  };
+}
+
+/**
+ * Warning for a row whose image was not attempted because the chunk's image
+ * time budget ran out.
+ *
+ * @param row - The row
+ */
+function imageSkippedWarning(row: StoredImportRow): ImportWarning {
+  return {
+    row: row.rowNumber,
+    title: row.title,
+    message:
+      "The image was skipped because the import ran out of time for images; the asset was imported without an image.",
+  };
+}
+
 /**
  * Downloads, stores and signs the main image of every row in a chunk that has
  * an image URL. Runs before the chunk's transaction so the transaction never
@@ -156,13 +201,19 @@ function userFacingMessage(cause: unknown): string {
  * pre-allocated asset id, and uploads overwrite, so a retried chunk replaces
  * its own images instead of leaving extra copies.
  *
- * An image that cannot be fetched or stored is logged and the asset is created
- * without it, the same as the per-row importer.
+ * The step must finish well inside the job expiry, so:
+ * - a URL that failed once in the chunk is not fetched again (an unreachable
+ *   host costs about 20 seconds per attempt);
+ * - the whole image phase is capped at `ASSET_IMPORT_IMAGE_BUDGET_MS`; rows
+ *   not reached in time are imported without an image.
+ *
+ * Every row left without its image (invalid URL, failed download or upload,
+ * budget spent) gets a warning, so the user can see which images to add.
  *
  * @param args.rows - The chunk's rows
  * @param args.userId - The user who started the import
  * @param args.lease - The import's lease, renewed as uploads go
- * @returns The signed image per asset id
+ * @returns The signed images and the warnings for rows without one
  */
 async function uploadChunkImages({
   rows,
@@ -172,25 +223,31 @@ async function uploadChunkImages({
   rows: StoredImportRow[];
   userId: string;
   lease: ImportLeaseArgs;
-}): Promise<Record<string, ImportedImage>> {
+}): Promise<ChunkImages> {
   const images: Record<string, ImportedImage> = {};
+  const warnings: ImportWarning[] = [];
   // Files often repeat one image URL across many rows; the cache downloads it
-  // once per chunk.
+  // once per chunk, and `failedUrls` does the same for URLs that fail.
   const cache = new LRUCache<string, CachedImage>({
     maxSize: MAX_CACHE_SIZE,
     sizeCalculation: (value) =>
       typeof value?.size === "number" && value.size > 0 ? value.size : 1,
   });
+  const failedUrls = new Set<string>();
+  const deadline = Date.now() + ASSET_IMPORT_IMAGE_BUDGET_MS;
   let attempted = 0;
 
   for (const row of rows) {
     const imageUrl = row.imageUrl?.trim();
     if (!imageUrl) continue;
 
-    if (!isValidImageUrl(imageUrl)) {
-      Logger.info(
-        `Skipping invalid image URL for imported asset ${row.assetId}`
-      );
+    if (!isValidImageUrl(imageUrl) || failedUrls.has(imageUrl)) {
+      warnings.push(imageFailedWarning(row, imageUrl));
+      continue;
+    }
+
+    if (Date.now() >= deadline) {
+      warnings.push(imageSkippedWarning(row));
       continue;
     }
 
@@ -210,8 +267,14 @@ async function uploadChunkImages({
           mainImage: await createSignedUrl({ filename: path }),
           mainImageExpiration: threeDaysFromNow(),
         };
+      } else {
+        // `uploadImageFromUrl` returns null when the download failed.
+        failedUrls.add(imageUrl);
+        warnings.push(imageFailedWarning(row, imageUrl));
       }
     } catch (cause) {
+      failedUrls.add(imageUrl);
+      warnings.push(imageFailedWarning(row, imageUrl));
       Logger.error(
         new ShelfError({
           cause,
@@ -229,7 +292,7 @@ async function uploadChunkImages({
     }
   }
 
-  return images;
+  return { images, warnings };
 }
 
 /**
@@ -268,11 +331,12 @@ export async function runRowsStep(
     chunkStart + ASSET_IMPORT_CHUNK_SIZE
   );
   const resolved = resolvedOf(assetImport);
-  const imagePaths = await uploadChunkImages({
-    rows,
-    userId,
-    lease: { importId, organizationId },
-  });
+  const { images: imagePaths, warnings: imageWarnings } =
+    await uploadChunkImages({
+      rows,
+      userId,
+      lease: { importId, organizationId },
+    });
 
   const result = await writeImportChunk({
     importId,
@@ -283,6 +347,7 @@ export async function runRowsStep(
     resolved,
     canUseBarcodes: assetImport.canUseBarcodes,
     imagePaths,
+    extraWarnings: imageWarnings,
   });
 
   return nextStepAfter({

@@ -87,6 +87,12 @@ export type WriteImportChunkArgs = {
   canUseBarcodes: boolean;
   /** Signed images by asset id. Rows without an entry get no image. */
   imagePaths: Record<string, ImportedImage>;
+  /**
+   * Warnings found before the transaction (images that could not be
+   * imported). Stored with the chunk's own warnings in the same transaction,
+   * so they are kept only when the chunk commits.
+   */
+  extraWarnings?: ImportWarning[];
 };
 
 /** Outcome of {@link writeImportChunk}. */
@@ -520,6 +526,7 @@ export async function writeImportChunk({
   resolved,
   canUseBarcodes,
   imagePaths,
+  extraWarnings = [],
 }: WriteImportChunkArgs): Promise<WriteImportChunkResult> {
   const nextProcessedRows = chunkStart + rows.length;
 
@@ -536,7 +543,7 @@ export async function writeImportChunk({
           return { applied: false, nextProcessedRows, warnings: [] };
         }
 
-        const warnings: ImportWarning[] = [];
+        const warnings: ImportWarning[] = [...extraWarnings];
         const prepared = rows.map((row) => prepareRow(row, resolved));
         const withLocation = prepared.filter((p) => p.locationId);
         const withKit = prepared.filter((p) => p.kitId);

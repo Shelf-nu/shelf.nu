@@ -19,7 +19,7 @@ import type { AssetImport } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
-import { isLikeShelfError } from "~/utils/error";
+import { isLikeShelfError, isPrismaTransientError } from "~/utils/error";
 import { appendImportWarnings } from "./chunk-writer.server";
 import { renewImportLease } from "./lease.server";
 import { resolvedOf, storedRowsOf } from "./progress.server";
@@ -86,6 +86,27 @@ function custodyFailureReason(cause: unknown): string {
 }
 
 /**
+ * Whether a custody failure is a passing database problem (pool exhausted,
+ * server unreachable) anywhere in its cause chain. Those must fail the step so
+ * pg-boss retries it; turning them into a warning would leave the kit without
+ * custody for good.
+ *
+ * @param cause - What `bulkAssignKitCustody` threw
+ */
+function isTransientFailure(cause: unknown): boolean {
+  let current: unknown = cause;
+  // Cause chains are short; the bound only guards against a cycle.
+  for (let depth = 0; depth < 10 && current; depth++) {
+    if (isPrismaTransientError(current)) return true;
+    current =
+      typeof current === "object" && "cause" in current
+        ? (current as { cause: unknown }).cause
+        : undefined;
+  }
+  return false;
+}
+
+/**
  * Builds the warning for a kit whose custody could not be assigned.
  *
  * @param kit - The kit's name and the first row naming it
@@ -110,6 +131,8 @@ function kitCustodyWarning(
  *
  * @param assetImport - The import
  * @returns Warnings for kits left without custody
+ * @throws The custody error when it is a transient database failure, so the
+ * step is retried
  */
 async function assignKitCustody(
   assetImport: AssetImport
@@ -178,6 +201,7 @@ async function assignKitCustody(
         try {
           await assign([kitId]);
         } catch (cause) {
+          if (isTransientFailure(cause)) throw cause;
           warnings.push(kitCustodyWarning(kit, custodyFailureReason(cause)));
         }
       }

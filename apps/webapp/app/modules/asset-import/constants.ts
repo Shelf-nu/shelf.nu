@@ -27,6 +27,15 @@ export const ASSET_IMPORT_LEASE_MINUTES = 15;
  */
 export const ASSET_IMPORT_STALL_MINUTES = 30;
 
+/**
+ * Time one ROWS chunk may spend downloading images before it writes its rows.
+ * Rows not reached in time are imported without an image and get a warning.
+ * Must stay well under the 15-minute job expiry (`ASSET_IMPORT_LEASE_MINUTES`):
+ * pg-boss gives up on a handler at expiry, and a step that outlives it is no
+ * longer tracked or retried.
+ */
+export const ASSET_IMPORT_IMAGE_BUDGET_MS = 8 * 60 * 1000;
+
 /** A DRAFT older than this can no longer be confirmed; the user uploads again. */
 export const ASSET_IMPORT_DRAFT_TTL_HOURS = 24;
 
