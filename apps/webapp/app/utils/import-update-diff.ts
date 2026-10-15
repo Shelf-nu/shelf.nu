@@ -96,28 +96,23 @@ export function parseYesNo(value: string): boolean | undefined {
 
 /**
  * Raw Prisma field/relation names that only ever appear TOGETHER as headers
- * in the workspace **backup** export (`exportAssetsBackupToCsv` in
- * `~/utils/csv.server.ts`). That export writes `Object.keys(asset)`
- * verbatim as the header row — a fixed shape (same `include` on every row)
- * — including relation keys whose cells are raw JSON blobs (`{}`, `[]`,
- * `{"name":"Foo"}`) rather than plain values.
+ * in a legacy workspace **backup** file. Shelf no longer produces these, but
+ * workspaces still hold old copies. The backup wrote `Object.keys(asset)`
+ * verbatim as its header row, including relation keys whose cells are raw
+ * JSON blobs (`{}`, `[]`, `{"name":"Foo"}`) rather than plain values.
  *
- * Before this branch, that file was rejected outright by the update
- * importer because identifier matching was case-sensitive. This branch's
- * case-insensitive matching + `sequentialId` alias means a backup file can
- * now slip past the identifier check — and if it does, its `category`,
- * `tags`, and `assetModel` cells would be proposed as literal new entities
- * (a category named `{}`, a tag named `[]`, an AssetModel with a JSON
- * name).
+ * Identifier matching is case-insensitive and accepts the `sequentialId`
+ * alias, so a backup file's `id` column passes the identifier check. Let
+ * through, its `category`, `tags` and `assetModel` cells would be proposed as
+ * literal new entities (a category named `{}`, a tag named `[]`, an
+ * AssetModel with a JSON name).
  *
  * `isBackupExportHeaderRow` requires ALL of these to be present, not just
  * one: a single marker like `notes` is a plausible name for a workspace's
- * own custom field (a real regression caught in review — a custom field
- * literally named "Notes" false-positived a single-marker version of this
- * guard). All five only co-occur when the file really is a raw backup
- * export; they never appear in the asset-index export (which uses display
- * labels like "Created at", with a space) or the import-ready export
- * (which never emits them at all).
+ * own custom field, and a custom field named "Notes" must not trip the
+ * guard. All five only co-occur in a raw backup file; they never appear in
+ * the asset-index export (which uses display labels like "Created at", with
+ * a space) or the import-ready export (which never emits them at all).
  */
 const BACKUP_EXPORT_ONLY_HEADERS = [
   "assetLocations",
@@ -128,8 +123,8 @@ const BACKUP_EXPORT_ONLY_HEADERS = [
 ];
 
 /**
- * Detects a workspace backup export (Settings → General → Export backup)
- * fed into the update importer by mistake.
+ * Detects a legacy workspace backup file fed into the update importer by
+ * mistake.
  * See {@link BACKUP_EXPORT_ONLY_HEADERS} for why requiring ALL markers
  * (not just one) is what makes this a safe, unambiguous signal.
  *

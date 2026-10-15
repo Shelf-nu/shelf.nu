@@ -33,6 +33,7 @@ import { getQr } from "~/modules/qr/service.server";
 import { ShelfError } from "~/utils/error";
 import { createSignedUrl } from "~/utils/storage.server";
 import { resolveAssetIdsForBulkOperation } from "./bulk-operations-helper.server";
+import { bookableListScopeWhere } from "./list-scope.server";
 import {
   ASSET_SEARCH_CEILING_MESSAGE,
   MAX_MATCHED_ASSET_SEARCH_IDS,
@@ -72,6 +73,7 @@ import {
   updateAsset,
   uploadDuplicateAssetMainImage,
 } from "./service.server";
+import { buildLowStockWhere } from "./utils.server";
 
 // why: isolating asset service logic from actual database operations
 vitest.mock("~/database/db.server", () => ({
@@ -94,6 +96,8 @@ vitest.mock("~/database/db.server", () => ({
       // test that needs the create to SUCCEED (rather than reject at a guard)
       // has something to resolve.
       create: vitest.fn().mockResolvedValue({ id: "asset-new" }),
+      // why: buildLowStockWhere compares quantity to this column reference.
+      fields: { minQuantity: "Asset.minQuantity" },
       findFirst: vitest.fn().mockResolvedValue(null),
       findMany: vitest.fn().mockResolvedValue([]),
       findUnique: vitest.fn().mockResolvedValue(null),
@@ -5970,6 +5974,44 @@ describe("placeUnplacedUnits", () => {
     expect(db.custody.create).not.toHaveBeenCalled();
     expect(db.custody.update).not.toHaveBeenCalled();
     expect(db.custody.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("getAssets low-stock filter", () => {
+  const findManyMock = vi.mocked(db.asset.findMany);
+
+  beforeEach(() => {
+    findManyMock.mockReset().mockResolvedValue([]);
+  });
+
+  const base = {
+    organizationId: "org_1",
+    page: 1,
+    perPage: 20,
+    orderBy: "createdAt" as const,
+    orderDirection: "desc" as const,
+  };
+  const scope = { holderUserId: "user_1" };
+
+  it("keeps the bookable scope when the low-stock filter is on", async () => {
+    await getAssets({ ...base, bookableScope: scope, lowStockOnly: true });
+    // why: findMany's args are typed optional; this path always passes them.
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.AND).toEqual([
+      bookableListScopeWhere(scope),
+      buildLowStockWhere(),
+    ]);
+  });
+
+  it("adds only the low-stock clause when the list is not scoped", async () => {
+    await getAssets({ ...base, lowStockOnly: true });
+    const where = findManyMock.mock.calls[0][0]!.where!;
+    expect(where.AND).toEqual([buildLowStockWhere()]);
+  });
+
+  it("adds no clause when the filter is off", async () => {
+    await getAssets(base);
+    expect(findManyMock.mock.calls[0][0]!.where!.AND).toBeUndefined();
   });
 });
 

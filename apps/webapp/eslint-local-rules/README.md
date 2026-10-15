@@ -175,7 +175,7 @@ db.asset.findMany({ where: { organizationId, archivedAt: { not: null } } });
 db.asset.findFirst({ where: { id, organizationId } });
 ```
 
-**Reach archived on purpose when** the surface shows assets that are already part of a record or a physical label: the asset's own pages, a booking that holds it, a location or kit page, audits, QR/barcode scan resolution, history reports and the backup export. Also guards that read the archive state, and ID allocation (sequential ids must count archived rows).
+**Reach archived on purpose when** the surface shows assets that are already part of a record or a physical label: the asset's own pages, a booking that holds it, a location or kit page, audits, QR/barcode scan resolution and history reports. Also guards that read the archive state, and ID allocation (sequential ids must count archived rows).
 
 **Not checked**: a `where` built elsewhere (a variable or a helper such as `getAssetsWhereInput`, which applies the view itself), spreads inside the literal, and writes (the archived freeze in `updateAsset` and the bulk services guards those).
 

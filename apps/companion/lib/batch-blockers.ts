@@ -21,12 +21,18 @@
  *   reads IN_CUSTODY or CHECKED_OUT while most of its units are free. A
  *   quantity row is judged by the units this mode can move instead.
  * - add to booking / fulfil: the web add-assets-to-booking drawer.
+ * - kits holding only archived assets (assign custody, add to booking):
+ *   `kitsOnlyArchivedBlocker` in
+ *   `apps/webapp/app/components/scanner/drawer/uses/scan-blocker-helpers.tsx`.
  * Extraction target: a pure `packages/*` scanner module (none yet).
  *
  * Rules by action:
  * - every action: archived assets, first and alone. An archived asset is
  *   read-only and cannot be booked, so it raises no other blocker: the one
  *   thing to do with it is take it out of the list.
+ * - assign custody and add to booking: kits holding only archived assets.
+ *   Kit custody and kit bookings leave archived members out, so such a kit
+ *   has nothing in it to hand over or book, and the server refuses it.
  * - assign custody: quantity rows with no free units; INDIVIDUAL assets
  *   already in custody, checked out, or part of a kit; kits already in
  *   custody, checked out, or holding assets in custody.
@@ -45,7 +51,7 @@
  * @see {@link file://./../app/(tabs)/scanner.tsx} integration
  */
 
-import type { AssetType } from "./api/types";
+import type { AssetType, ScannedKit } from "./api/types";
 import { unitsFor, type ScanQuantityFacts } from "./custody-scan-quantities";
 
 /** Batch actions that submit a scanned list (the "view" action is excluded). */
@@ -77,6 +83,10 @@ export type BlockableItem = {
   archived?: boolean;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
+  /** Kits only: active members. Absent, the kit is read as having some. */
+  assetCount?: number;
+  /** Kits only: archived members. Absent, read as none. */
+  archivedAssetCount?: number;
   /**
    * Assets only: the asset's type. Absent on servers that predate quantity
    * tracking, and then read as INDIVIDUAL.
@@ -90,6 +100,32 @@ export type BlockableItem = {
   quantityFacts?: ScanQuantityFacts;
 };
 
+/** The fields of a scanned kit's row that the kit blockers read. */
+type KitBlockerFacts = Pick<
+  BlockableItem,
+  | "assetCount"
+  | "archivedAssetCount"
+  | "hasAssetsInCustody"
+  | "hasUnavailableAssets"
+>;
+
+/**
+ * What the kit blockers need from a scanned kit, for its scan-list row.
+ * `kit.assets` and `kit._count` hold the active members only, so an archived
+ * member never raises a custody or availability blocker for the kit.
+ *
+ * @param kit - The kit from the QR or barcode resolver
+ * @returns The facts to spread into the kit's row
+ */
+export function kitBlockerFacts(kit: ScannedKit): KitBlockerFacts {
+  return {
+    assetCount: kit._count.assets,
+    archivedAssetCount: kit.archivedAssetCount,
+    hasAssetsInCustody: kit.assets.some((a) => a.status === "IN_CUSTODY"),
+    hasUnavailableAssets: kit.assets.some((a) => !a.availableToBook),
+  };
+}
+
 /** Booking context for the `booking_add` / `booking_fulfil` rules. */
 export type BookingBlockerContext = {
   /** Asset ids already in the target booking. */
@@ -101,6 +137,7 @@ export type BookingBlockerContext = {
 /** Every blocker id, across all actions. */
 type BlockerKey =
   | "asset-archived"
+  | "kit-only-archived"
   | "qty-nothing-free"
   | "qty-held-via-kit"
   | "qty-nothing-held"
@@ -190,9 +227,27 @@ function candidatesFor(
     message: (n) => `${countNoun(n, "asset")} archived${tail}`,
   });
 
+  /**
+   * Kits holding only archived assets, worded for what this action finds
+   * nothing to do. An empty kit is not reported here, as on the web.
+   */
+  const kitsOnlyArchivedCandidate = (goal: string): BlockerCandidate => ({
+    key: "kit-only-archived",
+    affected: kits.filter(
+      (i) => (i.archivedAssetCount ?? 0) > 0 && i.assetCount === 0
+    ),
+    message: (n) =>
+      `${
+        n === 1 ? "1 kit holds" : `${n} kits hold`
+      } only archived assets. There is nothing in ${
+        n === 1 ? "it" : "them"
+      } to ${goal}.`,
+  });
+
   if (action === "assign_custody") {
     return [
       archivedCandidate(" and can't be put in custody."),
+      kitsOnlyArchivedCandidate("put into custody"),
       {
         key: "qty-nothing-free",
         affected: quantityRows.filter(
@@ -326,10 +381,18 @@ function candidatesFor(
   }
 
   if (action === "booking_add" || action === "booking_fulfil") {
-    const archivedForBooking = archivedCandidate(" and can't be booked.");
-    // The archived rule reads nothing from the booking, so it holds while the
-    // booking is still loading. Every other rule here needs its context.
-    if (!bookingCtx) return [archivedForBooking];
+    // The archived rules read nothing from the booking, so they hold while
+    // the booking is still loading. Every other rule here needs its context.
+    // Fulfil matches concrete units to reservations, so, as on the web, a kit
+    // with only archived assets is flagged when adding only.
+    const archivedForBooking =
+      action === "booking_add"
+        ? [
+            archivedCandidate(" and can't be booked."),
+            kitsOnlyArchivedCandidate("book"),
+          ]
+        : [archivedCandidate(" and can't be booked.")];
+    if (!bookingCtx) return archivedForBooking;
 
     // Mirrors the web add-assets-to-booking drawer, including that checked-out
     // items only block when the booking itself is checked out (ONGOING or
@@ -339,7 +402,7 @@ function candidatesFor(
     );
 
     const candidates: BlockerCandidate[] = [
-      archivedForBooking,
+      ...archivedForBooking,
       {
         key: "asset-already-in-booking",
         affected: assets.filter((i) =>

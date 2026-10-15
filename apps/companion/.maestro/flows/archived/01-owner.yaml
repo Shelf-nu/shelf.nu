@@ -14,8 +14,11 @@ tags:
 # Covers the asset screen (badge, notice, disabled actions, Reinstate), the
 # Scan tab's archived blocker in Assign and Location modes, a draft booking
 # that holds an archived asset (Reserve disabled, duplicate note), a kit with
-# an archived member and an audit expecting one, and finally Reinstate, which
-# leaves the asset active (re-run `archived-up` to archive it again).
+# an archived member and an audit expecting one, a kit holding only archived
+# assets (kit page and Scan tab), a kit scanned into a booking with its
+# archived member left out, a model reservation the dates can no longer fill,
+# and finally Reinstate, which leaves the asset active (re-run `archived-up`
+# to archive it again).
 #
 # The refused-scan cases are two steps around a database change, so they run
 # on their own:
@@ -37,4 +40,5 @@ tags:
 - runFlow: steps/owner-scanner.yaml
 - runFlow: steps/owner-booking.yaml
 - runFlow: steps/owner-kit-audit.yaml
+- runFlow: steps/owner-kits-and-shortfall.yaml
 - runFlow: steps/owner-reinstate.yaml

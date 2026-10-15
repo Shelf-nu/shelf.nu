@@ -8,7 +8,6 @@ import type {
 import { data, redirect, useLoaderData } from "react-router";
 
 import { z } from "zod";
-import { ExportBackupButton } from "~/components/assets/export-backup-button";
 import { ErrorContent } from "~/components/errors";
 
 import type { HeaderData } from "~/components/layout/header/types";
@@ -16,7 +15,6 @@ import TransferOwnershipCard, {
   TransferOwnershipSchema,
 } from "~/components/settings/transfer-ownership-card";
 
-import { Card } from "~/components/shared/card";
 import {
   EditGeneralWorkspaceSettingsFormSchema,
   EditWorkspacePermissionsSettingsFormSchema,
@@ -49,11 +47,7 @@ import {
   getOwnerSubscriptionInfo,
   premiumIsEnabled,
 } from "~/utils/stripe.server";
-import {
-  canExportAssets,
-  canHideShelfBranding,
-} from "~/utils/subscription.server";
-import { tw } from "~/utils/tw";
+import { canHideShelfBranding } from "~/utils/subscription.server";
 import { resolveUserDisplayName } from "~/utils/user";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -166,7 +160,6 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     return payload({
       header,
       organization: currentOrganization,
-      canExportAssets: canExportAssets(tierLimit),
       canHideShelfBranding: canHideBrandingForThisWorkspace,
       user,
       curriences: Object.keys(Currency),
@@ -616,7 +609,6 @@ export async function action({ context, request }: ActionFunctionArgs) {
 export default function GeneralPage() {
   const {
     organization,
-    canExportAssets,
     scimEnabled,
     scimTokens,
     admins,
@@ -634,21 +626,6 @@ export default function GeneralPage() {
         scimEnabled={scimEnabled}
         scimTokens={scimTokens}
       />
-
-      <Card className={tw("mb-0")}>
-        <h4 className="text-text-lg font-semibold">Asset backup</h4>
-        <p className=" text-sm text-gray-600">
-          Download a backup of your assets. If you want to restore a backup,
-          please get in touch with support.
-        </p>
-        <p className=" font-italic mb-2 text-sm text-gray-600">
-          IMPORTANT NOTE: QR codes will not be included in the export. Due to
-          the nature of how Shelf's QR codes work, they currently cannot be
-          exported with assets because they have unique ids. <br />
-          Importing a backup will just create a new QR code for each asset.
-        </p>
-        <ExportBackupButton canExportAssets={canExportAssets} />
-      </Card>
 
       <TransferOwnershipCard
         admins={admins}
