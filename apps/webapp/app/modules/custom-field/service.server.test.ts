@@ -31,7 +31,9 @@ vi.mock("../asset-index-settings/service.server", () => ({
 }));
 
 const { db } = await import("~/database/db.server");
-const { softDeleteCustomField } = await import("./service.server");
+const { softDeleteCustomField, upsertCustomField } = await import(
+  "./service.server"
+);
 
 const dbTransactionMock = vi.mocked(db.$transaction);
 
@@ -286,5 +288,44 @@ describe("softDeleteCustomField", () => {
     // Verify that the name has a timestamp appended
     expect(capturedUpdateData.name).toMatch(/^Serial Number_\d+$/);
     expect(capturedUpdateData.deletedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("upsertCustomField", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("looks a definition up by exact name regardless of case", async () => {
+    const existing = {
+      id: "cf-serial",
+      name: "SERIAL_NO",
+      type: "TEXT",
+      options: [],
+    };
+    vi.mocked(db.customField.findFirst).mockResolvedValue(existing as never);
+
+    const { customFields } = await upsertCustomField([
+      {
+        name: "Serial_No",
+        type: "TEXT",
+        helpText: null,
+        required: false,
+        active: true,
+        organizationId: "org-1",
+        userId: "user-1",
+      },
+    ]);
+
+    // `in` keeps `_` a plain character; `equals` + insensitive is an ILIKE,
+    // where it matches any one character.
+    expect(db.customField.findFirst).toHaveBeenCalledWith({
+      where: {
+        name: { in: ["Serial_No"], mode: "insensitive" },
+        organizationId: "org-1",
+        deletedAt: null,
+      },
+    });
+    expect(customFields.Serial_No.id).toBe("cf-serial");
   });
 });

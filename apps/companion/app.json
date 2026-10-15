@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "bundleIdentifier": "com.shelf.companion",
       "associatedDomains": ["applinks:app.shelf.nu"],
       "infoPlist": {

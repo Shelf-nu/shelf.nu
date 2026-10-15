@@ -1,17 +1,30 @@
+/**
+ * Invite User Dialog
+ *
+ * The "Invite team members" dialog on the team settings pages, plus the Zod
+ * schema the invite route parses its form with. The role picker lists only the
+ * roles the signed-in member may grant; the server refuses any other role
+ * regardless of what the form submits.
+ *
+ * @see {@link file://./../../routes/api+/settings.invite-user.ts}
+ * @see {@link file://./../../modules/invite/roles.ts}
+ */
 import type { ReactElement } from "react";
 import { cloneElement, useCallback, useEffect, useState } from "react";
-import { OrganizationRoles } from "@prisma/client";
 import { UserIcon } from "lucide-react";
 import { useZorm } from "react-zorm";
 import { z } from "zod";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
-import { INVITABLE_ROLES } from "~/modules/invite/roles";
+import { useRoleAccess } from "~/hooks/use-role-access";
+import { INVITABLE_ROLES, isInvitableRole } from "~/modules/invite/roles";
 import { isFormProcessing } from "~/utils/form";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
 import { validEmail } from "~/utils/misc";
-import type { UserFriendlyRoles } from "~/utils/organization-roles";
+import { canAssignRole } from "~/utils/permissions/membership-access";
+import type { OrganizationRole } from "~/utils/permissions/role-access";
+import { ROLE_LABELS } from "~/utils/permissions/role-access";
 import Input from "../forms/input";
 import {
   Select,
@@ -35,6 +48,11 @@ type InviteUserDialogProps = {
   onClose?: () => void;
 };
 
+/**
+ * Form schema shared by the invite dialog and the invite route. The route
+ * parses the submitted form with it, so it is the server-side role check for a
+ * single invite as well.
+ */
 export const InviteUserFormSchema = z.object({
   email: z
     .string()
@@ -43,20 +61,16 @@ export const InviteUserFormSchema = z.object({
       message: "Please enter a valid email",
     })),
   teamMemberId: z.string().optional(),
-  // INVITABLE_ROLES is shared with the CSV import path so the two cannot drift.
-  // OWNER is excluded there, and that exclusion is a security control.
+  // The invitable list is shared with the CSV import and resend paths. OWNER
+  // is never in it, and that exclusion is a security control.
   role: z.preprocess(
     (value) => String(value).trim().toUpperCase(),
-    z.enum(INVITABLE_ROLES, { message: "Please select a role" })
+    z.custom<OrganizationRole>((value) => isInvitableRole(value), {
+      message: "Please select a role",
+    })
   ),
   inviteMessage: z.string().max(1000).optional(),
 });
-
-const organizationRolesMap: Record<string, UserFriendlyRoles> = {
-  [OrganizationRoles.ADMIN]: "Administrator",
-  [OrganizationRoles.BASE]: "Base",
-  [OrganizationRoles.SELF_SERVICE]: "Self service",
-};
 
 export default function InviteUserDialog({
   className,
@@ -68,6 +82,11 @@ export default function InviteUserDialog({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [messageCharCount, setMessageCharCount] = useState(0);
   const organization = useCurrentOrganization();
+  const { ownsWorkspace } = useRoleAccess();
+  /** Roles this member may grant; only the owner may grant an owner-only role. */
+  const grantableRoles = INVITABLE_ROLES.filter((role) =>
+    canAssignRole({ actorOwnsWorkspace: ownsWorkspace, role })
+  );
 
   const fetcher =
     useFetcherWithReset<DataOrErrorResponse<{ success?: boolean }>>();
@@ -192,11 +211,11 @@ export default function InviteUserDialog({
                     align="start"
                   >
                     <div className=" max-h-[320px] overflow-auto">
-                      {Object.entries(organizationRolesMap).map(([k, v]) => (
-                        <SelectItem value={k} key={k} className="p-2">
+                      {grantableRoles.map((role) => (
+                        <SelectItem value={role} key={role} className="p-2">
                           <div className="flex items-center gap-2">
                             <div className=" ml-px block text-sm lowercase text-gray-900 first-letter:uppercase">
-                              {v}
+                              {ROLE_LABELS[role]}
                             </div>
                           </div>
                         </SelectItem>

@@ -169,6 +169,46 @@ describe("validateContentImportRows", () => {
     expect(errors[0].title).toBe("Conflicting custom field columns");
   });
 
+  it("rejects a description over 5,000 characters", () => {
+    expect(
+      validateContentImportRows({
+        data: [row(), row({ description: "a".repeat(5123) })],
+        existingCustomFields: [],
+      })
+    ).toEqual({
+      errors: [
+        {
+          row: 3,
+          title: "Description too long",
+          message:
+            'Asset "Aputure 300x": the description is 5,123 characters, but the maximum is 5,000. Shorten it and import again.',
+        },
+      ],
+      totalErrors: 1,
+    });
+  });
+
+  it("accepts a description of exactly 5,000 characters", () => {
+    expect(
+      validateContentImportRows({
+        data: [row({ description: "a".repeat(5000) })],
+        existingCustomFields: [],
+      })
+    ).toEqual({ errors: [], totalErrors: 0 });
+  });
+
+  it("counts a \\r\\n line break in a description as one character", () => {
+    // 5,001 UTF-16 units, 5,000 characters as the user counts them.
+    expect(
+      validateContentImportRows({
+        data: [
+          row({ description: `${"a".repeat(2500)}\r\n${"a".repeat(2499)}` }),
+        ],
+        existingCustomFields: [],
+      })
+    ).toEqual({ errors: [], totalErrors: 0 });
+  });
+
   it("accepts two columns defining one custom field with the SAME type", () => {
     // The importer accepts these today; refusing here would make pre-flight
     // stricter than the code it guards.

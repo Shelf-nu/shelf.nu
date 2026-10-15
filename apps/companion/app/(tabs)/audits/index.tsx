@@ -24,7 +24,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AuditListSkeleton } from "@/components/skeleton-loader";
 import { useSwipeFilters } from "@/lib/use-swipe-filters";
 import { announce } from "@/lib/a11y";
-import { userCanSeeOrgWideAudits } from "@/lib/permissions";
+import { useRoleAccess } from "@/hooks/use-role-access";
 
 const PAGE_SIZE = 20;
 const auditKeyExtractor = (item: AuditListItem) => item.id;
@@ -72,12 +72,11 @@ function AuditsListContent() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState(0);
-  // BASE/SELF_SERVICE roles are server-side-scoped to their own
-  // assignments regardless of the flag; showing them an "All audits"
-  // toggle would be a lie (the chip flips visually, the result set
-  // never widens). For those roles we hide the toggle entirely and
-  // force `assignedToMe` to true. See `canWidenScope` below.
-  const canWidenScope = userCanSeeOrgWideAudits(currentOrg?.roles);
+  // Members whose audit scope is "assigned" are scoped to their assignments
+  // by the server whatever the flag, so the "All audits" toggle is hidden for
+  // them and `assignedToMe` is forced to true (see the effect below).
+  const access = useRoleAccess();
+  const canWidenScope = access.audits.seeAll;
   // why: default to the FULL workspace list (not "assigned to me"). The
   // original dead-end was an admin assigned to 0–1 audits out of many
   // landing on an empty "nothing assigned to you" screen — when in fact

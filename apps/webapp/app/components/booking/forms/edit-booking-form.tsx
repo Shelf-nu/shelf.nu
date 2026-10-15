@@ -1,7 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import type { BookingStatus, Tag } from "@prisma/client";
-import { OrganizationRoles } from "@prisma/client";
-import { BOOKING_RESERVE_BLOCKED_LABELS } from "@shelf/labels";
+import {
+  archivedAssetsRefusal,
+  BOOKING_RESERVE_BLOCKED_LABELS,
+} from "@shelf/labels";
 import { useAtom } from "jotai";
 import { DateTime } from "luxon";
 import { useActionData, useLoaderData, useNavigation } from "react-router";
@@ -9,16 +11,19 @@ import { useZorm } from "react-zorm";
 import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { useBookingSettings } from "~/hooks/use-booking-settings";
 import { useBookingStatusHelpers } from "~/hooks/use-booking-status";
+import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
 import { useFormatPrefs } from "~/hooks/use-format-prefs";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
+import { useReservationIsRequest } from "~/hooks/use-reservation-is-request";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { useWorkingHours } from "~/hooks/use-working-hours";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import type { UnavailableAssetRow } from "~/modules/booking/unavailable-assets";
-import { isExplicitCheckoutRequired } from "~/modules/booking-settings/explicit-checkout";
 import type {
   BookingPageActionData,
   BookingPageLoaderData,
 } from "~/routes/_layout+/bookings.$bookingId.overview";
 import { getOutstandingModelRequests } from "~/utils/booking-model-requests";
+import { bookingCustodianIsSelf } from "~/utils/bookings";
 import { DATE_TIME_FORMAT } from "~/utils/constants";
 import { toIsoDateTimeToUserTimezone } from "~/utils/date-fns";
 import { isFormProcessing } from "~/utils/form";
@@ -29,6 +34,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { userHasPermission } from "~/utils/permissions/permission.validator.client";
+import { isExplicitScanRequired } from "~/utils/permissions/role-access";
 import { tw } from "~/utils/tw";
 import { Form } from "../../custom-form";
 import { CustodianField } from "./fields/custodian";
@@ -102,9 +108,13 @@ type BookingFlags = {
    */
   hasModelRequests?: boolean;
   hasUnavailableAssets: boolean;
+  /** The booking holds an archived asset; reserve and check-out refuse it. */
+  hasArchivedAssets?: boolean;
   hasCheckedOutAssets: boolean;
   hasAlreadyBookedAssets: boolean;
   hasAssetsInCustody: boolean;
+  /** A kit on the booking has a custodian, so the booking cannot check out. */
+  hasKitsInCustody?: boolean;
 };
 
 type BookingFormData = {
@@ -119,6 +129,12 @@ type BookingFormData = {
      * exist. Empty whenever that flag is false.
      */
     unavailableAssets: UnavailableAssetRow[];
+    /**
+     * The archived assets `bookingFlags.hasArchivedAssets` refuses over, named
+     * on the disabled Reserve and Check out buttons. Optional for callers
+     * outside the booking page, which never carry an archived asset.
+     */
+    archivedAssets?: UnavailableAssetRow[];
     description: string | null;
     status: BookingStatus;
     tags: Pick<Tag, "id" | "name">[];
@@ -140,10 +156,20 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     custodianRef,
     bookingFlags,
     unavailableAssets,
+    archivedAssets,
     description,
     status,
     tags,
   } = booking;
+  const canReinstateAssets = useCanArchiveAssets();
+  /** Why Reserve and Check out are off while an archived asset is on board. */
+  const archivedAssetsReason = bookingFlags?.hasArchivedAssets
+    ? archivedAssetsRefusal({
+        titles: (archivedAssets ?? []).map((asset) => asset.title),
+        fix: "remove-from-booking",
+        canReinstate: canReinstateAssets,
+      })
+    : null;
 
   const bookingStatus = useBookingStatusHelpers(status);
   const {
@@ -153,6 +179,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     currentOrganization,
     booking: loaderBooking,
     lifecycleProgress,
+    checkoutSourceQuestions,
   } = useLoaderData<BookingPageLoaderData>();
 
   /**
@@ -224,13 +251,9 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
     );
   const bookingSettings = useBookingSettings();
 
-  const {
-    roles,
-    isBaseOrSelfService,
-    isBase,
-    isAdministratorOrOwner,
-    effectiveRole,
-  } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const roleAccess = useRoleAccess();
+  const reservationIsRequest = useReservationIsRequest();
 
   const zo = useZorm(
     "NewQuestionWizardScreen",
@@ -242,7 +265,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       status,
       workingHours: workingHours,
       bookingSettings,
-      isAdminOrOwner: isAdministratorOrOwner,
+      bypassTimeLimits: roleAccess.policy.bookings.bypassTimeLimits,
     })
   );
 
@@ -317,18 +340,15 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
   }
 
   /**
-   * Check whether the user can see actions
-   * 1. Admin/Owner always can see all
-   * 2. SELF_SERVICE can see actions if they are the custodian of the booking
-   * 3. BASE can see actions if they are the custodian of the booking
-   * This is also used to disabled the name & description fields
-   *
+   * Whether the user can see the booking actions:
+   * - Members who write every booking always see them.
+   * - Everyone else only on a booking they hold.
+   * This also decides whether the name and description fields are disabled.
    */
   const canSeeActions =
-    !isBaseOrSelfService ||
-    (isBaseOrSelfService &&
-      (defaultTeamMember?.userId === userId ||
-        defaultTeamMember?.id === userId));
+    roleAccess.bookings.writeAll ||
+    defaultTeamMember?.userId === userId ||
+    defaultTeamMember?.id === userId;
 
   return (
     <Form
@@ -342,7 +362,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
       {canSeeActions ? (
         <AbsolutePositionedHeaderActions>
           <div className="flex flex-1 items-center justify-between gap-2">
-            <When truthy={isBase}>
+            <When truthy={reservationIsRequest}>
               <BookingProcessSidebar />
             </When>
 
@@ -393,14 +413,17 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   (!bookingFlags?.hasAssets &&
                     !bookingFlags?.hasModelRequests) ||
                   bookingFlags?.hasAlreadyBookedAssets ||
-                  bookingFlags?.hasUnavailableAssets
+                  bookingFlags?.hasUnavailableAssets ||
+                  archivedAssetsReason
                     ? {
                         // Wording lives in @shelf/labels so the tooltip, the
                         // mobile route's 400, the in-transaction guard and the
                         // companion's inline note can never say four different
                         // things about the same rule (they did, and this copy
                         // carried an "unavailble" typo).
-                        reason: bookingFlags?.hasUnavailableAssets ? (
+                        reason: archivedAssetsReason ? (
+                          archivedAssetsReason
+                        ) : bookingFlags?.hasUnavailableAssets ? (
                           <UnavailableAssetsReason
                             assets={unavailableAssets ?? []}
                           />
@@ -419,7 +442,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 className="grow whitespace-nowrap"
                 size="sm"
               >
-                {isBase ? "Request reservation" : "Reserve"}
+                {reservationIsRequest ? "Request reservation" : "Reserve"}
               </Button>
             ) : null}
 
@@ -450,13 +473,19 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                 const checkoutDisabled =
                   disabled ||
                   isLoadingWorkingHours ||
+                  archivedAssetsReason ||
                   bookingFlags?.hasUnavailableAssets ||
                   bookingFlags?.hasAlreadyBookedAssets ||
                   bookingFlags?.hasCheckedOutAssets ||
-                  bookingFlags?.hasAssetsInCustody
+                  bookingFlags?.hasAssetsInCustody ||
+                  bookingFlags?.hasKitsInCustody
                     ? {
-                        reason: bookingFlags?.hasAssetsInCustody
+                        reason: archivedAssetsReason
+                          ? archivedAssetsReason
+                          : bookingFlags?.hasAssetsInCustody
                           ? "Some assets in this booking are currently in custody. You need to resolve that before you can check-out"
+                          : bookingFlags?.hasKitsInCustody
+                          ? "Some kits in this booking are currently in custody. Release their custody before you can check-out"
                           : bookingFlags?.hasAlreadyBookedAssets
                           ? "Your booking has assets that are already booked for the desired period. You need to resolve that before you can check-out"
                           : isProcessing || isLoadingWorkingHours
@@ -488,6 +517,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   <CheckoutDropdown
                     portalContainer={formElement || undefined}
                     formId="edit-booking-form"
+                    sourceQuestions={checkoutSourceQuestions}
                     booking={{ id, name: name!, from: startDateAsDate }}
                     disabled={disabled}
                     canFullCheckOut={!!bookingStatus?.isReserved}
@@ -507,9 +537,10 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                       )
                     }
                     checkOutDisabled={checkoutDisabled}
-                    requireExplicitCheckout={isExplicitCheckoutRequired({
-                      role: effectiveRole,
-                      bookingSettings,
+                    requireExplicitCheckout={isExplicitScanRequired({
+                      access: roleAccess,
+                      settings: bookingSettings,
+                      direction: "checkout",
                     })}
                   />
                 );
@@ -532,12 +563,11 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   from: startDateAsDate,
                 }}
                 disabled={disabled || isLoadingWorkingHours}
-                requireExplicitCheckin={
-                  (effectiveRole === OrganizationRoles.ADMIN &&
-                    bookingSettings.requireExplicitCheckinForAdmin) ||
-                  (effectiveRole === OrganizationRoles.SELF_SERVICE &&
-                    bookingSettings.requireExplicitCheckinForSelfService)
-                }
+                requireExplicitCheckin={isExplicitScanRequired({
+                  access: roleAccess,
+                  settings: bookingSettings,
+                  direction: "checkin",
+                })}
               />
             </When>
           </div>
@@ -603,7 +633,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
                   disabled={
                     disabled ||
                     isLoadingWorkingHours ||
-                    isBaseOrSelfService ||
+                    bookingCustodianIsSelf(roleAccess) ||
                     inputFieldIsDisabled
                   }
                   userCanSeeCustodian={userCanSeeCustodian}

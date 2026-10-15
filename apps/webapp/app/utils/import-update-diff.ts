@@ -8,6 +8,11 @@
  * @see {@link file://./import-update.server.ts} Orchestration (server)
  */
 import type { CustomField } from "@prisma/client";
+import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  isAssetDescriptionTooLong,
+} from "~/utils/asset-description";
+import { countCharacters } from "~/utils/count-characters";
 import { decodeCsvListCell } from "~/utils/csv-cells";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import { isLikeShelfError, type ShelfError } from "~/utils/error";
@@ -441,14 +446,16 @@ export function compareCoreField(
     }
 
     case "description": {
-      // Plain scalar, compared the same way as `name` — a simple
-      // string-equality diff. Unlike `name`, the underlying DB column is
-      // nullable, so an unset description reads as "". This function
-      // never sees an empty CSV cell (computeAssetDiffs branches to
-      // detectClearing first), and `description` isn't handled there
-      // either — like `name`, an empty cell is a no-op, not a clear.
+      // Plain scalar with a string-equality diff. The DB column is
+      // nullable, so an unset description reads as "". The cell arrives
+      // trimmed, so it is compared with the trimmed stored text: a stored
+      // description that differs only by surrounding whitespace is not a
+      // change. This function never sees an empty CSV cell
+      // (computeAssetDiffs branches to detectClearing first), and
+      // `description` isn't handled there either, so like `name`, an empty
+      // cell is a no-op, not a clear.
       const current = asset.description ?? "";
-      if (csvValue !== current) {
+      if (csvValue !== current.trim()) {
         return {
           field: displayName,
           currentValue: current || "(none)",
@@ -992,6 +999,19 @@ export function detectClearing(
 // ---------------------------------------------------------------------------
 
 /**
+ * The failed-row reason for a description the import would save over the
+ * length limit.
+ *
+ * @param description - The description the row would save
+ * @returns The reason, or `null` when the description fits
+ */
+function overLimitDescriptionReason(description: string): string | null {
+  if (!isAssetDescriptionTooLong(description)) return null;
+  const length = countCharacters(description).toLocaleString("en-US");
+  return `Description too long: ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`;
+}
+
+/**
  * Computes field-by-field diffs between CSV rows and existing assets.
  * Handles duplicate detection, fallback identifier matching, and
  * cross-validation of identifiers.
@@ -1064,6 +1084,18 @@ export function computeAssetDiffs({
       continue;
     }
 
+    // Archived assets are read-only (issue #382). `updateAsset` refuses them at
+    // apply time regardless; the preview reports the row as failed up front,
+    // because its job is to say what will happen BEFORE anything is saved.
+    if (existingAsset.archivedAt) {
+      failedRows.push({
+        rowNumber,
+        id: assetId,
+        reason: "Asset is archived — reinstate it before updating",
+      });
+      continue;
+    }
+
     // Check for duplicate assets by canonical UUID (not CSV identifier string)
     const firstSeenRow = seenIds.get(existingAsset.id);
     if (firstSeenRow !== undefined) {
@@ -1126,6 +1158,13 @@ export function computeAssetDiffs({
 
     // Compute per-field diffs
     const changes: FieldChange[] = [];
+    /**
+     * Why the whole row is refused, when one of its changes cannot be saved.
+     * Only a description the file changes is measured, so a stored
+     * description already over the limit never blocks a row that leaves it
+     * as it is.
+     */
+    let rowRefusal: string | null = null;
 
     for (const [colIdx, column] of headerAnalysis.columnIndexMap) {
       const csvValue = row[colIdx]?.trim() ?? "";
@@ -1174,6 +1213,9 @@ export function computeAssetDiffs({
         );
         if (change) {
           changes.push(change);
+          if (column.internalKey === "description") {
+            rowRefusal ??= overLimitDescriptionReason(change.newValue);
+          }
         }
       } else if (column.kind === "customField" && column.cfDef) {
         const change = compareCustomField(
@@ -1188,7 +1230,9 @@ export function computeAssetDiffs({
       }
     }
 
-    if (changes.length === 0) {
+    if (rowRefusal) {
+      failedRows.push({ rowNumber, id: assetId, reason: rowRefusal });
+    } else if (changes.length === 0) {
       skippedAssets.push({
         id: assetId,
         title: existingAsset.title,

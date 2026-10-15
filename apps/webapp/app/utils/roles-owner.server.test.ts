@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("~/database/db.server", () => ({ db: {} }));
 vi.mock("@sentry/react-router", () => ({ setUser: vi.fn(), setTag: vi.fn() }));
 
+import { isWorkspaceOwner } from "./permissions/role-access";
 import { assertIsOrganizationOwner, isOrganizationOwner } from "./roles.server";
 
 // @vitest-environment node
@@ -55,8 +56,8 @@ describe("isOrganizationOwner", () => {
   });
 
   it("finds OWNER anywhere in the roles array, not just first", () => {
-    // `resolveEffectiveRole` returns roles[0], so a check built on it would
-    // miss an owner who also carries another role.
+    // A check that reads only the first role would miss an owner who also
+    // carries another role.
     expect(
       isOrganizationOwner({
         userOrganizations: memberships([
@@ -66,6 +67,23 @@ describe("isOrganizationOwner", () => {
         organizationId: ORG,
       })
     ).toBe(true);
+  });
+
+  it("reads OWNER anywhere in the membership, like isWorkspaceOwner", () => {
+    const cases: OrganizationRoles[][] = [
+      [OrganizationRoles.OWNER],
+      [OrganizationRoles.ADMIN, OrganizationRoles.OWNER],
+      [OrganizationRoles.BASE],
+      [],
+    ];
+    for (const roles of cases) {
+      expect(
+        isOrganizationOwner({
+          userOrganizations: [{ organization: { id: ORG }, roles }],
+          organizationId: ORG,
+        })
+      ).toBe(isWorkspaceOwner(roles));
+    }
   });
 
   it("does not leak ownership of a DIFFERENT workspace", () => {

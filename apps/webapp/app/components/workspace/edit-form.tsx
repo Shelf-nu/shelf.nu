@@ -13,10 +13,11 @@ import { updateDynamicTitleAtom } from "~/atoms/dynamic-title-atom";
 import { fileErrorAtom } from "~/atoms/file";
 import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import type { loader } from "~/routes/_layout+/account-details.workspace.$workspaceId.edit";
 import { getValidationErrors } from "~/utils/http";
 import type { DataOrErrorResponse } from "~/utils/http.server";
+import { SSO_GROUP_ROLE, type SsoGroupField } from "~/utils/sso-group-roles";
 import { tw } from "~/utils/tw";
 import { zodFieldIsRequired } from "~/utils/zod";
 import CurrencySelector from "./currency-selector";
@@ -314,12 +315,12 @@ const WorkspaceGeneralEditForms = ({
         </FormRow>
 
         <FormRow
-          rowLabel={"QR codes on PDFs"}
+          rowLabel={"Code images on PDFs"}
           className={"border-b-0"}
           subHeading={
             <p>
-              Control whether the QR image is printed on the booking checklist
-              and the audit receipt.
+              Control whether each item's code is printed as a picture on the
+              booking checklist and the audit receipt.
             </p>
           }
         >
@@ -342,16 +343,15 @@ const WorkspaceGeneralEditForms = ({
                 htmlFor="showQrCodesOnPdfs"
                 className="cursor-pointer text-[14px] font-medium text-gray-700"
               >
-                Print QR codes on PDFs
+                Print code images on PDFs
               </label>
               <p
                 id="showQrCodesOnPdfs-desc"
                 className="text-[14px] text-gray-600"
               >
-                Turn this off when people should scan the label on the item
-                itself. A printed sheet carries the same codes, so it can be
-                scanned instead of walking to the equipment. The code still
-                prints as text either way.
+                Prints the same code as the text: a QR code, or the barcode your
+                workspace uses. Turn this off when people should scan the label
+                on the item itself. The code still prints as text either way.
               </p>
             </div>
           </div>
@@ -561,18 +561,22 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
   z
     .object({
       id: z.string(),
+      adminGroupId: z.string().optional(),
+      managerGroupId: z.string().optional(),
       selfServiceGroupId: z.string().optional(),
       baseUserGroupId: z.string().optional(),
-      adminGroupId: z.string().optional(),
     })
     .superRefine((data, ctx) => {
       if (!sso) return;
 
-      const hasAtLeastOneGroup = [
-        data.adminGroupId,
-        data.selfServiceGroupId,
-        data.baseUserGroupId,
-      ].some((value) => value != null && value.trim().length > 0);
+      /* Every group-id column counts, so a workspace that maps only one role
+         (whichever it is) passes. */
+      const hasAtLeastOneGroup = (
+        Object.keys(SSO_GROUP_ROLE) as SsoGroupField[]
+      ).some((field) => {
+        const value = data[field];
+        return value != null && value.trim().length > 0;
+      });
 
       if (!hasAtLeastOneGroup) {
         ctx.addIssue({
@@ -586,7 +590,7 @@ export const EditWorkspaceSSOSettingsFormSchema = (sso: boolean = false) =>
 
 const WorkspaceSSOEditForm = ({ className }: Props) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const fetcher = useFetcher({ key: "sso" });
   const schema = EditWorkspaceSSOSettingsFormSchema(organization.enabledSso);
   const zo = useZorm("NewQuestionWizardScreen", schema);
@@ -683,6 +687,29 @@ const WorkspaceSSOEditForm = ({ className }: Props) => {
         </FormRow>
 
         <FormRow
+          rowLabel={`Manager role group`}
+          subHeading={
+            <div>
+              The group identifier that should be mapped to the <b>Manager</b>{" "}
+              role.
+            </div>
+          }
+          className="border-b-0 pb-[10px]"
+        >
+          <Input
+            label={"Manager role group"}
+            hideLabel
+            className="w-full"
+            name={zo.fields.managerGroupId()}
+            error={
+              validationErrors?.managerGroupId?.message ||
+              zo.errors.managerGroupId()?.message
+            }
+            defaultValue={organization.ssoDetails.managerGroupId || undefined}
+          />
+        </FormRow>
+
+        <FormRow
           rowLabel={`Self service role group`}
           subHeading={
             <div>
@@ -748,7 +775,7 @@ const WorkspaceScimTokensSection = ({
   className?: string;
 }) => {
   const { organization } = useLoaderData<typeof loader>();
-  const { isOwner } = useUserRoleHelper();
+  const { ownsWorkspace: isOwner } = useRoleAccess();
   const generateFetcher = useFetcher({ key: "generateScimToken" });
   const deleteFetcher = useFetcher({ key: "deleteScimToken" });
   const generateDisabled = useDisabled(generateFetcher);

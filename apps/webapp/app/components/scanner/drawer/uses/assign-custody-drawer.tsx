@@ -10,18 +10,24 @@ import {
   clearScannedItemsAtom,
   removeScannedItemAtom,
   scannedAssetQuantitiesAtom,
+  scannedAssetSourcesAtom,
   scannedItemsAtom,
   removeScannedItemsByAssetIdAtom,
   removeMultipleScannedItemsAtom,
   scannedItemIdsAtom,
+  setScannedAssetSourceAtom,
 } from "~/atoms/qr-scanner";
+import { CustodySourceSelect } from "~/components/assets/custody-source-select";
 import { Form } from "~/components/custom-form";
 import DynamicSelect from "~/components/dynamic-select/dynamic-select";
 import { CheckmarkIcon } from "~/components/icons/library";
 import {
   assignableUnits,
   buildQuantitiesPayload,
+  buildSourceLocationsPayload,
+  scannedSourceChoice,
   shouldShowStateBadges,
+  sourceCappedMax,
 } from "~/components/scanner/drawer/custody-scan-quantities";
 import { Button } from "~/components/shared/button";
 import {
@@ -35,7 +41,7 @@ import {
 } from "~/components/shared/modal";
 import { Spinner } from "~/components/shared/spinner";
 import { useDisabled } from "~/hooks/use-disabled";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useRoleAccess } from "~/hooks/use-role-access";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import { createCustodianSchema } from "~/modules/custody/schema";
 import type { ScannerLoader } from "~/routes/_layout+/scanner";
@@ -98,19 +104,20 @@ export default function AssignCustodyDrawer({
   const removeItem = useSetAtom(removeScannedItemAtom);
   const removeAssetsFromList = useSetAtom(removeScannedItemsByAssetIdAtom);
   const removeItemsFromList = useSetAtom(removeMultipleScannedItemsAtom);
+  const pickedSources = useAtomValue(scannedAssetSourcesAtom);
 
   // Blockers live in `custody-blockers` so the list is a pure function of the
   // scanned rows and can be tested without mounting this drawer.
-  const { blockerConfigs, onResolveAll } = buildAssignCustodyBlockers({
+  const { blockerConfigs } = buildAssignCustodyBlockers({
     items,
     removeAssetsFromList,
     removeItemsFromList,
+    pickedSources,
   });
 
   // Create blockers component
   const [hasBlockers, Blockers] = createBlockers({
     blockerConfigs,
-    onResolveAll,
   });
 
   // Render item row
@@ -172,11 +179,13 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
     custodianName: "",
   });
   const disabled = useDisabled();
-  const { isSelfService } = useUserRoleHelper();
+  const assignsSelfOnly = useRoleAccess().custody.assign === "self";
   const { teamMembers } = useLoaderData<ScannerLoader>();
   // Per-row units for quantity-tracked scans, written by
   // `ScannedAssetQuantityInput` and keyed by asset id.
   const assetQuantities = useAtomValue(scannedAssetQuantitiesAtom);
+  // Per-row "From location" picks for pools placed at two or more locations.
+  const assetSources = useAtomValue(scannedAssetSourcesAtom);
   // The scanned rows themselves. The submit sends a quantity for every
   // quantity-tracked row, not only the ones whose input was edited.
   const items = useAtomValue(scannedItemsAtom);
@@ -201,11 +210,22 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
           })
         );
 
+        // Where each such pool's units come from; rows without a picker send
+        // no entry and the server resolves them as it always has.
+        const sourceLocations = JSON.stringify(
+          buildSourceLocationsPayload({
+            items,
+            assetIds,
+            picked: assetSources,
+          })
+        );
+
         // Create object data structure for assets
         const assetData = {
           custodian,
           assetIds,
           quantities,
+          sourceLocations,
         };
 
         // Convert to FormData
@@ -332,18 +352,18 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
         ))}
 
         <div className="px-4 md:pl-0">
-          <div className="relative z-50 my-8 ">
+          <div className="relative z-50 mb-3 mt-2">
             <h5 className="mb-1">Assign custody to:</h5>
             <DynamicSelect
               defaultValue={
-                isSelfService && teamMembers?.length > 0
+                assignsSelfOnly && teamMembers?.length > 0
                   ? JSON.stringify({
                       id: teamMembers[0].id,
                       name: resolveTeamMemberName(teamMembers[0]),
                     })
                   : undefined
               }
-              disabled={disabled || isSelfService}
+              disabled={disabled || assignsSelfOnly}
               model={{
                 name: "teamMember",
                 queryKey: "name",
@@ -380,7 +400,7 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
             ) : null}
           </div>
 
-          <div className={tw("mb-4 flex gap-3", isSelfService && "-mt-4")}>
+          <div className="mb-2 flex gap-3">
             <Button
               type="submit"
               variant="primary"
@@ -400,11 +420,18 @@ function CustodyForm({ disableSubmit }: { disableSubmit: boolean }) {
 export function AssetRow({ asset }: { asset: AssetFromQr }) {
   const qtyTracked = isQuantityTracked(asset);
   const maxAllowed = assignableUnits(asset);
+  const pickedSources = useAtomValue(scannedAssetSourcesAtom);
+  const setSource = useSetAtom(setScannedAssetSourceAtom);
+  // "From location" for a pool placed at two or more locations; nothing otherwise.
+  const sourceChoice = scannedSourceChoice(asset, pickedSources);
+  // The quantity never goes above what the chosen location has left.
+  const rowMax = sourceCappedMax(maxAllowed, sourceChoice);
   // Whole-row state badges are suppressed while a quantity row still has free
   // units. See `shouldShowStateBadges`.
   const showStateBadges = shouldShowStateBadges(asset, maxAllowed);
   // Use predefined presets to create label configurations
   const availabilityConfigs = [
+    assetLabelPresets.archived(!!asset.archivedAt),
     assetLabelPresets.inCustody(
       showStateBadges && asset.status === AssetStatus.IN_CUSTODY
     ),
@@ -443,17 +470,50 @@ export function AssetRow({ asset }: { asset: AssetFromQr }) {
           </span>
           <AssetAvailabilityLabels />
         </div>
+
+        {qtyTracked && maxAllowed > 0 && sourceChoice.value !== null ? (
+          <div
+            className="mt-1 max-w-xs"
+            role="presentation"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CustodySourceSelect
+              id={`scan-source-${asset.id}`}
+              label="From location"
+              options={sourceChoice.options}
+              value={sourceChoice.value}
+              onChange={(source) =>
+                setSource({
+                  assetId: asset.id,
+                  source,
+                  maxQuantity: sourceCappedMax(maxAllowed, {
+                    options: sourceChoice.options,
+                    value: source,
+                  }),
+                })
+              }
+              unitLabel={asset.unitOfMeasure || "units"}
+              name={null}
+              compact
+            />
+          </div>
+        ) : null}
       </div>
 
       {/* Quantity-tracked rows hand over a number of units, not the whole
           item. Hidden once nothing is free: the row is still listed, and the
           blocker below explains why it cannot go. */}
-      {qtyTracked && maxAllowed > 0 ? (
+      {qtyTracked && rowMax > 0 ? (
         <ScannedAssetQuantityInput
           assetId={asset.id}
-          max={maxAllowed}
+          max={rowMax}
           unit={asset.unitOfMeasure || "units"}
         />
+      ) : null}
+      {qtyTracked && maxAllowed > 0 && rowMax === 0 ? (
+        <span className="shrink-0 whitespace-nowrap text-xs text-gray-500">
+          None left here
+        </span>
       ) : null}
     </div>
   );

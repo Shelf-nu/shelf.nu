@@ -16,8 +16,8 @@ import { describe, expect, it, vi } from "vitest";
 // why: the badge reads the viewer's roles, org and identity from Remix loader
 // data, which is unavailable outside a route. Stub them to a permitted viewer
 // so these tests exercise naming, not the custody permission gate.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: ["ADMIN"] }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => ["ADMIN"],
 }));
 vi.mock("~/hooks/use-current-organization", () => ({
   useCurrentOrganization: () => ({ id: "org-1" }),

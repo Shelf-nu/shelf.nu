@@ -95,13 +95,12 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   });
 
   try {
-    const { organizationId, role, isSelfServiceOrBase } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.booking,
-        action: PermissionAction.read,
-      });
+    const { organizationId, access } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
 
     const url = new URL(request.url);
     const parsedQuery = ModelAvailabilityQuerySchema.safeParse({
@@ -145,18 +144,17 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       });
     }
 
-    // `booking:read` reaches SELF_SERVICE and BASE for every booking id in the
+    // `booking:read` reaches every role for every booking id in the
     // workspace, so the same ownership gate the reservation write applies has
-    // to stand here too — otherwise this endpoint reports how much a
-    // colleague's booking reserves of each model.
-    if (isSelfServiceOrBase) {
-      validateBookingOwnership({
-        booking,
-        userId,
-        role,
-        action: "view model reservations on",
-      });
-    }
+    // to stand here too; otherwise this endpoint reports how much a
+    // colleague's booking reserves of each model. No-op for a caller whose
+    // access writes every booking.
+    validateBookingOwnership({
+      booking,
+      userId,
+      access,
+      action: "view model reservations on",
+    });
 
     // Org-scoped: an id from another workspace has no availability to report
     // to this one, and the availability maths would happily return zeroes

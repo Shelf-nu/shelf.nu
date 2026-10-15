@@ -22,6 +22,7 @@ import type {
   UpdateAssetPayload,
   UpdateAssetResponse,
   DeleteAssetResponse,
+  ReinstateAssetResponse,
   UpdateImageResponse,
   AdjustQuantityResponse,
   ManagePlacementsResponse,
@@ -51,6 +52,9 @@ export const assetMutationsApi = {
       {
         method: "POST",
         body: JSON.stringify({ name }),
+        // why: not retried. Each call creates a tag, so a request that timed
+        // out after the server had already written it would leave two.
+        retry: false,
       }
     );
     if (!result.error) invalidateResponseCache("/api/mobile/tags");
@@ -106,6 +110,9 @@ export const assetMutationsApi = {
     apiFetch<CreateAssetResponse>(`/api/mobile/asset/create?orgId=${orgId}`, {
       method: "POST",
       body: JSON.stringify(payload),
+      // why: not retried. Each call records a new row, so a request that
+      // timed out after the server had already written it would leave two.
+      retry: false,
     }),
 
   /** Update an existing asset (partial update -- only provided fields change) */
@@ -140,12 +147,31 @@ export const assetMutationsApi = {
     return result;
   },
 
-  /** Delete an asset */
-  deleteAsset: (orgId: string, assetId: string) =>
+  /**
+   * Delete an asset. `confirmation` is the title the user typed in the delete
+   * sheet; the server checks it once every supported build sends it (#3175).
+   */
+  deleteAsset: (orgId: string, assetId: string, confirmation: string) =>
     apiFetch<DeleteAssetResponse>(`/api/mobile/asset/delete?orgId=${orgId}`, {
       method: "POST",
-      body: JSON.stringify({ assetId }),
+      body: JSON.stringify({ assetId, confirmation }),
     }),
+
+  /**
+   * Reinstate an archived asset: it becomes active, bookable and changeable
+   * again. Admins and owners only (`asset: archive`). The server refuses an
+   * asset whose kit is in custody or checked out. Not retried: a retry after
+   * a slow success would read "not archived" and report a failure.
+   */
+  reinstateAsset: (orgId: string, assetId: string) =>
+    apiFetch<ReinstateAssetResponse>(
+      `/api/mobile/asset/reinstate?orgId=${orgId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ assetId }),
+        retry: false,
+      }
+    ),
 
   /**
    * Adjust total stock of a QUANTITY_TRACKED asset (restock / remove /

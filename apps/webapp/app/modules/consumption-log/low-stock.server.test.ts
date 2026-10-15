@@ -31,7 +31,7 @@ vitest.mock("~/utils/emitter/send-notification.server", () => ({
 // don't depend on org fixtures.
 const getAdminsMock = vitest.fn();
 vitest.mock("~/modules/organization/service.server", () => ({
-  getOrganizationAdminsForNotification: (...args: unknown[]) =>
+  getOrganizationNotificationAudience: (...args: unknown[]) =>
     getAdminsMock(...args),
 }));
 
@@ -133,6 +133,10 @@ describe("checkAndNotifyLowStock — debounce (enter-low fires once)", () => {
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
     expect(lowStockAlertHtmlMock).toHaveBeenCalledTimes(1);
+    expect(getAdminsMock).toHaveBeenCalledWith({
+      organizationId: expect.any(String),
+      audience: "inventoryAlerts",
+    });
     // The debounce marker is stamped with a Date so a further decrement while
     // still low won't re-fire.
     expect(assetUpdateMock).toHaveBeenCalledWith({

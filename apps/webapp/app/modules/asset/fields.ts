@@ -115,12 +115,21 @@ export const getAssetOverviewFields = (canUseBarcodes: boolean = false) => {
       // on each request.
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
+        // Keys each release dialog's fetcher: one person can hold several
+        // rows (one per source location), so the holder's id is not unique.
+        id: true,
         createdAt: true,
         quantity: true,
+        // The location the units were taken from (NULL: unplaced, or with
+        // `sourceUnknown` not recorded). The custody breakdown lists it per
+        // holder and the release dialog asks per location when there are
+        // several.
+        location: { select: { id: true, name: true } },
+        sourceUnknown: true,
         // why: kit-allocated custody rows must not be released directly
         // from the asset's custody-breakdown card. The UI uses
         // `kitCustodyId` to swap the Release button for a "held via kit"
-        // badge — releasing the parent kit is the only correct path.
+        // badge: releasing the parent kit is the only correct path.
         kitCustodyId: true,
         kitCustody: {
           select: {
@@ -254,7 +263,12 @@ export const assetIndexFields = ({
   unavailableBookingStatuses?: BookingStatus[];
 } = {}) => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of
@@ -394,7 +408,12 @@ export const assetIndexFields = ({
 
 export const advancedAssetIndexFields = () => {
   const fields = {
-    assetKits: { select: { kit: true } },
+    // Oldest membership first, the same "primary kit" the advanced index's
+    // raw SQL picks, so `getRowKitStatus` reads one kit in both modes.
+    assetKits: {
+      select: { kit: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    },
     category: true,
     tags: true,
     // Cover image of the asset's model, rendered when the asset has none of

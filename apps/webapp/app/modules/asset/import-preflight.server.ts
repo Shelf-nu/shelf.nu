@@ -20,6 +20,11 @@ import { AssetType, CustomFieldType } from "@prisma/client";
 import { ASSET_TYPE_ADJECTIVES } from "@shelf/labels";
 
 import {
+  ASSET_DESCRIPTION_MAX_LENGTH_LABEL,
+  isAssetDescriptionTooLong,
+} from "~/utils/asset-description";
+import { countCharacters } from "~/utils/count-characters";
+import {
   buildCustomFieldValue,
   getDefinitionFromCsvHeader,
 } from "~/utils/custom-fields";
@@ -139,6 +144,18 @@ export function validateContentImportRows({
   for (const [index, asset] of data.entries()) {
     const row = spreadsheetRowNumber(index);
     const rowLabel = `asset "${asset.title}"`;
+
+    // The importer stores the cell as it is, untrimmed, so the cell is what
+    // gets measured.
+    const description = cell(asset, "description") ?? "";
+    if (isAssetDescriptionTooLong(description)) {
+      const length = countCharacters(description).toLocaleString("en-US");
+      errors.push({
+        row,
+        title: "Description too long",
+        message: `Asset "${asset.title}": the description is ${length} characters, but the maximum is ${ASSET_DESCRIPTION_MAX_LENGTH_LABEL}. Shorten it and import again.`,
+      });
+    }
 
     // ── quantity-tracked columns ──────────────────────────────────────
     let assetType: AssetType | undefined;

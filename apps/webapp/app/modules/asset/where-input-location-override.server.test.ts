@@ -34,6 +34,7 @@ describe("getAssetsWhereInput location override", () => {
   it("matches the URL's locations exactly when no override is passed", () => {
     expect(build("location=campus&category=cat-1")).toEqual({
       organizationId: ORG,
+      archivedAt: null,
       categoryId: { in: ["cat-1"] },
       assetLocations: { some: { locationId: { in: ["campus"] } } },
     });
@@ -44,6 +45,7 @@ describe("getAssetsWhereInput location override", () => {
       build("location=campus&category=cat-1", ["campus", "building-a"])
     ).toEqual({
       organizationId: ORG,
+      archivedAt: null,
       categoryId: { in: ["cat-1"] },
       assetLocations: {
         some: { locationId: { in: ["campus", "building-a"] } },
@@ -72,7 +74,11 @@ describe("getAssetsWhereInput location override", () => {
   });
 
   it("adds no location clause for an empty URL, override or not", () => {
-    expect(build("")).toEqual({ organizationId: ORG });
-    expect(build("", ["campus"])).toEqual({ organizationId: ORG });
+    // An empty query string is the default "active" view.
+    expect(build("")).toEqual({ organizationId: ORG, archivedAt: null });
+    expect(build("", ["campus"])).toEqual({
+      organizationId: ORG,
+      archivedAt: null,
+    });
   });
 });

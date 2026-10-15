@@ -7,6 +7,9 @@
  * across their other workspaces, and the response carries the OWNING
  * `organizationId` so the app can offer to switch and open it there.
  *
+ * A linked asset carries only the custody the caller may see in the owning
+ * workspace, as on the asset detail.
+ *
  * @see {@link file://./qr.$qrId.ts} the QR twin of this route
  * @see {@link file://./../../../modules/api/mobile-auth.server.ts} MOBILE_ASSET_SELECT and the shape helpers
  */
@@ -18,9 +21,9 @@ import {
   requireOrganizationAccess,
   MOBILE_ASSET_SELECT,
   MOBILE_KIT_SELECT,
-  resignAndShapeMobileAsset,
   shapeMobileKitResponse,
 } from "~/modules/api/mobile-auth.server";
+import { shapeScannedAssetForViewer } from "~/modules/api/mobile-code-resolve.server";
 import { getBarcodeByValue } from "~/modules/barcode/service.server";
 import { makeShelfError } from "~/utils/error";
 import { getParams } from "~/utils/http.server";
@@ -210,12 +213,14 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
         // the flat `asset.kit` / `.location` / `.custody` shape the companion
         // build in the App Store consumes. Mirrors qr.$qrId.ts; see
         // MOBILE_ASSET_SELECT for the full shape.
-        // Re-signed against the workspace that owns the barcode.
+        // Re-signed, and custody scoped, in the workspace that owns the
+        // barcode.
         asset: foundBarcode.asset
-          ? await resignAndShapeMobileAsset(
-              foundBarcode.asset,
-              foundOrganizationId
-            )
+          ? await shapeScannedAssetForViewer({
+              asset: foundBarcode.asset,
+              organizationId: foundOrganizationId,
+              viewerUserId: user.id,
+            })
           : null,
         // Kit-linked barcodes return the kit so the scanner can batch-operate
         // on it. shapeMobileKitResponse handles null pass-through.

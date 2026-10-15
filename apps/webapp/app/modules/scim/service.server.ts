@@ -16,6 +16,13 @@ import { randomUsernameFromEmail } from "~/utils/user";
 import { ScimError } from "./errors.server";
 import { parseScimFilter } from "./filters.server";
 import { userToScimResource } from "./mappers.server";
+import {
+  isScimValueObject,
+  normalizeScimPath,
+  readScimAttribute,
+  readScimNameObject,
+  readScimStringValue,
+} from "./patch-attributes.server";
 import type { ScimListResponse, ScimUser } from "./types";
 import { SCIM_SCHEMA_LIST_RESPONSE } from "./types";
 import type { ScimPatchOp, ScimUserInput } from "./validation.server";
@@ -718,40 +725,63 @@ export async function patchScimUser(
       continue;
     }
 
-    if (op.path === "active") {
+    // Attribute names are case-insensitive (RFC 7644 Section 3.10), so an
+    // exactly-matched path drops a well-formed op and answers 200.
+    const path = normalizeScimPath(op.path);
+
+    if (path === "active") {
       // Leave the intent untouched on an unrecognised value rather than
-      // defaulting to "deactivate" (see parseScimActiveValue).
+      // defaulting to "deactivate" (see parseScimActiveValue). Names differ:
+      // a value that cannot be stored is refused rather than ignored, because
+      // "nothing happened, status 200" is what hides a broken mapping.
       activeIntent = parseScimActiveValue(op.value) ?? activeIntent;
-    } else if (op.path === "userName") {
-      newEmail = String(op.value ?? "").toLowerCase();
-    } else if (op.path === "name.givenName") {
-      newFirstName = String(op.value ?? "");
-    } else if (op.path === "name.familyName") {
-      newLastName = String(op.value ?? "");
-    } else if (!op.path && typeof op.value === "object" && op.value !== null) {
+    } else if (path === "username") {
+      newEmail = readScimStringValue(op.value, "userName").toLowerCase();
+    } else if (path === "name.givenname") {
+      newFirstName = readScimStringValue(op.value, "name.givenName");
+    } else if (path === "name.familyname") {
+      newLastName = readScimStringValue(op.value, "name.familyName");
+    } else if (path === "name") {
+      // A complex attribute path carrying its sub-attributes as an object:
+      // { op: "Replace", path: "name", value: { givenName: "Jane" } }
+      const name = readScimNameObject(op.value);
+      if (name.firstName !== undefined) newFirstName = name.firstName;
+      if (name.lastName !== undefined) newLastName = name.lastName;
+    } else if (!path && isScimValueObject(op.value)) {
       // Path-less op: attributes live as keys of the value object.
       // e.g. { op: "Replace", value: { active: false } } or
       //      { op: "Add", value: { name: { givenName: "Jane" } } }
-      const val = op.value as Record<string, unknown>;
+      const val = op.value;
 
-      if ("active" in val) {
-        activeIntent = parseScimActiveValue(val.active) ?? activeIntent;
+      const active = readScimAttribute(val, "active");
+      if (active.present) {
+        activeIntent = parseScimActiveValue(active.value) ?? activeIntent;
       }
       // Nested name object: { name: { givenName, familyName } }
-      if ("name" in val && typeof val.name === "object" && val.name !== null) {
-        const name = val.name as Record<string, unknown>;
-        if ("givenName" in name) newFirstName = String(name.givenName ?? "");
-        if ("familyName" in name) newLastName = String(name.familyName ?? "");
+      const nested = readScimAttribute(val, "name");
+      if (nested.present) {
+        const name = readScimNameObject(nested.value);
+        if (name.firstName !== undefined) newFirstName = name.firstName;
+        if (name.lastName !== undefined) newLastName = name.lastName;
       }
       // Flat dotted keys: { "name.givenName": "Jane" }
-      if ("name.givenName" in val) {
-        newFirstName = String(val["name.givenName"] ?? "");
+      const dottedGiven = readScimAttribute(val, "name.givenName");
+      if (dottedGiven.present) {
+        newFirstName = readScimStringValue(dottedGiven.value, "name.givenName");
       }
-      if ("name.familyName" in val) {
-        newLastName = String(val["name.familyName"] ?? "");
+      const dottedFamily = readScimAttribute(val, "name.familyName");
+      if (dottedFamily.present) {
+        newLastName = readScimStringValue(
+          dottedFamily.value,
+          "name.familyName"
+        );
       }
-      if ("userName" in val) {
-        newEmail = String(val.userName ?? "").toLowerCase();
+      const userName = readScimAttribute(val, "userName");
+      if (userName.present) {
+        newEmail = readScimStringValue(
+          userName.value,
+          "userName"
+        ).toLowerCase();
       }
     }
     // NOTE: externalId is the immutable SCIM resource id and is intentionally

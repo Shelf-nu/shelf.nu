@@ -1,3 +1,5 @@
+import { RESERVATION_AUDIENCE } from "~/utils/permissions/role-audience";
+
 /** A single recipient entry for the notification preview. */
 type PreviewRecipient = {
   /** Stable identifier for removable items (team member ID for booking_recipient) */
@@ -31,9 +33,10 @@ const reasonLabels: Record<string, string> = {
  * Read-only preview of all notification recipients for a booking.
  *
  * Lists each recipient with their reason (custodian, creator, always-notify,
- * per-booking). The admin count is shown separately as a footnote because
- * admins are only notified on the initial reservation event, not on
- * subsequent booking lifecycle changes (checkout, checkin, etc.).
+ * per-booking). The reservation audience (`adminCount`: every member whose
+ * role hears booking broadcasts) is shown separately as a footnote because it
+ * is only notified on the initial reservation event, not on subsequent booking
+ * lifecycle changes (checkout, checkin, etc.).
  *
  * Visibility is privacy-gated by the parent component — this component
  * itself does not check the user's role.
@@ -92,10 +95,8 @@ export function NotificationPreview({
       {notifyAdminsOnNewBooking ? (
         <p className="mt-1 text-[13px] text-gray-500">
           {adminCount > 0
-            ? `+ ${adminCount} admin${
-                adminCount !== 1 ? "s" : ""
-              } will be notified on reservation`
-            : "+ Workspace admins will be notified on reservation"}
+            ? `+ ${adminCount} more (${RESERVATION_AUDIENCE}) will be notified on reservation`
+            : `+ Workspace ${RESERVATION_AUDIENCE} will be notified on reservation`}
         </p>
       ) : null}
     </div>

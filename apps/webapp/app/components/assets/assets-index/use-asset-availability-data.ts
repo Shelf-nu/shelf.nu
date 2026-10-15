@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { AssetType } from "@prisma/client";
 import type { useLoaderData } from "react-router";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { AdvancedAssetBooking } from "~/modules/asset/types";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import {
@@ -135,7 +135,7 @@ function hasBarPeriod(booking: {
  * @returns `resources` for the rows and `events` for the bars
  */
 export function useAssetAvailabilityData(items: Items) {
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
     roles,
