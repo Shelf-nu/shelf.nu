@@ -24,9 +24,10 @@ export const auditsApi = {
    *   - `page` / `perPage` — pagination knobs.
    *   - `search` — free-text search over name / description.
    *   - `assignedToMe` — when `true`, restricts the result to audits
-   *     the caller is assigned to. For BASE/SELF_SERVICE users this is
-   *     already implicit server-side; for admins/owners it's the
-   *     companion's "Assigned to me" toggle.
+   *     the caller is assigned to. For roles limited to assigned audits
+   *     (`access.audits.seeAll` false) this is already implicit
+   *     server-side; for the others it is the companion's "Assigned to
+   *     me" toggle.
    * @param signal AbortSignal for in-flight cancellation on rapid
    *   filter toggling (the list re-fires on every chip tap; aborting
    *   the previous request stops a slow earlier response from

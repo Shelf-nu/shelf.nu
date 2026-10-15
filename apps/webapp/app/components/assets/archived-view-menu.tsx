@@ -11,8 +11,9 @@
  * is what the title and the count under it describe. Archiving is orthogonal
  * to an asset's status, so it is not one of the filters.
  *
- * Render it only for members holding `asset: archive` (`useCanArchiveAssets`).
- * Everyone else gets the plain title and the Active set.
+ * Render it only for members whose role may see archived assets
+ * (`useCanViewArchivedAssets`). Everyone else gets the plain title and the
+ * Active set.
  *
  * @see {@link file://./../../modules/asset/data.server.ts} `resolveArchivedViewForMember`
  * @see {@link file://./../list/index.tsx} the `titleContent` slot
@@ -57,16 +58,18 @@ function toArchivedView(raw: string | null): ArchivedFilter {
 
 /**
  * The view an asset list is showing: the `?archived=` choice when the member
- * can archive, Active otherwise. Mirrors the loader's
+ * may see archived assets, Active otherwise. Mirrors the loader's
  * `resolveArchivedViewForMember`, so copy written for a view (an empty state)
  * matches the rows the server returned.
  *
- * @param canArchiveAssets - From `useCanArchiveAssets()`
+ * @param canViewArchivedAssets - From `useCanViewArchivedAssets()`
  * @returns The view the list is showing
  */
-export function useArchivedView(canArchiveAssets: boolean): ArchivedFilter {
+export function useArchivedView(
+  canViewArchivedAssets: boolean
+): ArchivedFilter {
   const [searchParams] = useSearchParams();
-  return canArchiveAssets
+  return canViewArchivedAssets
     ? toArchivedView(searchParams.get("archived"))
     : "active";
 }

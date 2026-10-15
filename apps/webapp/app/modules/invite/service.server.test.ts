@@ -744,4 +744,21 @@ describe("createInvite / bulkInviteUsers: who may grant Administrator", () => {
     expect(dbMock.$transaction).not.toHaveBeenCalled();
     expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
   });
+
+  it("bulkInviteUsers refuses an Administrator row written as the role's label", async () => {
+    await expect(
+      bulkInviteUsers({
+        users: [
+          { email: "a@school.org", role: "Base" },
+          { email: "b@school.org", role: " administrator " },
+        ] as Parameters<typeof bulkInviteUsers>[0]["users"],
+        userId: "admin-1",
+        organizationId: "org-1",
+        actorOwnsWorkspace: false,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(dbMock.$transaction).not.toHaveBeenCalled();
+    expect(dbMock.invite.createManyAndReturn).not.toHaveBeenCalled();
+  });
 });
