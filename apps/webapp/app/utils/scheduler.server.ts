@@ -1,6 +1,7 @@
 import PgBoss from "pg-boss";
 import { ShelfError } from "./error";
 import { Logger } from "./logger";
+import { toSchedulerErrorCause } from "./scheduler-error";
 import { DATABASE_URL, NODE_ENV } from "../utils/env";
 
 export enum QueueNames {
@@ -45,9 +46,8 @@ export const init = async () => {
 
     // Register an error handler before starting. PgBoss extends EventEmitter and
     // re-emits worker/maintenance failures (e.g. transient EAUTHTIMEOUT / 08006)
-    // as 'error' events. An unhandled 'error' event on an EventEmitter throws and
-    // crashes the Node process (the SHELF-WEBAPP-1KJ / 21E production crashes and
-    // subsequent machine restarts). Logging it keeps the process alive.
+    // as 'error' events. An 'error' event with no listener throws and crashes
+    // the Node process, so this listener must exist; logging keeps it alive.
     //
     // why the listenerCount guard: in dev the instance is a surviving `global`
     // while the `!pgBossInstance` guard above is on a module-local that resets on
@@ -58,7 +58,9 @@ export const init = async () => {
       pgBossInstance.on("error", (cause: unknown) => {
         Logger.error(
           new ShelfError({
-            cause,
+            // The raw payload can carry the pg client and its connection
+            // parameters; only the failure itself may reach Sentry.
+            cause: toSchedulerErrorCause(cause),
             message: "pg-boss worker error",
             label: "Scheduler",
             shouldBeCaptured: true,
