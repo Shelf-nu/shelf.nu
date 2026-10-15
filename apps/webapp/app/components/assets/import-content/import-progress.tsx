@@ -16,6 +16,11 @@ import useApiQuery from "~/hooks/use-api-query";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useInterval } from "~/hooks/use-interval";
 import { ASSET_IMPORT_POLL_INTERVAL_SECONDS } from "~/modules/asset-import/constants";
+import {
+  formatAssetCount,
+  formatCount,
+  formatRowCount,
+} from "~/modules/asset-import/format";
 import type {
   AssetImportStatusPayload,
   ImportWarning,
@@ -114,7 +119,7 @@ function announcement(status: AssetImportStatusPayload) {
           return "Importing assets";
       }
     case "COMPLETED":
-      return `${status.totalRows} assets imported`;
+      return `${formatAssetCount(status.totalRows)} imported`;
     case "FAILED":
       return status.errorMessage ?? "The import stopped.";
     default:
@@ -199,7 +204,8 @@ export function ImportProgress({
             aria-label="Import progress"
           />
           <p className="mt-2 text-sm text-gray-700">
-            Imported {status.processedRows} of {status.totalRows} assets
+            Imported {formatCount(status.processedRows)} of{" "}
+            {formatAssetCount(status.totalRows)}
           </p>
           <p className="mt-2 text-sm text-gray-600">
             You can leave this page. We will email you when it is done.
@@ -219,9 +225,10 @@ export function ImportProgress({
             <div className="mt-6">
               <h4>Warnings</h4>
               <p className="text-sm text-gray-600">
-                {status.warningCount} rows were imported with a warning
+                {formatRowCount(status.warningCount)} imported with a warning
               </p>
               <ImportRowErrorsTable
+                tone="warning"
                 rowErrors={warnings}
                 totalRowErrors={status.warningCount}
               />
@@ -233,8 +240,8 @@ export function ImportProgress({
       {status.status === "FAILED" ? (
         <div>
           <p className="mt-1 text-sm text-gray-600">
-            Imported {status.processedRows} of {status.totalRows} before it
-            stopped.
+            Imported {formatCount(status.processedRows)} of{" "}
+            {formatCount(status.totalRows)} before it stopped.
           </p>
           {resumeFetcher.data?.error ? (
             <p className="mt-2 text-sm text-red-600">

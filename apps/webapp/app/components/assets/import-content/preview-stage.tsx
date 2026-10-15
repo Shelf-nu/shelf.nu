@@ -18,6 +18,7 @@ import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
+import { formatAssetCount } from "~/modules/asset-import/format";
 import type { ContentImportPreview } from "~/modules/asset-import/types";
 import type { action } from "~/routes/_layout+/assets.import";
 import { AlertIcon } from "../../icons/library";
@@ -127,7 +128,7 @@ export function PreviewStage({
         columns={preview.columns}
         rows={preview.rows}
         totalRows={totalRows}
-        caption={`${totalRows} assets will be created`}
+        caption={`${formatAssetCount(totalRows)} will be created`}
         legend={[
           { tone: "new", label: "Will be created" },
           ...(totalValueWarnings > 0
@@ -139,7 +140,7 @@ export function PreviewStage({
 
       <div className="my-4 flex flex-wrap items-center gap-3">
         <ConfirmImportDialog
-          triggerLabel={`Import ${totalRows} assets`}
+          triggerLabel={`Import ${formatAssetCount(totalRows)}`}
           title="Confirm asset import"
           description="The import runs in the background. You can leave this page; we will email you when it finishes."
           confirmLabel={isConfirming ? "Starting..." : "Import"}

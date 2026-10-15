@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 import { Link, useLocation } from "react-router";
+import { formatAssetCount, formatCount } from "~/modules/asset-import/format";
 import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
 import { useAssetImportStatus } from "../assets/import-content/import-progress";
 import { Progress } from "../shared/progress";
@@ -127,7 +128,7 @@ function ImportCardBody({ initial }: AssetImportCardProps) {
   // hear status changes and not every row count.
   const outcome =
     status.status === "COMPLETED"
-      ? `${status.totalRows} assets imported`
+      ? `${formatAssetCount(status.totalRows)} imported`
       : status.status === "FAILED"
       ? status.errorMessage ?? "The import stopped."
       : null;
@@ -186,14 +187,16 @@ function ImportCardBody({ initial }: AssetImportCardProps) {
           {finished ? (
             status.warningCount > 0 ? (
               <p className="text-sm text-gray-600">
-                {status.warningCount} warnings
+                {formatCount(status.warningCount)}{" "}
+                {status.warningCount === 1 ? "warning" : "warnings"}
               </p>
             ) : null
           ) : (
             <>
               <Progress value={percent} aria-label="Import progress" />
               <p className="mt-2 text-sm text-gray-600">
-                {status.processedRows} of {status.totalRows}
+                {formatCount(status.processedRows)} of{" "}
+                {formatCount(status.totalRows)}
               </p>
             </>
           )}

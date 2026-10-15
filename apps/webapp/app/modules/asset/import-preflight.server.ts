@@ -109,9 +109,9 @@ export function validateContentImportRows({
         {
           row: 0,
           title: "File too large",
-          message: `This file has ${
-            data.length
-          } rows, but the maximum is ${maxRows.toLocaleString(
+          message: `This file has ${data.length.toLocaleString(
+            "en-US"
+          )} rows, but the maximum is ${maxRows.toLocaleString(
             "en-US"
           )}. Please split it into smaller files and import them one at a time.`,
         },

@@ -179,6 +179,7 @@ export const csvDataFromRequest = async ({
         message:
           "The CSV file is too large. Please reduce the file size by removing empty rows or splitting it into smaller files and try again.",
         label: "CSV",
+        status: 400,
         shouldBeCaptured: false,
       });
     }

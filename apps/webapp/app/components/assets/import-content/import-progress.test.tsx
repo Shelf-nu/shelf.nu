@@ -209,7 +209,7 @@ describe("ImportProgress", () => {
     );
 
     expect(
-      await screen.findByText("2 rows were imported with a warning")
+      await screen.findByText("2 rows imported with a warning")
     ).toBeInTheDocument();
     expect(screen.getByText("Warnings")).toBeInTheDocument();
     expect(screen.getByText("QR code is already linked")).toBeInTheDocument();

@@ -11,6 +11,7 @@
  * @see {@link file://./../../../routes/_layout+/_layout.tsx} Loader and render site
  */
 import { useLocation } from "react-router";
+import { formatCount } from "~/modules/asset-import/format";
 import type { AssetImportNoticePayload } from "~/modules/asset-import/types";
 
 /** Props for {@link AssetImportNotice}. */
@@ -45,8 +46,9 @@ export function AssetImportNotice({
       role="status"
       className="mx-4 mt-4 rounded border border-primary-200 bg-primary-25 p-3 text-sm text-primary-700"
     >
-      An import is running ({activeAssetImport.processedRows} of{" "}
-      {activeAssetImport.totalRows}). New assets will keep appearing.
+      An import is running ({formatCount(activeAssetImport.processedRows)} of{" "}
+      {formatCount(activeAssetImport.totalRows)}). New assets will keep
+      appearing.
     </div>
   );
 }
