@@ -70,7 +70,7 @@ vitest.mock("~/database/db.server", () => ({
       // The column reference the low-stock predicate compares quantity to.
       fields: { minQuantity: "Asset.minQuantity" },
     },
-    custody: { aggregate: vitest.fn() },
+    custody: { aggregate: vitest.fn(), findMany: vitest.fn() },
     organization: { findUnique: vitest.fn() },
     consumptionLog: { findFirst: vitest.fn(), findMany: vitest.fn() },
     assetLocation: { findMany: vitest.fn() },
@@ -90,6 +90,7 @@ const assetUpdateMock = db.asset.update as ReturnType<typeof vitest.fn>;
 const custodyAggregateMock = db.custody.aggregate as ReturnType<
   typeof vitest.fn
 >;
+const custodyFindManyMock = db.custody.findMany as ReturnType<typeof vitest.fn>;
 const assetCountMock = db.asset.count as ReturnType<typeof vitest.fn>;
 const orgFindUniqueMock = db.organization.findUnique as ReturnType<
   typeof vitest.fn
@@ -141,6 +142,7 @@ beforeEach(() => {
   assetUpdateMock.mockResolvedValue({});
   assetCountMock.mockResolvedValue(0);
   custodyAggregateMock.mockResolvedValue({ _sum: { quantity: 0 } });
+  custodyFindManyMock.mockResolvedValue([]);
   orgFindUniqueMock.mockResolvedValue({
     name: "Acme",
     customEmailFooter: null,
@@ -680,9 +682,15 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       customEmailFooter: "Clearwater Supply, 12 Harbor Road",
     });
     placementsMock.mockResolvedValue([
-      { quantity: 1, location: { name: "Ogden warehouse" } },
-      { quantity: 1, location: { name: "Ogden warehouse" } },
-      { quantity: 1, location: { name: "Van 3" } },
+      { quantity: 1, assetKitId: null, location: { name: "Ogden warehouse" } },
+      { quantity: 1, assetKitId: null, location: { name: "Ogden warehouse" } },
+      { quantity: 1, assetKitId: null, location: { name: "Van 3" } },
+      { quantity: 4, assetKitId: "ak-1", location: { name: "Van 3" } },
+    ]);
+    // 2 of the 3 custody units were taken from Ogden; 1 has no source.
+    custodyFindManyMock.mockResolvedValue([
+      { quantity: 2, location: { name: "Ogden warehouse" } },
+      { quantity: 1, location: null },
     ]);
     assetCountMock.mockResolvedValue(1);
     logsAre([consumeRow]);
@@ -701,7 +709,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       unitOfMeasure: "boards",
       organizationName: "Clearwater Supply",
       customEmailFooter: "Clearwater Supply, 12 Harbor Road",
-      placements: "Ogden warehouse: 2, Van 3: 1",
+      placements: "Van 3: 1 + 4 in kits, Ogden warehouse: 2 (2 in custody)",
       inCustody: 3,
       otherLowCount: 1,
     });
@@ -712,15 +720,25 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
       where: {
         organizationId: ORG_ID,
         id: { not: ASSET_ID },
+        archivedAt: null,
         type: "QUANTITY_TRACKED",
         minQuantity: { not: null },
         quantity: { lte: "Asset.minQuantity" },
       },
     });
-    // Placements are org-scoped.
+    // Placements and custody sources are org-scoped.
     expect(placementsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { assetId: ASSET_ID, organizationId: ORG_ID },
+      })
+    );
+    expect(custodyFindManyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetId: ASSET_ID,
+          kitCustodyId: null,
+          location: { is: { organizationId: ORG_ID } },
+        },
       })
     );
     // A fresh log row explains the change, so the acting user is not loaded.
@@ -984,7 +1002,7 @@ describe("checkAndNotifyLowStock: the facts each copy is rendered from", () => {
     );
     logsAre([{ ...consumeRow, category: "RESTOCK", quantity: 12 }]);
     placementsMock.mockResolvedValue([
-      { quantity: 14, location: { name: "Ogden warehouse" } },
+      { quantity: 14, assetKitId: null, location: { name: "Ogden warehouse" } },
     ]);
     assetCountMock.mockResolvedValue(2);
 

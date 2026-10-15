@@ -467,6 +467,39 @@ describe("describeStockMovement: a minimum change", () => {
     ).toBe(`Minimum changed from 3 to 10 ${WHEN}`);
   });
 
+  it("names both when one asset edit changed the quantity and the minimum", () => {
+    // updateAsset writes the adjustment row, then the event a moment later.
+    const out = movement(
+      logRow({
+        category: "ADJUSTMENT",
+        quantity: 18,
+        note: ASSET_EDIT_ADJUSTMENT_NOTE,
+      }),
+      {
+        minimumChange: minimumChange({
+          by: DANA,
+          createdAt: new Date(CREATED_AT.getTime() + 40),
+        }),
+      }
+    );
+    expect(out?.text).toBe(
+      `Quantity adjusted and minimum changed from 3 to 10 by Dana Reyes on the asset edit page ${WHEN}`
+    );
+  });
+
+  it("a minimum change well after an edit-page adjustment is its own change", () => {
+    const out = movement(
+      logRow({
+        category: "ADJUSTMENT",
+        quantity: 18,
+        note: ASSET_EDIT_ADJUSTMENT_NOTE,
+        createdAt: new Date(CREATED_AT.getTime() - 30_000),
+      }),
+      { minimumChange: minimumChange() }
+    );
+    expect(out?.text).toBe(`Minimum changed from 3 to 10 by Sam Ortiz ${WHEN}`);
+  });
+
   it("a stale minimum change falls back to the neutral sentence", () => {
     expect(
       movement(null, {
@@ -493,10 +526,8 @@ describe("describeStockMovement: stale or missing log row", () => {
     });
   });
 
-  it("a stale row without an acting user says stock or minimum changed", () => {
-    expect(movement(logRow(), { now: stale })).toEqual({
-      text: "Stock or minimum was changed",
-    });
+  it("a stale row without an acting user leaves the row out", () => {
+    expect(movement(logRow(), { now: stale })).toBeNull();
   });
 
   it("no row with an acting user names the acting user", () => {
@@ -511,13 +542,44 @@ describe("describeStockMovement: stale or missing log row", () => {
 });
 
 describe("describePlacements", () => {
-  it("sums manual and kit-driven rows per location, largest first", () => {
+  /** A placement row; `assetKitId` set makes it kit-driven. */
+  function placed(
+    name: string,
+    quantity: number,
+    assetKitId: string | null = null
+  ) {
+    return { quantity, assetKitId, location: { name } };
+  }
+
+  it("sums manual rows per location, largest first", () => {
     const out = describePlacements([
-      { quantity: 1, location: { name: "Van 3" } },
-      { quantity: 1, location: { name: "Ogden warehouse" } },
-      { quantity: 1, location: { name: "Ogden warehouse" } },
+      placed("Van 3", 1),
+      placed("Ogden warehouse", 1),
+      placed("Ogden warehouse", 1),
     ]);
     expect(record(out)).toBe("Ogden warehouse: 2, Van 3: 1");
+  });
+
+  it("lists kit units apart, so a location never shows more than the asset has", () => {
+    // 100 placed by hand plus a 50-unit kit slice: valid for a 100-unit asset.
+    const out = describePlacements([
+      placed("Warehouse", 100),
+      placed("Warehouse", 50, "ak-1"),
+      placed("Van 3", 5, "ak-2"),
+    ]);
+    expect(record(out)).toBe("Warehouse: 100 + 50 in kits, Van 3: 5 in kits");
+  });
+
+  it("says how many of a location's units are in custody", () => {
+    const out = describePlacements(
+      [placed("Ogden warehouse", 10), placed("Van 3", 2)],
+      [
+        { quantity: 6, location: { name: "Ogden warehouse" } },
+        // Custody from a location the asset is no longer placed at is ignored.
+        { quantity: 1, location: { name: "Old shed" } },
+      ]
+    );
+    expect(record(out)).toBe("Ogden warehouse: 10 (6 in custody), Van 3: 2");
   });
 
   it("says the asset is not placed when there are no rows", () => {
@@ -595,13 +657,13 @@ describe("preheader", () => {
 describe("otherLowSentence", () => {
   it("is singular for one item", () => {
     expect(record(otherLowSentence(1))).toBe(
-      "1 other item is at or below its minimum"
+      "1 other item has total stock at or below its minimum"
     );
   });
 
   it("is plural for several", () => {
     expect(record(otherLowSentence(3))).toBe(
-      "3 other items are at or below their minimum"
+      "3 other items have total stock at or below their minimum"
     );
   });
 });
@@ -645,7 +707,7 @@ describe("buildFactRows", () => {
       { label: "Out with people", value: "3 Units" },
       {
         label: "Also low",
-        value: "1 other item is at or below its minimum",
+        value: "1 other item has total stock at or below its minimum",
         link: {
           text: "See all low-stock items",
           href: "/assets?lowStockOnly=true",
@@ -711,7 +773,7 @@ describe("headings, leads and notices", () => {
       })
     );
     expect(segmentsToText(footer)).toBe(
-      'This email was sent to sam@clearwater.test because you are an owner or admin of "Clearwater Supply". Every owner and admin of the workspace received it. To change when it fires, edit the minimum quantity on the asset.'
+      'This email was sent to sam@clearwater.test because your role in "Clearwater Supply" receives inventory alerts, and everyone with such a role received it. To change when it fires, edit the minimum quantity on the asset.'
     );
   });
 });

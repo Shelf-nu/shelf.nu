@@ -101,8 +101,22 @@ export type StockMovement = {
   href?: string;
 };
 
-/** A placement row as `assetLocation.findMany` returns it. */
-export type PlacementRow = { quantity: number; location: { name: string } };
+/**
+ * A placement row as `assetLocation.findMany` returns it. `assetKitId` set
+ * means a kit-driven row: units of a kit slice placed at the kit's location.
+ */
+export type PlacementRow = {
+  quantity: number;
+  assetKitId: string | null;
+  location: { name: string };
+};
+
+/**
+ * Operator custody taken from a location (`Custody.locationId` set,
+ * `kitCustodyId` null), as `custody.findMany` returns it. Custody never
+ * changes a placement's count, so these units are still part of it.
+ */
+export type CustodySourceRow = { quantity: number; location: { name: string } };
 
 /**
  * The order of the parts of a combined sentence: what took stock away first,
@@ -364,17 +378,62 @@ export function isFreshMovement(
 }
 
 /**
+ * The sentence for one save of the asset edit form that changed both the
+ * quantity and the minimum. `updateAsset` writes the adjustment row first and
+ * the minimum-change event after it, so on its own the event would win as the
+ * newest record and the sentence would leave out the stock change.
+ *
+ * Matches only that shape: a single fresh adjustment carrying
+ * {@link ASSET_EDIT_ADJUSTMENT_NOTE}, and a fresh minimum change no more than
+ * {@link MOVEMENT_GROUP_WINDOW_MS} after it.
+ *
+ * @returns The combined sentence, or null when the records are not one edit
+ */
+function describeEditOfBoth(
+  latest: StockMovementLog[],
+  minimumChange: MinimumChange | null,
+  prefs: ResolvedFormatPrefs,
+  now: Date
+): StockMovement | null {
+  const [log] = latest;
+  if (
+    latest.length !== 1 ||
+    log.category !== "ADJUSTMENT" ||
+    log.note !== ASSET_EDIT_ADJUSTMENT_NOTE ||
+    !isFreshMovement(log, now) ||
+    !isFreshMovement(minimumChange, now)
+  ) {
+    return null;
+  }
+  const gap = minimumChange.createdAt.getTime() - log.createdAt.getTime();
+  if (gap < 0 || gap > MOVEMENT_GROUP_WINDOW_MS) {
+    return null;
+  }
+  const minimum =
+    minimumChange.from === null
+      ? `minimum set to ${minimumChange.to}`
+      : `minimum changed from ${minimumChange.from} to ${minimumChange.to}`;
+  return {
+    text: `Quantity adjusted and ${minimum}${byName(
+      resolveUserDisplayName(log.performedBy)
+    )} on the asset edit page${onDateAtTime(log.createdAt, prefs)}`,
+  };
+}
+
+/**
  * Builds the "What happened" sentence.
  *
  * Two records can explain the change, each only while it is fresh (see
  * {@link MOVEMENT_FRESHNESS_MS}): the newest operation in the log, whose rows
  * {@link pickLatestMovement} picks, and the newest minimum change, which writes
- * no log row. When both are fresh the newer one wins.
+ * no log row. When both are fresh the newer one wins, except when one asset
+ * edit changed both: then the sentence names both (see
+ * {@link describeEditOfBoth}).
  *
- * With neither, the mail falls back to naming whoever made the change. That
- * sentence must stay true whatever the trigger was, so it says "stock or
- * minimum", never "quantity". With neither a record nor an acting user there
- * is nothing true to say, so the row is left out.
+ * With no fresh record, the mail falls back to naming whoever made the change.
+ * That sentence must stay true whatever the trigger was, so it says "stock or
+ * minimum", never "quantity". With no fresh record and no acting user there is
+ * nothing true to say, so the row is left out, even when older records exist.
  *
  * @param params.logs - The asset's newest `ConsumptionLog` rows, newest first
  * @param params.minimumChange - The asset's newest minimum change, or null
@@ -401,6 +460,10 @@ export function describeStockMovement({
 }): StockMovement | null {
   const latest = pickLatestMovement(logs);
   const logIsFresh = isFreshMovement(latest[0], now);
+  const editedTogether = describeEditOfBoth(latest, minimumChange, prefs, now);
+  if (editedTogether) {
+    return editedTogether;
+  }
   if (
     isFreshMovement(minimumChange, now) &&
     (!logIsFresh ||
@@ -423,7 +486,7 @@ export function describeStockMovement({
       prefs
     );
   }
-  if (logs.length === 0 && !actingUser) {
+  if (!actingUser) {
     return null;
   }
   return {
@@ -434,30 +497,80 @@ export function describeStockMovement({
 }
 
 /**
- * Builds the "Where it is" value: every placement of the asset, manual and
- * kit-driven alike, summed per location name, largest first.
+ * Builds the "Where it is" value: every location the asset is placed at,
+ * largest first, with the same split the asset and location pages show.
+ *
+ * - Manual placements are summed per location. Units taken into custody from
+ *   that location stay in its count (custody never moves a placement), so the
+ *   value says how many of them are in custody: `"Ogden warehouse: 10 (6 in
+ *   custody)"`.
+ * - Kit-driven placements are listed apart (`"+ 5 in kits"`), never added to
+ *   the manual count. The two axes are bounded separately, so 100 placed by
+ *   hand plus a 50-unit kit slice is valid for a 100-unit asset, and a sum
+ *   would print more units than the asset has.
  *
  * @param rows - The asset's `AssetLocation` rows with their location name
- * @returns `"Ogden warehouse: 2, Van 3: 1"`, or {@link NOT_PLACED}
+ * @param custody - Operator custody per source location; omit when unknown
+ * @returns `"Ogden warehouse: 10 (6 in custody), Van 3: 1 + 5 in kits"`, or
+ *   {@link NOT_PLACED}
  */
-export function describePlacements(rows: PlacementRow[]) {
+export function describePlacements(
+  rows: PlacementRow[],
+  custody: CustodySourceRow[] = []
+) {
   // Location names are unique per workspace, case-insensitively (the
-  // `Location_name_organizationId_key` index), so a name sums only the manual
-  // and kit-driven rows of one location, never two locations.
-  const totals = new Map<string, number>();
+  // `Location_name_organizationId_key` index), so a name keys one location.
+  const totals = new Map<
+    string,
+    { manual: number; kits: number; inCustody: number }
+  >();
+  const entry = (name: string) => {
+    let found = totals.get(name);
+    if (!found) {
+      found = { manual: 0, kits: 0, inCustody: 0 };
+      totals.set(name, found);
+    }
+    return found;
+  };
   for (const row of rows) {
-    const name = row.location.name;
-    totals.set(name, (totals.get(name) ?? 0) + row.quantity);
+    const found = entry(row.location.name);
+    if (row.assetKitId) {
+      found.kits += row.quantity;
+    } else {
+      found.manual += row.quantity;
+    }
+  }
+  for (const row of custody) {
+    // Custody only annotates a location the asset is placed at.
+    const found = totals.get(row.location.name);
+    if (found) {
+      found.inCustody += row.quantity;
+    }
   }
   const placed = [...totals.entries()]
-    .filter(([, qty]) => qty > 0)
-    .sort(([aName, aQty], [bName, bQty]) =>
-      bQty === aQty ? aName.localeCompare(bName) : bQty - aQty
-    );
+    .filter(([, t]) => t.manual > 0 || t.kits > 0)
+    .sort(([aName, a], [bName, b]) => {
+      const diff = b.manual + b.kits - (a.manual + a.kits);
+      return diff === 0 ? aName.localeCompare(bName) : diff;
+    });
   if (placed.length === 0) {
     return NOT_PLACED;
   }
-  return placed.map(([name, qty]) => `${name}: ${qty}`).join(", ");
+  return placed
+    .map(([name, t]) => {
+      const parts: string[] = [];
+      if (t.manual > 0) {
+        const held = Math.min(t.inCustody, t.manual);
+        parts.push(
+          held > 0 ? `${t.manual} (${held} in custody)` : `${t.manual}`
+        );
+      }
+      if (t.kits > 0) {
+        parts.push(`${t.kits} in kits`);
+      }
+      return `${name}: ${parts.join(" + ")}`;
+    })
+    .join(", ");
 }
 
 /**
@@ -526,12 +639,18 @@ export function preheader({
 /**
  * The "Also low" sentence.
  *
- * @param n - How many OTHER assets in the workspace are at or below their minimum
+ * Says "total stock" because the count and the list it links to
+ * ({@link LOW_STOCK_LIST_PATH}) compare `Asset.quantity` to the minimum,
+ * ignoring custody, while the alert itself fires on available units. An item
+ * low only because of custody is therefore not in the count.
+ *
+ * @param n - How many OTHER assets in the workspace have total stock at or
+ *   below their minimum
  */
 export function otherLowSentence(n: number) {
   return n === 1
-    ? "1 other item is at or below its minimum"
-    : `${n} other items are at or below their minimum`;
+    ? "1 other item has total stock at or below its minimum"
+    : `${n} other items have total stock at or below their minimum`;
 }
 
 /**
@@ -689,8 +808,10 @@ export function greeting(greetingName: string) {
 }
 
 /**
- * The "why did I get this" footer. Every owner and admin receives the mail, so
- * it says so, and it names the one setting that controls it.
+ * The "why did I get this" footer. Recipients are every member whose role
+ * receives inventory alerts (`notifications.inventoryAlerts` in
+ * `@shelf/permissions`), so it names that reason rather than the roles, and
+ * it names the one setting that controls when the mail fires.
  *
  * @param params.email - The address this copy was sent to
  * @param params.organizationName - The workspace name (bold in HTML)
@@ -704,11 +825,11 @@ export function recipientFooter({
 }): CopySegment[] {
   return [
     {
-      text: `This email was sent to ${email} because you are an owner or admin of `,
+      text: `This email was sent to ${email} because your role in `,
     },
     { text: `"${organizationName}"`, bold: true },
     {
-      text: ". Every owner and admin of the workspace received it. To change when it fires, edit the minimum quantity on the asset.",
+      text: " receives inventory alerts, and everyone with such a role received it. To change when it fires, edit the minimum quantity on the asset.",
     },
   ];
 }

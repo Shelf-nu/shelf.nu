@@ -276,6 +276,7 @@ async function sendLowStockEmails({
       recipients,
       logRows,
       placementRows,
+      custodySourceRows,
       otherLowCount,
       minimumEvent,
     ] = await Promise.all([
@@ -296,9 +297,28 @@ async function sendLowStockEmails({
         () =>
           db.assetLocation.findMany({
             where: { assetId, organizationId },
-            select: { quantity: true, location: { select: { name: true } } },
+            select: {
+              quantity: true,
+              assetKitId: true,
+              location: { select: { name: true } },
+            },
           }),
         "placements",
+        ids
+      ),
+      optionalRead(
+        () =>
+          db.custody.findMany({
+            // Operator custody taken from a location; kit custody holds kit
+            // slice units, which never come off a manual placement.
+            where: {
+              assetId,
+              kitCustodyId: null,
+              location: { is: { organizationId } },
+            },
+            select: { quantity: true, location: { select: { name: true } } },
+          }),
+        "custody per source location",
         ids
       ),
       optionalRead(
@@ -362,7 +382,16 @@ async function sendLowStockEmails({
 
     const organizationName = org?.name ?? "your organization";
     /** A failed read is unknown, not "not placed": the row is left out. */
-    const placements = placementRows ? describePlacements(placementRows) : null;
+    const placements = placementRows
+      ? describePlacements(
+          placementRows,
+          (custodySourceRows ?? []).flatMap((row) =>
+            row.location
+              ? [{ quantity: row.quantity, location: row.location }]
+              : []
+          )
+        )
+      : null;
     const numbers = { assetTitle, available, minQuantity, unitOfMeasure };
     const subject =
       variant === "alert"

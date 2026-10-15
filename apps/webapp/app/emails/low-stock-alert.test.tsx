@@ -67,6 +67,23 @@ async function renderAlert(props: LowStockAlertProps) {
 }
 
 describe("low-stock alert email", () => {
+  it("leaves out the facts panel when there are no facts", async () => {
+    const { html, text } = await renderAlert(
+      alertProps({
+        movement: null,
+        placements: null,
+        inCustody: 0,
+        otherLowCount: 0,
+      })
+    );
+    // The panel's background colour appears only on the panel.
+    expect(html).not.toContain("#F9FAFB");
+    // No empty block between the lead and the asset link.
+    expect(text).toContain(
+      "Your minimum is 5 Units.\n\nOpen asset: https://app.shelf.nu/assets/asset-1/overview"
+    );
+  });
+
   it("carries every fact in both the HTML and the plain text", async () => {
     const { html, text, visible } = await renderAlert(alertProps());
 
@@ -81,7 +98,7 @@ describe("low-stock alert email", () => {
       "Out with people",
       "3 Units",
       "Also low",
-      "1 other item is at or below its minimum",
+      "1 other item has total stock at or below its minimum",
       "See all low-stock items",
       "Open booking",
       "Open asset",
@@ -114,7 +131,7 @@ describe("low-stock alert email", () => {
   it("footer names the recipient's address and the workspace", async () => {
     const { text, visible } = await renderAlert(alertProps());
     const footer =
-      'This email was sent to sam@clearwater.test because you are an owner or admin of "Clearwater Supply". Every owner and admin of the workspace received it. To change when it fires, edit the minimum quantity on the asset.';
+      'This email was sent to sam@clearwater.test because your role in "Clearwater Supply" receives inventory alerts, and everyone with such a role received it. To change when it fires, edit the minimum quantity on the asset.';
     expect(visible).toContain(footer);
     expect(text).toContain(footer);
     expect(visible).toContain(`© ${new Date().getFullYear()} Shelf.nu`);

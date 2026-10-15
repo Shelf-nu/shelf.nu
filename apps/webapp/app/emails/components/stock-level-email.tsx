@@ -162,39 +162,42 @@ export function StockLevelEmail({
             <Segments segments={content.lead} />
           </Text>
 
-          <Section
-            style={{
-              margin: "24px 0",
-              backgroundColor: "#F9FAFB",
-              borderRadius: "8px",
-              border: "1px solid #EAECF0",
-              padding: "8px 20px",
-            }}
-          >
-            {rows.map((row, index) => (
-              <div
-                key={row.label}
-                style={{
-                  padding: "10px 0",
-                  borderBottom:
-                    index < rows.length - 1 ? "1px solid #EAECF0" : "none",
-                }}
-              >
-                <p style={labelStyle}>{row.label}</p>
-                <p style={valueStyle}>{row.value}</p>
-                {row.link ? (
-                  <p style={valueStyle}>
-                    <Link
-                      href={`${facts.serverUrl}${row.link.href}`}
-                      style={{ color: emailPrimaryColor }}
-                    >
-                      {row.link.text}
-                    </Link>
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </Section>
+          {/* No facts, no panel: an empty bordered box reads as broken. */}
+          {rows.length > 0 ? (
+            <Section
+              style={{
+                margin: "24px 0",
+                backgroundColor: "#F9FAFB",
+                borderRadius: "8px",
+                border: "1px solid #EAECF0",
+                padding: "8px 20px",
+              }}
+            >
+              {rows.map((row, index) => (
+                <div
+                  key={row.label}
+                  style={{
+                    padding: "10px 0",
+                    borderBottom:
+                      index < rows.length - 1 ? "1px solid #EAECF0" : "none",
+                  }}
+                >
+                  <p style={labelStyle}>{row.label}</p>
+                  <p style={valueStyle}>{row.value}</p>
+                  {row.link ? (
+                    <p style={valueStyle}>
+                      <Link
+                        href={`${facts.serverUrl}${row.link.href}`}
+                        style={{ color: emailPrimaryColor }}
+                      >
+                        {row.link.text}
+                      </Link>
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </Section>
+          ) : null}
 
           {/* Centred so the button reads as the one action at any width. */}
           <Section style={{ textAlign: "center", marginBottom: "24px" }}>
@@ -271,7 +274,7 @@ export function stockLevelEmailText({
     greeting(facts.recipient.greetingName),
     content.heading,
     segmentsToText(content.lead),
-    factLines.join("\n"),
+    ...(factLines.length > 0 ? [factLines.join("\n")] : []),
     `Open asset: ${facts.serverUrl}/assets/${facts.assetId}/overview`,
     content.notice,
     "The Shelf Team",

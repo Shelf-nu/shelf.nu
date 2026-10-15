@@ -1,8 +1,9 @@
 /**
  * Low Stock Alert Email Template
  *
- * Sent to every owner and admin of a workspace when a quantity-tracked asset's
- * available quantity crosses down to or below its minimum (`minQuantity`).
+ * Sent to every member whose role receives inventory alerts when a
+ * quantity-tracked asset's available quantity crosses down to or below its
+ * minimum (`minQuantity`).
  * Reads "Out of stock" instead of "Low stock" when nothing is available.
  *
  * Tells the reader, without opening the app: what is low and how low, what took

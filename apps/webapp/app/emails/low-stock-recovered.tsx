@@ -1,9 +1,9 @@
 /**
  * Low Stock Recovered Email Template
  *
- * Sent to every owner and admin of a workspace when a quantity-tracked asset
- * that was alerted as low climbs back above its minimum (`minQuantity`). It
- * closes the episode the low-stock alert opened, so it carries the same facts:
+ * Sent to every member whose role receives inventory alerts when a
+ * quantity-tracked asset that was alerted as low climbs back above its minimum
+ * (`minQuantity`). It closes the episode the low-stock alert opened, so it carries the same facts:
  * what brought the stock back, where it sits, and what else is still low.
  *
  * The body is shared with the low-stock alert; this file supplies only the

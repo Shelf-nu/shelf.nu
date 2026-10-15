@@ -81,7 +81,7 @@ describe("back-in-stock email", () => {
       "Where it is",
       "Ogden warehouse: 14",
       "Also low",
-      "2 other items are at or below their minimum",
+      "2 other items have total stock at or below their minimum",
       "See all low-stock items",
       "Open asset",
       "No action needed.",
@@ -111,7 +111,7 @@ describe("back-in-stock email", () => {
   it("footer names the recipient's address and the workspace", async () => {
     const { text, visible } = await renderRecovered(recoveredProps());
     const footer =
-      'This email was sent to sam@clearwater.test because you are an owner or admin of "Clearwater Supply". Every owner and admin of the workspace received it. To change when it fires, edit the minimum quantity on the asset.';
+      'This email was sent to sam@clearwater.test because your role in "Clearwater Supply" receives inventory alerts, and everyone with such a role received it. To change when it fires, edit the minimum quantity on the asset.';
     expect(visible).toContain(footer);
     expect(text).toContain(footer);
   });
