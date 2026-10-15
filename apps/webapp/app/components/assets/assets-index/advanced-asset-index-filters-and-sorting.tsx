@@ -47,6 +47,7 @@ import {
 import type { Filter, FilterFieldType } from "./advanced-filters/schema";
 import { ValueField } from "./advanced-filters/value-field";
 import { useFilterFormValidation } from "./advanced-filters/value.client.validator";
+import { isLowStockFilterOn, toggleLowStockParam } from "./low-stock-param";
 import { SaveFilterButton } from "./saved-filter-presets";
 import When from "../../when/when";
 
@@ -126,24 +127,14 @@ function AdvancedFilter() {
   // Reads as inactive on the model view, which renders no toggle for it, so the
   // badge, the empty-state copy and the clear control describe the controls
   // actually on screen for the render before the strip below lands.
-  const lowStockActive =
-    !isModelView && searchParams.get("lowStockOnly") === "true";
+  const lowStockActive = !isModelView && isLowStockFilterOn(searchParams);
   const activeFilterCount = initialFilters.length + (lowStockActive ? 1 : 0);
 
   function toggleLowStock() {
     // Preserve any in-progress (unapplied) column-filter edits: skip the
     // URL-sync effect's reset, exactly as `applyFilters` / `clearAllFilters` do.
     isApplyingInternally.current = true;
-    setSearchParams((prev) => {
-      if (prev.get("lowStockOnly") === "true") {
-        prev.delete("lowStockOnly");
-      } else {
-        prev.set("lowStockOnly", "true");
-      }
-      // Re-run pagination from the top when the filter changes.
-      prev.delete("page");
-      return prev;
-    });
+    setSearchParams(toggleLowStockParam);
   }
 
   // Create a stable string from search params excluding getAll parameter

@@ -5754,6 +5754,7 @@ export async function getPaginatedAndFilterableAssets({
   userId,
   locationIdsOverride,
   honorArchivedView = false,
+  honorLowStockFilter = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -5793,6 +5794,12 @@ export async function getPaginatedAndFilterableAssets({
    * member without the grant, gets active assets whatever the URL says.
    */
   honorArchivedView?: boolean;
+  /**
+   * Honour the `?lowStockOnly=true` param. Off by default: only the asset
+   * index renders the toggle that clears it, so a picker or another list
+   * never narrows to low-stock items on a param it cannot show.
+   */
+  honorLowStockFilter?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -5900,7 +5907,8 @@ export async function getPaginatedAndFilterableAssets({
         archivedFilter: honorArchivedView
           ? getArchivedFilterFromParams(searchParams)
           : "active",
-        lowStockOnly: searchParams.get("lowStockOnly") === "true",
+        lowStockOnly:
+          honorLowStockFilter && searchParams.get("lowStockOnly") === "true",
       }),
     ]);
 

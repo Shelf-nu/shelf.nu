@@ -312,6 +312,8 @@ export async function simpleModeLoader({
       // custody rule for every restricted role.
       canSeeAllCustody,
       honorArchivedView,
+      // The simple index renders the "Low stock only" toggle.
+      honorLowStockFilter: true,
       filters,
       extraInclude:
         view === "availability"

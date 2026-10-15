@@ -21,6 +21,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { isLowStockFilterOn, toggleLowStockParam } from "./low-stock-param";
 import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
@@ -46,7 +47,7 @@ export function AssetIndexFilters({
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
   const [searchParams, setSearchParams] = useSearchParams();
-  const lowStockActive = searchParams.get("lowStockOnly") === "true";
+  const lowStockActive = isLowStockFilterOn(searchParams);
 
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
@@ -80,14 +81,7 @@ export function AssetIndexFilters({
                 aria-label="Low stock only"
                 title="Low stock only"
                 className="shrink-0 whitespace-nowrap"
-                onClick={() =>
-                  setSearchParams((prev) => {
-                    if (lowStockActive) prev.delete("lowStockOnly");
-                    else prev.set("lowStockOnly", "true");
-                    prev.delete("page");
-                    return prev;
-                  })
-                }
+                onClick={() => setSearchParams(toggleLowStockParam)}
               >
                 <span className="flex items-center gap-1.5">
                   <TriangleAlertIcon className="size-4" aria-hidden="true" />
