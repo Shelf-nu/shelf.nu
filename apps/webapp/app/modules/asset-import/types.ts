@@ -69,6 +69,15 @@ export type AssetImportStatusPayload = {
   isMine: boolean;
 };
 
+/**
+ * What members without import permission receive for the assets index
+ * notice: progress only, no id, file name, error text or warning count.
+ */
+export type AssetImportNoticePayload = Pick<
+  AssetImportStatusPayload,
+  "status" | "phase" | "processedRows" | "totalRows"
+>;
+
 /** Status page payload: the status plus the stored warnings. */
 export type AssetImportDetailsPayload = AssetImportStatusPayload & {
   warnings: ImportWarning[];

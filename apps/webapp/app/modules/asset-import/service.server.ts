@@ -415,6 +415,13 @@ type StatusRow = {
   warnings?: unknown;
 };
 
+/** Compile-time check: every {@link StatusRow} column is selected (and no more). */
+const _statusSelectCoversRow: Record<
+  Exclude<keyof StatusRow, "warnings">,
+  true
+> = STATUS_SELECT;
+void _statusSelectCoversRow;
+
 /** A {@link StatusRow} after the stall check, as {@link toStatusPayload} reads it. */
 type SettledImport = {
   status: AssetImportStatus;

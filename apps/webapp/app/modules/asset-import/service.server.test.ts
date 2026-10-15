@@ -565,6 +565,30 @@ describe("getActiveAssetImport", () => {
     expect(query?.orderBy).toEqual({ updatedAt: "desc" });
   });
 
+  it("fails a stalled RUNNING import and reports it as FAILED", async () => {
+    vi.mocked(db.assetImport.findFirst)
+      .mockResolvedValueOnce(row({ updatedAt: minutesAgo(120) }) as never)
+      .mockResolvedValueOnce(
+        imp({
+          status: "FAILED",
+          phase: "ROWS",
+          errorMessage: "stopped",
+          completedAt: null,
+          processedRows: 4,
+          warningCount: 0,
+        }) as never
+      );
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+
+    const result = await getActiveAssetImport({
+      userId: "u",
+      organizationId: "org",
+    });
+
+    expect(db.assetImport.updateMany).toHaveBeenCalled();
+    expect(result?.status).toBe("FAILED");
+  });
+
   it("never selects rows, resolved data or warnings", async () => {
     vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
 

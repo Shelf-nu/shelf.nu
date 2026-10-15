@@ -44,7 +44,14 @@ import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
 import { getActiveAssetImport } from "~/modules/asset-import/service.server";
-import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
+import type {
+  AssetImportNoticePayload,
+  AssetImportStatusPayload,
+} from "~/modules/asset-import/types";
+import {
+  isFullImportPayload,
+  shapeActiveImportForViewer,
+} from "~/modules/asset-import/viewer-payload";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -68,6 +75,7 @@ import { isLikeShelfError, makeShelfError, ShelfError } from "~/utils/error";
 import { isRouteError } from "~/utils/http";
 import { payload, error } from "~/utils/http.server";
 import { skipRevalidationOnClientViewChange } from "~/utils/list-view-params";
+import { Logger } from "~/utils/logger";
 import {
   PermissionAction,
   PermissionEntity,
@@ -262,10 +270,36 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
-    const activeAssetImportPromise: Promise<AssetImportStatusPayload | null> =
-      getActiveAssetImport({
-        userId: authSession.userId,
-        organizationId: currentOrganization.id,
+    // A failure here (e.g. the AssetImport table not migrated yet) must not
+    // take every page down: log it and show no import.
+    const activeAssetImportPromise: Promise<
+      AssetImportStatusPayload | AssetImportNoticePayload | null
+    > = hasPermission({
+      organizationId,
+      userId,
+      roles: currentOrganizationUserRoles ?? [],
+      entity: PermissionEntity.asset,
+      action: PermissionAction.import,
+    })
+      .then(async (canImport) =>
+        shapeActiveImportForViewer(
+          await getActiveAssetImport({
+            userId: authSession.userId,
+            organizationId: currentOrganization.id,
+          }),
+          canImport
+        )
+      )
+      .catch((cause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause,
+            message: "Could not load the active asset import.",
+            label: "Asset Import",
+            shouldBeCaptured: true,
+          })
+        );
+        return null;
       });
     const [
       bookingSettings,
@@ -308,7 +342,10 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
         // Explicit annotation keeps the loader's inferred type small.
-        activeAssetImport: activeAssetImport as AssetImportStatusPayload | null,
+        activeAssetImport: activeAssetImport as
+          | AssetImportStatusPayload
+          | AssetImportNoticePayload
+          | null,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
@@ -435,7 +472,7 @@ export default function App() {
             </>
           )}
           <Toaster />
-          {activeAssetImport ? (
+          {isFullImportPayload(activeAssetImport) ? (
             <AssetImportCard
               key={activeAssetImport.id}
               initial={activeAssetImport}

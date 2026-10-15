@@ -36,7 +36,12 @@ function renderNotice(
   const Stub = createRoutesStub([
     {
       path: "*",
-      Component: () => <AssetImportNotice activeAssetImport={active} />,
+      Component: () => (
+        <>
+          <AssetImportNotice activeAssetImport={active} />
+          <span>route ready</span>
+        </>
+      ),
     },
   ]);
   return render(<Stub initialEntries={[path]} />);
@@ -52,17 +57,22 @@ describe("AssetImportNotice", () => {
   });
 
   it("renders nothing for a completed import", async () => {
-    const { container } = renderNotice(status({ status: "COMPLETED" }));
+    renderNotice(status({ status: "COMPLETED" }));
 
-    // The stub resolves its route asynchronously; wait a tick before asserting.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(container).toBeEmptyDOMElement();
+    await screen.findByText("route ready");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("also shows with a trailing slash", async () => {
+    renderNotice(status(), "/assets/");
+
+    expect(await screen.findByRole("status")).toBeInTheDocument();
   });
 
   it("renders nothing off the assets index", async () => {
-    const { container } = renderNotice(status(), "/kits");
+    renderNotice(status(), "/kits");
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(container).toBeEmptyDOMElement();
+    await screen.findByText("route ready");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

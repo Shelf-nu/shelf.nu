@@ -11,12 +11,12 @@
  * @see {@link file://./../../../routes/_layout+/_layout.tsx} Loader and render site
  */
 import { useLocation } from "react-router";
-import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
+import type { AssetImportNoticePayload } from "~/modules/asset-import/types";
 
 /** Props for {@link AssetImportNotice}. */
 type AssetImportNoticeProps = {
   /** The active import from the layout loader, if any. */
-  activeAssetImport: AssetImportStatusPayload | null | undefined;
+  activeAssetImport: AssetImportNoticePayload | null | undefined;
 };
 
 /**
@@ -32,7 +32,7 @@ export function AssetImportNotice({
   const { pathname } = useLocation();
 
   if (
-    pathname !== "/assets" ||
+    (pathname !== "/assets" && pathname !== "/assets/") ||
     !activeAssetImport ||
     (activeAssetImport.status !== "QUEUED" &&
       activeAssetImport.status !== "RUNNING")
