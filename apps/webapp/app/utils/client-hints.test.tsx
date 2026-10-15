@@ -3,9 +3,10 @@
 // request header on the SERVER (document is undefined there). Under happy-dom
 // `document` exists, so the helper would read the empty `document.cookie` instead
 // — node env mirrors the real server path.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ResolvedFormatPrefs } from "~/utils/date-format";
 import {
+  CLIENT_HINT_CHECK_SCRIPT,
   detectFormatPrefsForPersistence,
   formatDateBasedOnLocaleOnly,
 } from "./client-hints";
@@ -79,5 +80,64 @@ describe("detectFormatPrefsForPersistence — timezone persistence gate", () => 
     expect(
       detectFormatPrefsForPersistence(requestWith("America/New_York")).timeZone
     ).toBe("America/New_York");
+  });
+});
+
+/**
+ * The inline `<head>` script runs before any stylesheet has loaded. It is
+ * executed here against a minimal fake `document` / `window` / `navigator`,
+ * which is all it touches.
+ */
+describe("CLIENT_HINT_CHECK_SCRIPT", () => {
+  const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  function runScript(cookie: string) {
+    const writtenCookies: string[] = [];
+    const fakeDocument = {
+      documentElement: { style: { visibility: "" } },
+      get cookie() {
+        return cookie;
+      },
+      set cookie(value: string) {
+        writtenCookies.push(value);
+      },
+    };
+    const reload = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    new Function("document", "window", "navigator", CLIENT_HINT_CHECK_SCRIPT)(
+      fakeDocument,
+      { location: { reload } },
+      { cookieEnabled: true }
+    );
+    return {
+      writtenCookies,
+      reload,
+      style: fakeDocument.documentElement.style,
+    };
+  }
+
+  it("writes a persistent cookie, hides the page and reloads when the cookie is missing", () => {
+    const { writtenCookies, reload, style } = runScript("");
+
+    expect(writtenCookies).toHaveLength(1);
+    expect(writtenCookies[0]).toContain(
+      `CH-time-zone=${encodeURIComponent(browserTimeZone)}`
+    );
+    // A session cookie is gone after a browser restart, which would reload
+    // the first tab of every session.
+    expect(writtenCookies[0]).toMatch(/;max-age=\d+/);
+    // Without this, Firefox paints the page it is leaving before its CSS loads.
+    expect(style.visibility).toBe("hidden");
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the page alone when the cookie already matches", () => {
+    const { writtenCookies, reload, style } = runScript(
+      `CH-time-zone=${encodeURIComponent(browserTimeZone)}`
+    );
+
+    expect(writtenCookies).toHaveLength(0);
+    expect(style.visibility).toBe("");
+    expect(reload).not.toHaveBeenCalled();
   });
 });
