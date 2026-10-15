@@ -649,27 +649,6 @@ export default function OrgPage() {
         <div className="w-[400px] bg-gray-200 p-4">
           <div className="flex flex-col gap-8">
             <div>
-              <h3>Export assets backup</h3>
-              <Button
-                type="submit"
-                to={`/api/admin/export-org-assets/${
-                  organization.id
-                }/assets-${new Date().toISOString().slice(0, 10)}.csv`}
-                download={true}
-                reloadDocument={true}
-              >
-                Export assets backup
-              </Button>
-            </div>
-            <div>
-              <h3>Import assets backup</h3>
-              <FileForm
-                intent="backup"
-                url={`/api/admin/import-org-assets/${organization.id}`}
-              />
-            </div>
-
-            <div>
               <h3>Import content</h3>
               <FileForm intent={"content"} />
             </div>

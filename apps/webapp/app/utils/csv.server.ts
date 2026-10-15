@@ -16,11 +16,7 @@ import iconv from "iconv-lite";
 import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
-import { serializeBackupPlacements } from "~/modules/asset/backup-placements";
-import {
-  fetchAssetsForExport,
-  getAdvancedPaginatedAndFilterableAssets,
-} from "~/modules/asset/service.server";
+import { getAdvancedPaginatedAndFilterableAssets } from "~/modules/asset/service.server";
 import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
@@ -52,7 +48,6 @@ import { getBookingAssetCheckinLabel } from "./booking-assets";
 import { checkExhaustiveSwitch } from "./check-exhaustive-switch";
 import { getClientHint } from "./client-hints";
 import { getAdvancedFiltersFromRequest } from "./cookies.server";
-import { quoteCsvCell } from "./csv-cells";
 import { formatCurrency } from "./currency";
 import { formatDate, type ResolvedFormatPrefs } from "./date-format";
 import { resolveUserFormatPrefsById } from "./date-format.server";
@@ -178,181 +173,6 @@ export const csvDataFromRequest = async ({ request }: { request: Request }) => {
     });
   }
 };
-
-/**
- * One row of the backup export: an asset's own columns plus the relations the
- * dump carries (`category`, `tags`, `notes`, `customFields`, …). The builder
- * walks a row by key, so it is typed by what it reads — arbitrary entries —
- * rather than by Prisma's `Asset`, which describes only the columns and would
- * make every relation-bearing row a cast.
- */
-export type BackupExportRow = Record<string, unknown>;
-
-/**
- * Builds the rows of the workspace backup export — a full-fidelity dump whose
- * one job is to re-import through `extractCSVDataFromBackupImport`.
- *
- * Relations are carried as JSON, and values are copied verbatim rather than
- * formatted for reading: a boolean stays `true`, a timestamp keeps its time.
- * Every cell is quoted, because both the JSON and ordinary asset text hold
- * quotes, semicolons and commas, and an unquoted cell carrying one shifts the
- * columns after it — silently, since the importer reads by position.
- *
- * @param args.assets - The rows to dump, as {@link BackupExportRow}.
- * @param args.keysToSkip - Columns to leave out (foreign keys that only
- *   resolve in the source workspace).
- * @returns Rows of already-quoted cells, ready to join with a delimiter.
- */
-export const buildCsvBackupDataFromAssets = ({
-  assets,
-  keysToSkip,
-}: {
-  assets: BackupExportRow[];
-  keysToSkip: string[];
-}) => {
-  if (!assets.length) return [] as unknown as CSVData;
-  return assets.map((asset) => {
-    const toExport: string[] = [];
-
-    /** Itterate over the values to create teh export object */
-    Object.entries(asset).forEach(([key, value]) => {
-      /** Skip keys that are not needed. These are foreign keys for the related entries */
-      if (keysToSkip.includes(key)) return;
-
-      /** If the value is null, push an empty string
-       * We have a bit of a special case, for the relations that are objects, we need to push an empty object instead of an empty string.
-       * This way we prevent the import from failing when importing the file again due to "Invalid JSON"
-       * This needs to be done for all one-to-one relations
-       */
-      if (value === null) {
-        if (["custody", "category", "assetModel"].includes(key)) {
-          return toExport.push(quoteCsvCell("{}"));
-        }
-        return toExport.push(quoteCsvCell(""));
-      }
-
-      /** Relations listed here travel as JSON rather than as an id, so a
-       * restore can resolve (or create) them by name. An id would only mean
-       * anything in the workspace the backup came from.
-       *
-       * Every relation `fetchAssetsForExport` loads needs a case here and a
-       * matching one in `extractCSVDataFromBackupImport`. One that falls to
-       * the default branch stringifies to `[object Object]`. */
-      switch (key) {
-        case "assetLocations":
-          // As `[{ location: <name>, quantity }]`; which rows go out depends
-          // on the asset's type, see `serializeBackupPlacements`.
-          toExport.push(
-            quoteCsvCell(
-              JSON.stringify(serializeBackupPlacements(value, asset.type))
-            )
-          );
-          break;
-        // Custody rows go out whole, ids included. Those ids are
-        // workspace-local: a restore resolves the custodian by name and must
-        // never read an id from the file. A location on custody has to travel
-        // by name, as `assetLocations` does, never as an id.
-        case "custody":
-        case "category":
-        case "notes":
-        case "tags":
-        case "organization":
-        case "valuation":
-        case "customFields":
-        case "assetModel":
-          toExport.push(
-            quoteCsvCell(
-              JSON.stringify(value, (_key, value) => {
-                /** Custom replacer function.
-                 * We do this to ensure that in the result we have emtpy strings instead of null values
-                 */
-                if (value === null) {
-                  return "";
-                }
-                return value;
-              })
-            )
-          );
-          break;
-        case "description":
-          // Line breaks are stripped rather than quoted: one asset stays one
-          // row, so the file keeps its shape in a spreadsheet.
-          toExport.push(quoteCsvCell(String(value).replace(/\n|\r/g, "")));
-          break;
-        default:
-          toExport.push(quoteCsvCell(String(value)));
-      }
-    });
-
-    return toExport;
-  });
-};
-
-/* There are some keys that need to be skipped and require special handling */
-const keysToSkip = [
-  "userId",
-  "organizationId",
-  "categoryId",
-  "locationId",
-  "customFieldId",
-  "mainImage",
-  "mainImageExpiration",
-  // The backup carries the resolved `assetModel` object instead, so a restore
-  // can find or create the model by name. This FK resolves only in the
-  // workspace the backup came from.
-  "assetModelId",
-];
-
-export async function exportAssetsBackupToCsv({
-  organizationId,
-}: {
-  organizationId: string;
-}) {
-  try {
-    const assets = await fetchAssetsForExport({ organizationId });
-
-    const csvData = buildCsvBackupDataFromAssets({
-      assets,
-      keysToSkip,
-    });
-
-    if (!csvData || !csvData.length) {
-      throw new ShelfError({
-        cause: null,
-        title: "No assets to export",
-        message:
-          "Your workspace doesn't have any assets so there is nothing to export.",
-        label: "CSV",
-        shouldBeCaptured: false,
-      });
-    }
-
-    /** Get the headers from the first row and filter out the keys to skip */
-    const headers = Object.keys(assets[0])
-      .filter((header) => !keysToSkip.includes(header))
-      .map(quoteCsvCell);
-
-    /** Add the header column */
-    csvData.unshift(headers);
-
-    /** Convert the data to a string */
-    const csvRows = csvData.map((row) => row.join(";"));
-
-    /** Join the rows with a new line */
-    const csvString = csvRows.join("\n");
-
-    return csvString;
-  } catch (cause) {
-    throw new ShelfError({
-      cause,
-      message: isLikeShelfError(cause)
-        ? cause.message
-        : "Something went wrong while exporting the assets.",
-      additionalData: { organizationId },
-      label: "CSV",
-    });
-  }
-}
 
 /**
  * Resolves the assets to export, honoring the select-all sentinel and the
