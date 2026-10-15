@@ -128,4 +128,12 @@ export type ContentImportPreview = {
     inKit: number;
     quantityTracked: number;
   };
+  /**
+   * Values that will import but probably do not match their label, such as
+   * an External QR value without a protocol. Capped at
+   * `MAX_REPORTED_ROW_ERRORS`; never blocks the import.
+   */
+  valueWarnings: ImportWarning[];
+  /** How many value warnings the whole file has, listed or not. */
+  totalValueWarnings: number;
 };

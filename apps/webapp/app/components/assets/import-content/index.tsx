@@ -216,7 +216,8 @@ export const ImportContent = () => {
                 your organization. Code39 and DataMatrix allow only letters and
                 numbers; Code128 supports most symbols. Values are automatically
                 converted to uppercase. Leave barcode columns empty if you don't
-                want to assign barcodes.
+                want to assign barcodes. Enter External QR values exactly as the
+                label encodes them, including https://.
               </p>
             </div>
           </div>

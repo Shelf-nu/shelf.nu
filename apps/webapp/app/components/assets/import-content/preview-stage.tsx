@@ -20,7 +20,9 @@ import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ContentImportPreview } from "~/modules/asset-import/types";
 import type { action } from "~/routes/_layout+/assets.import";
+import { AlertIcon } from "../../icons/library";
 import { Button } from "../../shared/button";
+import { ImportRowErrorsTable } from "../../shared/import-row-errors-table";
 import { SummaryPill } from "../bulk-update/shared";
 import { ConfirmImportDialog } from "../import-preview/confirm-import-dialog";
 import { ImportErrorDetails } from "../import-preview/import-error-details";
@@ -56,7 +58,8 @@ export function PreviewStage({
   confirmFetcher,
 }: PreviewStageProps) {
   const isConfirming = useDisabled(confirmFetcher);
-  const { counts, newEntities, totalRows } = preview;
+  const { counts, newEntities, totalRows, valueWarnings, totalValueWarnings } =
+    preview;
   const [dialogOpen, setDialogOpen] = useState(false);
   const confirmOutcome = useFetcherOutcomeSinceOpen(confirmFetcher, dialogOpen);
   // The refusal shown in the dialog: the confirm fetcher's error, but only when
@@ -101,12 +104,36 @@ export function PreviewStage({
         ]}
       />
 
+      {totalValueWarnings > 0 ? (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-2 font-medium text-amber-800">
+            <AlertIcon className="inline-block size-4" /> {totalValueWarnings}{" "}
+            barcode {totalValueWarnings === 1 ? "value" : "values"} may not
+            match {totalValueWarnings === 1 ? "its label" : "their labels"}
+          </p>
+          <p className="text-sm text-amber-700">
+            Scanning matches the exact text a QR code encodes. You can import
+            anyway, or fix the file and upload it again.
+          </p>
+          <ImportRowErrorsTable
+            rowErrors={valueWarnings}
+            totalRowErrors={totalValueWarnings}
+            tone="warning"
+          />
+        </div>
+      ) : null}
+
       <ImportGrid
         columns={preview.columns}
         rows={preview.rows}
         totalRows={totalRows}
         caption={`${totalRows} assets will be created`}
-        legend={[{ tone: "new", label: "Will be created" }]}
+        legend={[
+          { tone: "new", label: "Will be created" },
+          ...(totalValueWarnings > 0
+            ? [{ tone: "warning" as const, label: "Check this value" }]
+            : []),
+        ]}
         ariaLabel="Import preview"
       />
 

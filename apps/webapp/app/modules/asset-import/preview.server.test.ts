@@ -131,6 +131,50 @@ describe("buildContentImportPreview", () => {
       quantityTracked: 1,
     });
   });
+
+  describe("External QR value warnings", () => {
+    it("warns about bare web addresses with the spreadsheet row and still stores the draft", async () => {
+      const preview = await buildContentImportPreview({
+        ...args,
+        csvData: [
+          ["title", "barcode_ExternalQR"],
+          ["Drill", "example.com/abc"],
+          ["Saw", "https://ok.example.com/x"],
+          ["Ladder", "https://ok.example.com/y,shop.example.co.uk/item"],
+        ],
+      });
+
+      expect(preview.totalValueWarnings).toBe(2);
+      expect(preview.valueWarnings.map((warning) => warning.row)).toEqual([
+        2, 4,
+      ]);
+      expect(preview.valueWarnings[0].message).toContain('"example.com/abc"');
+      expect(preview.valueWarnings[1].message).toContain(
+        '"shop.example.co.uk/item"'
+      );
+      expect(preview.rows[0].cells.barcode_ExternalQR.tone).toBe("warning");
+      expect(preview.rows[0].cells.barcode_ExternalQR.note).toContain(
+        "without"
+      );
+      expect(preview.rows[1].cells.barcode_ExternalQR.tone).toBe("plain");
+      expect(preview.rows[2].cells.barcode_ExternalQR.tone).toBe("warning");
+      expect(db.assetImport.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns no warnings when every value has a protocol", async () => {
+      const preview = await buildContentImportPreview({
+        ...args,
+        csvData: [
+          ["title", "barcode_ExternalQR"],
+          ["Drill", "https://example.com/abc"],
+          ["Saw", ""],
+        ],
+      });
+
+      expect(preview.valueWarnings).toEqual([]);
+      expect(preview.totalValueWarnings).toBe(0);
+    });
+  });
 });
 
 describe("toImportGridRows", () => {

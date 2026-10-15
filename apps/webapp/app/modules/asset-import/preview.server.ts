@@ -12,9 +12,14 @@
 import type { Organization, Prisma, User } from "@prisma/client";
 import { db } from "~/database/db.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
+import { getExternalQrValueWarning } from "~/modules/barcode/validation";
 import { LEGACY_CUID_LENGTH } from "~/utils/constants";
+import { decodeCsvListCell } from "~/utils/csv-cells";
 import { id } from "~/utils/id/id.server";
-import { spreadsheetRowNumber } from "~/utils/import-row-errors";
+import {
+  MAX_REPORTED_ROW_ERRORS,
+  spreadsheetRowNumber,
+} from "~/utils/import-row-errors";
 import { extractCSVDataFromContentImport } from "~/utils/import.server";
 import { PREVIEW_DISPLAY_LIMIT } from "./constants";
 import { findMissingImportEntities } from "./missing-entities.server";
@@ -23,6 +28,7 @@ import type {
   ImportGridCell,
   ImportGridRow,
   ImportNewEntities,
+  ImportWarning,
   StoredImportRow,
 } from "./types";
 import { validateContentImportFile } from "./validate.server";
@@ -35,6 +41,50 @@ const SINGLE_NAME_COLUMNS = {
   custodian: "custodians",
   assetModel: "assetModels",
 } as const satisfies Record<string, keyof ImportNewEntities>;
+
+/** Column holding External QR values, a comma separated list per cell. */
+const EXTERNAL_QR_COLUMN = "barcode_ExternalQR";
+
+/**
+ * Warnings for every value in an External QR cell, in cell order.
+ *
+ * @param raw - Stored cell value
+ * @returns One warning text per flagged value; empty when the cell is fine
+ */
+function externalQrCellWarnings(raw: unknown): string[] {
+  if (typeof raw !== "string" || !raw.trim()) return [];
+  return decodeCsvListCell(raw).flatMap((value) => {
+    const warning = getExternalQrValueWarning(value);
+    return warning ? [warning] : [];
+  });
+}
+
+/**
+ * Collects value warnings over every stored row.
+ *
+ * @param rows - Stored import rows
+ * @returns The first {@link MAX_REPORTED_ROW_ERRORS} warnings and the exact total
+ */
+export function collectValueWarnings(rows: StoredImportRow[]): {
+  valueWarnings: ImportWarning[];
+  totalValueWarnings: number;
+} {
+  const valueWarnings: ImportWarning[] = [];
+  let totalValueWarnings = 0;
+  for (const row of rows) {
+    for (const message of externalQrCellWarnings(row[EXTERNAL_QR_COLUMN])) {
+      totalValueWarnings += 1;
+      if (valueWarnings.length < MAX_REPORTED_ROW_ERRORS) {
+        valueWarnings.push({
+          row: row.rowNumber,
+          title: "External QR value",
+          message,
+        });
+      }
+    }
+  }
+  return { valueWarnings, totalValueWarnings };
+}
 
 /** Case-insensitive membership, matching how missing entities are detected. */
 function includesName(names: string[], value: string): boolean {
@@ -70,6 +120,11 @@ function toGridCell(
     if (value.trim() && includesName(newEntities[kind], value)) {
       return { value, tone: "new", note: "Will be created" };
     }
+  }
+
+  if (column === EXTERNAL_QR_COLUMN) {
+    const [warning] = externalQrCellWarnings(raw);
+    if (warning) return { value, tone: "warning", note: warning };
   }
 
   return { value, tone: "plain" };
@@ -174,6 +229,7 @@ export async function buildContentImportPreview({
     columns,
     rows: toImportGridRows(rows, columns, newEntities, PREVIEW_DISPLAY_LIMIT),
     newEntities,
+    ...collectValueWarnings(rows),
     counts: {
       withImage: rows.filter((row) => row.imageUrl?.trim()).length,
       withCustodian: rows.filter((row) => row.custodian?.trim()).length,

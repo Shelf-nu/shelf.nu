@@ -46,6 +46,8 @@ const PREVIEW: ContentImportPreview = {
     assetModels: [],
   },
   counts: { withImage: 1, withCustodian: 0, inKit: 0, quantityTracked: 0 },
+  valueWarnings: [],
+  totalValueWarnings: 0,
 };
 
 /**
@@ -96,6 +98,52 @@ describe("ContentImportFlow", () => {
     expect(
       screen.getByText("Power tools", { selector: "span.font-mono" })
     ).toBeInTheDocument();
+  });
+
+  it("lists External QR value warnings above the grid and keeps Import enabled", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      error: null,
+      intent: "preview",
+      preview: {
+        ...PREVIEW,
+        valueWarnings: [
+          {
+            row: 2,
+            title: "External QR value",
+            message: '"example.com/abc" looks like a web address',
+          },
+        ],
+        totalValueWarnings: 1,
+      },
+    });
+
+    await uploadFile(user);
+
+    expect(
+      await screen.findByText(/1 barcode value may not match its label/i)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('"example.com/abc" looks like a web address')
+    ).toBeInTheDocument();
+    expect(screen.getByText("Check this value")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Check" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Import 2 assets" })
+    ).toBeEnabled();
+  });
+
+  it("shows no warning notice when the file has no value warnings", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: PREVIEW });
+
+    await uploadFile(user);
+
+    await screen.findByRole("button", { name: "Import 2 assets" });
+    expect(screen.queryByText(/may not match/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Check this value")).not.toBeInTheDocument();
   });
 
   it("moves focus to the preview heading when the preview loads", async () => {

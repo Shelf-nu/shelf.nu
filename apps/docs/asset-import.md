@@ -94,6 +94,10 @@ rollout, the updatable set is: `name`, `category`, `location`, `tags`,
 See the in-app help text for the full rules. These aren't specific to
 qty-tracked imports.
 
+Enter External QR values exactly as the label encodes them, including
+`https://`. The preview flags values that look like a web address without a
+protocol (`example.com/abc`); the warning never blocks the import.
+
 ## How a create import runs
 
 Create-from-content is a browser-driven flow backed by a background job. The
