@@ -297,10 +297,11 @@ const label: ErrorLabel = "Booking";
  * @param booking - The booking data used to render the email template
  * @param subject - Email subject line
  * @param buildText - Builds the plain-text body from a recipient's resolved prefs
+ *   and the actor, passed together so the text and HTML lines always agree
  * @param buildHeading - Builds the HTML heading from a recipient's resolved prefs
  * @param hints - Acting user's hints, only the null-field fallback for recipients
- * @param actor - Who acted and when, shown under the heading. Pass the same
- *   `actor` to the text builder so the plain-text body carries the line too.
+ * @param actor - Who acted and when, shown under the heading and handed to
+ *   `buildText` for the plain-text body
  * @param templateProps - Additional props forwarded to the email template
  */
 async function sendBookingEmailToAllRecipients({
@@ -318,8 +319,15 @@ async function sendBookingEmailToAllRecipients({
   subject: string;
   /** From `resolveBookingEmailActor`; `undefined` leaves the line out. */
   actor: BookingEmailActor | undefined;
-  /** Built per recipient with their resolved prefs. */
-  buildText: (prefs: ResolvedFormatPrefs) => string;
+  /**
+   * Built per recipient. Spread `textArgs` into the text builder: it carries
+   * the recipient's resolved prefs and the actor, so the plain-text body gets
+   * the same actor line as the HTML.
+   */
+  buildText: (textArgs: {
+    prefs: ResolvedFormatPrefs;
+    actor: BookingEmailActor | undefined;
+  }) => string;
   /** Built per recipient with their resolved prefs. */
   buildHeading: (prefs: ResolvedFormatPrefs) => string;
   /** Acting user's hints — only the null-field fallback for recipients. */
@@ -352,7 +360,7 @@ async function sendBookingEmailToAllRecipients({
     sendEmail({
       to: recipient.email,
       subject,
-      text: buildText(recipientPrefs),
+      text: buildText({ prefs: recipientPrefs, actor }),
       html,
     });
   }
@@ -2690,18 +2698,17 @@ export async function reserveBooking({
         recipients,
         booking: bookingFound,
         subject: `✅ Booking reserved (${bookingFound.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           assetReservedEmailContent({
+            ...textArgs,
             bookingName: bookingFound.name,
             assetsCount: bookingFound._count.bookingAssets,
             custodian,
             from,
             to,
-            prefs,
             bookingId: bookingFound.id,
             customEmailFooter: bookingFound.organization.customEmailFooter,
             modelRequests: outstandingModelRequests,
-            actor,
           }),
         buildHeading: () => `Booking reservation for ${custodian}`,
         hints,
@@ -6954,17 +6961,16 @@ export async function checkinBooking({
         recipients,
         booking: updatedBooking,
         subject: `🎉 Booking complete (${updatedBooking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           completedBookingEmailContent({
+            ...textArgs,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
             from: updatedBooking.from!,
             to: updatedBooking.to!,
             bookingId: updatedBooking.id,
-            prefs,
             customEmailFooter: updatedBooking.organization.customEmailFooter,
-            actor,
           }),
         buildHeading: () =>
           `Your booking has been completed: "${updatedBooking.name}"`,
@@ -12383,18 +12389,17 @@ export async function cancelBooking({
         recipients,
         booking,
         subject: `❌ Booking cancelled (${booking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           cancelledBookingEmailContent({
+            ...textArgs,
             bookingName: booking.name,
             assetsCount: booking._count.bookingAssets,
             custodian,
             from: booking.from!,
             to: booking.to!,
             bookingId: booking.id,
-            prefs,
             customEmailFooter: booking.organization.customEmailFooter,
             cancellationReason: cancellationReason || undefined,
-            actor,
           }),
         buildHeading: () =>
           `Your booking has been cancelled: "${booking.name}"`,
@@ -12547,17 +12552,16 @@ export async function revertBookingToDraft({
           recipients,
           booking: draftBooking,
           subject: `↩️ Booking reverted to draft (${draftBooking.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             revertedToDraftEmailContent({
+              ...textArgs,
               bookingName: draftBooking.name,
               assetsCount: draftBooking._count.bookingAssets,
               custodian,
               from: draftBooking.from!,
               to: draftBooking.to!,
               bookingId: draftBooking.id,
-              prefs,
               customEmailFooter: draftBooking.organization.customEmailFooter,
-              actor,
             }),
           buildHeading: () =>
             `Your booking has been reverted to draft: "${draftBooking.name}"`,
@@ -12934,18 +12938,17 @@ export async function extendBooking({
         recipients,
         booking: updatedBooking,
         subject: `Booking extended (${updatedBooking.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           extendBookingEmailContent({
+            ...textArgs,
             bookingName: updatedBooking.name,
             assetsCount: updatedBooking._count.bookingAssets,
             custodian,
             from: updatedBooking.from!,
             to: updatedBooking.to!,
-            prefs,
             bookingId: updatedBooking.id,
             oldToDate: booking.to,
             customEmailFooter: updatedBooking.organization.customEmailFooter,
-            actor,
           }),
         buildHeading: (prefs) =>
           `Booking extended from ${formatDate(booking.to, prefs, {
@@ -14664,17 +14667,16 @@ export async function deleteBooking(
         recipients,
         booking: b,
         subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-        buildText: (prefs) =>
+        buildText: (textArgs) =>
           deletedBookingEmailContent({
+            ...textArgs,
             bookingName: b.name,
             assetsCount: b._count.bookingAssets,
             custodian,
             from: b.from as Date,
             to: b.to as Date,
             bookingId: b.id,
-            prefs,
             customEmailFooter: b.organization.customEmailFooter,
-            actor,
           }),
         buildHeading: () => `Your booking has been deleted: "${b.name}"`,
         hints,
@@ -16235,16 +16237,15 @@ export async function bulkDeleteBookings({
           recipients,
           booking: b,
           subject: `🗑️ Booking deleted (${b.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             deletedBookingEmailContent({
+              ...textArgs,
               bookingName: b.name,
               assetsCount: b.bookingAssets.length,
               custodian,
               from: b.from as Date,
               to: b.to as Date,
               bookingId: b.id,
-              prefs,
-              actor,
             }),
           buildHeading: () => `Your booking has been deleted: "${b.name}"`,
           hints,
@@ -16758,17 +16759,16 @@ export async function bulkCancelBookings({
           recipients,
           booking: b,
           subject: `❌ Booking cancelled (${b.name}) - shelf.nu`,
-          buildText: (prefs) =>
+          buildText: (textArgs) =>
             cancelledBookingEmailContent({
+              ...textArgs,
               bookingName: b.name,
               assetsCount: b._count.bookingAssets,
               custodian,
               from: b.from as Date,
               to: b.to as Date,
               bookingId: b.id,
-              prefs,
               customEmailFooter: b.organization.customEmailFooter,
-              actor,
             }),
           buildHeading: () => `Your booking has been cancelled: "${b.name}"`,
           hints,
