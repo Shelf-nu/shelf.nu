@@ -18,9 +18,11 @@ import {
 import { useHydrated } from "remix-utils/use-hydrated";
 import { AtomsResetHandler } from "~/atoms/atoms-reset-handler";
 import { feedbackModalOpenAtom } from "~/atoms/feedback";
+import { AssetImportNotice } from "~/components/assets/assets-index/asset-import-notice";
 import { ErrorContent } from "~/components/errors";
 
 import FeedbackModal from "~/components/feedback/feedback-modal";
+import { AssetImportCard } from "~/components/layout/asset-import-card";
 import {
   CommandPaletteButton,
   CommandPaletteRoot,
@@ -41,6 +43,8 @@ import { MissingPaymentMethodBanner } from "~/components/subscription/missing-pa
 import { NoSubscription } from "~/components/subscription/no-subscription";
 import { UnpaidInvoiceBanner } from "~/components/subscription/unpaid-invoice-banner";
 import { config } from "~/config/shelf.config";
+import { getActiveAssetImport } from "~/modules/asset-import/service.server";
+import type { AssetImportStatusPayload } from "~/modules/asset-import/types";
 import { revokeAllSessions } from "~/modules/auth/service.server";
 import { getLegacyLoginDecisionForUser } from "~/modules/auth/sso-enforcement.server";
 import { getBookingSettingsForOrganization } from "~/modules/booking-settings/service.server";
@@ -258,19 +262,31 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     // Run booking settings, working hours, and unread count in parallel —
     // all only depend on organizationId/userId which are available now.
-    const [bookingSettings, workingHours, unreadUpdatesCount] =
-      await Promise.all([
-        getBookingSettingsForOrganization(currentOrganization.id),
-        getWorkingHoursForOrganization(currentOrganization.id),
-        (() => {
-          // Same audience rule as the updates page (announcementRole), so the
-          // badge counts exactly what the list shows.
-          const userRole = announcementRole(currentOrganizationUserRoles);
-          return userRole
-            ? getUnreadCountForUser({ userId: authSession.userId, userRole })
-            : Promise.resolve(0);
-        })(),
-      ]);
+    const activeAssetImportPromise: Promise<AssetImportStatusPayload | null> =
+      getActiveAssetImport({
+        userId: authSession.userId,
+        organizationId: currentOrganization.id,
+      });
+    const [
+      bookingSettings,
+      workingHours,
+      unreadUpdatesCount,
+      activeAssetImport,
+    ] = await Promise.all([
+      getBookingSettingsForOrganization(currentOrganization.id),
+      getWorkingHoursForOrganization(currentOrganization.id),
+      (() => {
+        // Same audience rule as the updates page (announcementRole), so the
+        // badge counts exactly what the list shows.
+        const userRole = announcementRole(currentOrganizationUserRoles);
+        return userRole
+          ? getUnreadCountForUser({ userId: authSession.userId, userRole })
+          : Promise.resolve(0);
+      })(),
+      // The import in flight (or just finished for the starter), shown by
+      // the floating card and the assets index notice.
+      activeAssetImportPromise,
+    ]);
 
     return data(
       payload({
@@ -291,6 +307,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
         canUseBookings: canUseBookings(currentOrganization),
         canUseAudits: canUseAudits(currentOrganization),
         unreadUpdatesCount,
+        // Explicit annotation keeps the loader's inferred type small.
+        activeAssetImport: activeAssetImport as AssetImportStatusPayload | null,
         hasUnpaidInvoice: user.hasUnpaidInvoice,
         warnForNoPaymentMethod: user.warnForNoPaymentMethod,
         needsSequentialIdMigration,
@@ -350,6 +368,7 @@ export default function App() {
     minimizedSidebar,
     needsSequentialIdMigration,
     currentOrganizationId,
+    activeAssetImport,
   } = useLoaderData<typeof loader>();
   const isHydrated = useHydrated();
   // Several authenticated routes (assets._index, kits._index, locations.*, …)
@@ -411,10 +430,17 @@ export default function App() {
                   <SidebarTrigger />
                 </div>
               </header>
+              <AssetImportNotice activeAssetImport={activeAssetImport} />
               <Outlet />
             </>
           )}
           <Toaster />
+          {activeAssetImport ? (
+            <AssetImportCard
+              key={activeAssetImport.id}
+              initial={activeAssetImport}
+            />
+          ) : null}
 
           {/* Sequential ID Migration Modal */}
           {needsSequentialIdMigration ? (

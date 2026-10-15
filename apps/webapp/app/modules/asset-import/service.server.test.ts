@@ -16,6 +16,7 @@ import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ShelfError } from "~/utils/error";
 import {
   confirmAssetImport,
+  getActiveAssetImport,
   getAssetImportDetails,
   getAssetImportStatus,
   markStalledImportIfNeeded,
@@ -478,5 +479,100 @@ describe("getAssetImportStatus and getAssetImportDetails", () => {
     await expect(getAssetImportDetails(args)).rejects.toMatchObject({
       status: 404,
     });
+  });
+});
+
+describe("getActiveAssetImport", () => {
+  /** A selected import row; override what a test cares about. */
+  function row(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "imp",
+      organizationId: "org",
+      createdById: "other",
+      status: "RUNNING",
+      phase: "ROWS",
+      fileName: "assets.csv",
+      totalRows: 10,
+      processedRows: 3,
+      errorMessage: null,
+      warningCount: 0,
+      completedAt: null,
+      updatedAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("returns a running import started by someone else as not mine", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(row() as never);
+
+    const result = await getActiveAssetImport({
+      userId: "u",
+      organizationId: "org",
+    });
+
+    expect(result).toMatchObject({
+      id: "imp",
+      status: "RUNNING",
+      isMine: false,
+    });
+  });
+
+  it("marks the viewer's own import as mine", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(
+      row({ createdById: "u" }) as never
+    );
+
+    const result = await getActiveAssetImport({
+      userId: "u",
+      organizationId: "org",
+    });
+
+    expect(result?.isMine).toBe(true);
+  });
+
+  it("returns null when nothing qualifies", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await expect(
+      getActiveAssetImport({ userId: "u", organizationId: "org" })
+    ).resolves.toBeNull();
+  });
+
+  it("limits finished imports to the viewer's own from the last 10 minutes", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await getActiveAssetImport({ userId: "u", organizationId: "org" });
+
+    const query = vi.mocked(db.assetImport.findFirst).mock.calls[0][0];
+    const where = query?.where as {
+      organizationId: string;
+      OR: Array<Record<string, unknown>>;
+    };
+    expect(where.organizationId).toBe("org");
+    expect(where.OR[0]).toEqual({ status: { in: ["QUEUED", "RUNNING"] } });
+    expect(where.OR[1]).toMatchObject({
+      status: { in: ["COMPLETED", "FAILED"] },
+      createdById: "u",
+    });
+    const { gt } = where.OR[1].updatedAt as { gt: Date };
+    const ageMinutes = (Date.now() - gt.getTime()) / 60000;
+    expect(ageMinutes).toBeGreaterThan(9.9);
+    expect(ageMinutes).toBeLessThan(10.1);
+    expect(query?.orderBy).toEqual({ updatedAt: "desc" });
+  });
+
+  it("never selects rows, resolved data or warnings", async () => {
+    vi.mocked(db.assetImport.findFirst).mockResolvedValueOnce(null);
+
+    await getActiveAssetImport({ userId: "u", organizationId: "org" });
+
+    const query = vi.mocked(db.assetImport.findFirst).mock.calls[0][0];
+    expect(query?.select).not.toHaveProperty("rows");
+    expect(query?.select).not.toHaveProperty("resolved");
+    expect(query?.select).not.toHaveProperty("warnings");
   });
 });

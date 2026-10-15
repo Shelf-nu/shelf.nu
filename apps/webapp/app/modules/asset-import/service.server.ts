@@ -10,7 +10,14 @@
  * @see {@link file://./worker.server.ts}
  * @see {@link file://./failure.server.ts}
  */
-import type { AssetImport, Organization, Prisma, User } from "@prisma/client";
+import type {
+  AssetImport,
+  AssetImportPhase,
+  AssetImportStatus,
+  Organization,
+  Prisma,
+  User,
+} from "@prisma/client";
 import { PrismaClientKnownRequestError } from "@prisma/client/runtime/library";
 import { db } from "~/database/db.server";
 import { isLikeShelfError, ShelfError } from "~/utils/error";
@@ -267,7 +274,13 @@ const STATUS_SELECT = {
   warningCount: true,
   completedAt: true,
   updatedAt: true,
-} satisfies Prisma.AssetImportSelect;
+} as const satisfies Prisma.AssetImportSelect;
+
+/** {@link STATUS_SELECT} plus the stored warnings, for the status page. */
+const STATUS_WITH_WARNINGS_SELECT = {
+  ...STATUS_SELECT,
+  warnings: true,
+} as const satisfies Prisma.AssetImportSelect;
 
 /** The 404 raised when an import is missing, in another workspace or a draft. */
 function importNotFound(): ShelfError {
@@ -278,6 +291,75 @@ function importNotFound(): ShelfError {
     status: 404,
     shouldBeCaptured: false,
   });
+}
+
+/**
+ * Reads one non-draft import of a workspace. The result type is declared by
+ * hand so callers never infer from the Prisma select.
+ *
+ * @param args.importId - The import to read
+ * @param args.organizationId - Workspace the import must belong to
+ * @param args.withWarnings - Also select the stored `warnings`
+ * @returns The row, or null when missing, in another workspace or a draft
+ */
+async function findVisibleImportRow({
+  importId,
+  organizationId,
+  withWarnings,
+}: {
+  importId: string;
+  organizationId: Organization["id"];
+  withWarnings: boolean;
+}): Promise<StatusRow | null> {
+  const where = {
+    id: importId,
+    organizationId,
+    status: { not: "DRAFT" },
+  } as const;
+  if (withWarnings) {
+    return db.assetImport.findFirst({
+      where,
+      select: STATUS_WITH_WARNINGS_SELECT,
+    }) as Promise<StatusRow | null>;
+  }
+  return db.assetImport.findFirst({
+    where,
+    select: STATUS_SELECT,
+  }) as Promise<StatusRow | null>;
+}
+
+/**
+ * Reads the newest import the app shell should surface for a viewer.
+ *
+ * @param args.userId - The viewer
+ * @param args.organizationId - Active workspace
+ * @param args.recentSince - Oldest `updatedAt` a finished import may have
+ * @returns The row, or null when nothing qualifies
+ */
+async function findActiveImportRow({
+  userId,
+  organizationId,
+  recentSince,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+  recentSince: Date;
+}): Promise<StatusRow | null> {
+  return db.assetImport.findFirst({
+    where: {
+      organizationId,
+      OR: [
+        { status: { in: ["QUEUED", "RUNNING"] } },
+        {
+          status: { in: ["COMPLETED", "FAILED"] },
+          createdById: userId,
+          updatedAt: { gt: recentSince },
+        },
+      ],
+    },
+    orderBy: { updatedAt: "desc" },
+    select: STATUS_SELECT,
+  }) as Promise<StatusRow | null>;
 }
 
 /**
@@ -300,14 +382,59 @@ async function loadVisibleImport({
   importId: string;
   organizationId: Organization["id"];
   withWarnings: boolean;
-}) {
-  const found = await db.assetImport.findFirst({
-    where: { id: importId, organizationId, status: { not: "DRAFT" } },
-    select: { ...STATUS_SELECT, ...(withWarnings ? { warnings: true } : {}) },
+}): Promise<SettledImport> {
+  const found = await findVisibleImportRow({
+    importId,
+    organizationId,
+    withWarnings,
   });
 
   if (!found) throw importNotFound();
 
+  return settleLoadedImport(found);
+}
+
+/**
+ * Plain shape of a row selected with {@link STATUS_SELECT} (plus `warnings`
+ * when asked for). Declared by hand so callers never infer types from the
+ * Prisma select.
+ */
+type StatusRow = {
+  id: string;
+  organizationId: string;
+  createdById: string;
+  status: AssetImportStatus;
+  phase: AssetImportPhase;
+  fileName: string | null;
+  totalRows: number;
+  processedRows: number;
+  errorMessage: string | null;
+  warningCount: number;
+  completedAt: Date | null;
+  updatedAt: Date;
+  warnings?: unknown;
+};
+
+/** A {@link StatusRow} after the stall check, as {@link toStatusPayload} reads it. */
+type SettledImport = {
+  status: AssetImportStatus;
+  phase: AssetImportPhase;
+  errorMessage: string | null;
+  completedAt: Date | null;
+  processedRows: number;
+  warningCount: number;
+  warnings: unknown;
+  found: StatusRow;
+};
+
+/**
+ * Runs the stall check on a row selected with {@link STATUS_SELECT} and
+ * shapes the result for {@link toStatusPayload}.
+ *
+ * @param found - A row selected with `STATUS_SELECT` (optionally `warnings`)
+ * @returns The import as it is after the stall check
+ */
+async function settleLoadedImport(found: StatusRow): Promise<SettledImport> {
   // why: the stall check reads only id, organizationId, status and updatedAt,
   // all selected above; the full row type is not needed to run it.
   const checked = await markStalledImportIfNeeded(
@@ -329,11 +456,11 @@ async function loadVisibleImport({
 /**
  * Builds the status payload from a loaded import.
  *
- * @param loaded - Result of {@link loadVisibleImport}
+ * @param loaded - Result of {@link settleLoadedImport}
  * @param userId - The viewer; decides `isMine`
  */
 function toStatusPayload(
-  loaded: Awaited<ReturnType<typeof loadVisibleImport>>,
+  loaded: SettledImport,
   userId: User["id"]
 ): AssetImportStatusPayload {
   const { found } = loaded;
@@ -411,4 +538,41 @@ export async function getAssetImportDetails({
       ? (loaded.warnings as unknown as ImportWarning[])
       : [],
   };
+}
+
+/** How long the starter keeps seeing the outcome of a finished import. */
+const FINISHED_IMPORT_VISIBLE_MINUTES = 10;
+
+/**
+ * Finds the import the app shell should surface for a viewer: any import of
+ * the workspace that is queued or running (everyone sees it), or one the
+ * viewer started that finished in the last
+ * {@link FINISHED_IMPORT_VISIBLE_MINUTES} minutes (so the starter sees the
+ * outcome once). The most recently updated match wins. Fails a stalled import
+ * first. Served by the `(organizationId, status)` index.
+ *
+ * @param args.userId - The viewer; decides `isMine` and who sees an outcome
+ * @param args.organizationId - Active workspace
+ * @returns The status payload (never rows or warnings), or null when nothing qualifies
+ */
+export async function getActiveAssetImport({
+  userId,
+  organizationId,
+}: {
+  userId: User["id"];
+  organizationId: Organization["id"];
+}): Promise<AssetImportStatusPayload | null> {
+  const recentSince = new Date(
+    Date.now() - FINISHED_IMPORT_VISIBLE_MINUTES * 60 * 1000
+  );
+
+  const found = await findActiveImportRow({
+    userId,
+    organizationId,
+    recentSince,
+  });
+
+  if (!found) return null;
+
+  return toStatusPayload(await settleLoadedImport(found), userId);
 }
