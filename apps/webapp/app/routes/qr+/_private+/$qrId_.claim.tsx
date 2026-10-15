@@ -3,7 +3,7 @@ import type {
   LoaderFunctionArgs,
   ActionFunctionArgs,
 } from "react-router";
-import { data, redirect, useNavigation } from "react-router";
+import { data, redirect, useActionData, useNavigation } from "react-router";
 import { z } from "zod";
 import { Form } from "~/components/custom-form";
 import { UnlinkIcon } from "~/components/icons/library";
@@ -24,9 +24,11 @@ import {
   getParams,
   parseData,
 } from "~/utils/http.server";
+import type { DataOrErrorResponse } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
+  roleHasPermission,
 } from "~/utils/permissions/permission.data";
 import {
   requirePermission,
@@ -38,12 +40,13 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
   const { userId } = authSession;
   const { qrId } = getParams(params, z.object({ qrId: z.string() }));
   try {
-    const { organizations, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.qr,
-      action: PermissionAction.update,
-    });
+    const { organizations, userOrganizations, currentOrganization } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.qr,
+        action: PermissionAction.update,
+      });
 
     const qr = await db.qr
       .findUniqueOrThrow({
@@ -70,12 +73,27 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       return redirect(`/qr/${qrId}/link`);
     }
 
+    /**
+     * Only workspaces the action will accept are offered: the caller must hold
+     * `qr:update` in the one they pick. The selected workspace always stays,
+     * because the check above already passed for it.
+     */
+    const claimableOrganizations = organizations.filter((organization) =>
+      roleHasPermission({
+        roles: userOrganizations.find(
+          (membership) => membership.organization.id === organization.id
+        )?.roles,
+        entity: PermissionEntity.qr,
+        action: PermissionAction.update,
+      })
+    );
+
     return payload({
       header: {
         title: "Claim QR code for your organization",
       },
       qrId,
-      organizations,
+      organizations: claimableOrganizations,
       currentOrganizationId: currentOrganization.id,
     });
   } catch (cause) {
@@ -141,6 +159,8 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 export default function QrLink() {
   const navigation = useNavigation();
   const disabled = isFormProcessing(navigation.state);
+  /** A refused claim, for example after the caller's role changed. */
+  const actionData = useActionData<DataOrErrorResponse>();
   return (
     <>
       <div className="flex flex-1 justify-center py-8">
@@ -160,6 +180,11 @@ export default function QrLink() {
             <Form method="post" className="w-full">
               <div className="flex flex-col gap-2">
                 <OrganizationSelect />
+                {actionData?.error ? (
+                  <p className="text-sm text-error-500" role="alert">
+                    {actionData.error.message}
+                  </p>
+                ) : null}
                 <Button
                   className="max-w-full"
                   width="full"

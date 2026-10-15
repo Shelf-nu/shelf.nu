@@ -1,6 +1,7 @@
 // @vitest-environment node
 /**
- * Who may claim an unclaimed QR code, through either web door.
+ * Who may claim an unclaimed QR code, through either web door, and which
+ * workspaces the claim page offers.
  *
  * The claim page and the link page both post a claim with the target workspace
  * in the FORM, not the selected one, so each action must judge the caller by
@@ -17,17 +18,30 @@
  */
 import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createActionArgs } from "@mocks/remix";
+import { createActionArgs, createLoaderArgs } from "@mocks/remix";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 
 import { getSelectedOrganization } from "~/modules/organization/context.server";
 import { claimQrCode } from "~/modules/qr/service.server";
-import { action as claimAction } from "~/routes/qr+/_private+/$qrId_.claim";
+import {
+  action as claimAction,
+  loader as claimLoader,
+} from "~/routes/qr+/_private+/$qrId_.claim";
 import { action as linkAction } from "~/routes/qr+/_private+/$qrId_.link";
 
-// why: importing the routes pulls the Prisma client transitively; the reads
-// and writes these cases depend on are behind the mocked services below.
-vi.mock("~/database/db.server", () => ({ db: {} }));
+// why: the claim page reads the QR code to confirm it is still unclaimed; the
+// other reads and writes these cases depend on are behind the mocked services
+// below.
+vi.mock("~/database/db.server", () => ({
+  db: {
+    qr: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({
+        id: "qr-1",
+        organizationId: null,
+      }),
+    },
+  },
+}));
 
 // why: memberships come from the session cookie and the database. They are the
 // input these cases vary, so they are supplied directly; the permission check
@@ -160,5 +174,44 @@ describe.each(doors)("$name claim action", (door) => {
       userId: "user-1",
     });
     expect((result as Response).status).toBe(302);
+  });
+});
+
+describe("claim page loader", () => {
+  it("offers only the workspaces where the caller may claim a code", async () => {
+    const membership = (id: string, role: OrganizationRoles) => ({
+      organization: { id },
+      roles: [role],
+    });
+    vi.mocked(getSelectedOrganization).mockResolvedValue({
+      organizationId: SELECTED_WORKSPACE,
+      currentOrganization: { id: SELECTED_WORKSPACE },
+      organizations: [
+        { id: SELECTED_WORKSPACE },
+        { id: "workspace-owned" },
+        { id: "workspace-managed" },
+        { id: "workspace-base" },
+      ],
+      userOrganizations: [
+        membership(SELECTED_WORKSPACE, OrganizationRoles.ADMIN),
+        membership("workspace-owned", OrganizationRoles.OWNER),
+        membership("workspace-managed", OrganizationRoles.MANAGER),
+        membership("workspace-base", OrganizationRoles.BASE),
+      ],
+    } as never);
+
+    const result = await claimLoader(
+      createLoaderArgs({
+        request: new Request("http://localhost/qr/qr-1/claim"),
+        params: { qrId: "qr-1" },
+        context: { getSession: () => ({ userId: "user-1" }) } as never,
+      })
+    );
+
+    expect(
+      (result as { organizations: { id: string }[] }).organizations.map(
+        (organization) => organization.id
+      )
+    ).toEqual([SELECTED_WORKSPACE, "workspace-owned"]);
   });
 });
