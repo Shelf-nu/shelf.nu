@@ -390,9 +390,10 @@ workspace's visibility toggles for this. Never compare role strings in the app:
 `eslint.config.js`) fails `pnpm --filter @shelf/companion lint` on a role comparison
 outside tests.
 
-**Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update
-to every live `runtimeVersion` (1.5.0, 1.4.0, 1.3.0, 1.2.0). Builds older than
-1.2.0 cannot update over the air; for them an unknown role denies every
+**Shipping:** role logic is JavaScript, so a change ships as an EAS OTA update,
+published once for every live `runtimeVersion` that can take one (1.4.0 and
+later, see [EAS-UPDATE.md](./EAS-UPDATE.md)). Older builds cannot update over the
+air; for them an unknown role denies every
 client-gated affordance, and server-computed booking actions keep working.
 A companion bundle that reaches a device before the server sends the toggles
 reads them as off, which only under-offers.
