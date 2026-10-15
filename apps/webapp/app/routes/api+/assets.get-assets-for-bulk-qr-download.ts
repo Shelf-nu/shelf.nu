@@ -106,14 +106,18 @@ export async function loader({ context, request }: ActionFunctionArgs) {
          * `qr: read` is held by BASE and SELF_SERVICE, so this endpoint is
          * reachable by roles that may not see other people's custody. An
          * unscoped custodian filter would list exactly which assets a named
-         * colleague holds, ignoring `baseUserCanSeeCustody`.
+         * colleague holds, ignoring `baseUserCanSeeCustody`. A member who sees
+         * all custody passes the "all" sentinel: the helper refuses an
+         * advanced `custody` filter for anything else.
          */
-        allowedTeamMemberIds: await scopeCustodianFilterIds({
-          teamMemberIds: searchParams.getAll("teamMember"),
-          canSeeAllCustody: access.custody.seeAll,
-          userId,
-          organizationId,
-        }),
+        allowedTeamMemberIds: access.custody.seeAll
+          ? "all"
+          : await scopeCustodianFilterIds({
+              teamMemberIds: searchParams.getAll("teamMember"),
+              canSeeAllCustody: false,
+              userId,
+              organizationId,
+            }),
         // The Archived / All views are for members who may see archived
         // assets (`assets.seeArchived`, issue #382); anyone else downloads
         // the codes of active assets, whatever the URL says.

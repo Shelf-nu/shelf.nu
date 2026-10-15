@@ -66,9 +66,13 @@ vi.mock("~/utils/roles.server", async () => {
   };
 });
 // why: the select-all path narrows a custodian filter through this, and it hits
-// the database; these cases pass explicit ids, so it only needs to resolve.
+// the database. The stand-in keeps the real contract for a member who sees all
+// custody: it returns the requested ids, never the "all" sentinel.
 vi.mock("~/modules/team-member/service.server", () => ({
-  scopeCustodianFilterIds: vi.fn().mockResolvedValue("all"),
+  scopeCustodianFilterIds: vi.fn(
+    async ({ teamMemberIds }: { teamMemberIds?: string[] | null }) =>
+      teamMemberIds ?? []
+  ),
 }));
 
 // why: the query COUNT is the assertion, so the delegates have to be
@@ -207,6 +211,21 @@ describe("bulk QR download select-all", () => {
     );
   });
 
+  it("lets a member who sees all custody filter by custody", async () => {
+    bulkMocks.resolveAssetIdsForBulkOperation.mockResolvedValue(["asset-0"]);
+    (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      assets.slice(0, 1)
+    );
+
+    await runSelectAll("custody=is:in-custody");
+
+    // The helper refuses a `custody` filter unless told "all"; an empty list
+    // would turn an admin's valid filtered download into an empty one.
+    expect(bulkMocks.resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ allowedTeamMemberIds: "all" })
+    );
+  });
+
   it("resolves in simple mode for a role without the advanced index", async () => {
     // A demoted member's saved mode can still be ADVANCED, and advanced search
     // matches custodian names, which BASE may not be allowed to see.
@@ -227,6 +246,8 @@ describe("bulk QR download select-all", () => {
     expect(bulkMocks.resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
       expect.objectContaining({
         settings: expect.objectContaining({ mode: "SIMPLE" }),
+        // A restricted role never gets the unrestricted custody sentinel.
+        allowedTeamMemberIds: [],
       })
     );
   });
