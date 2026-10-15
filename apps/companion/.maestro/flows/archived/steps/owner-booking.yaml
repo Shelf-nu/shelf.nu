@@ -2,7 +2,7 @@ appId: com.shelf.companion.carlos
 ---
 # Steps: a DRAFT booking holding an asset that was archived after it was
 # added. The row reads "Archived", Reserve is disabled with the reason shown,
-# and a duplicate says the archived asset was left out of the copy.
+# and a duplicate says the archived asset was left out.
 # No login (see ../01-owner.yaml).
 
 - openLink: "shelf://bookings/${SHELF_TEST_ARCHIVED_BOOKING_ID}"
@@ -31,7 +31,7 @@ appId: com.shelf.companion.carlos
 - tapOn:
     text: "^Duplicate$"
 - extendedWaitUntil:
-    visible: "1 archived asset was left out of the copy. Archived assets can't be booked."
+    visible: "1 archived asset was left out."
     timeout: 20000
 - takeScreenshot: archived-owner-duplicate
 - tapOn: "OK"

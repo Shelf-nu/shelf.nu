@@ -1,4 +1,5 @@
 import {
+  archivedAssetBlockedReason,
   ASSET_QTY_STATUS_LABELS,
   DELETE_CONSEQUENCE_LABELS,
 } from "@shelf/labels";
@@ -71,11 +72,7 @@ import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
 import { InfoRow } from "@/components/shared/info-row";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
-import {
-  archivedAssetReason,
-  assetBadgeStatus,
-  isArchivedAsset,
-} from "@/lib/archived-assets";
+import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
 import { isQuantityTracked, formatQuantity } from "@/lib/quantity-format";
 import { useAssetData } from "@/hooks/use-asset-data";
 import { useCustodyActions } from "@/hooks/use-custody-actions";
@@ -550,7 +547,7 @@ export default function AssetDetailScreen() {
   // a notice says why, and every change the server would refuse is off.
   const isArchived = isArchivedAsset(asset);
   const archivedReason = isArchived
-    ? archivedAssetReason({ canReinstate })
+    ? archivedAssetBlockedReason({ canReinstate })
     : undefined;
   const canUpdateLiveAsset = canUpdateAsset && !isArchived;
   const badge = statusBadge[assetBadgeStatus(asset)] ?? {
