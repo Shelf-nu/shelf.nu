@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SERVER_URL } from "~/utils/env";
 import {
+  assetImportFinishedEmailHtml,
   assetImportFinishedEmailText,
   sendAssetImportFinishedEmail,
 } from "./asset-import-finished";
@@ -23,8 +24,10 @@ const { db } = await import("~/database/db.server");
 const { Logger } = await import("~/utils/logger");
 
 const base: AssetImportFinishedEmailProps = {
-  firstName: "Sam",
+  startedBy: "Sam Lee",
   workspaceName: "Acme Workspace",
+  customEmailFooter: null,
+  fileName: "inventory.csv",
   outcome: "completed",
   totalRows: 120,
   processedRows: 120,
@@ -33,37 +36,79 @@ const base: AssetImportFinishedEmailProps = {
   importUrl: `${SERVER_URL}/assets/import/imp_1`,
 };
 
+const FOOTER_REASON =
+  'This email was sent to you because you started this import in the workspace "Acme Workspace".';
+
 describe("assetImportFinishedEmailText", () => {
-  it("reports the completed import with counts, workspace and assets link", () => {
+  it("reports the completed import with heading, counts, workspace and assets link", () => {
     const text = assetImportFinishedEmailText(base);
-    expect(text).toContain("Hey Sam,");
-    expect(text).toContain("120 assets were imported into Acme Workspace.");
-    expect(text).toContain(`${SERVER_URL}/assets`);
-    expect(text).not.toContain("with a warning");
+    expect(text).toContain("Your asset import is complete");
+    expect(text).toContain("inventory.csv | 120 assets");
+    expect(text).toContain("Workspace: Acme Workspace");
+    expect(text).toContain("Imported: 120 of 120 assets");
+    expect(text).toContain("Started by: Sam Lee");
+    expect(text).toContain(`View assets: ${SERVER_URL}/assets`);
+    expect(text).toContain(FOOTER_REASON);
+    expect(text).toContain("The Shelf Team");
+    expect(text).not.toContain("Rows with warnings");
+    expect(text).not.toContain("View import:");
     expect(text).not.toMatch(/[—–]/);
   });
 
-  it("adds the warning notice and import link when rows had warnings", () => {
+  it("falls back to CSV import when there is no file name", () => {
+    const text = assetImportFinishedEmailText({ ...base, fileName: null });
+    expect(text).toContain("CSV import | 120 assets");
+  });
+
+  it("adds the warning count and import link when rows had warnings", () => {
     const text = assetImportFinishedEmailText({ ...base, warningCount: 3 });
-    expect(text).toContain("3 rows were imported with a warning");
-    expect(text).toContain(`${SERVER_URL}/assets/import/imp_1`);
+    expect(text).toContain("Rows with warnings: 3");
+    expect(text).toContain(`View import: ${SERVER_URL}/assets/import/imp_1`);
     expect(text).not.toMatch(/[—–]/);
   });
 
-  it("reports the failed import with progress, error and resume link", () => {
+  it("reports the failed import with progress, reason and resume link", () => {
     const text = assetImportFinishedEmailText({
       ...base,
       outcome: "failed",
       processedRows: 40,
       errorMessage: "The database was unreachable.",
     });
-    expect(text).toContain(
-      "We imported 40 of 120 assets into Acme Workspace before the import stopped."
-    );
-    expect(text).toContain("The database was unreachable.");
+    expect(text).toContain("Your asset import stopped");
+    expect(text).toContain("inventory.csv | 120 assets");
+    expect(text).toContain("Imported: 40 of 120 assets");
+    expect(text).toContain("Reason: The database was unreachable.");
     expect(text).toContain("Nothing was imported twice.");
-    expect(text).toContain(`${SERVER_URL}/assets/import/imp_1`);
+    expect(text).toContain(`Open import: ${SERVER_URL}/assets/import/imp_1`);
+    expect(text).toContain(FOOTER_REASON);
     expect(text).not.toMatch(/[—–]/);
+  });
+
+  it("includes the workspace custom footer when set", () => {
+    const text = assetImportFinishedEmailText({
+      ...base,
+      customEmailFooter: "Questions? Ask IT.",
+    });
+    expect(text).toContain("Questions? Ask IT.");
+  });
+});
+
+describe("assetImportFinishedEmailHtml", () => {
+  it("renders the h1 heading, subheading and the custom footer", async () => {
+    const html = await assetImportFinishedEmailHtml({
+      ...base,
+      customEmailFooter: "Questions? Ask IT.",
+    });
+    expect(html).toMatch(/<h1[^>]*>Your asset import is complete<\/h1>/);
+    expect(html).toContain("inventory.csv");
+    expect(html).toContain("Questions? Ask IT.");
+    expect(html).toContain("View assets");
+    expect(html).not.toContain("View import");
+  });
+
+  it("omits the custom footer when the workspace has none", async () => {
+    const html = await assetImportFinishedEmailHtml(base);
+    expect(html).not.toContain("Questions? Ask IT.");
   });
 });
 
@@ -74,11 +119,12 @@ describe("sendAssetImportFinishedEmail", () => {
 
   it("does not throw when sending fails, and logs the error", async () => {
     vi.mocked(db.assetImport.findFirst).mockResolvedValue({
+      fileName: "a.csv",
       totalRows: 2,
       processedRows: 2,
       warningCount: 0,
       errorMessage: null,
-      organization: { name: "Acme Workspace" },
+      organization: { name: "Acme Workspace", customEmailFooter: null },
       createdBy: {
         email: "sam@test",
         firstName: "Sam",

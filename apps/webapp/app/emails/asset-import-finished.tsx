@@ -5,30 +5,31 @@
  * every row was written (`completed`) or the import stopped part way
  * (`failed`) and can be resumed from the import page.
  *
- * Follows the React Email pattern in `stripe/audit-trial-welcome.tsx`:
- * `LogoForEmail` header, shared styles, a CTA button, a yellow notice box and
- * a plain-text twin.
+ * Uses the standard notification layout shared with
+ * `audit-updates-template.tsx` and `bookings-updates-template.tsx`: centred
+ * logo, h1 heading, h2 subheading, label/value lines, centred buttons, the
+ * workspace's custom footer and a bordered footer block. A plain-text twin
+ * carries the same information in the same order.
  *
- * @see {@link file://./stripe/audit-trial-welcome.tsx} - Reference template
- * @see {@link file://./low-stock-alert.tsx} - Notice box example
+ * @see {@link file://./audit-updates-template.tsx} - Reference layout
+ * @see {@link file://./components/custom-footer.tsx} - Workspace footer text
  */
 
 import {
   Button,
   Container,
   Head,
+  Heading,
   Html,
-  Link,
   render,
-  Text,
 } from "@react-email/components";
-import { config } from "~/config/shelf.config";
 import { db } from "~/database/db.server";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
-import { resolveUserGreetingName } from "~/utils/user";
+import { resolveUserDisplayName } from "~/utils/user";
+import { CustomEmailFooter } from "./components/custom-footer";
 import { LogoForEmail } from "./logo";
 import { sendEmail } from "./mail.server";
 import { styles } from "./styles";
@@ -38,10 +39,14 @@ export type AssetImportEmailOutcome = "completed" | "failed";
 
 /** Props shared by the HTML and plain-text renderings. */
 export type AssetImportFinishedEmailProps = {
-  /** Greeting name of the person who started the import */
-  firstName: string;
+  /** Display name of the person who started the import */
+  startedBy: string;
   /** Name of the workspace the assets were imported into */
   workspaceName: string;
+  /** The workspace's custom email footer, when it has one */
+  customEmailFooter?: string | null;
+  /** Name of the uploaded CSV; null when it was not recorded */
+  fileName?: string | null;
   /** Whether the import finished or stopped early */
   outcome: AssetImportEmailOutcome;
   /** Number of rows in the import */
@@ -56,34 +61,43 @@ export type AssetImportFinishedEmailProps = {
   importUrl: string;
 };
 
-/** Subject line for each outcome. */
+/** Subject line (and h1 heading) for each outcome. */
 const SUBJECTS: Record<AssetImportEmailOutcome, string> = {
   completed: "Your asset import is complete",
   failed: "Your asset import stopped",
 };
 
-/** Greeting prefix, tolerant of an empty name. */
-const greeting = (firstName: string) =>
-  `Hey${firstName ? ` ${firstName}` : ""},`;
+/** Reassurance line shown under the reason of a failed import. */
+const RESUME_SENTENCE =
+  "Nothing was imported twice. Open the import and choose Resume to continue where it stopped.";
 
-/** Warning sentence shown in the notice box of a completed import. */
-const warningSentence = (warningCount: number) =>
-  `${warningCount} rows were imported with a warning, for example a barcode that was already in use. Review them on the import page.`;
+/** Points to where the warnings are listed; appended to the warning count. */
+const WARNING_HINT = "listed on the import page";
 
-/** Body sentence for a failed import. */
-const failedSentence = ({
+/** Returns "asset" or "assets" for a count. */
+const assetNoun = (count: number) => (count === 1 ? "asset" : "assets");
+
+/** Text of the h2 subheading: file name (or "CSV import") and row count. */
+const subheading = ({
+  fileName,
+  totalRows,
+}: Pick<AssetImportFinishedEmailProps, "fileName" | "totalRows">) =>
+  `${fileName?.trim() || "CSV import"} | ${totalRows} ${assetNoun(totalRows)}`;
+
+/** Value of the "Imported" line, e.g. "965 of 965 assets". */
+const importedValue = ({
   processedRows,
   totalRows,
-  workspaceName,
-}: Pick<
-  AssetImportFinishedEmailProps,
-  "processedRows" | "totalRows" | "workspaceName"
->) =>
-  `We imported ${processedRows} of ${totalRows} assets into ${workspaceName} before the import stopped.`;
+}: Pick<AssetImportFinishedEmailProps, "processedRows" | "totalRows">) =>
+  `${processedRows} of ${totalRows} ${assetNoun(totalRows)}`;
 
-/** Reassurance line shown under the error of a failed import. */
-const RESUME_SENTENCE =
-  "Nothing was imported twice. Open the import to resume from where it stopped.";
+/** Value of the "Rows with warnings" line. */
+const warningsValue = (warningCount: number) =>
+  `${warningCount} (${WARNING_HINT})`;
+
+/** Why the recipient received the email; shown in the footer block. */
+const footerReason = (workspaceName: string) =>
+  `This email was sent to you because you started this import in the workspace "${workspaceName}".`;
 
 /**
  * Plain-text version of the asset import finished email.
@@ -94,38 +108,55 @@ const RESUME_SENTENCE =
 export const assetImportFinishedEmailText = (
   props: AssetImportFinishedEmailProps
 ) => {
-  const { outcome, firstName, workspaceName, totalRows, warningCount } = props;
+  const { outcome, workspaceName, warningCount, startedBy } = props;
+  const failed = outcome === "failed";
 
-  if (outcome === "failed") {
-    return `${greeting(firstName)}
-
-${failedSentence(props)}
-
-${props.errorMessage ?? ""}
-
-${RESUME_SENTENCE}
-
-Open import: ${props.importUrl}
-
-The Shelf Team
-`;
+  const lines = [
+    SUBJECTS[outcome],
+    "",
+    subheading(props),
+    "",
+    `Workspace: ${workspaceName}`,
+    `Imported: ${importedValue(props)}`,
+  ];
+  if (warningCount > 0) {
+    lines.push(`Rows with warnings: ${warningsValue(warningCount)}`);
   }
-
-  return `${greeting(firstName)}
-
-${totalRows} assets were imported into ${workspaceName}.
-
-View assets: ${SERVER_URL}/assets
-${
-  warningCount > 0
-    ? `\n${warningSentence(warningCount)}\n\nReview the import: ${
-        props.importUrl
-      }\n`
-    : ""
-}
-The Shelf Team
-`;
+  lines.push(`Started by: ${startedBy}`);
+  if (failed) {
+    lines.push(`Reason: ${props.errorMessage ?? "Unknown error"}`, "");
+    lines.push(RESUME_SENTENCE, "", `Open import: ${props.importUrl}`);
+  } else {
+    lines.push("", `View assets: ${SERVER_URL}/assets`);
+    if (warningCount > 0) {
+      lines.push(`View import: ${props.importUrl}`);
+    }
+  }
+  if (props.customEmailFooter) {
+    lines.push("", props.customEmailFooter);
+  }
+  lines.push(
+    "",
+    footerReason(workspaceName),
+    "",
+    "Thanks,",
+    "The Shelf Team",
+    "",
+    `© ${new Date().getFullYear()} Shelf.nu`,
+    ""
+  );
+  return lines.join("\n");
 };
+
+/** Label/value line in the style of the reference notification templates. */
+function DetailLine({ label, value }: { label: string; value: string }) {
+  return (
+    <p style={{ ...styles.p }}>
+      <span style={{ color: "#101828", fontWeight: "600" }}>{label}:</span>{" "}
+      {value}
+    </p>
+  );
+}
 
 /**
  * React Email component for the asset import finished email.
@@ -135,20 +166,16 @@ The Shelf Team
 function AssetImportFinishedEmailTemplate(
   props: AssetImportFinishedEmailProps
 ) {
-  const { emailPrimaryColor } = config;
-  const { outcome, firstName, workspaceName, totalRows, warningCount } = props;
-  const noticeStyle = {
-    ...styles.p,
-    backgroundColor: "#FFF8E1",
-    border: "1px solid #FFE082",
-    borderRadius: "8px",
-    padding: "16px",
-  };
+  const { outcome, workspaceName, warningCount, startedBy } = props;
+  const failed = outcome === "failed";
+  const showImportButton = !failed && warningCount > 0;
   const buttonStyle = {
     ...styles.button,
     textAlign: "center" as const,
-    maxWidth: "200px",
-    marginBottom: "24px",
+    display: "inline-block",
+    marginBottom: "12px",
+    width: "100%",
+    maxWidth: "240px",
   };
 
   return (
@@ -157,44 +184,117 @@ function AssetImportFinishedEmailTemplate(
         <title>{SUBJECTS[outcome]}</title>
       </Head>
 
-      <Container style={{ padding: "32px 16px", maxWidth: "100%" }}>
-        <LogoForEmail />
-
-        <div style={{ paddingTop: "8px" }}>
-          <Text style={{ ...styles.p }}>{greeting(firstName)}</Text>
-
-          {outcome === "failed" ? (
+      <Container
+        style={{ padding: "32px 16px", textAlign: "center", maxWidth: "100%" }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            marginBottom: "32px",
+          }}
+        >
+          <LogoForEmail />
+        </div>
+        <div style={{ margin: "32px" }}>
+          <Heading as="h1" style={{ ...styles.h1 }}>
+            {SUBJECTS[outcome]}
+          </Heading>
+          <Heading as="h2" style={{ ...styles.h2 }}>
+            {subheading(props)}
+          </Heading>
+          <DetailLine label="Workspace" value={workspaceName} />
+          <DetailLine label="Imported" value={importedValue(props)} />
+          {warningCount > 0 && (
+            <DetailLine
+              label="Rows with warnings"
+              value={warningsValue(warningCount)}
+            />
+          )}
+          <DetailLine label="Started by" value={startedBy} />
+          {failed && (
             <>
-              <Text style={{ ...styles.p }}>{failedSentence(props)}</Text>
-              <Text style={noticeStyle}>{props.errorMessage}</Text>
-              <Text style={{ ...styles.p }}>{RESUME_SENTENCE}</Text>
-              <Button href={props.importUrl} style={buttonStyle}>
-                Open import
-              </Button>
-            </>
-          ) : (
-            <>
-              <Text style={{ ...styles.p }}>
-                {totalRows} assets were imported into {workspaceName}.
-              </Text>
-              <Button href={`${SERVER_URL}/assets`} style={buttonStyle}>
-                View assets
-              </Button>
-              {warningCount > 0 ? (
-                <Text style={noticeStyle}>
-                  {warningSentence(warningCount)}{" "}
-                  <Link
-                    href={props.importUrl}
-                    style={{ color: emailPrimaryColor }}
-                  >
-                    Review the import
-                  </Link>
-                </Text>
-              ) : null}
+              <DetailLine
+                label="Reason"
+                value={props.errorMessage ?? "Unknown error"}
+              />
+              <p style={{ ...styles.p }}>{RESUME_SENTENCE}</p>
             </>
           )}
+        </div>
 
-          <Text style={{ marginTop: "24px", ...styles.p }}>The Shelf Team</Text>
+        <div style={{ textAlign: "center", marginBottom: "32px" }}>
+          {failed ? (
+            <Button href={props.importUrl} style={buttonStyle}>
+              Open import
+            </Button>
+          ) : (
+            <>
+              <Button
+                href={`${SERVER_URL}/assets`}
+                style={{
+                  ...buttonStyle,
+                  marginRight: showImportButton ? "12px" : "0",
+                }}
+              >
+                View assets
+              </Button>
+              {showImportButton && (
+                <Button href={props.importUrl} style={buttonStyle}>
+                  View import
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+
+        <CustomEmailFooter footerText={props.customEmailFooter} />
+
+        <div
+          style={{
+            marginTop: "32px",
+            paddingTop: "32px",
+            borderTop: "1px solid #E4E4E7",
+          }}
+        >
+          <p
+            style={{
+              ...styles.p,
+              marginBottom: "16px",
+              fontSize: "14px",
+              color: "#344054",
+            }}
+          >
+            This email was sent to you because you started this import in the
+            workspace{" "}
+            <span style={{ color: "#101828", fontWeight: "600" }}>
+              "{workspaceName}"
+            </span>
+            .
+          </p>
+          <p
+            style={{
+              ...styles.p,
+              marginBottom: "16px",
+              fontSize: "14px",
+              color: "#71717A",
+            }}
+          >
+            Thanks,
+            <br />
+            The Shelf Team
+          </p>
+          <p
+            style={{
+              ...styles.p,
+              marginBottom: "32px",
+              fontSize: "14px",
+              color: "#344054",
+            }}
+          >
+            © {new Date().getFullYear()} Shelf.nu
+          </p>
         </div>
       </Container>
     </Html>
@@ -233,11 +333,12 @@ export async function sendAssetImportFinishedEmail({
     const assetImport = await db.assetImport.findFirst({
       where: { id: importId, organizationId },
       select: {
+        fileName: true,
         totalRows: true,
         processedRows: true,
         warningCount: true,
         errorMessage: true,
-        organization: { select: { name: true } },
+        organization: { select: { name: true, customEmailFooter: true } },
         createdBy: { select: { email: true, ...USER_NAME_SELECT } },
       },
     });
@@ -255,8 +356,9 @@ export async function sendAssetImportFinishedEmail({
     const { createdBy, organization, ...counts } = assetImport;
     const props: AssetImportFinishedEmailProps = {
       ...counts,
-      firstName: resolveUserGreetingName(createdBy),
+      startedBy: resolveUserDisplayName(createdBy) || "Unknown User",
       workspaceName: organization.name,
+      customEmailFooter: organization.customEmailFooter,
       outcome,
       importUrl: `${SERVER_URL}/assets/import/${importId}`,
     };
