@@ -116,7 +116,7 @@ describe("getAdvancedAssetCriticalPage — SQL shape", () => {
     const sql = await getBuiltSql();
 
     expect(sql).toContain(
-      'json_agg(aq.critical_row ORDER BY saq."__sortRank")'
+      'jsonb_agg(aq.critical_row ORDER BY saq."__sortRank")'
     );
   });
 
@@ -139,7 +139,7 @@ describe("getAdvancedAssetCriticalPage — SQL shape", () => {
     const sql = await getBuiltSql();
 
     expect(sql).toContain(
-      "COALESCE(json_agg(aq.critical_row ORDER BY saq.\"__sortRank\"), '[]'::jsonb)"
+      "COALESCE(jsonb_agg(aq.critical_row ORDER BY saq.\"__sortRank\"), '[]'::jsonb)"
     );
   });
 

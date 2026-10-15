@@ -133,7 +133,7 @@ export async function getAdvancedAssetCriticalPage({
         Prisma.sql`${slimCtes}
       SELECT
         (SELECT total_count FROM count_query) AS total_count,
-        COALESCE(json_agg(aq.critical_row ORDER BY saq."__sortRank"), '[]'::jsonb) AS items
+        COALESCE(jsonb_agg(aq.critical_row ORDER BY saq."__sortRank"), '[]'::jsonb) AS items
       FROM sorted_asset_query saq
       LEFT JOIN LATERAL (
         -- LEAN critical-row projection, run once per page row (≤100).
