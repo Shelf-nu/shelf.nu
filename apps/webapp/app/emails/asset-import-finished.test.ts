@@ -55,6 +55,21 @@ describe("assetImportFinishedEmailText", () => {
     expect(text).not.toMatch(/[—–]/);
   });
 
+  it("formats large counts with thousands separators", () => {
+    const text = assetImportFinishedEmailText({
+      ...base,
+      outcome: "failed",
+      totalRows: 10000,
+      processedRows: 965,
+      warningCount: 1234,
+      errorMessage: "Stopped",
+    });
+
+    expect(text).toContain("| 10,000 assets");
+    expect(text).toContain("965 of 10,000 assets");
+    expect(text).toContain("1,234 (");
+  });
+
   it("falls back to CSV import when there is no file name", () => {
     const text = assetImportFinishedEmailText({ ...base, fileName: null });
     expect(text).toContain("CSV import | 120 assets");

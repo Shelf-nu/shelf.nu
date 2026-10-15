@@ -24,6 +24,7 @@ import {
   render,
 } from "@react-email/components";
 import { db } from "~/database/db.server";
+import { formatAssetCount, formatCount } from "~/modules/asset-import/format";
 import { USER_NAME_SELECT } from "~/modules/user/fields";
 import { SERVER_URL } from "~/utils/env";
 import { ShelfError } from "~/utils/error";
@@ -74,26 +75,23 @@ const RESUME_SENTENCE =
 /** Points to where the warnings are listed; appended to the warning count. */
 const WARNING_HINT = "listed on the import page";
 
-/** Returns "asset" or "assets" for a count. */
-const assetNoun = (count: number) => (count === 1 ? "asset" : "assets");
-
 /** Text of the h2 subheading: file name (or "CSV import") and row count. */
 const subheading = ({
   fileName,
   totalRows,
 }: Pick<AssetImportFinishedEmailProps, "fileName" | "totalRows">) =>
-  `${fileName?.trim() || "CSV import"} | ${totalRows} ${assetNoun(totalRows)}`;
+  `${fileName?.trim() || "CSV import"} | ${formatAssetCount(totalRows)}`;
 
-/** Value of the "Imported" line, e.g. "965 of 965 assets". */
+/** Value of the "Imported" line, e.g. "965 of 10,000 assets". */
 const importedValue = ({
   processedRows,
   totalRows,
 }: Pick<AssetImportFinishedEmailProps, "processedRows" | "totalRows">) =>
-  `${processedRows} of ${totalRows} ${assetNoun(totalRows)}`;
+  `${formatCount(processedRows)} of ${formatAssetCount(totalRows)}`;
 
 /** Value of the "Rows with warnings" line. */
 const warningsValue = (warningCount: number) =>
-  `${warningCount} (${WARNING_HINT})`;
+  `${formatCount(warningCount)} (${WARNING_HINT})`;
 
 /** Why the recipient received the email; shown in the footer block. */
 const footerReason = (workspaceName: string) =>
