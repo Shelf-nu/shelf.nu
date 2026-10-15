@@ -15,7 +15,7 @@ import { LocationDescriptionColumn } from "~/components/location/location-descri
 import LocationQuickActions from "~/components/location/location-quick-actions";
 import { Button } from "~/components/shared/button";
 import { Td, Th } from "~/components/table";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import type { LOCATION_LIST_INCLUDE } from "~/modules/location/service.server";
 import { getLocations } from "~/modules/location/service.server";
 import { LOCATION_SORTING_OPTIONS } from "~/modules/location/utils";
@@ -33,6 +33,7 @@ import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { userHasPermission } from "~/utils/permissions/permission.validator.client";
 import { requirePermission } from "~/utils/roles.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
@@ -98,19 +99,40 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 ];
 
 export default function LocationsIndexPage() {
-  const { isBaseOrSelfService } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
+  const showRowActions = useShowLocationRowActions();
+  // The bulk menu offers Delete and Create audit.
+  const showBulkActions =
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.audit,
+      action: PermissionAction.create,
+    });
+
+  const canCreateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
 
   return (
     <>
       <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new location`}
-          data-test-id="createNewLocation"
-        >
-          New location
-        </Button>
+        {canCreateLocation ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new location`}
+            data-test-id="createNewLocation"
+          >
+            New location
+          </Button>
+        ) : null}
       </Header>
       <ListContentWrapper>
         <Filters
@@ -125,16 +147,22 @@ export default function LocationsIndexPage() {
           }}
         />
         <List
-          bulkActions={
-            isBaseOrSelfService ? undefined : <BulkActionsDropdown />
+          bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
+          customEmptyStateContent={
+            canCreateLocation
+              ? {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+                  newButtonRoute: "/locations/new",
+                  newButtonContent: "Create your first location",
+                }
+              : {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Locations added to this workspace will appear here.",
+                }
           }
-          customEmptyStateContent={{
-            title: "No locations yet",
-            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
-            newButtonRoute: "/locations/new",
-            newButtonContent: "Create your first location",
-          }}
           ItemComponent={ListItemContent}
+          extraItemComponentProps={{ showRowActions }}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -142,7 +170,7 @@ export default function LocationsIndexPage() {
               <Th className="whitespace-nowrap">Child locations</Th>
               <Th>Assets</Th>
               <Th>Kits</Th>
-              <Th>Actions</Th>
+              {showRowActions ? <Th>Actions</Th> : null}
             </>
           }
         />
@@ -153,8 +181,11 @@ export default function LocationsIndexPage() {
 
 const ListItemContent = ({
   item,
+  extraProps,
 }: {
   item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+  /** Decided once by the page, so the row cells always match the header. */
+  extraProps: { showRowActions: boolean };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -203,14 +234,37 @@ const ListItemContent = ({
     <Td>{item._count.children}</Td>
     <Td>{item._count.assetLocations}</Td>
     <Td>{item._count.kits}</Td>
-    <Td>
-      <LocationQuickActions
-        location={{
-          id: item.id,
-          name: item.name,
-          childCount: item._count.children,
-        }}
-      />
-    </Td>
+    {extraProps.showRowActions ? (
+      <Td>
+        <LocationQuickActions
+          location={{
+            id: item.id,
+            name: item.name,
+            childCount: item._count.children,
+          }}
+        />
+      </Td>
+    ) : null}
   </>
 );
+
+/**
+ * Whether the member gets any per-row location action. Every button in
+ * `LocationQuickActions` needs `location: update` or `location: delete`, so
+ * without either the Actions column would render empty.
+ */
+function useShowLocationRowActions() {
+  const roles = useOrganizationRoles();
+  return (
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    })
+  );
+}

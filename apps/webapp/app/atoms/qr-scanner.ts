@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@prisma/client";
 import { atom } from "jotai";
+import type { Getter, Setter } from "jotai";
 import { getPrimaryLocation } from "~/modules/asset/utils";
 import type {
   AssetFromQr,
@@ -40,6 +41,67 @@ export const scannedItemsAtom = atom<ScanListItems>({});
  *   atoms below so removing an item also drops its qty entry.
  */
 export const scannedAssetQuantitiesAtom = atom<Record<string, number>>({});
+
+/**
+ * The "From location" a scanned pool's units come from, keyed by `assetId`:
+ * a location id or `"unplaced"`. Set only when the operator picks one; the
+ * assign drawer falls back to the pre-selected location (the one with the
+ * most units left) for rows without an entry. Every remove and clear path
+ * drops an asset's entry together with its quantity, so a rescan starts from
+ * the pre-selection again.
+ */
+export const scannedAssetSourcesAtom = atom<Record<string, string>>({});
+
+/**
+ * Drops the per-asset entries (quantity and picked source) of assets that
+ * left the scan list. Both maps are keyed by `assetId`, not by `qrId`.
+ */
+function dropScannedAssetEntries(get: Getter, set: Setter, assetIds: string[]) {
+  if (assetIds.length === 0) return;
+  const quantities = { ...get(scannedAssetQuantitiesAtom) };
+  const sources = { ...get(scannedAssetSourcesAtom) };
+  for (const id of assetIds) {
+    delete quantities[id];
+    delete sources[id];
+  }
+  set(scannedAssetQuantitiesAtom, quantities);
+  set(scannedAssetSourcesAtom, sources);
+}
+
+/**
+ * Writer for {@link scannedAssetSourcesAtom}: one asset's picked source.
+ * Pass `maxQuantity`, the new source's cap, to lower an entered quantity
+ * that no longer fits in the same update. A cap below 1 leaves the quantity
+ * alone: the row then shows no input, and the bulk route's up-front check
+ * names the location.
+ */
+export const setScannedAssetSourceAtom = atom(
+  null,
+  (
+    get,
+    set,
+    payload: { assetId: string; source: string; maxQuantity?: number }
+  ) => {
+    const { assetId, source, maxQuantity } = payload;
+    set(scannedAssetSourcesAtom, {
+      ...get(scannedAssetSourcesAtom),
+      [assetId]: source,
+    });
+    const quantities = get(scannedAssetQuantitiesAtom);
+    const entered = quantities[assetId];
+    if (
+      maxQuantity !== undefined &&
+      maxQuantity >= 1 &&
+      entered !== undefined &&
+      entered > maxQuantity
+    ) {
+      set(scannedAssetQuantitiesAtom, {
+        ...quantities,
+        [assetId]: maxQuantity,
+      });
+    }
+  }
+);
 
 /**
  * Writer atom that updates a single asset's scanned quantity. Drawer
@@ -192,16 +254,12 @@ export const updateScannedItemAtom = atom(
 // Remove item based on key
 export const removeScannedItemAtom = atom(null, (get, set, qrId: string) => {
   const currentItems = get(scannedItemsAtom);
-  // Drop the matching scanned-item entry plus any qty entry for the
-  // removed asset (qty map is keyed by assetId, not qrId).
+  // Drop the matching scanned-item entry plus the removed asset's qty and
+  // source entries (both keyed by assetId, not qrId).
   const removedAssetId = currentItems[qrId]?.data?.id;
   const { [qrId]: _, ...rest } = currentItems;
   set(scannedItemsAtom, rest);
-  if (removedAssetId) {
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const { [removedAssetId]: __, ...qtyRest } = currentQty;
-    set(scannedAssetQuantitiesAtom, qtyRest);
-  }
+  if (removedAssetId) dropScannedAssetEntries(get, set, [removedAssetId]);
 });
 
 // Remove multiple items based on key array
@@ -217,14 +275,7 @@ export const removeMultipleScannedItemsAtom = atom(
       delete updatedItems[qrId];
     });
     set(scannedItemsAtom, updatedItems);
-    if (removedAssetIds.length > 0) {
-      const currentQty = get(scannedAssetQuantitiesAtom);
-      const qtyRest = { ...currentQty };
-      removedAssetIds.forEach((id) => {
-        delete qtyRest[id];
-      });
-      set(scannedAssetQuantitiesAtom, qtyRest);
-    }
+    dropScannedAssetEntries(get, set, removedAssetIds);
   }
 );
 
@@ -240,12 +291,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
       }
     });
     set(scannedItemsAtom, updatedItems);
-    const currentQty = get(scannedAssetQuantitiesAtom);
-    const qtyRest = { ...currentQty };
-    ids.forEach((id) => {
-      delete qtyRest[id];
-    });
-    set(scannedAssetQuantitiesAtom, qtyRest);
+    dropScannedAssetEntries(get, set, ids);
   }
 );
 
@@ -253,6 +299,7 @@ export const removeScannedItemsByAssetIdAtom = atom(
 export const clearScannedItemsAtom = atom(null, (_get, set) => {
   set(scannedItemsAtom, {}); // Resets the atom to an empty object
   set(scannedAssetQuantitiesAtom, {}); // Drop any qty entries too.
+  set(scannedAssetSourcesAtom, {}); // And any picked source locations.
 });
 
 /*******************************/

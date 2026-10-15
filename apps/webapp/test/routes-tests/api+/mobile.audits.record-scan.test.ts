@@ -4,6 +4,7 @@
  * enforcement (403 when disabled).
  */
 import { action } from "~/routes/api+/mobile+/audits.record-scan";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createActionArgs } from "@mocks/remix";
 
 // @vitest-environment node
@@ -102,11 +103,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
     });
 
     (requireOrganizationAccess as any).mockResolvedValue("org-1");
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      canUseAudits: true,
-      canUseBarcodes: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"] })
+    );
     (requireMobilePermission as any).mockResolvedValue(undefined);
     vi.mocked(requireAuditAssignee).mockResolvedValue(undefined);
   });
@@ -147,22 +146,20 @@ describe("POST /api/mobile/audits/record-scan", () => {
       organizationId: "org-1",
     });
 
-    // why: ADMIN role must map to isSelfServiceOrBase: false so admins can
-    // scan into any audit of their workspace
+    // why: an ADMIN is not limited to assigned audits, so admins can scan
+    // into any audit of their workspace
     expect(requireAuditAssignee).toHaveBeenCalledWith({
       auditSessionId: "session-1",
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
     });
   });
 
   it("should return 403 when a BASE user is not assigned to the audit", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "BASE",
-      canUseAudits: true,
-      canUseBarcodes: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["BASE"] })
+    );
     const assigneeError = Object.assign(
       new Error(
         "Only users assigned to this audit can perform this action. Please contact the audit creator to be assigned."
@@ -191,10 +188,10 @@ describe("POST /api/mobile/audits/record-scan", () => {
       auditSessionId: "session-1",
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: true,
+      assignedOnly: true,
     });
-    // why: the scan must not be recorded when the assignee gate rejects —
-    // the pre-fix behavior wrote scans for users who could not complete
+    // why: the scan must not be recorded when the assignee gate rejects:
+    // a scan from a user who cannot complete the audit must never land
     expect(recordAuditScan).not.toHaveBeenCalled();
   });
 
@@ -224,11 +221,9 @@ describe("POST /api/mobile/audits/record-scan", () => {
   });
 
   it("should return 403 when the Audits add-on is disabled", async () => {
-    (getMobileUserContext as any).mockResolvedValue({
-      role: "ADMIN",
-      canUseAudits: false,
-      canUseBarcodes: true,
-    });
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["ADMIN"], canUseAudits: false })
+    );
 
     const request = createRecordScanRequest({
       auditSessionId: "session-1",
@@ -242,5 +237,32 @@ describe("POST /api/mobile/audits/record-scan", () => {
     const body = await (result as unknown as Response).json();
     expect(body.error.message).toContain("not enabled");
     expect(recordAuditScan).not.toHaveBeenCalled();
+  });
+
+  it("a [SELF_SERVICE, ADMIN] membership is not limited to assigned audits", async () => {
+    // The scope follows the effective role, not the first role listed.
+    (getMobileUserContext as any).mockResolvedValue(
+      mobileUserContext({ roles: ["SELF_SERVICE", "ADMIN"] })
+    );
+    (recordAuditScan as any).mockResolvedValue({
+      scanId: "scan-1",
+      auditAssetId: "audit-asset-1",
+      foundAssetCount: 1,
+      unexpectedAssetCount: 0,
+    });
+
+    await action(
+      createActionArgs({
+        request: createRecordScanRequest({
+          auditSessionId: "session-1",
+          qrId: "qr-abc",
+          assetId: "asset-1",
+        }),
+      })
+    );
+
+    expect(requireAuditAssignee).toHaveBeenCalledWith(
+      expect.objectContaining({ assignedOnly: false })
+    );
   });
 });

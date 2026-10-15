@@ -7,6 +7,7 @@ import {
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { viewerCanSeeLegacyCustody } from "~/modules/api/mobile-custody-visibility.server";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 import { refreshExpiredKitImages } from "~/modules/kit/service.server";
 import { makeShelfError } from "~/utils/error";
 import {
@@ -29,10 +30,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
     const organizationId = await requireOrganizationAccess(request, user.id);
-    const { canSeeAllCustody } = await getMobileUserContext(
-      user.id,
-      organizationId
-    );
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     await requireMobilePermission({
       userId: user.id,
@@ -80,10 +78,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
           status: true,
           image: true,
           imageExpiration: true,
-          // Kits link to assets via the `AssetKit` pivot model — count that
+          // Kits link to assets via the `AssetKit` pivot model. Count that
           // relation, then re-key it below to `_count.assets`, the key the
-          // companion reads.
-          _count: { select: { assetKits: true } },
+          // companion reads. Archived members are out of service and not
+          // counted, matching the kit screen's own count.
+          _count: KIT_ACTIVE_MEMBER_COUNT,
           category: { select: { id: true, name: true } },
           location: { select: { id: true, name: true } },
           custody: {
@@ -126,7 +125,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
         viewerCanSeeLegacyCustody({
           custodianUserId: rest.custody.custodian.userId,
           viewerUserId: user.id,
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
         })
           ? rest.custody
           : null,

@@ -4,6 +4,21 @@ import type { Prisma } from "@prisma/client";
 // type so downstream `getKit` / `MergeInclude` consumers can see the deep
 // shape (e.g. `assetKits.select.asset.select.valuation`). A widening
 // annotation here collapses the union and forces consumers into casts.
+/**
+ * `_count` select for the number of members a kit shows to a user.
+ *
+ * Archived members are out of service, so no user-facing kit count includes
+ * them. Spread it as `_count: KIT_ACTIVE_MEMBER_COUNT`; the count arrives as
+ * `_count.assetKits`.
+ *
+ * Do not use it where the code needs the kit's FULL membership, for example
+ * to decide whether a booking holds the whole kit: archived members are still
+ * members, and a removal that names the kit detaches them too.
+ */
+export const KIT_ACTIVE_MEMBER_COUNT = {
+  select: { assetKits: { where: { asset: { archivedAt: null } } } },
+} satisfies Prisma.KitCountOutputTypeDefaultArgs;
+
 const KIT_OVERVIEW_BARCODES_FIELDS = {
   barcodes: {
     select: {
@@ -22,7 +37,9 @@ const KIT_OVERVIEW_BASE_FIELDS = {
       // per-unit valuation × this number, so a QT asset stocked at 100
       // with 5 of those in this kit contributes value-for-5, not 100.
       quantity: true,
-      asset: { select: { valuation: true } },
+      // `archivedAt` lets the reducer leave archived members out: they are
+      // out of service and add nothing to the kit's value.
+      asset: { select: { valuation: true, archivedAt: true } },
     },
   },
   qrCodes: {

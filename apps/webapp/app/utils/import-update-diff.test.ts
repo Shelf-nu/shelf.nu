@@ -1094,6 +1094,67 @@ describe("computeAssetDiffs", () => {
     expect(result.skippedAssets[0].reason).toBe("No changes detected");
   });
 
+  it("reports an archived asset as a failed row, not a pending update", () => {
+    // why: `updateAsset` refuses archived assets at apply time (issue #382).
+    // The preview exists to say what will happen BEFORE anything is saved, so
+    // counting an archived row as "to update" and then failing it makes the
+    // preview lie about its own outcome.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: new Date("2026-08-14T00:00:00Z"),
+        }),
+      ],
+    ]);
+
+    const csvData = [
+      ["Asset ID", "Name"],
+      ["SAM-0001", "New Name"],
+    ];
+
+    const result = computeAssetDiffs({
+      csvData,
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.assetsToUpdate).toHaveLength(0);
+    expect(result.failedRows).toHaveLength(1);
+    expect(result.failedRows[0].reason).toBe(
+      "Asset is archived — reinstate it before updating"
+    );
+  });
+
+  it("still previews an update for an asset that is not archived", () => {
+    // why: guards against the archived branch swallowing ordinary rows —
+    // `archivedAt: null` must behave exactly as before.
+    const assets = new Map<string, AssetForUpdate>([
+      [
+        "SAM-0001",
+        makeAsset({
+          sequentialId: "SAM-0001",
+          title: "Old Name",
+          archivedAt: null,
+        }),
+      ],
+    ]);
+
+    const result = computeAssetDiffs({
+      csvData: [
+        ["Asset ID", "Name"],
+        ["SAM-0001", "New Name"],
+      ],
+      headerAnalysis: makeHeaderAnalysis(),
+      existingAssets: assets,
+    });
+
+    expect(result.failedRows).toHaveLength(0);
+    expect(result.assetsToUpdate).toHaveLength(1);
+  });
+
   it("reports missing assets as failed rows", () => {
     const assets = new Map<string, AssetForUpdate>();
 
@@ -1991,5 +2052,90 @@ describe("isBackupExportHeaderRow", () => {
       "Asset model",
     ];
     expect(isBackupExportHeaderRow(headers)).toBe(false);
+  });
+});
+
+describe("computeAssetDiffs: description length limit", () => {
+  const headers = ["Asset ID", "Description", "Name"];
+
+  /** Diffs one data row per asset against `SAM-0001` and `SAM-0002`. */
+  function diff(
+    rows: string[][],
+    stored: Partial<AssetForUpdate> = { description: "Old description" }
+  ) {
+    const existingAssets = new Map<string, AssetForUpdate>([
+      ["SAM-0001", makeAsset({ id: "uuid-1", ...stored })],
+      ["SAM-0002", makeAsset({ id: "uuid-2", sequentialId: "SAM-0002" })],
+    ]);
+    return computeAssetDiffs({
+      csvData: [headers, ...rows],
+      headerAnalysis: analyzeUpdateHeaders(headers, []),
+      existingAssets,
+    });
+  }
+
+  it("refuses a row whose new description is over 5,000 characters", () => {
+    const result = diff([
+      ["SAM-0002", "Fits", "Test Asset"],
+      ["SAM-0001", "a".repeat(5123), "New Name"],
+    ]);
+
+    expect(result.failedRows).toEqual([
+      {
+        rowNumber: 3,
+        id: "SAM-0001",
+        reason:
+          "Description too long: 5,123 characters, but the maximum is 5,000. Shorten it and import again.",
+      },
+    ]);
+    expect(result.assetsToUpdate.map((a) => a.id)).toEqual(["SAM-0002"]);
+  });
+
+  it("accepts a description of exactly 5,000 characters", () => {
+    const description = "a".repeat(5000);
+    const result = diff([["SAM-0001", description, "Test Asset"]]);
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      {
+        field: "Description",
+        currentValue: "Old description",
+        newValue: description,
+      },
+    ]);
+  });
+
+  it("counts a \\r\\n line break as one character", () => {
+    // 5,001 UTF-16 units, 5,000 characters as the user counts them.
+    const description = `${"a".repeat(2500)}\r\n${"a".repeat(2499)}`;
+    const result = diff([["SAM-0001", description, "Test Asset"]]);
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes[0].newValue).toBe(description);
+  });
+
+  it("does not block a row that leaves a stored over-limit description as it is", () => {
+    const stored = "a".repeat(6000);
+    const result = diff([["SAM-0001", stored, "New Name"]], {
+      description: stored,
+    });
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      { field: "Name", currentValue: "Test Asset", newValue: "New Name" },
+    ]);
+  });
+
+  it("treats a stored description that differs only by surrounding whitespace as unchanged", () => {
+    // The CSV cell arrives trimmed, so a stored trailing line break is not
+    // something the file asks to change.
+    const result = diff([["SAM-0001", "a".repeat(6000), "New Name"]], {
+      description: `${"a".repeat(6000)}\n`,
+    });
+
+    expect(result.failedRows).toEqual([]);
+    expect(result.assetsToUpdate[0].changes).toEqual([
+      { field: "Name", currentValue: "Test Asset", newValue: "New Name" },
+    ]);
   });
 });

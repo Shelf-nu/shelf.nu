@@ -12,6 +12,8 @@
 
 // @vitest-environment node
 
+import { OrganizationRoles } from "@prisma/client";
+import { permissionContext } from "@helpers/role-access";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
 import { createActionArgs } from "@mocks/remix";
@@ -84,11 +86,9 @@ async function submit({
 beforeEach(() => {
   vi.clearAllMocks();
 
-  vi.mocked(requirePermission).mockResolvedValue({
-    organizationId: "org-1",
-    role: "ADMIN",
-    isSelfServiceOrBase: false,
-  } as never);
+  vi.mocked(requirePermission).mockResolvedValue(
+    permissionContext({ roles: [OrganizationRoles.ADMIN] }) as never
+  );
 
   vi.mocked(db.booking.findFirst).mockResolvedValue({
     id: "b1",

@@ -1,12 +1,10 @@
 ---
 description: User-supplied strings placed into note content (booking, audit, asset — anything rendered through Markdoc) must be sanitized against Markdoc-tag injection. Sanitize at write time.
-globs:
-  [
-    "apps/webapp/app/modules/**/service.server.ts",
-    "apps/webapp/app/modules/booking-note/**",
-    "apps/webapp/app/modules/audit/note-content.server.ts",
-    "apps/webapp/app/utils/markdoc-wrappers.ts",
-  ]
+paths:
+  - "apps/webapp/app/modules/**/service.server.ts"
+  - "apps/webapp/app/modules/booking-note/**"
+  - "apps/webapp/app/modules/audit/note-content.server.ts"
+  - "apps/webapp/app/utils/markdoc-wrappers.ts"
 ---
 
 # Sanitize User Input in Markdoc-Rendered Notes
@@ -57,6 +55,11 @@ prop.
 "It's user-controlled, so restrict it" is the WRONG test and has caused this
 miss three times: user comments are user-controlled too, and they legitimately
 link out. When you add a `MarkdownViewer` call site, ask who typed the string.
+
+Render UPDATE / system-generated notes with `SystemNoteViewer`
+(`~/components/markdown/system-note-viewer`), never a bare `MarkdownViewer`.
+The wrappers store raw line breaks and backslashes inside tag attributes, and
+only `SystemNoteViewer` encodes them so the tags parse.
 
 When you splice ANY user-controlled string into note content:
 

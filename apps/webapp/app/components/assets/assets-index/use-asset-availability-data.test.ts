@@ -27,10 +27,10 @@ import {
   useAssetAvailabilityData,
 } from "./use-asset-availability-data";
 
-// why: useUserRoleHelper resolves roles via Remix loader data; tests do not
+// why: useOrganizationRoles resolves roles via Remix loader data; tests do not
 // run inside a route, so stub it to a single-role admin set.
-vi.mock("~/hooks/user-user-role-helper", () => ({
-  useUserRoleHelper: () => ({ roles: ["ADMIN"] }),
+vi.mock("~/hooks/use-organization-roles", () => ({
+  useOrganizationRoles: () => ["ADMIN"],
 }));
 
 // why: useCurrentOrganization reads Remix root loader data unavailable in the

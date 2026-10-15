@@ -29,8 +29,8 @@ export async function action({ request }: ActionFunctionArgs) {
     await requireMobilePermission({
       userId: user.id,
       organizationId,
-      entity: PermissionEntity.asset,
-      action: PermissionAction.update,
+      entity: PermissionEntity.note,
+      action: PermissionAction.create,
     });
 
     const { assetId, content } = await parseMobileBody(
@@ -44,6 +44,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     // Verify asset exists and belongs to the organization
     const asset = await db.asset.findUnique({
+      // eslint-disable-next-line local-rules/require-archived-at-check-on-asset-queries -- why: org-ownership check for notes on an asset's own page, which stays usable for archived assets
       where: { id: assetId, organizationId },
       select: { id: true },
     });

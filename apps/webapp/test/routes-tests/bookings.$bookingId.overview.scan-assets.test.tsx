@@ -1,8 +1,10 @@
+import { OrganizationRoles } from "@prisma/client";
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import type { ActionFunctionArgs } from "react-router";
 import { redirect } from "react-router";
 
 import { locationDescendantsMock } from "@mocks/location-descendants";
+import { permissionContext } from "@helpers/role-access";
 
 // why: mocking location descendants to avoid database queries during tests
 vi.mock("~/modules/location/descendants.server", () => locationDescendantsMock);
@@ -56,12 +58,19 @@ vi.mock("~/modules/booking/service.server", () => ({
   getBooking: vi.fn(),
 }));
 
-// why: the route now imports `db` at module scope for the ownership guard's
-// booking lookup. `requirePermissionMock` below resolves no role, so
-// `isSelfServiceOrBase` is falsy and the lookup never runs, but the module
-// still has to resolve to something without touching a real database.
+// why: the action reads the target booking's status and owners before it
+// writes; an open DRAFT keeps these cases about the write itself (the caller
+// is an ADMIN, whose access writes every booking).
 vi.mock("~/database/db.server", () => ({
-  db: { booking: { findUniqueOrThrow: vi.fn() } },
+  db: {
+    booking: {
+      findFirst: vi.fn().mockResolvedValue({
+        status: "DRAFT",
+        creatorId: "someone-else",
+        custodianUserId: null,
+      }),
+    },
+  },
 }));
 
 // why: preventing actual notification sending during route tests
@@ -119,9 +128,12 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
     vi.clearAllMocks();
     requirePermissionMock.mockReset();
     addScannedAssetsToBookingMock.mockReset();
-    requirePermissionMock.mockResolvedValue({
-      organizationId: "org-1",
-    } as any);
+    requirePermissionMock.mockResolvedValue(
+      permissionContext({
+        organizationId: "org-1",
+        roles: [OrganizationRoles.ADMIN],
+      }) as unknown as Awaited<ReturnType<typeof requirePermission>>
+    );
     // why: the action destructures `addedAssetIds`/`claimedAssetIds` off the
     // service's return value to choose its notification; this test only
     // cares about the call args and the redirect, so one added asset is a
@@ -165,6 +177,11 @@ describe("bookings/$bookingId/overview/scan-assets action", () => {
       // kit-driven BookingAsset row). Empty when only direct asset
       // scans were submitted.
       kitSlices: [],
+      // The caller's access, so the service re-checks the add rule
+      // against the booking status it reads under the row lock.
+      access: expect.objectContaining({
+        bookings: expect.objectContaining({ writeAll: true }),
+      }),
     });
     expect(vi.mocked(redirect)).toHaveBeenCalledWith("/bookings/booking-123");
   });

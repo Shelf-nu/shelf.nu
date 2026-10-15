@@ -159,6 +159,8 @@ describe("POST /api/mobile/bookings/checkin", () => {
       organizationId: "org-1",
       hints: { timeZone: "UTC", locale: "en-US" },
       userId: "user-1",
+      // "Check In All" is the phone's one tap; the server states it.
+      provenance: { surface: "phone", method: "quick" },
     });
   });
 

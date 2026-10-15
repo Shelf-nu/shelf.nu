@@ -72,7 +72,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       });
     }
     if (context.isAuthenticated) {
-      return redirect("/assets");
+      return redirect("/");
     }
 
     // What the signup link asked for (`?plan=team&trial=true&utm_*=…`). From

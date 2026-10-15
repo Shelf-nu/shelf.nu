@@ -21,8 +21,9 @@ export * from "./activityEvent";
 /** Audit session + audit asset factories. `createAuditAsset` requires an
  * `auditSessionId`: that link is the model's entire tenant boundary. */
 export * from "./audit";
-/** `createLayoutLoaderData` — the `_layout` loader payload that
- * `useUserRoleHelper` and friends read through `useRouteLoaderData`. */
+/** `createLayoutLoaderData`: the `_layout` loader payload that
+ * `useOrganizationRoles`, `useRoleAccess` and friends read through
+ * `useRouteLoaderData`. */
 export * from "./layoutLoaderData";
 /** `stripePriceFactory` + `tierMetadata`/`addonMetadata` — resolved Stripe
  * prices, whose four entitlement-relevant properties must all be set. */

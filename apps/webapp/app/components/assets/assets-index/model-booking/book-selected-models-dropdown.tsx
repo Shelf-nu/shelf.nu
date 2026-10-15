@@ -41,7 +41,7 @@ import { Button } from "~/components/shared/button";
 import { MobileDropdownStyles } from "~/components/shared/mobile-dropdown-styles";
 import When from "~/components/when/when";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { isPersonalOrg } from "~/utils/organization";
 import {
   PermissionAction,
@@ -101,7 +101,7 @@ function ConditionalActionsDropdown() {
   const [open, setOpen] = useState(false);
   const organization = useCurrentOrganization();
   const selectedModels = useAtomValue(selectedBulkItemsAtom);
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
 
   const canCreateBooking = userHasPermission({
     roles,
@@ -157,7 +157,7 @@ function ConditionalActionsDropdown() {
         <PopoverTrigger asChild>
           <Button
             type="button"
-            className="hidden sm:flex"
+            className="hidden md:flex"
             disabled={disabledReason}
           >
             <span className="flex items-center gap-2">
@@ -167,14 +167,14 @@ function ConditionalActionsDropdown() {
         </PopoverTrigger>
 
         {/*
-          Below `sm` the trigger above is hidden and this one opens the sheet.
+          Below `md` the trigger above is hidden and this one opens the sheet.
           It only ever OPENS: the sheet is dismissed by tapping the overlay,
           which Radix reads as a pointer-down outside, and a toggle here would
           reopen what that dismissal just closed.
         */}
         <Button
           type="button"
-          className="flex-1 sm:hidden"
+          className="flex-1 md:hidden"
           onClick={() => setOpen(true)}
           disabled={disabledReason}
         >
@@ -187,6 +187,7 @@ function ConditionalActionsDropdown() {
 
         <PopoverPortal>
           <PopoverContent
+            data-mobile-sheet
             // Matches the offsets the shared menu primitive applies, so the
             // panel sits the same distance from the trigger and keeps the same
             // gap from the viewport edge.
@@ -196,12 +197,12 @@ function ConditionalActionsDropdown() {
             asChild
             className={tw(
               "z-50 w-screen overflow-y-auto rounded-t border border-gray-300 bg-white text-right shadow-md md:static md:w-56",
-              // `MobileDropdownStyles` strips the popper transform below `sm`,
+              // `MobileDropdownStyles` strips the popper transform below `md`,
               // which detaches the panel from its trigger and turns it into a
               // bottom sheet. Trigger-relative available height no longer
               // describes the room it has, so cap it against the viewport and
               // let it scroll past that.
-              "max-h-[85dvh] sm:max-h-[var(--radix-popover-content-available-height)]",
+              "max-h-[85dvh] md:max-h-[var(--radix-popover-content-available-height)]",
               "animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
             )}
           >

@@ -1,7 +1,9 @@
 import type { Prisma } from "@prisma/client";
 
+import type { CustodySourceSummary } from "~/modules/asset/custody-source";
 import type { AssetImageSource } from "~/modules/asset/image-resolution";
 import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
+import { KIT_ACTIVE_MEMBER_COUNT } from "~/modules/kit/fields";
 
 /**
  * The custodian fields every scanner row renders a holder with.
@@ -38,6 +40,10 @@ export const ASSET_CUSTODY_INCLUDE = {
       // it. Only the operator axis can be handed back asset-by-asset, so the
       // release scanner needs to tell them apart before offering a ceiling.
       kitCustodyId: true,
+      // One person can hold several operator rows on a quantity-tracked
+      // asset (one per location the units came from), so the release
+      // scanner counts holders by this id, not by rows.
+      teamMemberId: true,
       custodian: { select: CUSTODIAN_SELECT },
     },
   },
@@ -110,7 +116,10 @@ export const KIT_INCLUDE = {
       name: true,
     },
   },
-  _count: { select: { assetKits: true } },
+  // The "(N assets)" a scanned kit row shows: active members, since archived
+  // ones are left out of kit custody and bookings. `assetKits` below keeps
+  // them, so the server can leave them out and say so.
+  _count: KIT_ACTIVE_MEMBER_COUNT,
   assetKits: {
     select: {
       // Scanner needs the AssetKit's own id so kit-driven
@@ -131,6 +140,9 @@ export const KIT_INCLUDE = {
           // remaining-units map, INDIVIDUAL is binary).
           type: true,
           availableToBook: true,
+          // Archived members are left out of kit custody and bookings; the
+          // drawers flag a kit whose members are all archived.
+          archivedAt: true,
           custody: true,
           // Which `AssetModel` the member is an instance of. The fulfil
           // drawer matches a kit's members against the booking's
@@ -181,6 +193,11 @@ export type ScannerAssetPickerMeta = {
   maxAllowed: number;
   assetQuantity: number;
   unitOfMeasure: string | null;
+  /**
+   * Custody context only: where a pool's units can come from, when it is
+   * placed at two or more locations.
+   */
+  sources?: CustodySourceSummary | null;
 } | null;
 
 /**

@@ -1,25 +1,26 @@
 /**
  * Shared asset-search UNION builder.
  *
- * Both asset indexes search the SAME 10 sources with OR-of-terms semantics:
+ * Both asset indexes search the SAME 11 sources with OR-of-terms semantics:
  * the advanced index (raw SQL, `generateWhereClause`) and the simple index
- * (`getAssets`, Prisma). Historically each expressed this as a single
- * multi-table `OR`, which forced cross-org sequential scans (Category 156k
- * rows, Custody/TeamMember/User seq scans) — ~1.5s mean, 36s max on a 14k-asset
- * org. This module replaces that with an org-scoped `UNION` of one branch per
- * source, producing the set of matching asset ids. Nine of the ten branches
- * are served by trigram (GIN) indexes — Asset title/description/sequentialId,
- * Category.name, Location.name, Tag.name, Qr.id, Barcode.value, TeamMember.name,
- * and the custom-field values (via `AssetCustomFieldValue_searchable_trgm_idx`,
- * a functional GIN trigram index over the concatenated searchable JSON paths;
- * the custom-field branch queries that same `COALESCE(...) || ...` expression as
- * an indexed prefilter and keeps the per-path OR as the exact filter). The one
- * remaining branch — `User.firstName`/`lastName`/`displayName` — has no trigram
- * index and relies on org-scoping (`tm.organizationId` gates the scan before the
- * ILIKE, so it only touches the org's team members). Measured on the 14k-asset
- * org that surfaced this: searched COUNT ~2.6s -> ~0.3s (custom-field branch
- * 2.3s -> ~15ms warm) — a measurement, not a guarantee for every term/data
- * shape.
+ * (`getAssets`, Prisma). A search resolves to an org-scoped `UNION` of one
+ * branch per source, producing the set of matching asset ids.
+ *
+ * Every branch pins the org id as a literal param, and that is what keeps the
+ * scan small: a single multi-table `OR` over these sources cannot be
+ * org-scoped per table, so it forces cross-org sequential scans (Category,
+ * Custody/TeamMember/User).
+ *
+ * Ten of the eleven branches are served by trigram (GIN) indexes: Asset
+ * title/description/sequentialId, AssetModel.name, Category.name,
+ * Location.name, Tag.name, Qr.id, Barcode.value, TeamMember.name, and the
+ * custom-field values (via `AssetCustomFieldValue_searchable_trgm_idx`, a
+ * functional GIN trigram index over the concatenated searchable JSON paths;
+ * the custom-field branch queries that same `COALESCE(...) || ...` expression
+ * as an indexed prefilter and keeps the per-path OR as the exact filter). The
+ * one remaining branch, `User.firstName`/`lastName`/`displayName`, has no
+ * trigram index and relies on org-scoping (`tm.organizationId` gates the scan
+ * before the ILIKE, so it only touches the org's team members).
  *
  * The advanced index inlines this as `a.id IN (<union>)`; the simple index
  * executes it via `$queryRaw` and feeds the ids into its Prisma `where`.
@@ -43,7 +44,7 @@ export { CUSTOM_FIELD_SEARCH_PATHS };
 export type AssetSearchIdRow = { id: string };
 
 /**
- * Builds one term's OR-across-10-sources as a set of UNION-ed `SELECT id`
+ * Builds one term's OR-across-11-sources as a set of UNION-ed `SELECT id`
  * branches, each org-scoped with the LITERAL org id.
  */
 function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
@@ -98,6 +99,12 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
         AND a."organizationId" = ${organizationId}
         AND c."name" ILIKE ${like}
     UNION
+    SELECT a."id" FROM public."AssetModel" am
+      JOIN public."Asset" a ON a."assetModelId" = am."id"
+      WHERE am."organizationId" = ${organizationId}
+        AND a."organizationId" = ${organizationId}
+        AND am."name" ILIKE ${like}
+    UNION
     SELECT al."assetId" FROM public."Location" l
       JOIN public."AssetLocation" al ON al."locationId" = l."id"
       JOIN public."Asset" a ON a."id" = al."assetId"
@@ -137,7 +144,7 @@ function branchesForTerm(organizationId: string, term: string): Prisma.Sql {
 
 /**
  * Builds the org-scoped UNION of asset ids matching ANY of `terms` in ANY of the
- * 10 search sources (OR-of-terms). Returns a parenthesised subquery producing a
+ * 11 search sources (OR-of-terms). Returns a parenthesised subquery producing a
  * single `id` column.
  *
  * @param organizationId - Tenant scope (bound as a LITERAL param in every branch).

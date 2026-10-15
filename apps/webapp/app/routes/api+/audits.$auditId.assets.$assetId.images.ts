@@ -23,7 +23,7 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
@@ -37,14 +37,14 @@ export async function loader({ request, context, params }: LoaderFunctionArgs) {
     );
 
     // `audit: read` authorizes reading audits in general, never THIS audit.
-    // Without an assignment check a BASE or SELF_SERVICE member could read the
-    // evidence attached to any audit in the workspace, including ones they
-    // were never assigned to. ADMIN/OWNER are unrestricted.
+    // Without an assignment check a member limited to assigned audits could
+    // read the evidence attached to any audit in the workspace, including ones
+    // they were never assigned to. Callers who see every audit are unrestricted.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // Fetch images for the specific audit asset
@@ -65,7 +65,7 @@ export async function action({ request, context, params }: LoaderFunctionArgs) {
   const { userId } = context.getSession();
 
   try {
-    const { organizationId, isSelfServiceOrBase } = await requirePermission({
+    const { organizationId, access } = await requirePermission({
       request,
       userId,
       entity: PermissionEntity.audit,
@@ -84,7 +84,7 @@ export async function action({ request, context, params }: LoaderFunctionArgs) {
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     const { intent, imageId } = parseData(

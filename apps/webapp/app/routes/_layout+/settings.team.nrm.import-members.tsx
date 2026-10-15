@@ -41,8 +41,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
     const { organizationId, organizations } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.create,
+      entity: PermissionEntity.nonRegisteredMember,
+      action: PermissionAction.import,
     });
     await assertUserCanImportNRM({ organizationId, organizations });
 
@@ -63,8 +63,8 @@ export async function action({ context, request }: ActionFunctionArgs) {
     const { organizationId, organizations } = await requirePermission({
       userId,
       request,
-      entity: PermissionEntity.teamMember,
-      action: PermissionAction.create,
+      entity: PermissionEntity.nonRegisteredMember,
+      action: PermissionAction.import,
     });
 
     // Subscription assertion and form data parsing are independent — run in parallel

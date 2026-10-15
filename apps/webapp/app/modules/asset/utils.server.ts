@@ -20,7 +20,7 @@ import { stripMarkdocDelimiters } from "~/utils/markdoc-sanitize";
 import { wrapUserLinkForNote, wrapLinkForNote } from "~/utils/markdoc-wrappers";
 import { splitFilterParam } from "./filter-param";
 import { parseFiltersWithHierarchy } from "./query.server";
-import type { ICustomFieldValueJson } from "./types";
+import type { ArchivedFilter, ICustomFieldValueJson } from "./types";
 import type { Column } from "../asset-index-settings/helpers";
 
 /**
@@ -583,6 +583,47 @@ export const CurrentSearchParamsSchema = z.object({
   currentSearchParams: z.string().optional().nullable(),
 });
 
+// Defined in `./types` so `query.server.ts` can share it without an import
+// cycle (this module already imports from there); re-exported for callers.
+export type { ArchivedFilter } from "./types";
+
+/**
+ * Reads the `archived` view dimension from URL search params. Defaults to
+ * `active` so every list hides archived assets unless explicitly asked.
+ *
+ * @param searchParams - The request's search params.
+ * @returns The resolved {@link ArchivedFilter}.
+ */
+export function getArchivedFilterFromParams(
+  searchParams: URLSearchParams
+): ArchivedFilter {
+  const value = searchParams.get("archived");
+  if (value === "archived" || value === "all") {
+    return value;
+  }
+  return "active";
+}
+
+/**
+ * Applies an {@link ArchivedFilter} to a Prisma asset `where` clause.
+ * Mutates and returns the passed `where` for chaining.
+ *
+ * @param where - The Prisma asset where clause to narrow.
+ * @param archivedFilter - The resolved view dimension.
+ */
+export function applyArchivedFilter(
+  where: Prisma.AssetWhereInput,
+  archivedFilter: ArchivedFilter
+): Prisma.AssetWhereInput {
+  if (archivedFilter === "active") {
+    where.archivedAt = null;
+  } else if (archivedFilter === "archived") {
+    where.archivedAt = { not: null };
+  }
+  // "all" → leave the archived dimension unconstrained.
+  return where;
+}
+
 /**
  * Which custodian ids a caller may filter a "select all" query by.
  *
@@ -634,13 +675,36 @@ export function applyCustodianAllowList(
     : kept;
 }
 
+/**
+ * Prisma `where` clause for "select all" and bulk actions, built from a
+ * serialized list query string.
+ *
+ * It mirrors the simple-mode list filters (search, status, category, tag,
+ * location, custodian), always scoped to the organization, so a bulk action
+ * acts on the rows the list showed.
+ *
+ * @returns The clause; just `{ organizationId }` when there is no query string
+ */
 export function getAssetsWhereInput({
   organizationId,
   currentSearchParams,
   allowedTeamMemberIds,
+  locationIdsOverride,
+  honorArchivedView = false,
 }: {
   organizationId: Asset["organizationId"];
   currentSearchParams?: string | null;
+  /**
+   * Location ids the clause matches, in place of the `location` values in
+   * `currentSearchParams`. Omitted, the URL's own values are matched exactly.
+   *
+   * For surfaces whose visible list widens the ticked locations (to include
+   * their child locations): pass the same resolved set the list used, so
+   * "select all" acts on exactly the rows the user was shown.
+   *
+   * @see {@link file://./../location/child-locations-filter.server.ts}
+   */
+  locationIdsOverride?: string[];
   /**
    * Required, with no default, so every call site states an answer.
    *
@@ -651,17 +715,33 @@ export function getAssetsWhereInput({
    * which a BASE user can reach with `qr: read`.
    */
   allowedTeamMemberIds: AllowedCustodianFilterIds;
+  /**
+   * Apply the `?archived=` view (issue #382). Off by default: the param is raw
+   * URL input, so a "select all" caller gets active assets unless it opts in
+   * for a member allowed to see archived ones. See
+   * `resolveAssetIdsForBulkOperation`.
+   */
+  honorArchivedView?: boolean;
 }) {
   const where: Prisma.AssetWhereInput = { organizationId };
 
   if (!currentSearchParams) {
+    // No params at all means the default "active" view — hide archived assets.
+    applyArchivedFilter(where, "active");
     return where;
   }
 
   const searchParams = new URLSearchParams(currentSearchParams);
   const paramsValues = getParamsValues(searchParams);
 
-  const { categoriesIds, locationIds, tagsIds, search } = paramsValues;
+  // Active/Archived/All dimension: active unless the caller opted in.
+  applyArchivedFilter(
+    where,
+    honorArchivedView ? getArchivedFilterFromParams(searchParams) : "active"
+  );
+
+  const { categoriesIds, tagsIds, search } = paramsValues;
+  const locationIds = locationIdsOverride ?? paramsValues.locationIds;
 
   const teamMemberIds = applyCustodianAllowList(
     paramsValues.teamMemberIds ?? [],
