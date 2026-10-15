@@ -116,7 +116,7 @@ read-only  rows stored             claim QR,   100 rows     kit custody,
    (`PREVIEW_DISPLAY_LIMIT`) as a grid plus the entities that will be created
    (`missing-entities.server.ts`): categories, locations, tags, kits,
    custodians, custom fields and asset models the workspace does not have yet.
-2. **Confirm** (`startAssetImport` in `service.server.ts`). The stored rows are
+2. **Confirm** (`confirmAssetImport` in `service.server.ts`). The stored rows are
    validated again, because the workspace may have changed since the preview. A
    DRAFT older than 24 hours (`ASSET_IMPORT_DRAFT_TTL_HOURS`) cannot be
    confirmed. The import moves to `QUEUED` and a PREPARE job is sent. Only one
@@ -251,8 +251,9 @@ Also: `app/emails/asset-import-finished.tsx`; routes
 `components/assets/import-content/` (upload flow, preview stage, progress) and
 `components/assets/import-preview/` (grid, confirm dialog, error details, new
 entities notice). Other references: `modules/asset/service.server.ts`
-(`parseQtyTrackedCsvRow()`, `createAssetModelsIfNotExists()`) and
-`utils/import-update-types.ts` (`UPDATABLE_FIELDS` for the update path).
+(`parseQtyTrackedCsvRow()`), `modules/asset-model/service.server.ts`
+(`createAssetModelsIfNotExists()`) and `utils/import-update-types.ts`
+(`UPDATABLE_FIELDS` for the update path).
 
 ## Operational notes
 

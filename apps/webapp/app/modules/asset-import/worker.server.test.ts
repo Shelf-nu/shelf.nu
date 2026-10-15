@@ -20,6 +20,8 @@ import { writeImportChunk } from "./chunk-writer.server";
 import {
   ASSET_IMPORT_IMAGE_BUDGET_MS,
   ASSET_IMPORT_JOB_OPTIONS,
+  ASSET_IMPORT_LEASE_MINUTES,
+  ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS,
 } from "./constants";
 import { runFinalizeStep } from "./finalize.server";
 import { claimImportLease, releaseImportLease } from "./lease.server";
@@ -189,6 +191,18 @@ describe("enqueueAssetImportStep", () => {
     });
   });
 
+  it("delays the job when asked, keeping the singleton key and options", async () => {
+    const data = { importId: "imp", step: "ROWS" as const, chunkIndex: 1 };
+
+    await enqueueAssetImportStep(data, { delaySeconds: 870 });
+
+    expect(scheduler.send).toHaveBeenCalledWith("asset-import-queue", data, {
+      ...ASSET_IMPORT_JOB_OPTIONS,
+      singletonKey: "imp:ROWS:1",
+      startAfter: 870,
+    });
+  });
+
   it("treats a step that is already queued as success", async () => {
     vi.mocked(scheduler.send).mockResolvedValue(null);
 
@@ -231,6 +245,7 @@ describe("handleAssetImportJob", () => {
     vi.resetAllMocks();
     vi.mocked(scheduler.send).mockResolvedValue("job-1");
     vi.mocked(claimImportLease).mockResolvedValue(true);
+    vi.mocked(releaseImportLease).mockResolvedValue(true);
     vi.mocked(userCanStillImport).mockResolvedValue(true);
     vi.mocked(createSignedUrl).mockResolvedValue("https://signed.test/a");
     vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 0 });
@@ -349,6 +364,53 @@ describe("handleAssetImportJob", () => {
     const sendOrder = vi.mocked(scheduler.send).mock.invocationCallOrder[0];
     expect(releaseOrder).toBeLessThan(sendOrder);
     // Released once: `finally` does not release a lease already handed off.
+    expect(releaseImportLease).toHaveBeenCalledTimes(1);
+  });
+
+  it("enqueues the next step straight away when the lease was released", async () => {
+    loads(imp({ status: "RUNNING", totalRows: 250, processedRows: 0 }));
+    vi.mocked(writeImportChunk).mockResolvedValue({
+      applied: true,
+      nextProcessedRows: 100,
+      warnings: [],
+    });
+
+    await handleAssetImportJob(
+      job({ importId: "imp", step: "ROWS", chunkIndex: 0 })
+    );
+
+    const options = vi.mocked(scheduler.send).mock.calls[0][2];
+    expect(options).not.toHaveProperty("startAfter");
+  });
+
+  it("delays the next step until the lease lapses when the release failed", async () => {
+    loads(imp({ status: "RUNNING", totalRows: 250, processedRows: 0 }));
+    vi.mocked(writeImportChunk).mockResolvedValue({
+      applied: true,
+      nextProcessedRows: 100,
+      warnings: [],
+    });
+    vi.mocked(releaseImportLease).mockResolvedValue(false);
+
+    await expect(
+      handleAssetImportJob(
+        job({ importId: "imp", step: "ROWS", chunkIndex: 0 })
+      )
+    ).resolves.toBeUndefined();
+
+    expect(scheduler.send).toHaveBeenCalledWith(
+      "asset-import-queue",
+      { importId: "imp", step: "ROWS", chunkIndex: 1 },
+      expect.objectContaining({
+        singletonKey: "imp:ROWS:1",
+        startAfter: ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS,
+      })
+    );
+    // The delayed claim lands after the unreleased lease has lapsed.
+    expect(ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS).toBeGreaterThan(
+      (ASSET_IMPORT_LEASE_MINUTES - 1) * 60
+    );
+    // `finally` does not try a second release of a lease already handed off.
     expect(releaseImportLease).toHaveBeenCalledTimes(1);
   });
 

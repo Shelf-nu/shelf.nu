@@ -41,6 +41,7 @@ import {
   ASSET_IMPORT_IMAGE_BUDGET_MS,
   ASSET_IMPORT_JOB_OPTIONS,
   ASSET_IMPORT_POLL_INTERVAL_SECONDS,
+  ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS,
 } from "./constants";
 import { markImportFailed } from "./failure.server";
 import { runFinalizeStep } from "./finalize.server";
@@ -88,10 +89,13 @@ function singletonKeyFor(data: AssetImportJobData): string {
  * queued; that means the step is already scheduled, so it counts as success.
  *
  * @param data - Import id and the step to run
+ * @param options.delaySeconds - When set, the job becomes runnable only after
+ * this many seconds (pg-boss `startAfter`)
  * @throws {ShelfError} When the queue rejects the job
  */
 export async function enqueueAssetImportStep(
-  data: AssetImportJobData
+  data: AssetImportJobData,
+  { delaySeconds }: { delaySeconds?: number } = {}
 ): Promise<void> {
   const singletonKey = singletonKeyFor(data);
 
@@ -99,6 +103,7 @@ export async function enqueueAssetImportStep(
     const jobId = await scheduler.send(QueueNames.assetImportQueue, data, {
       ...ASSET_IMPORT_JOB_OPTIONS,
       singletonKey,
+      ...(delaySeconds === undefined ? {} : { startAfter: delaySeconds }),
     });
 
     if (jobId === null) {
@@ -366,9 +371,10 @@ function isLastAttempt(job: PgBoss.JobWithMetadata<AssetImportJobData>) {
  * FAILED. When the import cannot be loaded at all there is nothing to mark: the
  * error is logged and rethrown, and stall detection fails the import later.
  *
- * The lease is released before the next step is queued, so the next job can
- * never find it still held and drop out of the chain. A step that throws
- * releases it in `finally`.
+ * The lease is released before the next step is queued, so the next job does
+ * not find it still held and drop out of the chain. When that release fails,
+ * the next step is queued with a delay that outlasts the lease. A step that
+ * throws releases it in `finally`.
  *
  * @param job - The pg-boss job, with retry metadata
  * @throws The step's error, so pg-boss retries it or records the failure
@@ -416,11 +422,23 @@ export async function handleAssetImportJob(
     }
     leaseHeld = true;
 
-    /** Releases the lease, then queues the next step (if any). */
+    /**
+     * Releases the lease, then queues the next step (if any). When the
+     * release failed, the next step is delayed until the lease has lapsed:
+     * started now, its claim would find the lease held and return as a
+     * duplicate, ending the chain. The step itself does not throw, because
+     * its work is committed and a quick retry would find the lease held too.
+     */
     const handOff = async (next: AssetImportJobData | null) => {
       leaseHeld = false;
-      await releaseImportLease(importLease);
-      if (next) await enqueueAssetImportStep(next);
+      const released = await releaseImportLease(importLease);
+      if (!next) return;
+      await enqueueAssetImportStep(
+        next,
+        released
+          ? {}
+          : { delaySeconds: ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS }
+      );
     };
 
     switch (data.step) {

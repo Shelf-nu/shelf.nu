@@ -27,6 +27,17 @@ export const ASSET_IMPORT_POLL_INTERVAL_SECONDS = 2;
 export const ASSET_IMPORT_LEASE_MINUTES = 15;
 
 /**
+ * How long to hold back the next step when the previous step could not
+ * release its lease: the lease length (`ASSET_IMPORT_LEASE_MINUTES - 1`
+ * minutes) plus 30 seconds of margin. Started any earlier, the next step's
+ * claim would find the lease still held and return as a duplicate, which
+ * stops the chain until stall detection. Measured from the release, which
+ * comes after the claim, so the lease has always lapsed by then.
+ */
+export const ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS =
+  (ASSET_IMPORT_LEASE_MINUTES - 1) * 60 + 30;
+
+/**
  * A QUEUED or RUNNING import untouched for this long is treated as stopped.
  * Confirm, resume, every lease claim and every chunk bump `updatedAt`, so the
  * longest legitimate silence is one job expiry plus backoff, about 16 minutes.

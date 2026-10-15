@@ -155,6 +155,8 @@ async function assignKitCustody(
       where: {
         id: { in: groups.map((g) => g.custodianId) },
         organizationId,
+        // A soft-deleted member counts as gone, as in every custody flow.
+        deletedAt: null,
       },
       select: { id: true, name: true },
     }),

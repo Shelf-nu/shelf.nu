@@ -187,8 +187,10 @@ function BrokenQrCodesTable({
           </Tr>
         </thead>
         <tbody>
-          {data.map((code: { title: string; qrId: string }) => (
-            <Tr key={code.title}>
+          {/* Titles are not unique and duplicateCodes repeats whole entries,
+              so the static row's position is part of its key. */}
+          {data.map((code: { title: string; qrId: string }, index) => (
+            <Tr key={`${code.qrId}-${code.title}-${index}`}>
               <Td>{code.title}</Td>
               <Td>{code.qrId}</Td>
             </Tr>

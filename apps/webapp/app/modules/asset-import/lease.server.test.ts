@@ -2,7 +2,7 @@
 /**
  * Tests for the import lease: which imports a claim can match, the claim
  * result, that a lease always ends before its job expires, and that releasing
- * never throws.
+ * never throws but reports whether it succeeded.
  *
  * @see {@link file://./lease.server.ts}
  */
@@ -113,10 +113,10 @@ describe("releaseImportLease", () => {
     vi.resetAllMocks();
   });
 
-  it("clears the lease", async () => {
+  it("clears the lease and reports success", async () => {
     vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
 
-    await releaseImportLease(args);
+    await expect(releaseImportLease(args)).resolves.toBe(true);
 
     expect(db.assetImport.updateMany).toHaveBeenCalledWith({
       where: { id: "imp", organizationId: "org" },
@@ -124,11 +124,11 @@ describe("releaseImportLease", () => {
     });
   });
 
-  it("never throws", async () => {
+  it("never throws, and reports false when the release failed", async () => {
     vi.mocked(db.assetImport.updateMany).mockRejectedValue(
       new Error("connection lost")
     );
 
-    await expect(releaseImportLease(args)).resolves.toBeUndefined();
+    await expect(releaseImportLease(args)).resolves.toBe(false);
   });
 });

@@ -186,6 +186,33 @@ describe("runFinalizeStep", () => {
     );
   });
 
+  it("warns instead of assigning when the custodian was deleted, and still completes", async () => {
+    // A soft-deleted member is filtered out by the lookup, so nothing comes back.
+    vi.mocked(db.teamMember.findMany).mockResolvedValue([] as never);
+
+    await runFinalizeStep(imp([row(2, { kit: "Kit A", custodian: "Sam" })]));
+
+    expect(db.teamMember.findMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tm-sam"] }, organizationId: "org", deletedAt: null },
+      select: { id: true, name: true },
+    });
+    expect(bulkAssignKitCustody).not.toHaveBeenCalled();
+    expect(appendImportWarnings).toHaveBeenCalledWith(db, "imp", [
+      {
+        row: 2,
+        title: "Asset 2",
+        message:
+          'Custody for kit "Kit A" was not assigned: the custodian no longer exists.',
+      },
+    ]);
+    // The import still completes.
+    expect(db.assetImport.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "COMPLETED" }),
+      })
+    );
+  });
+
   it("rethrows a transient database error instead of storing a warning", async () => {
     vi.mocked(bulkAssignKitCustody).mockRejectedValue(
       new ShelfError({

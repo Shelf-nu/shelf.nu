@@ -415,7 +415,7 @@ describe("assertTeamMembersBelongToOrg", () => {
     expect(tx.teamMember.findMany).not.toHaveBeenCalled();
   });
 
-  it("resolves when every id belongs to the org, deduping and scoping by organizationId", async () => {
+  it("resolves when every id belongs to the org, deduping, scoping by organizationId and skipping soft-deleted members", async () => {
     const tx = txWith({
       teamMember: {
         findMany: vitest.fn().mockResolvedValue([{ id: "t1" }, { id: "t2" }]),
@@ -430,7 +430,7 @@ describe("assertTeamMembersBelongToOrg", () => {
     ).resolves.toBeUndefined();
 
     expect(tx.teamMember.findMany).toHaveBeenCalledWith({
-      where: { id: { in: ["t1", "t2"] }, organizationId: ORG },
+      where: { id: { in: ["t1", "t2"] }, organizationId: ORG, deletedAt: null },
       select: { id: true },
     });
   });

@@ -678,11 +678,14 @@ export async function assertCategoriesBelongToOrg(
  * Plural counterpart to the singular guard, for bulk paths that resolve many
  * team member IDs at once (e.g. the background asset import). Dedupes the input so
  * duplicate IDs don't inflate the expected count. A no-op for an empty list.
+ * Soft-deleted team members (`deletedAt` set) count as missing, as in every
+ * other custody flow.
  *
  * @param params.teamMemberIds - team member IDs sourced from request/form input
  * @param params.organizationId - The caller's (validated) organization ID
  * @param tx - Optional Prisma transaction client; defaults to the global `db`
- * @throws {ShelfError} 400 if any ID is missing or belongs to another org
+ * @throws {ShelfError} 400 if any ID is missing, soft-deleted or belongs to
+ * another org
  */
 export async function assertTeamMembersBelongToOrg(
   {
@@ -697,7 +700,7 @@ export async function assertTeamMembersBelongToOrg(
   const uniqueIds = [...new Set(teamMemberIds)];
 
   const found = await client.teamMember.findMany({
-    where: { id: { in: uniqueIds }, organizationId },
+    where: { id: { in: uniqueIds }, organizationId, deletedAt: null },
     select: { id: true },
   });
 

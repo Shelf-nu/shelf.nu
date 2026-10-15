@@ -11,11 +11,17 @@
  * pg-boss retries the job only after its expiry, so the retry always finds the
  * dead run's lease lapsed and can carry on the chain.
  *
+ * A step hands off by releasing the lease, then queuing the next step. When
+ * the release fails, the next step is queued with a delay of
+ * `ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS`, so its claim runs after the
+ * unreleased lease has lapsed instead of finding it held.
+ *
  * Only QUEUED and RUNNING imports can be claimed: a DRAFT was never confirmed,
  * and a COMPLETED or FAILED import has nothing left to run.
  *
  * @see {@link file://./worker.server.ts} the job runner that holds the lease
- * @see {@link file://./constants.ts} `ASSET_IMPORT_LEASE_MINUTES`
+ * @see {@link file://./constants.ts} `ASSET_IMPORT_LEASE_MINUTES`,
+ * `ASSET_IMPORT_UNRELEASED_LEASE_DELAY_SECONDS`
  */
 import { db } from "~/database/db.server";
 import { ShelfError } from "~/utils/error";
@@ -66,19 +72,23 @@ export async function claimImportLease({
 
 /**
  * Releases the lease so the next step can claim the import straight away.
- * Never throws: a lease that cannot be released simply lapses on its own.
+ * Never throws: a failure is logged and reported through the result. A lease
+ * that was not released stays held until it lapses, so a caller handing off
+ * to the next step must delay that step (see the job runner's hand-off).
  *
  * @param args - The import whose lease to release
+ * @returns True when the lease was cleared, false when the update failed
  */
 export async function releaseImportLease({
   importId,
   organizationId,
-}: ImportLeaseArgs): Promise<void> {
+}: ImportLeaseArgs): Promise<boolean> {
   try {
     await db.assetImport.updateMany({
       where: { id: importId, organizationId },
       data: { lockedUntil: null },
     });
+    return true;
   } catch (cause) {
     Logger.error(
       new ShelfError({
@@ -88,5 +98,6 @@ export async function releaseImportLease({
         label: "Asset Import",
       })
     );
+    return false;
   }
 }
