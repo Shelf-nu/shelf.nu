@@ -16,7 +16,16 @@ import iconv from "iconv-lite";
 import type { BookingsList } from "~/components/booking/bookings-list-fields";
 import type { SortingDirection } from "~/components/list/filters/sort-by";
 import { db } from "~/database/db.server";
+import {
+  getAdvancedAssetsForExport,
+  toAdvancedIndexExportAsset,
+} from "~/modules/asset/advanced-index/export.server";
 import { serializeBackupPlacements } from "~/modules/asset/backup-placements";
+import {
+  generateWhereClause,
+  parseFiltersWithHierarchy,
+  parseSortingOptions,
+} from "~/modules/asset/query.server";
 import {
   fetchAssetsForExport,
   getAdvancedPaginatedAndFilterableAssets,
@@ -25,6 +34,7 @@ import type {
   AdvancedIndexAsset,
   ShelfAssetCustomFieldValueType,
 } from "~/modules/asset/types";
+import { getArchivedFilterFromParams } from "~/modules/asset/utils.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import type {
   BarcodeField,
@@ -61,12 +71,16 @@ import { isLikeShelfError, ShelfError } from "./error";
 import { isMaxFileSizeError } from "./form-data-parse-errors.server";
 import { getCurrentSearchParams } from "./http.server";
 import {
+  buildImportReadyColumns,
   buildImportReadyCsvFromAssets,
   type ColumnScope,
+  type CoreImportField,
+  type ImportColumn,
 } from "./import-ready-export.server";
-import { ALL_SELECTED_KEY } from "./list";
+import { ALL_SELECTED_KEY, getParamsValues } from "./list";
 import { cleanMarkdownFormatting } from "./markdown-cleaner";
 import { sanitizeNoteContent } from "./note-sanitizer.server";
+import { isStreamingEnabled } from "./streaming-flag.server";
 import type { UserNameFields } from "./user";
 import { resolveTeamMemberName, resolveUserDisplayName } from "./user";
 
@@ -358,6 +372,15 @@ export async function exportAssetsBackupToCsv({
  * Resolves the assets to export, honoring the select-all sentinel and the
  * index's current filters. Shared by the standard and import-ready exports.
  *
+ * Flag-gates onto the bounded, windowed streaming export pipeline
+ * (`getAdvancedAssetsForExport`) per-organization
+ * ({@link isStreamingEnabled}): when ON, this builds the same slim-phase
+ * inputs (`generateWhereClause` + `parseSortingOptions`) the legacy service
+ * builds internally, and reads through the read-limiter's `"export"` lane
+ * instead of one unpaginated mega-query. When OFF, this calls the existing
+ * `getAdvancedPaginatedAndFilterableAssets({ takeAll: true })` path
+ * unchanged — both branches return the same `AdvancedIndexAsset[]` shape.
+ *
  * @param args.request - The incoming request (carries cookie-based filters).
  * @param args.assetIds - Comma-separated asset ids, or containing
  *   {@link ALL_SELECTED_KEY} when the "select all" sentinel is active.
@@ -368,6 +391,14 @@ export async function exportAssetsBackupToCsv({
  * @param args.timeZone - Acting user's IANA timezone; forwarded to the fetch so
  *   built-in date-column filters truncate the day in the user's tz (avoids an
  *   off-by-one). Defaults to "UTC" (import-ready export has no acting user).
+ * @param args.output - Which CSV this feeds; only labels the flag-ON
+ *   pipeline's metrics, never changes which rows are fetched.
+ * @param args.columns - This output's own resolved column list (already
+ *   scope-applied by the caller) — decides which hydration batches the
+ *   flag-ON pipeline fetches. Unread on the flag-OFF path, which always
+ *   hydrates every relation regardless of column visibility.
+ * @param args.activeCustomFields - The org's active custom fields, for
+ *   resolving a visible `cf_<name>` column to a field id on the flag-ON path.
  * @returns The full filtered asset set (no pagination when selecting all).
  */
 async function resolveExportAssets({
@@ -377,6 +408,9 @@ async function resolveExportAssets({
   currentOrganization,
   assetIndexCurrentSearchParams,
   timeZone = "UTC",
+  output,
+  columns,
+  activeCustomFields,
 }: {
   request: Request;
   assetIds: string;
@@ -387,6 +421,9 @@ async function resolveExportAssets({
   >;
   assetIndexCurrentSearchParams: string | null;
   timeZone?: string;
+  output: "human" | "import-ready";
+  columns: Column[];
+  activeCustomFields: Array<{ id: string; name: string }>;
 }): Promise<{ assets: AdvancedIndexAsset[] }> {
   /** Make an array of the ids and check if we have to take all */
   const ids = assetIds.split(",");
@@ -410,6 +447,68 @@ async function resolveExportAssets({
           )
         ).filters;
 
+  if (isStreamingEnabled(currentOrganization.id)) {
+    // Same slim-phase parsing `getAdvancedPaginatedAndFilterableAssets` does
+    // internally (see its own top) — replicated here because the flag-ON
+    // path calls the streaming pipeline directly instead of that service
+    // function, but both must agree on which rows match and in what order.
+    const currentFilterParams = new URLSearchParams(filtersToUse || "");
+    const searchParams = filtersToUse
+      ? currentFilterParams
+      : getCurrentSearchParams(request);
+    const { search } = getParamsValues(searchParams);
+    const lowStockOnly = searchParams.get("lowStockOnly") === "true";
+
+    const parsedFilters = await parseFiltersWithHierarchy(
+      // `filtersToUse` is `string | undefined`; `getAdvancedPaginatedAndFilterableAssets`
+      // coerces the same value to `""` via its `filters = ""` default before
+      // parsing, so an absent filter string means "no filters" here too.
+      filtersToUse ?? "",
+      settings.columns as Column[],
+      currentOrganization.id
+    );
+    const whereClause = generateWhereClause(
+      currentOrganization.id,
+      search,
+      parsedFilters,
+      takeAll ? undefined : ids,
+      // bookableScope: an export is never scoped to a bookable subset.
+      null,
+      timeZone,
+      lowStockOnly,
+      // Mirror the flag-OFF export's honorArchivedView behavior: a select-all
+      // export reproduces the index's Active/Archived/All view, while
+      // hand-picked rows export regardless of archive state so a ticked
+      // archived row is never dropped by the "active" default (issue #382).
+      takeAll ? getArchivedFilterFromParams(searchParams) : "all"
+    );
+    const sortBy = searchParams.getAll("sortBy");
+    const { orderByInner, customFieldSortings } = parseSortingOptions(sortBy);
+
+    const hydratedRows = await getAdvancedAssetsForExport({
+      output,
+      organizationId: currentOrganization.id,
+      // why: the legacy export has never redacted custody by viewer — every
+      // role with export permission sees the same custody data an admin
+      // does. Hard-coding full visibility here (rather than threading a real
+      // per-viewer scope) keeps the flag-ON export byte-for-byte at parity
+      // with the flag-OFF one instead of silently changing exported content
+      // the moment an organization is flipped onto the streaming rebuild.
+      viewerScope: { userId: "", canSeeAllCustody: true },
+      barcodesEnabled: currentOrganization.barcodesEnabled ?? false,
+      whereClause,
+      orderByInner,
+      customFieldSortings,
+      sortBy,
+      parsedFilters,
+      columns,
+      activeCustomFields,
+      signal: request.signal,
+    });
+
+    return { assets: hydratedRows.map(toAdvancedIndexExportAsset) };
+  }
+
   const { assets } = await getAdvancedPaginatedAndFilterableAssets({
     request,
     organizationId: currentOrganization.id,
@@ -430,6 +529,58 @@ async function resolveExportAssets({
   });
 
   return { assets };
+}
+
+/** Import-ready core fields that map onto a hydration batch — every other
+ * core field (`title`, `description`, `valuation`, …) lives on the critical
+ * row itself and needs no batch, so it is simply absent from this table. */
+const CORE_IMPORT_FIELD_HYDRATION_COLUMN: Partial<
+  Record<CoreImportField, Column["name"]>
+> = {
+  kit: "kit",
+  tags: "tags",
+  location: "location",
+  custodian: "custody",
+};
+
+/**
+ * Converts the import-ready export's own resolved column set into the
+ * {@link Column}[] shape `resolveHydrationPlan` reads, so the flag-ON export
+ * pipeline hydrates EXACTLY the batches this output renders — reusing
+ * `buildImportReadyColumns`'s inclusion decision rather than re-deriving it.
+ *
+ * @param importColumns - This export's resolved columns, from
+ *   `buildImportReadyColumns`.
+ * @returns One `Column` per import column that maps to a hydration batch;
+ *   core fields with no batch (e.g. `title`, `valuation`) are omitted.
+ */
+function importReadyColumnsForHydration(
+  importColumns: ImportColumn[]
+): Column[] {
+  const columns: Column[] = [];
+  importColumns.forEach((col, position) => {
+    if (col.kind === "core") {
+      const name = CORE_IMPORT_FIELD_HYDRATION_COLUMN[col.field];
+      if (name) {
+        columns.push({ name, visible: true, position });
+      }
+    } else if (col.kind === "barcode") {
+      // `col.header` IS the barcode column name (e.g. "barcode_Code128") —
+      // `buildImportReadyColumns` sources it straight from `barcodeFields`.
+      columns.push({
+        name: col.header as Column["name"],
+        visible: true,
+        position,
+      });
+    } else {
+      columns.push({
+        name: `cf_${col.name}` as Column["name"],
+        visible: true,
+        position,
+      });
+    }
+  });
+  return columns;
 }
 
 /**
@@ -468,23 +619,17 @@ export async function exportAssetsFromIndexToCsv({
   assetIndexCurrentSearchParams: string | null;
   columnScope?: ColumnScope;
 }) {
-  // Acting user's prefs: this export was triggered by userId, so their
-  // date/time preferences drive every humanized column AND the timezone the
-  // built-in date-column filters resolve the day in. Resolved before the fetch
-  // so `timeZone` can flow into the filter query.
-  const prefs = await resolveUserFormatPrefsById(
-    userId,
-    getClientHint(request)
-  );
-
-  const { assets } = await resolveExportAssets({
-    request,
-    assetIds,
-    settings,
-    currentOrganization,
-    assetIndexCurrentSearchParams,
-    timeZone: prefs.timeZone,
-  });
+  // Acting user's prefs and the org's active custom fields are independent —
+  // fetch them in parallel. Custom fields are needed even for this "always
+  // hydrates everything" legacy-shaped export because the flag-ON pipeline
+  // (below) uses them to resolve a visible `cf_<name>` column to a field id.
+  const [prefs, activeCustomFields] = await Promise.all([
+    resolveUserFormatPrefsById(userId, getClientHint(request)),
+    getActiveCustomFields({
+      organizationId: currentOrganization.id,
+      includeAllCategories: true,
+    }),
+  ]);
 
   const baseColumns = settings.columns as Column[];
   // "All columns" for the human export = every configured column, visible or
@@ -493,20 +638,33 @@ export async function exportAssetsFromIndexToCsv({
     columnScope === "all"
       ? baseColumns.map((c) => ({ ...c, visible: true }))
       : baseColumns;
+  const columns: Column[] = [
+    { name: "name", visible: true, position: 0 },
+    ...scopedColumns,
+    // Synthetic export-only column: emits `valuation × quantity` so QT
+    // inventories report total worth without overwriting the per-unit
+    // `valuation` column (kept lossless for CSV → re-import round-trip).
+    // Always appended at the end so existing user column ordering is
+    // unaffected. Not in `defaultFields` / column-picker schema, so
+    // users can't toggle or reorder it via settings.
+    { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
+  ];
+
+  const { assets } = await resolveExportAssets({
+    request,
+    assetIds,
+    settings,
+    currentOrganization,
+    assetIndexCurrentSearchParams,
+    timeZone: prefs.timeZone,
+    output: "human",
+    columns,
+    activeCustomFields,
+  });
 
   const csvData = buildCsvExportDataFromAssets({
     assets,
-    columns: [
-      { name: "name", visible: true, position: 0 },
-      ...scopedColumns,
-      // Synthetic export-only column: emits `valuation × quantity` so QT
-      // inventories report total worth without overwriting the per-unit
-      // `valuation` column (kept lossless for CSV → re-import round-trip).
-      // Always appended at the end so existing user column ordering is
-      // unaffected. Not in `defaultFields` / column-picker schema, so
-      // users can't toggle or reorder it via settings.
-      { name: "total_value", visible: true, position: Number.MAX_SAFE_INTEGER },
-    ],
+    columns,
     currentOrganization,
     prefs,
   });
@@ -551,28 +709,44 @@ export async function exportAssetsForImportToCsv({
   assetIndexCurrentSearchParams: string | null;
   columnScope: ColumnScope;
 }): Promise<string> {
-  const [{ assets }, activeCustomFields] = await Promise.all([
-    resolveExportAssets({
-      request,
-      assetIds,
-      settings,
-      currentOrganization,
-      assetIndexCurrentSearchParams,
-    }),
-    getActiveCustomFields({
-      organizationId: currentOrganization.id,
-      includeAllCategories: true,
-    }),
-  ]);
+  const activeCustomFields = await getActiveCustomFields({
+    organizationId: currentOrganization.id,
+    includeAllCategories: true,
+  });
 
   const effectiveScope: ColumnScope =
     settings.mode === "ADVANCED" ? columnScope : "all";
+  const barcodesEnabled = currentOrganization.barcodesEnabled ?? false;
+
+  // The importer's OWN column set — generally broader than the display
+  // settings' visible columns (see `buildImportReadyColumns`). Resolved
+  // before `resolveExportAssets`, which needs it to decide what the flag-ON
+  // pipeline hydrates: reusing this exact column set (rather than
+  // `settings.columns`) means hydration can never drift from what this
+  // export renders.
+  const importColumns = buildImportReadyColumns({
+    columnScope: effectiveScope,
+    settingsColumns: settings.columns as Column[],
+    activeCustomFields,
+    barcodesEnabled,
+  });
+
+  const { assets } = await resolveExportAssets({
+    request,
+    assetIds,
+    settings,
+    currentOrganization,
+    assetIndexCurrentSearchParams,
+    output: "import-ready",
+    columns: importReadyColumnsForHydration(importColumns),
+    activeCustomFields,
+  });
 
   return buildImportReadyCsvFromAssets({
     assets,
     settingsColumns: settings.columns as Column[],
     activeCustomFields,
-    barcodesEnabled: currentOrganization.barcodesEnabled ?? false,
+    barcodesEnabled,
     columnScope: effectiveScope,
   });
 }

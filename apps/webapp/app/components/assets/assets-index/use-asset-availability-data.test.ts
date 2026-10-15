@@ -479,7 +479,7 @@ describe("useAssetAvailabilityData — returned slices", () => {
           ongoing({
             checkedOutAt: OUT,
             checkedInAt: BACK,
-            custodianTeamMember: { id: "tm1", name: "Ada" },
+            custodianTeamMember: { id: "tm1", name: "Ada", user: null },
           }),
         ],
       },

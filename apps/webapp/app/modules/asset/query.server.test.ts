@@ -55,6 +55,18 @@ describe("parseSortingOptions", () => {
     expect(orderByInner).toBe('"assetCreatedAt" DESC, "assetId" ASC');
   });
 
+  it("sorts valuation by total value, coalescing NULL quantity and price", () => {
+    // `Asset.quantity` is NULL for INDIVIDUAL assets and `value` is NULL for an
+    // asset with no price. Without COALESCE the product is NULL, so every such
+    // row collapses onto the "assetId" tiebreaker and the list is not actually
+    // ordered by value. An INDIVIDUAL asset counts as one unit, a null price as
+    // zero.
+    const { orderByInner } = parseSortingOptions(["valuation:desc"]);
+    expect(orderByInner).toBe(
+      '(COALESCE("assetValue", 0) * COALESCE("assetQuantity", 1)) desc, "assetId" ASC'
+    );
+  });
+
   describe("direction validation", () => {
     it("normalizes uppercase DESC to desc", () => {
       const { orderByClause } = parseSortingOptions(["updatedAt:DESC"]);

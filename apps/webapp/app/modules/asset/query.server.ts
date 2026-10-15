@@ -1662,14 +1662,17 @@ export function parseSortingOptions(sortBy: string[]): {
           getNormalizedSortExpression(`"${columnName}"`, field.direction)
         );
       } else if (field.name === "valuation") {
-        // Quantity-aware: sort by TOTAL value (per-unit × quantity), matching
-        // what the "Value" cell displays. INDIVIDUAL assets are quantity=1 so
-        // this is identical to sorting on `assetValue` for them; QT assets
-        // are now ordered by total worth (the number users actually compare),
-        // not per-unit price. `assetValue` and `assetQuantity` are aliases on
-        // the outer SELECT — safe to multiply without quoting concerns.
+        // Quantity-aware: sort by TOTAL value (per-unit x quantity), matching
+        // what the "Value" cell displays. Both factors must be coalesced:
+        // `Asset.quantity` is NULL for INDIVIDUAL assets and `value` is NULL
+        // for an asset with no price, and a NULL factor makes the whole
+        // product NULL, which collapses every such row onto the `"assetId"`
+        // tiebreaker and leaves the list unsorted by value. An INDIVIDUAL
+        // asset counts as one unit, a missing price as zero. `assetValue` and
+        // `assetQuantity` are aliases projected by the asset query's SELECT,
+        // safe to multiply without quoting concerns.
         orderByParts.push(
-          `("assetValue" * "assetQuantity") ${field.direction}`
+          `(COALESCE("assetValue", 0) * COALESCE("assetQuantity", 1)) ${field.direction}`
         );
       } else {
         // Use regular sorting for non-text columns
@@ -2543,9 +2546,12 @@ export const assetReturnFragment = (options: AssetReturnOptions = {}) => {
 
 /**
  * qrId scalar subquery — the first QR id linked to the asset. Used as a sort
- * key (`ORDER BY "qrId"`) only when a qrId sort is active.
+ * key (`ORDER BY "qrId"`) only when a qrId sort is active. Exported so the
+ * critical-page query (`~/modules/asset/advanced-index/critical-query.server`)
+ * can reuse the identical correlated subquery for its always-present `qrId`
+ * field.
  */
-const QR_ID_SUBQUERY = Prisma.sql`(
+export const QR_ID_SUBQUERY = Prisma.sql`(
         SELECT q.id
         FROM public."Qr" q
         WHERE q."assetId" = a.id
@@ -2759,8 +2765,8 @@ function detectActiveSortKeys(sortBy: string[]): {
   };
 }
 
-/** Parameters for {@link buildAdvancedAssetsQuery}. */
-export type BuildAdvancedAssetsQueryParams = {
+/** Parameters for {@link buildSlimPagedAssetCTEs}. */
+export type BuildSlimPagedAssetCTEsParams = {
   /** WHERE clause from {@link generateWhereClause} (org scope + filters). */
   whereClause: Prisma.Sql;
   /** Inner `ORDER BY` body (no leading `ORDER BY `) from {@link parseSortingOptions}. */
@@ -2771,43 +2777,43 @@ export type BuildAdvancedAssetsQueryParams = {
   sortBy: string[];
   /** Parsed filters, used to detect whether a custody filter is active. */
   parsedFilters: Filter[];
-  /** Include the bookings jsonb aggregation (availability calendar / column). */
-  withBookings: boolean;
-  /** Include the barcodes jsonb aggregation. */
-  withBarcodes: boolean;
   /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
   paginationClause: Prisma.Sql;
 };
 
 /**
- * Assembles the advanced asset-index query using the paginate-first design.
- *
- * Shape (three CTEs + a lateral heavy phase):
+ * Builds the paginate-first slim phase shared by every advanced-index page
+ * query — the CTEs that decide WHICH page of asset ids to return and in WHAT
+ * order, with none of the heavy per-row projection:
  * 1. `asset_query` — SLIM: `a.id` + sort keys only, one row per matching asset,
  *    NO `GROUP BY` (the tag search/filter is EXISTS-ified in
- *    {@link generateWhereClause}, so no fanning tag join remains).
+ *    {@link generateWhereClause}, so no fanning tag join remains). Joins for a
+ *    name-based sort key (kit/category/assetModel/location) are gated on
+ *    whether that sort is actually active, so the default sort pays for none
+ *    of them.
  * 2. `sorted_asset_query` — `ROW_NUMBER()` freezes the sort into an integer
  *    `__sortRank`, then `LIMIT/OFFSET` slices the page.
- * 3. `count_query` — `COUNT(*)` over the slim set (full filtered total).
- * The final SELECT runs the ENTIRE heavy projection once per page row via
- * `LEFT JOIN LATERAL`, and `json_agg` orders by the integer `__sortRank` — the
- * sort expressions are never re-evaluated, so ties (no unique tiebreaker for
- * explicit sorts) stay consistent between the paged slice and the array order.
+ * 3. `count_query` — `COUNT(*)` over the slim set (full filtered total,
+ *    independent of the page slice).
  *
- * @param params - See {@link BuildAdvancedAssetsQueryParams}.
- * @returns The complete `Prisma.Sql` query returning one row
- *   `{ total_count: number, assets: AdvancedIndexAsset[] }`.
+ * {@link buildAdvancedAssetsQuery} (the legacy per-page hydration) and the
+ * streaming critical-row query both build on this ONE helper, so they select
+ * the identical page of asset ids in the identical order — the two paths
+ * cannot silently diverge on which rows a page contains.
+ *
+ * @param params - See {@link BuildSlimPagedAssetCTEsParams}.
+ * @returns A `Prisma.Sql` fragment — `WITH asset_query AS (...), sorted_asset_query AS (...), count_query AS (...)` —
+ *   meant to be followed by a caller-supplied final `SELECT` reading
+ *   `sorted_asset_query`/`count_query`.
  */
-export function buildAdvancedAssetsQuery({
+export function buildSlimPagedAssetCTEs({
   whereClause,
   orderByInner,
   customFieldSortings,
   sortBy,
   parsedFilters,
-  withBookings,
-  withBarcodes,
   paginationClause,
-}: BuildAdvancedAssetsQueryParams): Prisma.Sql {
+}: BuildSlimPagedAssetCTEsParams): Prisma.Sql {
   const customFieldSelect = generateCustomFieldSelect(customFieldSortings);
 
   const {
@@ -2879,12 +2885,6 @@ export function buildAdvancedAssetsQuery({
     ${assetModelJoin}
     ${locationJoin}`;
 
-  // Hoisted out of the return template's interpolation on purpose: a nested
-  // `Prisma.sql\`...\`` inside a `${}` inside the outer template tripped
-  // esbuild's transform into silently dropping this whole function from the
-  // bundle (tsc/vitest were fine, but the production build lost it).
-  const rankOrderBy = Prisma.sql`saq."__sortRank"`;
-
   return Prisma.sql`
       WITH asset_query AS (
         -- SLIM cheap phase: id + sort keys, one row per matching asset, no
@@ -2922,7 +2922,68 @@ export function buildAdvancedAssetsQuery({
         -- Full filtered total (pagination-independent) over the slim CTE.
         SELECT COUNT(*)::integer AS total_count
         FROM asset_query
-      )
+      )`;
+}
+
+/** Parameters for {@link buildAdvancedAssetsQuery}. */
+export type BuildAdvancedAssetsQueryParams = {
+  /** WHERE clause from {@link generateWhereClause} (org scope + filters). */
+  whereClause: Prisma.Sql;
+  /** Inner `ORDER BY` body (no leading `ORDER BY `) from {@link parseSortingOptions}. */
+  orderByInner: string;
+  /** Validated custom-field sortings from {@link parseSortingOptions}. */
+  customFieldSortings: CustomFieldSorting[];
+  /** Raw `sortBy` specs, used to detect active qrId/custody/barcode sort keys. */
+  sortBy: string[];
+  /** Parsed filters, used to detect whether a custody filter is active. */
+  parsedFilters: Filter[];
+  /** Include the bookings jsonb aggregation (availability calendar / column). */
+  withBookings: boolean;
+  /** Include the barcodes jsonb aggregation. */
+  withBarcodes: boolean;
+  /** `LIMIT/OFFSET` fragment, or `Prisma.empty` for takeAll (full export). */
+  paginationClause: Prisma.Sql;
+};
+
+/**
+ * Assembles the advanced asset-index query using the paginate-first design.
+ *
+ * Shape (three CTEs, built by {@link buildSlimPagedAssetCTEs}, plus a lateral
+ * heavy phase here): `asset_query` / `sorted_asset_query` / `count_query`
+ * decide which page of asset ids to return and in what order; the final
+ * SELECT below runs the ENTIRE heavy projection once per page row via
+ * `LEFT JOIN LATERAL`, and `json_agg` orders by the integer `__sortRank` — the
+ * sort expressions are never re-evaluated, so ties (no unique tiebreaker for
+ * explicit sorts) stay consistent between the paged slice and the array order.
+ *
+ * @param params - See {@link BuildAdvancedAssetsQueryParams}.
+ * @returns The complete `Prisma.Sql` query returning one row
+ *   `{ total_count: number, assets: AdvancedIndexAsset[] }`.
+ */
+export function buildAdvancedAssetsQuery({
+  whereClause,
+  orderByInner,
+  customFieldSortings,
+  sortBy,
+  parsedFilters,
+  withBookings,
+  withBarcodes,
+  paginationClause,
+}: BuildAdvancedAssetsQueryParams): Prisma.Sql {
+  // Hoisted out of the return template's interpolation on purpose: a nested
+  // `Prisma.sql\`...\`` inside a `${}` inside the outer template tripped
+  // esbuild's transform into silently dropping this whole function from the
+  // bundle (tsc/vitest were fine, but the production build lost it).
+  const rankOrderBy = Prisma.sql`saq."__sortRank"`;
+
+  return Prisma.sql`${buildSlimPagedAssetCTEs({
+    whereClause,
+    orderByInner,
+    customFieldSortings,
+    sortBy,
+    parsedFilters,
+    paginationClause,
+  })}
       SELECT
         (SELECT total_count FROM count_query) AS total_count,
         ${assetReturnFragment({
