@@ -11,6 +11,45 @@ interface Props {
   disabled?: boolean;
 }
 
+/** What pressing enter in the option builder should do with the typed text. */
+export type OptionEntryResolution =
+  | { status: "add"; option: string }
+  | { status: "duplicate" }
+  | { status: "ignore" };
+
+/**
+ * Decides whether typed text becomes an option, trimming it on the way in.
+ *
+ * Trimming belongs here rather than at save time: this is the only point that
+ * sees an option before anything stores it. An option IS the string an asset
+ * keeps in `AssetCustomFieldValue`, validated later by exact membership, so
+ * rewriting one after the fact would orphan the assets pointing at it.
+ *
+ * Duplicates are compared on the trimmed text, because "Large" and " Large "
+ * render as two rows an operator cannot tell apart.
+ *
+ * @param raw - The text currently in the input.
+ * @param options - The options already added.
+ * @returns Whether to add (with the text to add), report a duplicate, or do
+ *   nothing at all.
+ */
+export function resolveOptionEntry(
+  raw: string,
+  options: string[]
+): OptionEntryResolution {
+  const option = raw.trim();
+
+  if (!option) {
+    return { status: "ignore" };
+  }
+
+  if (options.some((existing) => existing.trim() === option)) {
+    return { status: "duplicate" };
+  }
+
+  return { status: "add", option };
+}
+
 function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
   const [opt, setOpt] = useState("");
   const [error, setError] = useState("");
@@ -29,14 +68,13 @@ function OptionBuilder({ options, onAdd, onRemove, disabled }: Props) {
           onKeyDown={(e) => {
             if (e.key == "Enter") {
               e.preventDefault();
-              if (opt) {
-                if (options.includes(opt)) {
-                  setError("Option already exists");
-                } else {
-                  onAdd(opt);
-                  setOpt("");
-                  setError("");
-                }
+              const entry = resolveOptionEntry(opt, options);
+              if (entry.status === "duplicate") {
+                setError("Option already exists");
+              } else if (entry.status === "add") {
+                onAdd(entry.option);
+                setOpt("");
+                setError("");
               }
             }
           }}

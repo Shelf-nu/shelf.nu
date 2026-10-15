@@ -25,16 +25,17 @@ import HorizontalTabs from "~/components/layout/horizontal-tabs";
 import { ScanDetails } from "~/components/location/scan-details";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
+import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { usePosition } from "~/hooks/use-position";
-import { useUserRoleHelper } from "~/hooks/user-user-role-helper";
 import { createBarcode } from "~/modules/barcode/service.server";
 import {
   validateBarcodeValue,
   normalizeBarcodeValue,
 } from "~/modules/barcode/validation";
+import { getCustodyCardHolderUserId } from "~/modules/custody/utils";
 import {
+  assertKitDeleteConfirmed,
   deleteKit,
-  deleteKitImage,
   emitAssetKitDetachmentNotes,
   fetchAssetKitDetachmentImpact,
   getKit,
@@ -55,6 +56,7 @@ import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { formatUnitCount } from "~/utils/asset-quantity";
 import { checkExhaustiveSwitch } from "~/utils/check-exhaustive-switch";
 import { redactCustodianForViewer } from "~/utils/custody-visibility.server";
+import { DeleteConfirmationSchema } from "~/utils/delete-confirmation";
 import { sendNotification } from "~/utils/emitter/send-notification.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, getParams, parseData } from "~/utils/http.server";
@@ -96,7 +98,7 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       userOrganizations,
       currentOrganization,
       canUseBarcodes,
-      canSeeAllCustody,
+      access,
     } = await requirePermission({
       userId,
       request,
@@ -110,7 +112,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         organizationId,
         extraInclude: {
           assetKits: {
+            // Archived members are out of service and left out of kit custody
+            // and kit bookings (issue #382), so the page's availability badge,
+            // Book and custody actions read the active members only. They
+            // never sit on a live booking either, so the current booking and
+            // the custody card lose nothing. `archivedMemberCount` below says
+            // how many are hidden.
+            where: { asset: { archivedAt: null } },
             select: {
+              // The membership id is the kit-slice discriminator booked rows
+              // point at (`BookingAsset.assetKitId`). `getKitCurrentBooking`
+              // needs it to tell a booking that took THIS kit from one that
+              // took the same pooled asset through another kit.
+              id: true,
               asset: {
                 select: {
                   id: true,
@@ -127,20 +141,38 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
                       },
                     },
                     select: {
+                      // Kit provenance of the booked slice: `assetKitId` is
+                      // the live membership row it was booked under,
+                      // `sourceKitId` the kit itself, which outlives a detach.
+                      // Both NULL = a standalone free-pool slice that belongs
+                      // to no kit.
+                      assetKitId: true,
+                      sourceKitId: true,
+                      // Per-slice departure markers — the record of whether
+                      // these units are out right now. A booking stays ONGOING
+                      // while other assets are away, so its status alone does
+                      // not say this kit is still gone.
+                      checkedOutAt: true,
+                      checkedInAt: true,
                       booking: {
                         select: {
                           id: true,
                           name: true,
                           from: true,
                           status: true,
-                          custodianTeamMember: true,
+                          // Only what the custody card and the redaction read:
+                          // the names shown, and the ids that recognise a
+                          // booking the viewer holds.
+                          custodianTeamMember: {
+                            select: { name: true, userId: true },
+                          },
                           custodianUser: {
                             select: {
+                              id: true,
                               firstName: true,
                               lastName: true,
                               displayName: true,
                               profilePicture: true,
-                              email: true,
                             },
                           },
                         },
@@ -198,9 +230,19 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       roles: userOrganizations.find((o) => o.organization.id === organizationId)
         ?.roles,
     });
+    // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
+    // `email`, and this route is gated on `kit: read` — held by BASE and
+    // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
+    // applies here (assets carry an array). The current booking is derived
+    // from the REDACTED kit: it is returned beside the kit, so reading the raw
+    // one would ship the holders the redaction just emptied.
+    const [redactedKit] = redactCustodianForViewer([kit], {
+      canSeeAllCustody: access.custody.seeAll,
+      userId,
+    });
     const currentBooking = getKitCurrentBooking({
-      id: kit.id,
-      assets: kit.assetKits.map((ak) => ak.asset),
+      id: redactedKit.id,
+      assetKits: redactedKit.assetKits,
     });
 
     const header: HeaderData = {
@@ -212,12 +254,14 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       plural: "assets",
     };
 
+    /** Members left out of `kit.assetKits` above because they are archived. */
+    const archivedMemberCount = await db.assetKit.count({
+      where: { kitId, organizationId, asset: { archivedAt: { not: null } } },
+    });
+
     return payload({
-      // `GET_KIT_STATIC_INCLUDES` selects `custody.custodian.user` down to
-      // `email`, and this route is gated on `kit: read` — held by BASE and
-      // SELF_SERVICE. A kit has ONE custody row, so the helper's object branch
-      // applies here (assets carry an array).
-      kit: redactCustodianForViewer([kit], { canSeeAllCustody, userId })[0],
+      kit: redactedKit,
+      archivedMemberCount,
       currentBooking,
       header,
       modelName,
@@ -289,21 +333,19 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
       } satisfies Prisma.UserSelect,
     });
 
-    const { image } = parseData(
-      formData,
-      z.object({
-        image: z.string().optional(),
-      }),
-      { additionalData: { userId, organizationId, kitId } }
-    );
-
     switch (intent) {
       case "delete": {
-        await deleteKit({ id: kitId, organizationId, actorUserId: userId });
+        // The dialog asks for the kit's name; refuse a request that skipped it.
+        const { confirmation } = parseData(formData, DeleteConfirmationSchema);
+        await assertKitDeleteConfirmed({
+          id: kitId,
+          organizationId,
+          confirmation,
+        });
 
-        if (image) {
-          await deleteKitImage({ url: image });
-        }
+        // Also removes the kit's stored image file. The image is read from
+        // the kit row, never from the request.
+        await deleteKit({ id: kitId, organizationId, actorUserId: userId });
 
         sendNotification({
           title: "Kit deleted",
@@ -577,7 +619,7 @@ export default function KitDetails() {
   usePosition();
   const { kit, currentBooking, qrObj, lastScan, userId, currentOrganization } =
     useLoaderData<typeof loader>();
-  const { roles } = useUserRoleHelper();
+  const roles = useOrganizationRoles();
   const { canUseBarcodes } = useBarcodePermissions();
 
   const kitHasUnavailableAssets = kit.assetKits.some(
@@ -654,7 +696,13 @@ export default function KitDetails() {
               booking={currentBooking || undefined}
               hasPermission={userCanViewSpecificCustody({
                 roles,
-                custodianUserId: kit?.custody?.custodian?.user?.id,
+                // The holder the card shows, so a viewer always sees custody
+                // that is their own — including a booking they hold.
+                custodianUserId: getCustodyCardHolderUserId({
+                  custody: kit.custody ? [kit.custody] : null,
+                  booking: currentBooking,
+                  viewerUserId: userId,
+                }),
                 organization: currentOrganization,
                 currentUserId: userId,
               })}

@@ -1,0 +1,80 @@
+# Placements editor on a QUANTITY_TRACKED asset (ManagePlacementsSheet).
+#
+# Precondition: app foregrounded with a signed-in session (qa-admin1 /
+# GRANULAR WORKSPACE) — uses the no-login pattern, so NO launchApp/clearState.
+# Test asset: "QA Qty Test — Tripod (10 pcs)" (cmqzf1xt20001s0iitjd72rkb),
+# starting UNPLACED.
+#
+# Verifies the core placement loop and restores the fixture, so the flow is
+# re-runnable: open the editor -> add Equipment Storage -> place a portion
+# (4 of 10) -> save -> the detail shows "Equipment Storage · 4 pcs" and the
+# unplaced remainder -> reopen -> remove the row -> save -> asset unplaced
+# again. DB cross-check (pivot row, per-row ASSET_LOCATION_CHANGED event +
+# note) happens outside Maestro.
+#
+# Scope note: the multi-row spread (two locations at once) and the
+# over-placed/validation states are covered by the route tests
+# (asset.manage-placements.test.ts) and manual on-device QA — Maestro's
+# RN numeric-input timing is unreliable for a second row while the keyboard
+# is up, so this flow keeps to one editable row to stay deterministic.
+#
+# Maestro full-matches a11y labels, so text matchers are regex-wrapped with
+# .* per .maestro/LESSONS.md.
+appId: com.shelf.companion.carlos
+---
+# Assets tab -> find the tripod via search
+- tapOn: "Assets"
+- tapOn: ".*Search assets.*"
+- inputText: "QA Qty Test"
+- extendedWaitUntil:
+    visible: ".*QA Qty Test — Tripod.*"
+    timeout: 10000
+# First tap may be consumed dismissing the keyboard — tap twice, second optional.
+- tapOn: ".*QA Qty Test — Tripod.*"
+- tapOn:
+    text: ".*QA Qty Test — Tripod.*"
+    optional: true
+- extendedWaitUntil:
+    visible: ".*10 pcs.*"
+    timeout: 15000
+
+# Open the editor and place 4 of 10 at Equipment Storage
+- tapOn: "Manage placements"
+- extendedWaitUntil:
+    visible: "Manage Placements"
+    timeout: 10000
+- tapOn: "Add location"
+- extendedWaitUntil:
+    visible: "Select Location"
+    timeout: 10000
+- tapOn: ".*Equipment Storage.*"
+- extendedWaitUntil:
+    visible: "Quantity at Equipment Storage"
+    timeout: 5000
+# The row seeds with the full pool and selectTextOnFocus selects it, so
+# inputText replaces the seed with the portion.
+- tapOn: "Quantity at Equipment Storage"
+- inputText: "4"
+- extendedWaitUntil:
+    visible: ".*Unplaced.*"
+    timeout: 5000
+- tapOn: "Save placements"
+- extendedWaitUntil:
+    visible: ".*Equipment Storage · 4 pcs.*"
+    timeout: 20000
+# The remainder is visible on the detail as the unplaced row.
+- assertVisible: ".*Unplaced.*"
+
+# Restore the fixture — remove the row, save the empty set -> unplaced again
+- tapOn: "Manage placements"
+- extendedWaitUntil:
+    visible: "Manage Placements"
+    timeout: 10000
+- tapOn: "Remove Equipment Storage"
+- extendedWaitUntil:
+    visible: ".*unplaced pool.*"
+    timeout: 5000
+- tapOn: "Save placements"
+- extendedWaitUntil:
+    visible: ".*Unplaced · 10 pcs.*"
+    timeout: 20000

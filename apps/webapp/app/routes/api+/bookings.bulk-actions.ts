@@ -1,5 +1,6 @@
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
+import { BookingsListSchema } from "~/components/booking/bookings-list-fields";
 import { BulkArchiveBookingsSchema } from "~/components/booking/bulk-archive-dialog";
 import { BulkCancelBookingsSchema } from "~/components/booking/bulk-cancel-dialog";
 import { BulkDeleteBookingSchema } from "~/components/booking/bulk-delete-dialog";
@@ -38,15 +39,21 @@ export async function action({ request, context }: ActionFunctionArgs) {
         .and(CurrentSearchParamsSchema)
     );
 
+    // The list the dialog was opened on, which a "Select all" stands for. It
+    // only narrows: the services AND it with the workspace and ownership scope.
+    const list = parseData(formData, BookingsListSchema);
+
     const intentToActionMap: Record<typeof intent, PermissionAction> = {
       "bulk-delete": PermissionAction.delete,
-      "bulk-archive": PermissionAction.update,
-      "bulk-cancel": PermissionAction.update,
+      // Archive and cancel have their own grants, which BASE does not hold.
+      // `update` is not the gate for them: BASE holds it.
+      "bulk-archive": PermissionAction.archive,
+      "bulk-cancel": PermissionAction.cancel,
     };
 
-    // `role` decides whether the bulk query is scoped to the caller's own
-    // bookings. It is the same authority the singular write paths use.
-    const { organizationId, role } = await requirePermission({
+    // `access` decides whether the bulk query is scoped to the caller's own
+    // bookings, the same authority the singular write paths use.
+    const { organizationId, access } = await requirePermission({
       userId,
       request,
       entity: PermissionEntity.booking,
@@ -55,15 +62,20 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
     switch (intent) {
       case "bulk-delete": {
-        const { bookingIds } = parseData(formData, BulkDeleteBookingSchema);
+        const { bookingIds, confirmation } = parseData(
+          formData,
+          BulkDeleteBookingSchema
+        );
 
         await bulkDeleteBookings({
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           hints: getClientHint(request),
           currentSearchParams,
+          list,
+          confirmation,
         });
 
         sendNotification({
@@ -83,8 +95,9 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           currentSearchParams,
+          list,
         });
 
         sendNotification({
@@ -104,9 +117,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
           bookingIds,
           organizationId,
           userId,
-          role,
+          access,
           hints: getClientHint(request),
           currentSearchParams,
+          list,
         });
 
         sendNotification({

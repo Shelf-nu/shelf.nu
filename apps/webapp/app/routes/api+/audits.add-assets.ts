@@ -32,18 +32,13 @@ export async function action({ request, context }: ActionFunctionArgs) {
   try {
     assertIsPost(request);
 
-    const {
-      organizationId,
-      canUseBarcodes,
-      role,
-      canSeeAllCustody,
-      isSelfServiceOrBase,
-    } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.audit,
-      action: PermissionAction.update,
-    });
+    const { organizationId, canUseBarcodes, role, access } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.audit,
+        action: PermissionAction.update,
+      });
 
     const formData = await request.formData();
 
@@ -60,14 +55,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
     );
 
     // `audit: update` authorizes updating audits in general, never THIS audit.
-    // Without this a BASE or SELF_SERVICE member could widen the scope of any
-    // pending audit in the workspace — adding assets to one they were never
-    // assigned to. ADMIN/OWNER are unrestricted. (detail.dev D043)
+    // Without this a member limited to assigned audits could widen the scope
+    // of any pending audit in the workspace, adding assets to one they were
+    // never assigned to. Callers who see every audit are unrestricted.
     await requireAuditAssignee({
       auditSessionId: auditId,
       organizationId,
       userId,
-      isSelfServiceOrBase,
+      assignedOnly: !access.audits.seeAll,
     });
 
     // Determine if we're selecting all items across multiple pages
@@ -106,7 +101,7 @@ export async function action({ request, context }: ActionFunctionArgs) {
           teamMemberIds: new URLSearchParams(currentSearchParams ?? "").getAll(
             "teamMember"
           ),
-          canSeeAllCustody,
+          canSeeAllCustody: access.custody.seeAll,
           userId,
           organizationId,
         }),

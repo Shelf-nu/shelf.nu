@@ -109,7 +109,7 @@ describe("auditCompletionReport", () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -130,7 +130,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -146,7 +146,7 @@ describe("auditCompletionReport", () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -165,7 +165,7 @@ describe("auditCompletionReport", () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
     const after = new Date();
@@ -188,7 +188,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -223,7 +223,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -244,7 +244,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -257,7 +257,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -274,7 +274,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -292,7 +292,7 @@ describe("auditCompletionReport", () => {
     const result = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
       page: 3,
       pageSize: 20,
@@ -319,7 +319,7 @@ describe("auditCompletionReport", () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -370,7 +370,7 @@ describe("auditCompletionReport — assignment scoping", () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -407,7 +407,7 @@ describe("auditCompletionReport — assignment scoping", () => {
     const payload = await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 
@@ -415,11 +415,11 @@ describe("auditCompletionReport — assignment scoping", () => {
     expect(payload.rows[0].accuracy).toBeNull();
   });
 
-  it("scopes every query to assigned audits for BASE and SELF_SERVICE viewers", async () => {
+  it("scopes every query to assigned audits when assignedOnly is set", async () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: true,
+      assignedOnly: true,
       timeframe: TIMEFRAME,
     });
 
@@ -436,11 +436,11 @@ describe("auditCompletionReport — assignment scoping", () => {
     }
   });
 
-  it("applies no assignment filter for admins and owners", async () => {
+  it("applies no assignment filter when the viewer sees every audit", async () => {
     await auditCompletionReport({
       organizationId: "org-1",
       userId: "user-1",
-      isSelfServiceOrBase: false,
+      assignedOnly: false,
       timeframe: TIMEFRAME,
     });
 

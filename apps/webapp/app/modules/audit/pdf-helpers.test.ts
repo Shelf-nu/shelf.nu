@@ -28,13 +28,18 @@ vi.mock("~/database/db.server", () => ({
   },
 }));
 
-// why: signing QR images reaches Supabase storage; irrelevant to note queries
+// why: rendering a QR per asset (qrcode-generator + sharp) is external image
+// work, irrelevant to note queries. Barcode pictures are NOT stubbed: the real
+// bwip-js draws them, because their geometry is what makes them scan.
 vi.mock("~/modules/qr/service.server", () => ({
   getQrCodeMaps: vi.fn().mockResolvedValue({}),
 }));
 
 import { db } from "~/database/db.server";
+import { ASSET_MODEL_IMAGE_SELECT } from "~/modules/asset/image-select";
 import { fetchAllAuditPdfRelatedData } from "~/modules/audit/pdf-helpers";
+import { QR_CODES_ORDER_BY } from "~/modules/barcode/display";
+import { getQrCodeMaps } from "~/modules/qr/service.server";
 
 const SESSION = {
   id: "audit-1",
@@ -75,7 +80,7 @@ describe("audit receipt — what it may truncate", () => {
       "audit-1",
       "org-1",
       "user-1",
-      undefined,
+      false,
       new Request("http://localhost/x")
     );
   });
@@ -122,5 +127,311 @@ describe("audit receipt — what it may truncate", () => {
 
     expect(q?.take).toBe(15);
     expect(q?.orderBy).toEqual({ createdAt: "desc" });
+  });
+});
+
+/**
+ * The receipt's Code column.
+ *
+ * Same wiring as the booking checklist, same reason: the sheet is read next to
+ * physical labels. The resolution rules are covered by `display.test.ts`; what
+ * is tested here is that the query asks for the columns the resolver reads and
+ * that the org's preference is one of them.
+ *
+ * Each case sets the two preference fields EXPLICITLY. Left off, the resolver's
+ * `undefined` preference falls through its `default` branch to the QR id, so a
+ * QR-id assertion passes on an org row that never carried a preference at all.
+ * The preference is the thing under test; it has to be set.
+ */
+describe("audit receipt — the printed asset code", () => {
+  const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
+  const ASSET = {
+    id: "asset-1",
+    title: "Camera",
+    thumbnailImage: null,
+    // Nullable: an asset without one is what sends SAM_ID to its fallback.
+    sequentialId: "SAM-0001" as string | null,
+    preferredBarcodeId: null,
+    qrCodes: [{ id: "qr-visible-id", version: 0, errorCorrection: "L" }],
+    barcodes: [{ id: "bc-1", type: "Code128", value: "128-VALUE" }],
+    category: null,
+    // A location so the strip can be shown NOT to take the derived
+    // `location` field with it.
+    assetLocations: [{ location: { name: "Store room" } }],
+  };
+
+  async function run(
+    prefs: {
+      qrIdDisplayPreference: string;
+      barcodesEnabled: boolean;
+      /** Defaults to the column default (`true`) when a case doesn't set it. */
+      showQrCodesOnPdfs?: boolean;
+    },
+    overrides: Partial<typeof ASSET> = {}
+  ) {
+    vi.clearAllMocks();
+    // why: the audit under test. The helper throws immediately without it.
+    mockOf(db.auditSession.findUnique).mockResolvedValue(SESSION);
+    // why: names which assets are on the audit; the helper skips the asset
+    // read entirely when this is empty, and there would be no row to check.
+    mockOf(db.auditAsset.findMany).mockResolvedValue([
+      { assetId: "asset-1", expected: true, status: null },
+    ]);
+    // why: the receipt's photo and note sections. Empty keeps these cases
+    // about the Code column.
+    mockOf(db.auditImage.findMany).mockResolvedValue([]);
+    mockOf(db.auditNote.findMany).mockResolvedValue([]);
+    // why: the row the resolver runs over — its QR, barcodes and SAM id are
+    // what each case varies.
+    mockOf(db.asset.findMany).mockResolvedValue([{ ...ASSET, ...overrides }]);
+    // why: carries the preference under test.
+    mockOf(db.organization.findUnique).mockResolvedValue({
+      id: "org-1",
+      name: "Org",
+      imageId: null,
+      currency: "USD",
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+      // Matches the column default, so a case that says nothing about the
+      // switch exercises the path that prints the image.
+      showQrCodesOnPdfs: true,
+      ...prefs,
+    });
+
+    return fetchAllAuditPdfRelatedData(
+      "audit-1",
+      "org-1",
+      "user-1",
+      false,
+      new Request("http://localhost/x")
+    );
+  }
+
+  it("asks the database for the columns the resolver reads", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    const include = mockOf(db.asset.findMany).mock.calls[0][0].include;
+
+    expect(include.barcodes).toEqual({
+      select: { id: true, type: true, value: true },
+    });
+    // why: NOT the tight `{ take: 1, select: { id } }` the code-bearing-entity
+    // rule asks for: `getQrCodeMaps` renders the image from `version` /
+    // `errorCorrection`, so narrowing this breaks the QR images in print only.
+    // Ordered so the QR picture and the QR id under it are the same code.
+    expect(include.qrCodes).toEqual({ orderBy: QR_CODES_ORDER_BY });
+  });
+
+  it("asks for the model cover, so an asset without a photo prints its model's", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    const include = mockOf(db.asset.findMany).mock.calls[0][0].include;
+
+    expect(include).toMatchObject(ASSET_MODEL_IMAGE_SELECT);
+  });
+
+  it("asks the database which code the workspace wants printed", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    expect(
+      mockOf(db.organization.findUnique).mock.calls[0][0].select
+    ).toMatchObject({
+      qrIdDisplayPreference: true,
+      barcodesEnabled: true,
+      // why: the sheet cannot decide whether to print the QR image without it.
+      showQrCodesOnPdfs: true,
+    });
+  });
+
+  it("prints the SAM ID for a workspace that asked for SAM IDs", async () => {
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    });
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"]).toMatchObject({
+      value: "SAM-0001",
+      type: "SAM_ID",
+      isFallback: false,
+    });
+  });
+
+  it("prints the QR id for a default workspace", async () => {
+    const result = await run({
+      qrIdDisplayPreference: "QR_ID",
+      barcodesEnabled: false,
+    });
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"]).toMatchObject({
+      value: "qr-visible-id",
+      type: "QR_ID",
+      isFallback: false,
+    });
+  });
+
+  it("prints the barcode value for a barcode-preference workspace", async () => {
+    const result = await run({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    });
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"]).toMatchObject({
+      value: "128-VALUE",
+      type: "Code128",
+      isFallback: false,
+    });
+  });
+
+  it("flags the fallback when the preferred code is missing from the asset", async () => {
+    const result = await run(
+      { qrIdDisplayPreference: "SAM_ID", barcodesEnabled: false },
+      { sequentialId: null }
+    );
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"]).toMatchObject({
+      value: "qr-visible-id",
+      type: "QR_ID",
+      isFallback: true,
+      workspacePreference: "SAM_ID",
+    });
+  });
+
+  it("resolves a code even when no QR image could be generated", async () => {
+    // why: `getQrCodeMaps` is stubbed to return {} here, which is also what
+    // the real thing produces for an asset whose image generation threw — it
+    // logs and moves on, leaving no entry. The row still has to print
+    // something a reader can match against the shelf.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    });
+
+    expect(result.assetIdToCodeImageMap["asset-1"]).toBeUndefined();
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
+  it("keeps the code-resolution relations out of the rows it returns", async () => {
+    // why: the rows are serialised to the browser, and the relations exist only
+    // to build the two maps the helper returns alongside them.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+    });
+
+    for (const row of result.assets) {
+      expect(row).not.toHaveProperty("barcodes");
+      expect(row).not.toHaveProperty("qrCodes");
+      expect(row).not.toHaveProperty("assetLocations");
+    }
+
+    // why: `location` is derived from `assetLocations`, so dropping the
+    // relation must not take the derived field with it.
+    expect(result.assets[0].location).toEqual({ name: "Store room" });
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
+
+  it("encodes a QR per asset when the workspace prints them", async () => {
+    await run({ qrIdDisplayPreference: "QR_ID", barcodesEnabled: false });
+
+    expect(mockOf(getQrCodeMaps)).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws the barcode, not the QR, for a barcode-preference workspace", async () => {
+    // why: the picture must be the SAME code as the text under it. The real
+    // bwip-js draws it; only the Shelf QR renderer is stubbed.
+    const result = await run({
+      qrIdDisplayPreference: "Code128",
+      barcodesEnabled: true,
+    });
+
+    const picture = result.assetIdToCodeImageMap["asset-1"];
+    expect(picture).toMatchObject({ shape: "linear", placement: "cell" });
+    expect(picture.src).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(
+      Buffer.from(picture.src.split(",")[1], "base64").toString("utf8")
+    ).toContain('preserveAspectRatio="none"');
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("moves a barcode too wide for the Code column onto the line under its row", async () => {
+    const result = await run(
+      { qrIdDisplayPreference: "Code128", barcodesEnabled: true },
+      {
+        barcodes: [
+          { id: "bc-1", type: "Code128", value: "ABCDEFGHIJKLMNOPQRST" },
+        ],
+      }
+    );
+
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe(
+      "ABCDEFGHIJKLMNOPQRST"
+    );
+    // why: shrinking it into the cell would make the bars too thin to scan,
+    // and a QR instead would be a picture of a DIFFERENT code.
+    expect(result.assetIdToCodeImageMap["asset-1"]).toMatchObject({
+      shape: "linear",
+      placement: "line",
+    });
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+  });
+
+  it("encodes nothing when the workspace prints no code pictures", async () => {
+    // The receipt renders no picture in this case, so encoding one would cost
+    // an encode per asset and carry a data URL per asset to a browser that
+    // drops it. The printed code is resolved independently, so the row stays
+    // matchable.
+    const result = await run({
+      qrIdDisplayPreference: "SAM_ID",
+      barcodesEnabled: false,
+      showQrCodesOnPdfs: false,
+    });
+
+    expect(mockOf(getQrCodeMaps)).not.toHaveBeenCalled();
+    expect(result.assetIdToCodeImageMap).toEqual({});
+    expect(result.assetIdToDisplayCodeMap["asset-1"].value).toBe("SAM-0001");
+  });
+});
+
+describe("audit receipt — refusals keep their status", () => {
+  /**
+   * The fetcher refuses two ways on purpose: the audit does not exist, or the
+   * caller is limited to assigned audits and is not assigned to this one. Both are
+   * answers for the user, and the catch around the fetch must not turn them
+   * into a captured 500.
+   */
+  const mockOf = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
+
+  const fetchAs = (assignedOnly: boolean) =>
+    fetchAllAuditPdfRelatedData(
+      "audit-1",
+      "org-1",
+      "user-1",
+      assignedOnly,
+      new Request("http://localhost/x")
+    );
+
+  it("answers 404 for an audit that does not exist", async () => {
+    vi.clearAllMocks();
+    // why: no audit with this id in the workspace.
+    mockOf(db.auditSession.findUnique).mockResolvedValue(null);
+
+    await expect(fetchAs(false)).rejects.toMatchObject({
+      status: 404,
+      shouldBeCaptured: false,
+    });
+  });
+
+  it("answers 403 for a caller limited to assigned audits who is not assigned", async () => {
+    vi.clearAllMocks();
+    // why: an audit assigned to someone else.
+    mockOf(db.auditSession.findUnique).mockResolvedValue({
+      ...SESSION,
+      assignments: [{ user: { id: "someone-else" } }],
+    });
+
+    await expect(fetchAs(true)).rejects.toMatchObject({
+      status: 403,
+      shouldBeCaptured: false,
+    });
   });
 });

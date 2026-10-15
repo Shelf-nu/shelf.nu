@@ -797,6 +797,156 @@ describe("applyBulkUpdatesFromImport — description (Task 2 fix round 1)", () =
   });
 });
 
+describe("description length limit on the update import", () => {
+  const overLimitReason =
+    "Description too long: 5,123 characters, but the maximum is 5,000. Shorten it and import again.";
+
+  function mockStoredAsset() {
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({ title: "Old Name", description: "Old description" }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+  }
+
+  it("lists an over-limit row as failed in the preview", async () => {
+    mockStoredAsset();
+
+    const preview = await buildUpdatePreview({
+      csvData: [
+        ["Asset ID", "Description", "Name"],
+        ["SAM-0001", "a".repeat(5123), "New Name"],
+      ],
+      organizationId,
+    });
+
+    expect(preview.failedRows).toEqual([
+      { rowNumber: 2, id: "SAM-0001", reason: overLimitReason },
+    ]);
+    expect(preview.assetsToUpdate).toEqual([]);
+    expect(preview.totalFieldChanges).toBe(0);
+  });
+
+  it("writes nothing for an over-limit row when applied without a preview", async () => {
+    mockStoredAsset();
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "Description", "Name"],
+        ["SAM-0001", "a".repeat(5123), "New Name"],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(updateAsset).not.toHaveBeenCalled();
+    expect(result.failed).toEqual([
+      { id: "SAM-0001", title: "", rowNumber: 2, error: overLimitReason },
+    ]);
+    expect(result.summary).toEqual({
+      total: 1,
+      updated: 0,
+      skipped: 0,
+      failed: 1,
+    });
+  });
+
+  it.each([
+    ["exactly 5,000 characters", "a".repeat(5000)],
+    [
+      "5,000 characters with a \\r\\n line break",
+      `${"a".repeat(2500)}\r\n${"a".repeat(2499)}`,
+    ],
+  ])("applies a description of %s", async (_label, description) => {
+    mockStoredAsset();
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "Description"],
+        ["SAM-0001", description],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.failed).toEqual([]);
+    expect(vi.mocked(updateAsset).mock.calls[0][0].description).toBe(
+      description
+    );
+  });
+});
+
+describe("applyBulkUpdatesFromImport — tags", () => {
+  it("connects a quoted tag name carrying the separator", async () => {
+    // why: tags are resolved into an id map keyed by the stored (trimmed)
+    // name, and the apply branch looks the decoded name up in that map — so a
+    // name the two layers spell differently silently resolves to nothing and
+    // the write clears the asset's tags instead of setting them.
+    vi.mocked(db.tag.findMany).mockResolvedValue([
+      { id: "tag-berlin", name: "Berlin, DE" },
+      { id: "tag-small", name: "small" },
+    ] as unknown as Awaited<ReturnType<typeof db.tag.findMany>>);
+    vi.mocked(updateAsset).mockResolvedValue({ id: "uuid-1" } as Awaited<
+      ReturnType<typeof updateAsset>
+    >);
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({ tags: [{ id: "tag-old", name: "old" }] }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "tags"],
+        ["SAM-0001", '"Berlin, DE",small'],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.failed).toBe(0);
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "uuid-1",
+        tags: { set: [{ id: "tag-berlin" }, { id: "tag-small" }] },
+      })
+    );
+  });
+
+  it("connects a tag whose cell was quoted for edge whitespace", async () => {
+    // why: quoting is also how a cell survives a spreadsheet, so a quoted item
+    // must resolve to the same tag its unquoted spelling would. A reader that
+    // kept the spaces looks up ` padded ` against a tag stored as `padded`,
+    // and that miss empties the list into a write that removes every tag.
+    vi.mocked(db.tag.findMany).mockResolvedValue([
+      { id: "tag-padded", name: "padded" },
+    ] as unknown as Awaited<ReturnType<typeof db.tag.findMany>>);
+    vi.mocked(updateAsset).mockResolvedValue({ id: "uuid-1" } as Awaited<
+      ReturnType<typeof updateAsset>
+    >);
+    vi.mocked(db.asset.findMany).mockResolvedValueOnce([
+      makeDbAsset({ tags: [{ id: "tag-old", name: "old" }] }),
+    ] as unknown as Awaited<ReturnType<typeof db.asset.findMany>>);
+
+    const result = await applyBulkUpdatesFromImport({
+      csvData: [
+        ["Asset ID", "tags"],
+        ["SAM-0001", '" padded "'],
+      ],
+      organizationId,
+      userId,
+      request,
+    });
+
+    expect(result.summary.failed).toBe(0);
+    expect(updateAsset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "uuid-1",
+        tags: { set: [{ id: "tag-padded" }] },
+      })
+    );
+  });
+});
+
 describe("wrong-format detection — identifier found, zero updatable columns (Task 3 fix)", () => {
   // why: "Status" is a known-but-read-only field (lands in ignoredColumns)
   // and "Some Random Column" doesn't match any field or custom field (lands

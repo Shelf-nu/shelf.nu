@@ -1,4 +1,3 @@
-import { OrganizationRoles } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
@@ -30,8 +29,8 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *
  * Both verbs wrap the SAME shared services the web route uses
  * (`upsertBookingModelRequest` / `removeBookingModelRequest`), so the
- * availability guard, the "DRAFT/RESERVED only" rule, the
- * can't-shrink-below-fulfilled rule and the activity notes all stay identical.
+ * availability guard, the live-booking rule, the can't-drop-below-assigned
+ * rule and the activity notes all stay identical.
  *
  * Security stack (mirrors `bookings.add-scanned-assets.ts` — the services do
  * NOT check custodian ownership, so a naive wrapper would be a cross-user
@@ -123,19 +122,15 @@ export async function action({ request, params }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE here (own bookings only). Keying
-    // only on SELF_SERVICE would let a BASE user edit anyone's reservations.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
     // The `booking:update` permission is granted to SELF_SERVICE / BASE, so
     // the permission check alone lets any user in the org reach any bookingId.
     // Without this ownership check those roles could manipulate other users'
-    // model reservations (cross-user IDOR within the org) — the shared
-    // service does not scope by custodian.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // model reservations (cross-user IDOR within the org): the shared service
+    // does not scope by custodian. A caller who does not write every booking
+    // must be its custodian.
+    if (!access.bookings.writeAll && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",

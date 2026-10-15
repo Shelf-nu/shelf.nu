@@ -124,19 +124,21 @@ export async function action({ context, request }: LoaderFunctionArgs) {
        * model row behind, and swallowing it silently means nobody ever finds
        * out. Log it so the orphan is discoverable.
        */
-      await deleteAssetModel({ id: assetModel.id, organizationId }).catch(
-        (rollbackCause: unknown) => {
-          Logger.error(
-            new ShelfError({
-              cause: rollbackCause,
-              message:
-                "Failed to roll back an asset model after its image upload failed — the model row may be orphaned.",
-              additionalData: { assetModelId: assetModel.id, organizationId },
-              label: "Asset Model",
-            })
-          );
-        }
-      );
+      await deleteAssetModel({
+        id: assetModel.id,
+        organizationId,
+        userId: authSession.userId,
+      }).catch((rollbackCause: unknown) => {
+        Logger.error(
+          new ShelfError({
+            cause: rollbackCause,
+            message:
+              "Failed to roll back an asset model after its image upload failed — the model row may be orphaned.",
+            additionalData: { assetModelId: assetModel.id, organizationId },
+            label: "Asset Model",
+          })
+        );
+      });
       throw cause;
     }
 

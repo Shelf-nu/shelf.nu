@@ -1,10 +1,25 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PUBLIC_BUCKET } from "./constants";
+import { SUPABASE_URL } from "./env";
 import { ShelfError } from "./error";
 import {
   findShelfErrorInCause,
   isSupabaseRateLimitError,
   isSupabaseServerError,
+  MAX_PUBLIC_FILES_PER_REMOVE,
+  parseFileFormData,
+  removePublicFiles,
+  uploadFile,
 } from "./storage.server";
+
+// why: the Supabase admin client talks to storage over HTTP; stub `remove` so
+// the tests stay offline and can assert the paths sent in each request
+const storageRemoveMock = vi.hoisted(() => vi.fn());
+vi.mock("~/integrations/supabase/client", () => ({
+  getSupabaseAdmin: () => ({
+    storage: { from: () => ({ remove: storageRemoveMock }) },
+  }),
+}));
 
 describe("isSupabaseRateLimitError", () => {
   it("returns true for StorageApiError with numeric status 429", () => {
@@ -239,5 +254,134 @@ describe("findShelfErrorInCause", () => {
 
   it("returns null for undefined input", () => {
     expect(findShelfErrorInCause(undefined)).toBeNull();
+  });
+});
+
+describe("removePublicFiles", () => {
+  const publicUrlFor = (path: string) =>
+    `${SUPABASE_URL}/storage/v1/object/public/${PUBLIC_BUCKET}/${path}`;
+
+  beforeEach(() => {
+    storageRemoveMock.mockReset();
+    storageRemoveMock.mockResolvedValue({ data: [], error: null });
+  });
+
+  it("removes every file in a single storage request", async () => {
+    const result = await removePublicFiles({
+      publicUrls: [
+        publicUrlFor("org-1/locations/loc-1/a.jpg"),
+        publicUrlFor("org-1/locations/loc-1/a-thumbnail.jpg"),
+        publicUrlFor("org-1/locations/loc-2/b.jpg"),
+      ],
+    });
+
+    expect(storageRemoveMock).toHaveBeenCalledTimes(1);
+    expect(storageRemoveMock).toHaveBeenCalledWith([
+      "org-1/locations/loc-1/a.jpg",
+      "org-1/locations/loc-1/a-thumbnail.jpg",
+      "org-1/locations/loc-2/b.jpg",
+    ]);
+    expect(result).toEqual({ invalidUrlCount: 0 });
+  });
+
+  it("skips URLs outside the public bucket and still removes the rest", async () => {
+    const result = await removePublicFiles({
+      publicUrls: [
+        "https://elsewhere.example.com/files/x.jpg",
+        publicUrlFor("org-1/locations/loc-1/a.jpg"),
+      ],
+    });
+
+    expect(storageRemoveMock).toHaveBeenCalledWith([
+      "org-1/locations/loc-1/a.jpg",
+    ]);
+    expect(result).toEqual({ invalidUrlCount: 1 });
+  });
+
+  it("makes no request when no URL points into the public bucket", async () => {
+    const result = await removePublicFiles({
+      publicUrls: ["https://elsewhere.example.com/files/x.jpg"],
+    });
+
+    expect(storageRemoveMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ invalidUrlCount: 1 });
+  });
+
+  it("throws when the storage request fails", async () => {
+    storageRemoveMock.mockResolvedValue({
+      data: null,
+      error: new Error("storage down"),
+    });
+
+    await expect(
+      removePublicFiles({ publicUrls: [publicUrlFor("org-1/a.jpg")] })
+    ).rejects.toBeInstanceOf(ShelfError);
+  });
+
+  it("refuses more files than one storage request accepts", async () => {
+    const publicUrls = Array.from(
+      { length: MAX_PUBLIC_FILES_PER_REMOVE + 1 },
+      (_, i) => publicUrlFor(`org-1/${i}.jpg`)
+    );
+
+    await expect(removePublicFiles({ publicUrls })).rejects.toBeInstanceOf(
+      ShelfError
+    );
+    expect(storageRemoveMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("unreadable image upload", () => {
+  /** A JPEG cut off halfway: the header passes, the decoder fails. */
+  async function truncatedJpeg(): Promise<Buffer> {
+    const sharp = (await import("sharp")).default;
+    const full = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: "#ef6820" },
+    })
+      .jpeg()
+      .toBuffer();
+    return full.subarray(0, Math.floor(full.length / 2));
+  }
+
+  it("keeps the 400 when uploadFile wraps it", async () => {
+    const buffer = await truncatedJpeg();
+
+    await expect(
+      uploadFile(
+        (async function* () {
+          await Promise.resolve();
+          yield new Uint8Array(buffer);
+        })(),
+        {
+          filename: "asset.jpg",
+          contentType: "image/jpeg",
+          bucketName: "assets",
+        }
+      )
+    ).rejects.toMatchObject({ status: 400, shouldBeCaptured: false });
+  });
+
+  it("keeps the 400 through the form-data parser's wrapping", async () => {
+    const buffer = await truncatedJpeg();
+    const form = new FormData();
+    form.append(
+      "mainImage",
+      new File([new Uint8Array(buffer)], "asset.jpg", { type: "image/jpeg" })
+    );
+
+    await expect(
+      parseFileFormData({
+        request: new Request("http://localhost/assets/new", {
+          method: "POST",
+          body: form,
+        }),
+        newFileName: "asset-1/main",
+        bucketName: "assets",
+      })
+    ).rejects.toMatchObject({
+      status: 400,
+      shouldBeCaptured: false,
+      title: "Image could not be read",
+    });
   });
 });

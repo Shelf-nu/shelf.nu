@@ -29,6 +29,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { fontSize, spacing, borderRadius } from "@/lib/constants";
+import { CONTENT_MAX_WIDTH } from "@/lib/content-column";
 import { useDateFormatter } from "@/lib/use-date-formatter";
 import type { AuditEvidenceImage, AuditEvidenceNote } from "@/lib/api/types";
 
@@ -46,11 +47,10 @@ type EvidenceViewerProps = {
   /**
    * Fetches again after a failure.
    *
-   * why it is needed: the sheet caches per audit, so a failed load left the
-   * error on screen with no way forward — the reader had to close the sheet
-   * and reopen it to get another attempt, which is not a thing anyone guesses.
-   * Audits run in stockrooms and basements, so a request timing out is the
-   * normal case, not the exceptional one.
+   * why: the sheet caches per audit, so without a retry a failed load stays
+   * on screen until the reader thinks to close and reopen the sheet. Audits
+   * run in stockrooms and basements, so a request timing out is the normal
+   * case, not the exceptional one.
    */
   onRetry?: () => void;
 };
@@ -208,6 +208,12 @@ const useStyles = createStyles((colors) => ({
     borderTopRightRadius: borderRadius.lg,
     maxHeight: "85%",
     paddingBottom: spacing.lg,
+    // The modal covers the whole window, outside any navigator's content
+    // column, so the sheet holds itself to the column: on a tablet it lines
+    // up with the screen behind it instead of spanning the window.
+    width: "100%",
+    maxWidth: CONTENT_MAX_WIDTH,
+    alignSelf: "center",
   },
   header: {
     flexDirection: "row",

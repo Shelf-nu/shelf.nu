@@ -42,9 +42,9 @@ interface AuditCompletionArgs {
   organizationId: string;
   /** Acting user — the subject of assignment scoping below. */
   userId: string;
-  /** BASE and SELF_SERVICE see only audits assigned to them, mirroring the
-   * audits index (`getAuditsForOrganization`); admins and owners see all. */
-  isSelfServiceOrBase: boolean;
+  /** Limit the report to audits assigned to `userId`, the same reach the
+   * audits index applies. Callers pass `!access.audits.seeAll`. */
+  assignedOnly: boolean;
   /** Window applied to `AuditSession.createdAt` — a session belongs to the
    * period it was created in, regardless of when it finished. */
   timeframe: ResolvedTimeframe;
@@ -75,7 +75,7 @@ export async function auditCompletionReport(
   const {
     organizationId,
     userId,
-    isSelfServiceOrBase,
+    assignedOnly,
     timeframe,
     page = 1,
     pageSize = 50,
@@ -91,10 +91,10 @@ export async function auditCompletionReport(
     const windowWhere = {
       organizationId,
       createdAt: { gte: timeframe.from, lte: timeframe.to },
-      // Assignment scoping for low-permission roles, the same
-      // `assignments.some.userId` predicate the audits index applies — the
-      // report must never show a session its viewer cannot open.
-      ...(isSelfServiceOrBase ? { assignments: { some: { userId } } } : {}),
+      // Assignment scoping: the same `assignments.some.userId` predicate the
+      // audits index applies, so the report never shows a session its viewer
+      // cannot open.
+      ...(assignedOnly ? { assignments: { some: { userId } } } : {}),
     };
 
     const [

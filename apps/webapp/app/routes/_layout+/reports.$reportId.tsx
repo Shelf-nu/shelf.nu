@@ -59,12 +59,14 @@ import type {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { getClientHint } from "~/utils/client-hints";
 import { resolveUserFormatPrefsById } from "~/utils/date-format.server";
-import { ShelfError } from "~/utils/error";
+import { ShelfError, makeShelfError } from "~/utils/error";
+import { error } from "~/utils/http.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { getIntParam } from "~/utils/search-params-number";
 import { tw } from "~/utils/tw";
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
@@ -81,7 +83,17 @@ export const handle = {
     match?.data?.report?.title || "Report",
 };
 
-export async function loader({ context, request, params }: LoaderFunctionArgs) {
+/**
+ * Resolves the requested report and runs it with the filters in the query
+ * string: timeframe, category, location, custodian, threshold and page.
+ * Numeric parameters that are missing or unreadable fall back to their
+ * defaults rather than reaching the report as `NaN`.
+ *
+ * @returns The report's data for the current filters, its id, and the page header
+ * @throws {ShelfError} 404 for an unknown report; 403 for one not yet enabled, or
+ *   when the caller lacks `reports: read`
+ */
+async function loadReport({ context, request, params }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
@@ -114,13 +126,15 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     });
   }
 
-  // Check permissions
-  const { organizationId, isSelfServiceOrBase } = await requirePermission({
-    userId,
-    request,
-    entity: PermissionEntity.asset,
-    action: PermissionAction.read,
-  });
+  // Check permissions. `currentOrganization` supplies the workspace currency
+  // for the reports whose KPI strings carry money values.
+  const { organizationId, currentOrganization, access } =
+    await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.reports,
+      action: PermissionAction.read,
+    });
 
   // Parse search params for filters
   const url = new URL(request.url);
@@ -160,8 +174,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         // Anchor trend-chart axis labels in the acting user's timezone (D2).
         timeZone: formatPrefs.timeZone,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
         sortBy,
         sortOrder,
       });
@@ -171,30 +185,37 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
     case "overdue-items":
       reportData = await overdueItemsReport({
         organizationId,
+        currency: currentOrganization.currency,
         custodianId: url.searchParams.get("custodian") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "idle-assets":
       reportData = await idleAssetsReport({
         organizationId,
-        idleThresholdDays: parseInt(url.searchParams.get("days") || "30", 10),
+        currency: currentOrganization.currency,
+        // A threshold below one day puts the cutoff at or after now, which
+        // marks every asset idle.
+        idleThresholdDays: getIntParam(url.searchParams, "days", 30, {
+          min: 1,
+        }),
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "custody-snapshot":
       reportData = await custodySnapshotReport({
         organizationId,
+        currency: currentOrganization.currency,
         teamMemberId: url.searchParams.get("teamMember") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -204,8 +225,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -213,22 +234,24 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await topBookedKitsReport({
         organizationId,
         timeframe,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "distribution":
       reportData = await assetDistributionReport({
         organizationId,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        currency: currentOrganization.currency,
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
     case "asset-inventory":
       reportData = await assetInventoryReport({
         organizationId,
+        currency: currentOrganization.currency,
         categoryIds:
           url.searchParams.get("categories")?.split(",").filter(Boolean) ||
           undefined,
@@ -238,8 +261,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         statuses:
           url.searchParams.get("statuses")?.split(",").filter(Boolean) ||
           undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -249,8 +272,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "12", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 12),
       });
       break;
 
@@ -260,8 +283,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         categoryId: url.searchParams.get("category") || undefined,
         locationId: url.searchParams.get("location") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -271,8 +294,8 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
         timeframe,
         assetId: url.searchParams.get("asset") || undefined,
         categoryId: url.searchParams.get("category") || undefined,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -280,10 +303,10 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       reportData = await auditCompletionReport({
         organizationId,
         userId,
-        isSelfServiceOrBase,
+        assignedOnly: !access.audits.seeAll,
         timeframe,
-        page: parseInt(url.searchParams.get("page") || "1", 10),
-        pageSize: parseInt(url.searchParams.get("pageSize") || "50", 10),
+        page: getIntParam(url.searchParams, "page", 1),
+        pageSize: getIntParam(url.searchParams, "pageSize", 50),
       });
       break;
 
@@ -305,6 +328,22 @@ export async function loader({ context, request, params }: LoaderFunctionArgs) {
       subHeading: reportData.report.description,
     },
   });
+}
+
+/**
+ * Loads the report page. Every failure, including a refused permission or an
+ * unknown report, becomes a response carrying its own status, so a member
+ * without report access sees a 403 page rather than a server error.
+ */
+export async function loader(args: LoaderFunctionArgs) {
+  try {
+    return await loadReport(args);
+  } catch (cause) {
+    const reason = makeShelfError(cause, {
+      userId: args.context.getSession().userId,
+    });
+    throw data(error(reason), { status: reason.status });
+  }
 }
 
 export default function ReportPage() {

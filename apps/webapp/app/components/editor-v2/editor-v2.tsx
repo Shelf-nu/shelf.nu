@@ -14,6 +14,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
+import { CharacterCount } from "~/components/shared/character-count";
 import { createEditorSchema } from "~/modules/editor-v2/markdoc-utils";
 import { handleActivationKeyPress } from "~/utils/keyboard";
 import { tw } from "~/utils/tw";
@@ -99,6 +100,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       applySlashCommand,
       handleSlashKeyDown,
       setSlashIndex,
+      clearSlash,
     } = useSlashCommands(commands, viewRef);
 
     const { runCommand, handleParagraphChange } = useEditorCommands(
@@ -118,7 +120,14 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
       placeholder,
       maxLength,
       shouldAutoFocus,
-      onBlur,
+      onBlur: (event) => {
+        // The slash menu is portaled to the body and positioned against the
+        // viewport, so it outlives the editor's focus unless it is closed here.
+        // Clicking the menu itself never reaches this: every control in the
+        // editor chrome cancels mousedown, so the editor keeps focus.
+        clearSlash();
+        onBlur?.(event);
+      },
       onFocus,
       onChange,
       onStateUpdate: (state: EditorState, view: EditorView) => {
@@ -260,13 +269,7 @@ export const EditorV2 = forwardRef<HTMLTextAreaElement, EditorV2Props>(
             {label} supports Markdown and Markdoc. {HINT_TEXT}
           </span>
           {maxLength ? (
-            <span
-              className={
-                markdocValue.length > maxLength ? "text-error-600" : undefined
-              }
-            >
-              {markdocValue.length}/{maxLength}
-            </span>
+            <CharacterCount count={markdocValue.length} max={maxLength} />
           ) : null}
         </div>
         <LinkDialog

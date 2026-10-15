@@ -1,20 +1,18 @@
 ---
 description: Shelf has TWO code-bearing entity types — Asset AND Kit. Any feature that surfaces an identifier or code value on one entity's list views must evaluate the equivalent surfaces for the other. Reach for the shared `resolveDisplayCode` resolver + `AssetCodeBadge` primitive so the same logic ships everywhere; don't re-implement per surface.
-globs:
-  [
-    "apps/webapp/app/components/booking/list-asset-content.tsx",
-    "apps/webapp/app/components/booking/kit-row.tsx",
-    "apps/webapp/app/components/assets/assets-index/assets-list.tsx",
-    "apps/webapp/app/components/assets/assets-index/advanced-asset-columns.tsx",
-    "apps/webapp/app/components/audit/expected-assets-list.tsx",
-    "apps/webapp/app/routes/_layout+/kits.$kitId.assets.tsx",
-    "apps/webapp/app/routes/_layout+/kits._index.tsx",
-    "apps/webapp/app/routes/_layout+/locations.$locationId.assets.tsx",
-    "apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.manage-assets.tsx",
-    "apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.manage-kits.tsx",
-    "apps/webapp/app/routes/_layout+/audits.$auditId.overview.tsx",
-    "apps/webapp/app/routes/_layout+/audits.$auditId.scan.tsx",
-  ]
+paths:
+  - "apps/webapp/app/components/booking/list-asset-content.tsx"
+  - "apps/webapp/app/components/booking/kit-row.tsx"
+  - "apps/webapp/app/components/assets/assets-index/assets-list.tsx"
+  - "apps/webapp/app/components/assets/assets-index/advanced-asset-columns.tsx"
+  - "apps/webapp/app/components/audit/expected-assets-list.tsx"
+  - "apps/webapp/app/routes/_layout+/kits.$kitId.assets.tsx"
+  - "apps/webapp/app/routes/_layout+/kits._index.tsx"
+  - "apps/webapp/app/routes/_layout+/locations.$locationId.assets.tsx"
+  - "apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.manage-assets.tsx"
+  - "apps/webapp/app/routes/_layout+/bookings.$bookingId.overview.manage-kits.tsx"
+  - "apps/webapp/app/routes/_layout+/audits.$auditId.overview.tsx"
+  - "apps/webapp/app/routes/_layout+/audits.$auditId.scan.tsx"
 ---
 
 Shelf renders rows of **code-bearing entities** in many places. Two entity

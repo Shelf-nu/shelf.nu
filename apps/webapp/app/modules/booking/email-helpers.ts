@@ -242,6 +242,18 @@ export const cancelledBookingEmailContent = (
   });
 
 /**
+ * This is the content of the email sent to the custodian when a reserved
+ * booking is reverted back to draft (e.g. an admin sends a reservation
+ * request back for changes). The booking still exists — the recipient can
+ * open it, adjust it and reserve it again.
+ */
+export const revertedToDraftEmailContent = (args: BasicEmailContentArgs) =>
+  baseBookingTextEmailContent({
+    ...args,
+    emailContent: `Your booking reservation has been reverted to draft: "${args.bookingName}". You can review the booking, make changes and submit it again.`,
+  });
+
+/**
  * Booking is extended
  *
  * This email is sent when a booking's end date is extended.
