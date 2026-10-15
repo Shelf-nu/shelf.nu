@@ -1,0 +1,30 @@
+appId: com.shelf.companion.carlos
+name: "Audits - Link to another audit replaces the open one"
+tags:
+  - audits
+  - deeplink
+
+---
+# Test: an audit link opened while another audit is on screen shows the linked
+# audit. Both links resolve to the same route, so the second one reaches the
+# open audit screen with a new id instead of pushing a new one.
+# Needs two audits in the test workspace (see env/test.env.example).
+
+- runFlow: ../../shared/login.yaml
+
+# Use tapOn to force a11y tree refresh after runFlow
+- tapOn:
+    text: "Quick Actions"
+
+- openLink: "shelf://audits/${SHELF_TEST_SWITCH_AUDIT_A_ID}"
+- extendedWaitUntil:
+    visible: "${SHELF_TEST_SWITCH_AUDIT_A_NAME}"
+    timeout: 20000
+
+- openLink: "shelf://audits/${SHELF_TEST_SWITCH_AUDIT_B_ID}"
+- extendedWaitUntil:
+    visible: "${SHELF_TEST_SWITCH_AUDIT_B_NAME}"
+    timeout: 20000
+- assertNotVisible: "${SHELF_TEST_SWITCH_AUDIT_A_NAME}"
+
+- takeScreenshot: audits-deep-link-switches-audit

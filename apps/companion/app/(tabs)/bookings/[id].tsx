@@ -116,13 +116,28 @@ const LIFECYCLE_COLORS = {
 } as const;
 
 /**
+ * The booking detail route.
+ *
+ * A link or navigate to another booking while this one is on top of the stack
+ * reuses this route with a new `id`, and the screen below holds data,
+ * selections and open sheets for one booking. Keying it by `id` gives every
+ * booking its own instance, so nothing from the previous one carries over and
+ * a reply still in flight for it lands nowhere.
+ */
+export default function BookingDetailRoute() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  return <BookingDetailScreen key={id} id={id} />;
+}
+
+/**
  * The booking detail screen: the booking's details, the actions its status and
  * the caller's role allow, its reserved models, and its assets and kits, which
  * can be searched, grouped under their kits, and selected for check-in,
  * check-out or removal.
+ *
+ * @param props.id - the booking to show
  */
-export default function BookingDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+function BookingDetailScreen({ id }: { id: string }) {
   const router = useRouter();
   const { currentOrg } = useOrg();
   // Current auth user — the booking's creator/custodian ids are compared

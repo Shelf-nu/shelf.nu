@@ -154,16 +154,30 @@ type DisplayAsset = {
 
 const auditAssetKeyExtractor = (item: DisplayAsset) => item.id;
 
+/**
+ * The audit detail route.
+ *
+ * A link or navigate to another audit while this one is on top of the stack
+ * reuses this route with a new `id`. Keying the screen by `id` gives every
+ * audit its own instance (error boundary included), so no data, filter or
+ * reply still in flight from the previous audit carries over.
+ */
 export default function AuditDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
   return (
-    <ErrorBoundary screenName="Audit Details">
-      <AuditDetailContent />
+    <ErrorBoundary key={id} screenName="Audit Details">
+      <AuditDetailContent id={id} />
     </ErrorBoundary>
   );
 }
 
-function AuditDetailContent() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+/**
+ * The audit's progress, its expected assets with their scan state and
+ * evidence, and the scan and complete actions.
+ *
+ * @param props.id - the audit to show
+ */
+function AuditDetailContent({ id }: { id: string }) {
   const router = useRouter();
   const { currentOrg } = useOrg();
   const { colors, auditStatusBadge, auditAssetStatusBadge } = useTheme();
