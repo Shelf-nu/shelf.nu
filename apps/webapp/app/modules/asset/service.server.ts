@@ -236,6 +236,7 @@ import type {
 } from "./types";
 import type { AllowedCustodianFilterIds } from "./utils.server";
 import {
+  buildLowStockWhere,
   getLocationUpdateNoteContent,
   getCustomFieldUpdateNoteContent,
   detectPotentialChanges,
@@ -254,6 +255,7 @@ import {
 } from "../asset-model/service.server";
 import { cancelAssetReminderScheduler } from "../asset-reminder/scheduler.server";
 import { createSystemBookingNotes } from "../booking-note/service.server";
+import { ASSET_EDIT_ADJUSTMENT_NOTE } from "../consumption-log/constants";
 import { checkAndNotifyLowStock } from "../consumption-log/low-stock.server";
 import { lockAssetForQuantityUpdate } from "../consumption-log/quantity-lock.server";
 import { createConsumptionLog } from "../consumption-log/service.server";
@@ -684,6 +686,8 @@ export async function getAssets(params: {
    * */
   hideUnavailableToAddToKit?: boolean;
   assetKitFilter?: string | null;
+  /** QUANTITY_TRACKED assets at or below their minimum only. */
+  lowStockOnly?: boolean;
   /** The caller's list scope; `null` or omitted lists every asset. */
   bookableScope?: BookableListScope | null;
   /**
@@ -710,6 +714,7 @@ export async function getAssets(params: {
     teamMemberIds,
     extraInclude,
     assetKitFilter,
+    lowStockOnly,
     bookableScope,
     archivedFilter = "active",
   } = params;
@@ -730,6 +735,14 @@ export async function getAssets(params: {
     // category filter below write `where.OR`.
     if (bookableScope) {
       where.AND = [bookableListScopeWhere(bookableScope)];
+    }
+
+    // Spread: the bookable scope above may already have written `where.AND`.
+    if (lowStockOnly) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        buildLowStockWhere(),
+      ];
     }
 
     if (search) {
@@ -2781,7 +2794,7 @@ export async function updateAsset({
             category: ConsumptionCategory.ADJUSTMENT,
             quantity: delta,
             userId,
-            note: "Quantity adjusted via asset edit",
+            note: ASSET_EDIT_ADJUSTMENT_NOTE,
             tx,
           });
         }
@@ -5741,6 +5754,7 @@ export async function getPaginatedAndFilterableAssets({
   userId,
   locationIdsOverride,
   honorArchivedView = false,
+  honorLowStockFilter = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -5780,6 +5794,12 @@ export async function getPaginatedAndFilterableAssets({
    * member without the grant, gets active assets whatever the URL says.
    */
   honorArchivedView?: boolean;
+  /**
+   * Honour the `?lowStockOnly=true` param. Off by default: only the asset
+   * index renders the toggle that clears it, so a picker or another list
+   * never narrows to low-stock items on a param it cannot show.
+   */
+  honorLowStockFilter?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -5887,6 +5907,8 @@ export async function getPaginatedAndFilterableAssets({
         archivedFilter: honorArchivedView
           ? getArchivedFilterFromParams(searchParams)
           : "active",
+        lowStockOnly:
+          honorLowStockFilter && searchParams.get("lowStockOnly") === "true",
       }),
     ]);
 
