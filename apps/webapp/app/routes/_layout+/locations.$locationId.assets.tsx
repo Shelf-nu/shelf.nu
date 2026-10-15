@@ -64,7 +64,7 @@ import { Td, Th } from "~/components/table";
 import { TeamMemberBadge } from "~/components/user/team-member-badge";
 import When from "~/components/when/when";
 import { db } from "~/database/db.server";
-import { useCanArchiveAssets } from "~/hooks/use-can-archive-assets";
+import { useCanViewArchivedAssets } from "~/hooks/use-can-view-archived-assets";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { hasGetAllValue } from "~/hooks/use-model-filters";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
@@ -347,15 +347,15 @@ export async function action({ context, request, params }: ActionFunctionArgs) {
 
 export default function LocationAssets() {
   const roles = useOrganizationRoles();
-  const canArchiveAssets = useCanArchiveAssets();
-  const archivedView = useArchivedView(canArchiveAssets);
+  const canViewArchivedAssets = useCanViewArchivedAssets();
+  const archivedView = useArchivedView(canViewArchivedAssets);
   const { location, archivedAssetCount } = useLoaderData<typeof loader>();
   /** Set only on the Active view of a location whose assets are all archived. */
   const archivedHiddenState =
     archivedView === "active"
       ? archivedHiddenEmptyState({
           archivedCount: archivedAssetCount,
-          canArchiveAssets,
+          canViewArchivedAssets,
           place: "location",
         })
       : null;
@@ -477,12 +477,15 @@ export default function LocationAssets() {
             </>
           }
           titleContent={
-            canArchiveAssets ? <ArchivedViewMenu plural="assets" /> : undefined
+            canViewArchivedAssets ? (
+              <ArchivedViewMenu plural="assets" />
+            ) : undefined
           }
           customEmptyStateContent={
             archivedView === "archived"
               ? { title: "No archived assets at this location", text: "" }
-              : {
+              : userRoleCanManageAssets
+              ? {
                   title:
                     archivedHiddenState?.title ??
                     "There are currently no assets at the location",
@@ -490,6 +493,14 @@ export default function LocationAssets() {
                     archivedHiddenState?.text ?? "Add assets in this location",
                   newButtonRoute: "manage-assets",
                   newButtonContent: "Add asset",
+                }
+              : {
+                  title:
+                    archivedHiddenState?.title ??
+                    "There are currently no assets at the location",
+                  text:
+                    archivedHiddenState?.text ??
+                    "Assets placed at this location will appear here.",
                 }
           }
         />

@@ -16,6 +16,7 @@
 export const ORGANIZATION_ROLES = [
   "OWNER",
   "ADMIN",
+  "MANAGER",
   "SELF_SERVICE",
   "BASE",
 ] as const;
@@ -27,8 +28,23 @@ export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 export const ROLE_LABELS: Record<OrganizationRole, string> = {
   OWNER: "Owner",
   ADMIN: "Administrator",
+  MANAGER: "Manager",
   SELF_SERVICE: "Self service",
   BASE: "Base",
+};
+
+/**
+ * The plural name of each role, for copy that names a group of people
+ * ("owners, administrators and managers"). Spelled out per role because not
+ * every label pluralizes by adding an "s" ("Self service users", not "Self
+ * services").
+ */
+export const ROLE_PLURAL_LABELS: Record<OrganizationRole, string> = {
+  OWNER: "Owners",
+  ADMIN: "Administrators",
+  MANAGER: "Managers",
+  SELF_SERVICE: "Self service users",
+  BASE: "Base users",
 };
 
 /**

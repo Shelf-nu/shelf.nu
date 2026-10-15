@@ -249,7 +249,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
     /** If the user is already onboarded, we assume they finished the process so we send them to the index */
     if (user.onboarded) {
-      return redirect("/assets");
+      return redirect("/");
     }
 
     const authUser = await getAuthUserById(userId);

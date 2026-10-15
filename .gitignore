@@ -29,6 +29,9 @@ tsconfig.tsbuildinfo
 # Claude Code development notes (local only)
 .claude-notes/
 
+# /pr-review artifacts (diff and rule copies per PR)
+.pr-review/
+
 # Claude Code — personal settings (project-shared settings and skills are committed)
 .claude/settings.local.json
 .claude/.credentials*

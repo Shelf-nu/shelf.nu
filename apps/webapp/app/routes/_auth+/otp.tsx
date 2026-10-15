@@ -53,7 +53,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
   const title = getOtpPageData(mode).title;
 
   if (context.isAuthenticated) {
-    return redirect("/assets");
+    return redirect("/");
   }
 
   /**
@@ -153,7 +153,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
           }
         }
 
-        // Setting the auth session and redirecting user to assets page
+        // Setting the auth session and redirecting to the role's landing page
         context.setSession(authSession);
 
         const { organizationId } = await getSelectedOrganization({
@@ -162,13 +162,13 @@ export async function action({ context, request }: ActionFunctionArgs) {
         });
 
         // The link's `redirectTo` is followed only by an account that has
-        // already onboarded. Everyone else lands on `/assets`, whose layout
-        // sends them to onboarding: `redirectTo` can name a page outside that
+        // already onboarded. Everyone else lands on `/`, whose role landing page
+        // sits inside the layout that sends them to onboarding: `redirectTo` can name a page outside that
         // layout (the QR pages have no onboarding check), and following it
         // would skip onboarding altogether.
         const landing = existingUser?.onboarded
-          ? safeRedirect(signupIntent?.redirectTo, "/assets")
-          : "/assets";
+          ? safeRedirect(signupIntent?.redirectTo, "/")
+          : "/";
 
         return redirect(landing, {
           headers: [

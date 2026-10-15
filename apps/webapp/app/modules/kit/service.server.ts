@@ -24,6 +24,7 @@ import type { LoaderFunctionArgs } from "react-router";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
 import type { ExtendedPrismaClient } from "~/database/db.server";
 import { db } from "~/database/db.server";
+import { LONG_TRANSACTION_OPTIONS } from "~/database/transaction-options.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import { lockAssetsForArchiveGuard } from "~/modules/asset/archive-lock.server";
 import { getPeakReservedUnitsByAsset } from "~/modules/asset/availability-primitives.server";
@@ -4426,7 +4427,7 @@ export async function bulkAssignKitCustody({
         })),
         tx
       );
-    });
+    }, LONG_TRANSACTION_OPTIONS);
   } catch (cause) {
     const message =
       cause instanceof ShelfError

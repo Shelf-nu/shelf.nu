@@ -100,6 +100,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => [
 
 export default function LocationsIndexPage() {
   const roles = useOrganizationRoles();
+  const showRowActions = useShowLocationRowActions();
   // The bulk menu offers Delete and Create audit.
   const showBulkActions =
     userHasPermission({
@@ -113,17 +114,25 @@ export default function LocationsIndexPage() {
       action: PermissionAction.create,
     });
 
+  const canCreateLocation = userHasPermission({
+    roles,
+    entity: PermissionEntity.location,
+    action: PermissionAction.create,
+  });
+
   return (
     <>
       <Header>
-        <Button
-          to="new"
-          role="link"
-          aria-label={`new location`}
-          data-test-id="createNewLocation"
-        >
-          New location
-        </Button>
+        {canCreateLocation ? (
+          <Button
+            to="new"
+            role="link"
+            aria-label={`new location`}
+            data-test-id="createNewLocation"
+          >
+            New location
+          </Button>
+        ) : null}
       </Header>
       <ListContentWrapper>
         <Filters
@@ -139,13 +148,21 @@ export default function LocationsIndexPage() {
         />
         <List
           bulkActions={showBulkActions ? <BulkActionsDropdown /> : undefined}
-          customEmptyStateContent={{
-            title: "No locations yet",
-            text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
-            newButtonRoute: "/locations/new",
-            newButtonContent: "Create your first location",
-          }}
+          customEmptyStateContent={
+            canCreateLocation
+              ? {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Create locations to organize assets by room, building, or site.",
+                  newButtonRoute: "/locations/new",
+                  newButtonContent: "Create your first location",
+                }
+              : {
+                  title: "No locations yet",
+                  text: "Locations help you track where your assets are. Locations added to this workspace will appear here.",
+                }
+          }
           ItemComponent={ListItemContent}
+          extraItemComponentProps={{ showRowActions }}
           headerChildren={
             <>
               <Th>Description</Th>
@@ -153,7 +170,7 @@ export default function LocationsIndexPage() {
               <Th className="whitespace-nowrap">Child locations</Th>
               <Th>Assets</Th>
               <Th>Kits</Th>
-              <Th>Actions</Th>
+              {showRowActions ? <Th>Actions</Th> : null}
             </>
           }
         />
@@ -164,8 +181,11 @@ export default function LocationsIndexPage() {
 
 const ListItemContent = ({
   item,
+  extraProps,
 }: {
   item: Prisma.LocationGetPayload<{ include: typeof LOCATION_LIST_INCLUDE }>;
+  /** Decided once by the page, so the row cells always match the header. */
+  extraProps: { showRowActions: boolean };
 }) => (
   <>
     <Td className="w-full p-0 md:p-0">
@@ -214,14 +234,37 @@ const ListItemContent = ({
     <Td>{item._count.children}</Td>
     <Td>{item._count.assetLocations}</Td>
     <Td>{item._count.kits}</Td>
-    <Td>
-      <LocationQuickActions
-        location={{
-          id: item.id,
-          name: item.name,
-          childCount: item._count.children,
-        }}
-      />
-    </Td>
+    {extraProps.showRowActions ? (
+      <Td>
+        <LocationQuickActions
+          location={{
+            id: item.id,
+            name: item.name,
+            childCount: item._count.children,
+          }}
+        />
+      </Td>
+    ) : null}
   </>
 );
+
+/**
+ * Whether the member gets any per-row location action. Every button in
+ * `LocationQuickActions` needs `location: update` or `location: delete`, so
+ * without either the Actions column would render empty.
+ */
+function useShowLocationRowActions() {
+  const roles = useOrganizationRoles();
+  return (
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.update,
+    }) ||
+    userHasPermission({
+      roles,
+      entity: PermissionEntity.location,
+      action: PermissionAction.delete,
+    })
+  );
+}

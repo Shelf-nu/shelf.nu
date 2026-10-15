@@ -803,7 +803,7 @@ describe("GET /api/model-filters", () => {
     );
 
     expect(JSON.stringify(lastWhere().AND)).toContain(
-      '"hasSome":["OWNER","ADMIN"]'
+      '"hasSome":["OWNER","ADMIN","MANAGER"]'
     );
   });
 });
