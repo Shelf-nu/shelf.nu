@@ -14,8 +14,7 @@
  * stored in another asset's folder, and removing it would break that asset's
  * image. Only the workspace the assets were deleted from is checked, so the
  * lookup reads that workspace's assets instead of every asset in the
- * database. An asset in another workspace showing the file (as a backup
- * restored into that workspace can leave behind) loses its photo.
+ * database. An asset in another workspace showing the file loses its photo.
  *
  * Every asset delete path (web single delete, bulk delete, the companion's
  * delete) runs this after its transaction commits.

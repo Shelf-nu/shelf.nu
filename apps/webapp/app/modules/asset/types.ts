@@ -18,7 +18,6 @@ import type {
   TeamMember,
 } from "@prisma/client";
 import type { Return } from "@prisma/client/runtime/library";
-import type { BackupPlacement } from "./backup-placements";
 import type { assetIndexFields } from "./fields";
 
 export interface ICustomFieldValueJson {
@@ -114,51 +113,6 @@ export interface CreateAssetFromContentImportPayload
    * TWO_WAY (returned with consumption report). */
   consumptionType?: "ONE_WAY" | "TWO_WAY";
 }
-
-export interface CreateAssetFromBackupImportPayload
-  extends Record<string, any> {
-  id: string;
-  title: string;
-  description?: string;
-  category:
-    | {
-        id: string;
-        name: string;
-        description: string;
-        color: string;
-        createdAt: string;
-        updatedAt: string;
-        userId: string;
-      }
-    | {};
-  tags: {
-    name: string;
-  }[];
-  /** Manual placements, by location name. Absent when the asset had none. */
-  assetLocations?: BackupPlacement[];
-  /**
-   * When the asset was archived (issue #382), or empty/absent for an active
-   * one. Restored as-is, so an archived asset does not come back active.
-   */
-  archivedAt?: string | null;
-  /** Only in a backup written before placements existed: the asset's one
-   * location. See `placementsForRestore`. */
-  location?:
-    | {
-        name: string;
-        description?: string;
-        address?: string;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | {};
-  customFields: AssetCustomFieldsValuesWithFields[];
-}
-
-export type AssetCustomFieldsValuesWithFields =
-  ShelfAssetCustomFieldValueType & {
-    customField: CustomField;
-  };
 
 /** Item returned by getAssetsFromView */
 export type AssetsFromViewItem = Prisma.AssetGetPayload<{
