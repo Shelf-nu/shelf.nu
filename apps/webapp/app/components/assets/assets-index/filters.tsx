@@ -1,4 +1,5 @@
 import { AssetStatus } from "@prisma/client";
+import { TriangleAlertIcon } from "lucide-react";
 import { StatusFilter } from "~/components/booking/status-filter";
 import DynamicDropdown from "~/components/dynamic-dropdown/dynamic-dropdown";
 import { ChevronRight } from "~/components/icons/library";
@@ -10,6 +11,7 @@ import When from "~/components/when/when";
 import {
   useClearValueFromParams,
   useSearchParamHasValue,
+  useSearchParams,
 } from "~/hooks/search-params";
 import { useAssetIndexViewState } from "~/hooks/use-asset-index-view-state";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
@@ -19,6 +21,7 @@ import type { OrganizationPermissionSettings } from "~/utils/permissions/custody
 import { resolveTeamMemberName } from "~/utils/user";
 import { AdvancedFilteringAndSorting } from "./advanced-asset-index-filters-and-sorting";
 import { ConfigureColumnsDropdown } from "./configure-columns-dropdown";
+import { isLowStockFilterOn, toggleLowStockParam } from "./low-stock-param";
 import { SavedFilterPresetsControls } from "./saved-filter-presets";
 import { AvailabilityViewToggle } from "./view-toggle";
 
@@ -34,7 +37,7 @@ export function AssetIndexFilters({
   disableTeamMemberFilter?: boolean;
 }) {
   /** Used for filtering based on user type */
-  const filterParams: string[] = ["category", "tag", "location"];
+  const filterParams = ["category", "tag", "location", "lowStockOnly"];
   if (!disableTeamMemberFilter) {
     filterParams.push("teamMember");
   }
@@ -43,6 +46,8 @@ export function AssetIndexFilters({
   const roles = useOrganizationRoles();
 
   const { modeIsSimple, modeIsAdvanced } = useAssetIndexViewState();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const lowStockActive = isLowStockFilterOn(searchParams);
 
   const organization = useCurrentOrganization();
   const canSeeAllCustody = userHasCustodyViewPermission({
@@ -66,6 +71,23 @@ export function AssetIndexFilters({
                 defaultSortingBy="createdAt"
                 className="flex-1"
               />
+              {/* Icon with the label only on wide screens: the toolbar shares
+                  one row with the search box, which must keep its width on a
+                  laptop. The aria-label carries the name while the text is hidden. */}
+              <Button
+                type="button"
+                variant={lowStockActive ? "primary" : "secondary"}
+                aria-pressed={lowStockActive}
+                aria-label="Low stock only"
+                title="Low stock only"
+                className="shrink-0 whitespace-nowrap"
+                onClick={() => setSearchParams(toggleLowStockParam)}
+              >
+                <span className="flex items-center gap-1.5">
+                  <TriangleAlertIcon className="size-4" aria-hidden="true" />
+                  <span className="hidden 2xl:inline">Low stock only</span>
+                </span>
+              </Button>
 
               <AvailabilityViewToggle />
             </div>
