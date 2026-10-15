@@ -4,8 +4,12 @@
  * One step of an import runs at a time. A step claims the import by setting
  * `AssetImport.lockedUntil` a lease length into the future; another run of any
  * step can only claim it once that time has passed or the lease was released.
- * Every claim and renewal also bumps `updatedAt`, which is what stall detection
- * reads.
+ * Every claim also bumps `updatedAt`, which is what stall detection reads.
+ *
+ * A lease is never renewed, and it always ends before the job that took it
+ * expires (see `ASSET_IMPORT_LEASE_MINUTES`). When a process dies mid-step,
+ * pg-boss retries the job only after its expiry, so the retry always finds the
+ * dead run's lease lapsed and can carry on the chain.
  *
  * Only QUEUED and RUNNING imports can be claimed: a DRAFT was never confirmed,
  * and a COMPLETED or FAILED import has nothing left to run.
@@ -25,9 +29,15 @@ export type ImportLeaseArgs = {
   organizationId: string;
 };
 
-/** When a lease taken now runs out. */
+/**
+ * When a lease taken at `now` runs out: one minute before the job that took
+ * it expires, so the lease always lapses before pg-boss retries that job.
+ *
+ * @param now - When the lease is claimed
+ * @returns The end of the lease
+ */
 function leaseExpiry(now: Date): Date {
-  return new Date(now.getTime() + ASSET_IMPORT_LEASE_MINUTES * 60 * 1000);
+  return new Date(now.getTime() + (ASSET_IMPORT_LEASE_MINUTES - 1) * 60 * 1000);
 }
 
 /**
@@ -55,29 +65,8 @@ export async function claimImportLease({
 }
 
 /**
- * Extends the lease the calling step holds. Long steps call it as they go so
- * the lease never lapses mid-step and `updatedAt` keeps moving.
- *
- * @param args - The import whose lease to extend
- */
-export async function renewImportLease({
-  importId,
-  organizationId,
-}: ImportLeaseArgs): Promise<void> {
-  await db.assetImport.updateMany({
-    where: {
-      id: importId,
-      organizationId,
-      status: { in: ["QUEUED", "RUNNING"] },
-    },
-    data: { lockedUntil: leaseExpiry(new Date()) },
-  });
-}
-
-/**
  * Releases the lease so the next step can claim the import straight away.
- * Never throws: a lease that cannot be released simply lapses after
- * `ASSET_IMPORT_LEASE_MINUTES`.
+ * Never throws: a lease that cannot be released simply lapses on its own.
  *
  * @param args - The import whose lease to release
  */

@@ -39,9 +39,6 @@ vi.mock("~/modules/kit/service.server", () => ({
 // why: storing warnings is a raw SQL update, tested with the chunk writer.
 vi.mock("./chunk-writer.server", () => ({ appendImportWarnings: vi.fn() }));
 
-// why: the lease is a database update; renewals do not matter here.
-vi.mock("./lease.server", () => ({ renewImportLease: vi.fn() }));
-
 // why: the email is sent over the network; here only whether it is sent.
 vi.mock("~/emails/asset-import-finished", () => ({
   sendAssetImportFinishedEmail: vi.fn(),

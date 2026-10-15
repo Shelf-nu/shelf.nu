@@ -2,8 +2,8 @@
 /**
  * Tests for `confirmAssetImport` and `resumeAssetImport`: the guards before
  * an import is queued and what happens when the queue refuses the first step.
- * Also covers stall detection, which fails a RUNNING import that stopped
- * moving exactly once.
+ * Also covers stall detection, which fails a QUEUED or RUNNING import that
+ * stopped moving exactly once.
  *
  * @see {@link file://./service.server.ts}
  */
@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ShelfError } from "~/utils/error";
+import { IMPORT_STALLED_MESSAGE } from "./failure.server";
 import {
   confirmAssetImport,
   getActiveAssetImport,
@@ -241,7 +242,42 @@ describe("markStalledImportIfNeeded", () => {
     expect(db.assetImport.updateMany).not.toHaveBeenCalled();
   });
 
-  it("leaves an old import that is not RUNNING alone", async () => {
+  it("marks a stale QUEUED import as failed once, freeing the workspace", async () => {
+    vi.mocked(db.assetImport.updateMany)
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    vi.mocked(db.assetImport.findFirst).mockResolvedValue(
+      imp({ status: "FAILED" }) as never
+    );
+    // Its first job never ran, so nothing has touched it since confirm.
+    const stuck = imp({ status: "QUEUED", updatedAt: minutesAgo(31) });
+
+    const first = await markStalledImportIfNeeded(stuck);
+    await markStalledImportIfNeeded(stuck);
+
+    expect(db.assetImport.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "imp",
+        organizationId: "org",
+        status: { in: ["QUEUED", "RUNNING"] },
+      },
+      data: {
+        status: "FAILED",
+        errorMessage: IMPORT_STALLED_MESSAGE,
+      },
+    });
+    expect(sendAssetImportFinishedEmail).toHaveBeenCalledOnce();
+    expect(first.status).toBe("FAILED");
+  });
+
+  it("leaves a recently queued import alone", async () => {
+    const recent = imp({ status: "QUEUED", updatedAt: minutesAgo(5) });
+
+    await expect(markStalledImportIfNeeded(recent)).resolves.toBe(recent);
+    expect(db.assetImport.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves an old import that is not QUEUED or RUNNING alone", async () => {
     await markStalledImportIfNeeded(
       imp({ status: "COMPLETED", updatedAt: minutesAgo(600) })
     );

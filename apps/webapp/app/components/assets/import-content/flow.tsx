@@ -6,6 +6,10 @@
  * Confirming queues the background import and the route action redirects to
  * the progress page, so there is no results stage here.
  *
+ * Each stage hides the other, so focus follows the stage: the preview stage
+ * focuses its heading when it mounts, and going back to the upload stage
+ * focuses the file input.
+ *
  * @see {@link file://./preview-stage.tsx} Preview stage
  * @see {@link file://./import-progress.tsx} Progress view the confirm redirects to
  * @see {@link file://./../../../routes/_layout+/assets.import.tsx} Route action (`preview`, `confirm`)
@@ -75,6 +79,9 @@ export function flowReducer(state: FlowState, action: FlowAction): FlowState {
  */
 export function ContentImportFlow() {
   const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  /** Set by "Choose a different file", so the upload stage takes focus back. */
+  const refocusFileInput = useRef(false);
   const previewFetcher = useFetcherWithReset<typeof action>();
   const confirmFetcher = useFetcherWithReset<typeof action>();
   const [state, dispatch] = useReducer(flowReducer, INITIAL_FLOW_STATE);
@@ -95,6 +102,13 @@ export function ContentImportFlow() {
     }
   }, [previewData]);
 
+  useEffect(() => {
+    if (stage === "upload" && refocusFileInput.current) {
+      refocusFileInput.current = false;
+      fileInputRef.current?.focus();
+    }
+  }, [stage]);
+
   const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
@@ -109,6 +123,7 @@ export function ContentImportFlow() {
     previewFetcher.reset();
     confirmFetcher.reset();
     lastProcessedPreview.current = null;
+    refocusFileInput.current = true;
     formRef.current?.reset();
   };
 
@@ -122,6 +137,7 @@ export function ContentImportFlow() {
         hidden={stage !== "upload"}
       >
         <Input
+          ref={fileInputRef}
           type="file"
           name="file"
           label="Select a csv file"

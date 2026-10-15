@@ -14,25 +14,31 @@ export const ASSET_IMPORT_CHUNK_SIZE = 100;
 export const ASSET_IMPORT_POLL_INTERVAL_SECONDS = 2;
 
 /**
- * How long a step holds an import before another run may take it over. Equal
- * to the job expiry, so by the time pg-boss retries a step whose process died,
- * that process's lease has lapsed.
+ * The job expiry of every import step, and the bound on its lease.
+ *
+ * Invariant: a lease is strictly shorter than the job expiry. A claim holds
+ * the import for `ASSET_IMPORT_LEASE_MINUTES - 1` minutes and is never renewed,
+ * so when a process dies mid-step, its lease has always lapsed by the time
+ * pg-boss retries the expired job, and the retry continues the chain. A live
+ * step finishes well inside the lease because the image phase is capped at
+ * `ASSET_IMPORT_IMAGE_BUDGET_MS` (8 minutes) and the chunk transaction at 30
+ * seconds.
  */
 export const ASSET_IMPORT_LEASE_MINUTES = 15;
 
 /**
- * A RUNNING import untouched for this long is treated as stopped. Every lease
- * claim and renewal bumps `updatedAt`, so the longest legitimate silence is one
- * expiry plus backoff, about 16 minutes.
+ * A QUEUED or RUNNING import untouched for this long is treated as stopped.
+ * Confirm, resume, every lease claim and every chunk bump `updatedAt`, so the
+ * longest legitimate silence is one job expiry plus backoff, about 16 minutes.
  */
 export const ASSET_IMPORT_STALL_MINUTES = 30;
 
 /**
  * Time one ROWS chunk may spend downloading images before it writes its rows.
  * Rows not reached in time are imported without an image and get a warning.
- * Must stay well under the 15-minute job expiry (`ASSET_IMPORT_LEASE_MINUTES`):
- * pg-boss gives up on a handler at expiry, and a step that outlives it is no
- * longer tracked or retried.
+ * Must stay well under the step's lease (one minute less than the 15-minute
+ * job expiry, `ASSET_IMPORT_LEASE_MINUTES`): the lease is never renewed, so a
+ * step that outlives it could overlap a retry of the same step.
  */
 export const ASSET_IMPORT_IMAGE_BUDGET_MS = 8 * 60 * 1000;
 

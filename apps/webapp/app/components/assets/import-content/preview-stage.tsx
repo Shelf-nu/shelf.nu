@@ -6,10 +6,17 @@
  * dialog queues the background import; the route redirects to its progress
  * page, so a successful confirm never returns to this component.
  *
+ * The stage replaces the upload form, which held focus, so it moves focus to
+ * its heading when it mounts. A refused confirm is read per opening of the
+ * dialog, so a refusal never shows on a later opening that did not cause it.
+ *
  * @see {@link file://./flow.tsx} Owner of the stage and the confirm fetcher
  * @see {@link file://./../import-preview/import-grid.tsx} Row grid
  */
+import { useState } from "react";
+import { useAutoFocus } from "~/hooks/use-auto-focus";
 import { useDisabled } from "~/hooks/use-disabled";
+import { useFetcherOutcomeSinceOpen } from "~/hooks/use-fetcher-error-since-open";
 import type useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ContentImportPreview } from "~/modules/asset-import/types";
 import type { action } from "~/routes/_layout+/assets.import";
@@ -37,7 +44,8 @@ type PreviewStageProps = {
 };
 
 /**
- * Renders the preview of a validated, not yet imported file.
+ * Renders the preview of a validated, not yet imported file. It mounts when
+ * the preview loads, which is when it takes focus.
  *
  * @param props - See {@link PreviewStageProps}
  * @returns Summary, notices, row grid and the confirm controls
@@ -49,9 +57,23 @@ export function PreviewStage({
 }: PreviewStageProps) {
   const isConfirming = useDisabled(confirmFetcher);
   const { counts, newEntities, totalRows } = preview;
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const confirmOutcome = useFetcherOutcomeSinceOpen(confirmFetcher, dialogOpen);
+  // The refusal shown in the dialog: the confirm fetcher's error, but only when
+  // it answered the opening in front of the user.
+  const confirmError =
+    confirmOutcome.status === "rejected" ? confirmFetcher.data?.error : null;
+  // The heading is rendered in place (no portal), so it can be focused in the
+  // mount effect without waiting a frame.
+  const headingRef = useAutoFocus<HTMLHeadingElement>({
+    deferToNextFrame: false,
+  });
 
   return (
     <div className="mt-4 w-full">
+      <h4 ref={headingRef} tabIndex={-1} className="mb-2">
+        {preview.fileName ? `Preview of ${preview.fileName}` : "Import preview"}
+      </h4>
       <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
         <SummaryPill count={totalRows} label="assets" color="blue" />
         <SummaryPill
@@ -96,10 +118,10 @@ export function PreviewStage({
           confirmLabel={isConfirming ? "Starting..." : "Import"}
           isSubmitting={isConfirming}
           errorDetails={
-            confirmFetcher.data?.error ? (
-              <ImportErrorDetails error={confirmFetcher.data.error} />
-            ) : null
+            confirmError ? <ImportErrorDetails error={confirmError} /> : null
           }
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
           onClose={() => confirmFetcher.reset()}
           onConfirm={() => {
             void confirmFetcher.submit(

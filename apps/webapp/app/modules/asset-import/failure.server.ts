@@ -19,7 +19,7 @@ import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ASSET_IMPORT_STALL_MINUTES } from "./constants";
 
-/** Shown when a RUNNING import stopped moving. */
+/** Shown when a QUEUED or RUNNING import stopped moving. */
 export const IMPORT_STALLED_MESSAGE =
   "The import stopped unexpectedly. Your progress is saved, use Resume to continue.";
 
@@ -63,10 +63,12 @@ export async function markImportFailed({
 }
 
 /**
- * Fails a RUNNING import that has not moved for `ASSET_IMPORT_STALL_MINUTES`.
- * Every lease claim, renewal and chunk bumps `updatedAt`, so a RUNNING import
- * that old has no live step behind it. Status reads call this before they
- * render the import.
+ * Fails a QUEUED or RUNNING import that has not moved for
+ * `ASSET_IMPORT_STALL_MINUTES`. Confirm, resume, every lease claim and every
+ * chunk bump `updatedAt`, so an active import that old has no live step
+ * behind it. That covers a QUEUED import whose first job never ran or never
+ * claimed it, which would otherwise hold the workspace's single active import
+ * slot forever. Status reads call this before they render the import.
  *
  * @param assetImport - The import as just loaded
  * @returns The import unchanged when it is not stalled, otherwise the import
@@ -77,7 +79,7 @@ export async function markStalledImportIfNeeded(
 ): Promise<AssetImport> {
   const stallBefore = Date.now() - ASSET_IMPORT_STALL_MINUTES * 60 * 1000;
   if (
-    assetImport.status !== "RUNNING" ||
+    (assetImport.status !== "QUEUED" && assetImport.status !== "RUNNING") ||
     assetImport.updatedAt.getTime() >= stallBefore
   ) {
     return assetImport;

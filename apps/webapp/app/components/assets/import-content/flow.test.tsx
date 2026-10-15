@@ -3,7 +3,9 @@
  *
  * Renders the flow in a router stub whose action answers like the real
  * `assets.import` route: a preview payload, or an error payload. Asserts what
- * the user sees across the upload and preview stages.
+ * the user sees across the upload and preview stages, where focus goes when the
+ * stage changes, and that a refused confirm belongs to the dialog opening that
+ * sent it.
  *
  * @see {@link file://./flow.tsx}
  */
@@ -94,6 +96,32 @@ describe("ContentImportFlow", () => {
     expect(
       screen.getByText("Power tools", { selector: "span.font-mono" })
     ).toBeInTheDocument();
+  });
+
+  it("moves focus to the preview heading when the preview loads", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: PREVIEW });
+
+    await uploadFile(user);
+
+    const heading = await screen.findByRole("heading", {
+      name: "Preview of assets.csv",
+    });
+    await waitFor(() => expect(heading).toHaveFocus());
+  });
+
+  it("moves focus back to the file input from 'Choose a different file'", async () => {
+    const user = userEvent.setup();
+    renderFlow({ error: null, intent: "preview", preview: PREVIEW });
+
+    await uploadFile(user);
+    await user.click(
+      await screen.findByRole("button", { name: /choose a different file/i })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/select a csv file/i)).toHaveFocus()
+    );
   });
 
   it("renders the server error under the file input", async () => {
@@ -197,6 +225,33 @@ describe("ContentImportFlow", () => {
       expect(
         await within(dialog).findByText("Another import is already running")
       ).toBeInTheDocument();
+    });
+
+    it("does not show a refusal from an earlier opening on a fresh one", async () => {
+      const user = userEvent.setup();
+      renderWithConfirm({
+        error: {
+          title: "Import error",
+          message: "Another import is already running",
+          label: "Assets",
+        },
+      });
+
+      await confirm(user);
+      const dialog = await screen.findByRole("alertdialog");
+      await within(dialog).findByText("Another import is already running");
+
+      // Dismiss the dialog, then open it again without confirming.
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument()
+      );
+      await user.click(screen.getByRole("button", { name: "Import 2 assets" }));
+
+      const reopened = await screen.findByRole("alertdialog");
+      expect(
+        within(reopened).queryByText("Another import is already running")
+      ).not.toBeInTheDocument();
     });
   });
 });

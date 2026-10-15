@@ -45,11 +45,7 @@ import {
 import { markImportFailed } from "./failure.server";
 import { runFinalizeStep } from "./finalize.server";
 import type { ImportLeaseArgs } from "./lease.server";
-import {
-  claimImportLease,
-  releaseImportLease,
-  renewImportLease,
-} from "./lease.server";
+import { claimImportLease, releaseImportLease } from "./lease.server";
 import { runPrepareStep, userCanStillImport } from "./prepare.server";
 import { nextStepAfter, resolvedOf, storedRowsOf } from "./progress.server";
 import type {
@@ -67,9 +63,6 @@ export const IMPORT_FAILED_MESSAGE =
 /** Shown when the user who started the import may no longer import. */
 export const IMPORT_PERMISSION_LOST_MESSAGE =
   "You no longer have permission to import assets in this workspace.";
-
-/** Images uploaded between two lease renewals. */
-const IMAGES_PER_LEASE_RENEWAL = 10;
 
 /**
  * Singleton key for a step: one queued job per import and step.
@@ -212,7 +205,7 @@ function imageSkippedWarning(row: StoredImportRow): ImportWarning {
  *
  * @param args.rows - The chunk's rows
  * @param args.userId - The user who started the import
- * @param args.lease - The import's lease, renewed as uploads go
+ * @param args.lease - The import the chunk belongs to, for log context
  * @returns The signed images and the warnings for rows without one
  */
 async function uploadChunkImages({
@@ -235,7 +228,6 @@ async function uploadChunkImages({
   });
   const failedUrls = new Set<string>();
   const deadline = Date.now() + ASSET_IMPORT_IMAGE_BUDGET_MS;
-  let attempted = 0;
 
   for (const row of rows) {
     const imageUrl = row.imageUrl?.trim();
@@ -284,11 +276,6 @@ async function uploadChunkImages({
           shouldBeCaptured: false,
         })
       );
-    }
-
-    attempted++;
-    if (attempted % IMAGES_PER_LEASE_RENEWAL === 0) {
-      await renewImportLease(lease);
     }
   }
 
@@ -374,6 +361,11 @@ function isLastAttempt(job: PgBoss.JobWithMetadata<AssetImportJobData>) {
  * Runs one import step. Exported for tests; pg-boss calls it through
  * {@link registerAssetImportWorkers}.
  *
+ * Loading the import and claiming its lease run inside the same error handling
+ * as the step, so a failure there on the last attempt still marks the import
+ * FAILED. When the import cannot be loaded at all there is nothing to mark: the
+ * error is logged and rethrown, and stall detection fails the import later.
+ *
  * The lease is released before the next step is queued, so the next job can
  * never find it still held and drop out of the chain. A step that throws
  * releases it in `finally`.
@@ -386,43 +378,51 @@ export async function handleAssetImportJob(
 ): Promise<void> {
   const { data } = job;
   const { importId } = data;
-
-  const assetImport = await db.assetImport.findFirst({
-    // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss job; the id comes from our own job payload (queued by confirm, resume or a previous step), never from a request. Every later write is scoped by the organizationId read here.
-    where: { id: importId },
-  });
-
-  if (!assetImport || !stepCanRun(assetImport.status, data.step)) {
-    Logger.info(
-      `Skipping asset import ${data.step} job for import ${importId} (status ${
-        assetImport?.status ?? "missing"
-      })`
-    );
-    return;
-  }
-
-  const { organizationId } = assetImport;
-  const lease: ImportLeaseArgs = { importId, organizationId };
-
-  if (!(await claimImportLease(lease))) {
-    // Another run is alive and continues the chain. Returning instead of
-    // throwing keeps this duplicate from using up retries and failing the
-    // import.
-    Logger.info(
-      `Asset import ${importId} is held by another run, skipping ${data.step}`
-    );
-    return;
-  }
-
-  let leaseHeld = true;
-  /** Releases the lease, then queues the next step (if any). */
-  const handOff = async (next: AssetImportJobData | null) => {
-    leaseHeld = false;
-    await releaseImportLease(lease);
-    if (next) await enqueueAssetImportStep(next);
-  };
+  // Set once the import is loaded; the failure path needs its workspace. It is
+  // asserted rather than annotated so the catch and finally blocks see the
+  // full type instead of the `null` it starts as.
+  let lease = null as ImportLeaseArgs | null;
+  let leaseHeld = false;
 
   try {
+    const assetImport = await db.assetImport.findFirst({
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: background pg-boss job; the id comes from our own job payload (queued by confirm, resume or a previous step), never from a request. Every later write is scoped by the organizationId read here.
+      where: { id: importId },
+    });
+
+    if (!assetImport || !stepCanRun(assetImport.status, data.step)) {
+      Logger.info(
+        `Skipping asset import ${
+          data.step
+        } job for import ${importId} (status ${
+          assetImport?.status ?? "missing"
+        })`
+      );
+      return;
+    }
+
+    const { organizationId } = assetImport;
+    const importLease: ImportLeaseArgs = { importId, organizationId };
+    lease = importLease;
+
+    if (!(await claimImportLease(importLease))) {
+      // Another run is alive and continues the chain. Returning instead of
+      // throwing keeps this duplicate from using up retries and failing the
+      // import.
+      Logger.info(
+        `Asset import ${importId} is held by another run, skipping ${data.step}`
+      );
+      return;
+    }
+    leaseHeld = true;
+
+    /** Releases the lease, then queues the next step (if any). */
+    const handOff = async (next: AssetImportJobData | null) => {
+      leaseHeld = false;
+      await releaseImportLease(importLease);
+      if (next) await enqueueAssetImportStep(next);
+    };
+
     switch (data.step) {
       case "PREPARE": {
         const allowed = await userCanStillImport({
@@ -461,21 +461,24 @@ export async function handleAssetImportJob(
     }
   } catch (cause) {
     if (isLastAttempt(job)) {
-      try {
-        await markImportFailed({
-          importId,
-          organizationId,
-          errorMessage: userFacingMessage(cause),
-        });
-      } catch (markCause) {
-        Logger.error(
-          new ShelfError({
-            cause: markCause,
-            message: "Failed to mark the asset import as failed",
-            additionalData: { ...data, organizationId },
-            label,
-          })
-        );
+      const organizationId = lease?.organizationId;
+      if (organizationId) {
+        try {
+          await markImportFailed({
+            importId,
+            organizationId,
+            errorMessage: userFacingMessage(cause),
+          });
+        } catch (markCause) {
+          Logger.error(
+            new ShelfError({
+              cause: markCause,
+              message: "Failed to mark the asset import as failed",
+              additionalData: { ...data, organizationId },
+              label,
+            })
+          );
+        }
       }
       Logger.error(
         new ShelfError({
@@ -488,7 +491,7 @@ export async function handleAssetImportJob(
     }
     throw cause;
   } finally {
-    if (leaseHeld) await releaseImportLease(lease);
+    if (leaseHeld && lease) await releaseImportLease(lease);
   }
 }
 

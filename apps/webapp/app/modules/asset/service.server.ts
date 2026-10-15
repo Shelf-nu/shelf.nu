@@ -422,8 +422,7 @@ export async function setKitCustodyAfterAssetImport({
  * - Assets with custody being imported into kits that exist but are not in custody,
  * - Existing kits with different custodians,
  * - Multiple custodians assigned to the same kit within the same import.
- */
-/**
+ *
  * @param args.data - Import rows; only rows with both a kit and a custodian matter
  * @param args.organizationId - Workspace whose kits are checked
  * @throws {ShelfError} 400 when a kit would end up with conflicting custodians

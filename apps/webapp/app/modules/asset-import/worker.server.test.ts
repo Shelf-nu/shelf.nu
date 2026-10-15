@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "~/database/db.server";
 import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { ShelfError } from "~/utils/error";
+import { Logger } from "~/utils/logger";
 import { scheduler } from "~/utils/scheduler.server";
 import { createSignedUrl, uploadImageFromUrl } from "~/utils/storage.server";
 import { writeImportChunk } from "./chunk-writer.server";
@@ -60,7 +61,6 @@ vi.mock("./finalize.server", () => ({ runFinalizeStep: vi.fn() }));
 // why: the lease is a database update; here only who holds it matters.
 vi.mock("./lease.server", () => ({
   claimImportLease: vi.fn(),
-  renewImportLease: vi.fn(),
   releaseImportLease: vi.fn(),
 }));
 
@@ -547,6 +547,110 @@ describe("handleAssetImportJob", () => {
           status: "FAILED",
           errorMessage: "Use plain numbers for AMOUNT fields.",
         },
+      })
+    );
+  });
+
+  it("rethrows a failed send after releasing the lease once, without failing the import early", async () => {
+    loads(imp({ status: "RUNNING", totalRows: 250, processedRows: 0 }));
+    vi.mocked(writeImportChunk).mockResolvedValue({
+      applied: true,
+      nextProcessedRows: 100,
+      warnings: [],
+    });
+    vi.mocked(scheduler.send).mockRejectedValue(new Error("connection lost"));
+
+    const error = await handleAssetImportJob(
+      job(
+        { importId: "imp", step: "ROWS", chunkIndex: 0 },
+        { retrycount: 1, retrylimit: 3 }
+      )
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(ShelfError);
+    expect(error).toMatchObject({
+      message: "Failed to queue the asset import step",
+    });
+    // Released by the hand-off, and not again by `finally`.
+    expect(releaseImportLease).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(releaseImportLease).mock.invocationCallOrder[0]
+    ).toBeLessThan(vi.mocked(scheduler.send).mock.invocationCallOrder[0]);
+    expect(vi.mocked(db.assetImport.updateMany)).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+    expect(sendAssetImportFinishedEmail).not.toHaveBeenCalled();
+  });
+
+  it("marks the import failed when claiming the lease throws on the last attempt", async () => {
+    loads(imp({ status: "QUEUED" }));
+    vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
+    vi.mocked(claimImportLease).mockRejectedValue(new Error("P1001"));
+
+    await expect(
+      handleAssetImportJob(
+        job(
+          { importId: "imp", step: "PREPARE" },
+          { retrycount: 3, retrylimit: 3 }
+        )
+      )
+    ).rejects.toThrow("P1001");
+
+    expect(vi.mocked(db.assetImport.updateMany)).toHaveBeenCalledWith({
+      where: {
+        id: "imp",
+        organizationId: "org",
+        status: { in: ["QUEUED", "RUNNING"] },
+      },
+      data: {
+        status: "FAILED",
+        errorMessage: expect.stringContaining("Resume"),
+      },
+    });
+    expect(sendAssetImportFinishedEmail).toHaveBeenCalledOnce();
+    // The claim never succeeded, so there is no lease to release.
+    expect(releaseImportLease).not.toHaveBeenCalled();
+  });
+
+  it("rethrows a failed lease claim without failing the import while retries remain", async () => {
+    loads(imp({ status: "QUEUED" }));
+    vi.mocked(claimImportLease).mockRejectedValue(new Error("P1001"));
+
+    await expect(
+      handleAssetImportJob(
+        job(
+          { importId: "imp", step: "PREPARE" },
+          { retrycount: 1, retrylimit: 3 }
+        )
+      )
+    ).rejects.toThrow("P1001");
+
+    expect(vi.mocked(db.assetImport.updateMany)).not.toHaveBeenCalled();
+    expect(sendAssetImportFinishedEmail).not.toHaveBeenCalled();
+  });
+
+  it("logs and rethrows when the import cannot be loaded on the last attempt", async () => {
+    vi.mocked(db.assetImport.findFirst).mockRejectedValue(new Error("P1001"));
+
+    await expect(
+      handleAssetImportJob(
+        job(
+          { importId: "imp", step: "PREPARE" },
+          { retrycount: 3, retrylimit: 3 }
+        )
+      )
+    ).rejects.toThrow("P1001");
+
+    // Without the row there is no workspace to scope a FAILED update to.
+    expect(vi.mocked(db.assetImport.updateMany)).not.toHaveBeenCalled();
+    expect(sendAssetImportFinishedEmail).not.toHaveBeenCalled();
+    expect(claimImportLease).not.toHaveBeenCalled();
+    expect(releaseImportLease).not.toHaveBeenCalled();
+    expect(Logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Asset import PREPARE step failed after its last retry",
       })
     );
   });

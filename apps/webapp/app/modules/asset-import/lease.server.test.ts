@@ -1,18 +1,16 @@
 // @vitest-environment node
 /**
  * Tests for the import lease: which imports a claim can match, the claim
- * result, and that releasing never throws.
+ * result, that a lease always ends before its job expires, and that releasing
+ * never throws.
  *
  * @see {@link file://./lease.server.ts}
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "~/database/db.server";
-import {
-  claimImportLease,
-  releaseImportLease,
-  renewImportLease,
-} from "./lease.server";
+import { ASSET_IMPORT_JOB_OPTIONS } from "./constants";
+import { claimImportLease, releaseImportLease } from "./lease.server";
 
 // why: the lease lives on the import row in the database.
 vi.mock("~/database/db.server", () => ({
@@ -62,23 +60,51 @@ describe("claimImportLease", () => {
   });
 });
 
-describe("renewImportLease", () => {
+describe("lease length", () => {
+  const jobExpiryMs = ASSET_IMPORT_JOB_OPTIONS.expireInMinutes * 60 * 1000;
+  const claimedAt = new Date("2026-10-15T10:00:00.000Z");
+
   beforeEach(() => {
     vi.resetAllMocks();
+    // why: the lease end is computed from the current time.
+    vi.useFakeTimers();
+    vi.setSystemTime(claimedAt);
     vi.mocked(db.assetImport.updateMany).mockResolvedValue({ count: 1 });
   });
 
-  it("extends the lease of an active import without checking who holds it", async () => {
-    await renewImportLease(args);
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    expect(db.assetImport.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: "imp",
-        organizationId: "org",
-        status: { in: ["QUEUED", "RUNNING"] },
-      },
-      data: { lockedUntil: expect.any(Date) },
-    });
+  it("ends a claim made at T before T plus the job expiry", async () => {
+    await claimImportLease(args);
+
+    const data = vi.mocked(db.assetImport.updateMany).mock.calls[0][0]
+      ?.data as { lockedUntil: Date };
+    expect(data.lockedUntil.getTime()).toBeLessThan(
+      claimedAt.getTime() + jobExpiryMs
+    );
+  });
+
+  it("lets a retry that arrives after the job expiry claim the lapsed lease", async () => {
+    await claimImportLease(args);
+    const firstLease = (
+      vi.mocked(db.assetImport.updateMany).mock.calls[0][0]?.data as {
+        lockedUntil: Date;
+      }
+    ).lockedUntil;
+
+    // The process died; pg-boss retries the job once it has expired.
+    vi.setSystemTime(new Date(claimedAt.getTime() + jobExpiryMs));
+    await claimImportLease(args);
+
+    // The retry only matches a lease that ended before its own "now", and the
+    // first lease did end before then, so the database update matches the row.
+    const retryWhere = vi.mocked(db.assetImport.updateMany).mock.calls[1][0]
+      ?.where as unknown as { OR: [unknown, { lockedUntil: { lt: Date } }] };
+    expect(retryWhere.OR[1].lockedUntil.lt.getTime()).toBeGreaterThan(
+      firstLease.getTime()
+    );
   });
 });
 

@@ -3,9 +3,12 @@
  *
  * Wraps an `AlertDialog` whose confirm button stays disabled until the user
  * types the exact phrase. The typed text lives in this component and resets
- * whenever the dialog closes.
+ * whenever the dialog closes. The dialog manages its own open state unless the
+ * caller passes `open`, which a caller needs when it reads a fetcher's answer
+ * per opening (see `useFetcherErrorSinceOpen`).
  *
  * @see {@link file://./../bulk-update/preview-display.tsx} Update-flow consumer
+ * @see {@link file://./../import-content/preview-stage.tsx} Content-import consumer
  */
 import type React from "react";
 import { useState } from "react";
@@ -51,6 +54,10 @@ type ConfirmImportDialogProps = {
   errorDetails?: React.ReactNode;
   /** Called whenever the dialog closes, e.g. to clear a stale server error. */
   onClose?: () => void;
+  /** Controls the open state. Leave unset for a self-managed dialog. */
+  open?: boolean;
+  /** Called on every open state change, opening and closing. */
+  onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -70,17 +77,21 @@ export function ConfirmImportDialog({
   error,
   errorDetails,
   onClose,
+  open,
+  onOpenChange,
 }: ConfirmImportDialogProps) {
   const [agreed, setAgreed] = useState("");
   const confirmed = agreed === CONFIRMATION_PHRASE;
 
   return (
     <AlertDialog
-      onOpenChange={(open) => {
-        if (!open) {
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
           setAgreed("");
           onClose?.();
         }
+        onOpenChange?.(nextOpen);
       }}
     >
       <AlertDialogTrigger asChild>

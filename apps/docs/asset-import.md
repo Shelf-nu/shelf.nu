@@ -149,9 +149,11 @@ Constants live in `modules/asset-import/constants.ts`.
   user can act on, and emails the creator. Each job also has a singleton key
   per import and step, so sending a queued step twice is a no-op.
 - **Lease.** `AssetImport.lockedUntil` (`lease.server.ts`) lets one step of an
-  import run at a time. A step claims it for 15 minutes, renews it while it
-  works and releases it when done. A duplicate job that cannot claim it returns
-  quietly; the holder continues the chain.
+  import run at a time. A step claims it for 14 minutes, one less than the job
+  expiry, never renews it, and releases it when done. Because the lease always
+  ends before the job expires, the retry of a step whose process died always
+  finds the lease lapsed and continues the chain. A duplicate job that cannot
+  claim it returns quietly; the holder continues the chain.
 - **Exactly-once chunks.** The first statement of a chunk transaction advances
   `processedRows`, guarded on the chunk's start offset. A retried chunk that
   already committed matches nothing and writes nothing; a concurrent duplicate
@@ -161,12 +163,15 @@ Constants live in `modules/asset-import/constants.ts`.
   asset ids and the same image paths (`<userId>/<assetId>/main-image-import`).
 - **Image budget.** A chunk spends at most 8 minutes
   (`ASSET_IMPORT_IMAGE_BUDGET_MS`) downloading images before it writes. Rows not
-  reached are imported without an image and get a warning. The budget stays
-  under the 15 minute expiry because pg-boss stops tracking a handler that
-  outlives it.
-- **Stall detection.** A `RUNNING` import whose `updatedAt` has not moved for 30
-  minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` the next time it is
-  read (`markStalledImportIfNeeded`), so a dead job never shows RUNNING forever.
+  reached are imported without an image and get a warning. The budget keeps a
+  live step well inside its 14 minute lease, which is never renewed.
+- **Stall detection.** A `QUEUED` or `RUNNING` import whose `updatedAt` has not
+  moved for 30 minutes (`ASSET_IMPORT_STALL_MINUTES`) is marked `FAILED` the
+  next time it is read (`markStalledImportIfNeeded`), so a dead job never shows
+  as active forever, and an import whose first job never ran cannot hold the
+  workspace's single active-import slot. Loading the import and claiming the
+  lease sit inside the job's error handling, so a failure there on the last
+  attempt marks the import `FAILED` straight away.
 - **Resume.** A `FAILED` import can be resumed from the status page
   (`resumeAssetImport`). It goes back to `QUEUED` and PREPARE runs again: it
   re-checks the creator's permission and recreates anything deleted meanwhile.
@@ -235,7 +240,7 @@ deleted entity in PREPARE and continues.
 - `prepare.server.ts`: PREPARE step and the import-permission re-check.
 - `chunk-writer.server.ts`: one ROWS transaction and its warnings.
 - `finalize.server.ts`: FINALIZE step, kit custody, completion.
-- `lease.server.ts`: claim, renew and release `lockedUntil`.
+- `lease.server.ts`: claim and release `lockedUntil`.
 - `failure.server.ts`: `FAILED` transition, stall detection, failure email.
 - `progress.server.ts`: pure readers for stored rows and next step.
 - `viewer-payload.ts`: permission-based shaping of the active import.

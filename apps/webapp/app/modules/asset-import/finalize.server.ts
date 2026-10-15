@@ -21,7 +21,6 @@ import { sendAssetImportFinishedEmail } from "~/emails/asset-import-finished";
 import { bulkAssignKitCustody } from "~/modules/kit/service.server";
 import { isLikeShelfError, isPrismaTransientError } from "~/utils/error";
 import { appendImportWarnings } from "./chunk-writer.server";
-import { renewImportLease } from "./lease.server";
 import { resolvedOf, storedRowsOf } from "./progress.server";
 import type { ImportWarning, StoredImportRow } from "./types";
 
@@ -137,7 +136,7 @@ function kitCustodyWarning(
 async function assignKitCustody(
   assetImport: AssetImport
 ): Promise<ImportWarning[]> {
-  const { id: importId, organizationId, createdById: userId } = assetImport;
+  const { organizationId, createdById: userId } = assetImport;
   const resolved = resolvedOf(assetImport);
   const groups = groupKitsByCustodian(
     storedRowsOf(assetImport),
@@ -206,8 +205,6 @@ async function assignKitCustody(
         }
       }
     }
-
-    await renewImportLease({ importId, organizationId });
   }
 
   return warnings;
