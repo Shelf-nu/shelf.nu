@@ -1,6 +1,6 @@
+import { AssetStatus } from "@prisma/client";
 import type {
   Asset,
-  AssetStatus,
   AssetType,
   Location,
   Prisma,
@@ -762,10 +762,17 @@ export function getAssetsWhereInput({
     allowedTeamMemberIds
   );
 
-  const status =
-    searchParams.get("status") === "ALL" // If the value is "ALL", we just remove the param
-      ? null
-      : (searchParams.get("status") as AssetStatus | null);
+  /**
+   * Only a real `AssetStatus` narrows the list. Anything else (`ALL`, or
+   * advanced-mode syntax such as `is:AVAILABLE` carried in a stale URL) is
+   * ignored: Prisma rejects an unknown enum value and the request would fail.
+   */
+  const statusParam = searchParams.get("status");
+  const status = (Object.values(AssetStatus) as string[]).includes(
+    statusParam ?? ""
+  )
+    ? (statusParam as AssetStatus)
+    : null;
 
   // First writer of `where.AND`; every later writer spreads it.
   if (searchParams.get("lowStockOnly") === "true") {

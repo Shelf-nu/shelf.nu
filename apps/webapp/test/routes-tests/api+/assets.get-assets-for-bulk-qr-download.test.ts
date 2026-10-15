@@ -9,6 +9,7 @@
  *
  * @see {@link file://../../../app/routes/api+/assets.get-assets-for-bulk-qr-download.ts}
  * @see {@link file://../../../app/modules/qr/utils.server.ts} generateQrObj
+ * @see {@link file://../../../app/modules/asset/bulk-operations-helper.server.ts}
  */
 import type { LoaderFunctionArgs } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +23,28 @@ const qrMocks = vi.hoisted(() => ({
 // why: the per-asset lookups are exactly what this route must stop making, so
 // the assertion is that these are never reached — not that they return a value.
 vi.mock("~/modules/qr/service.server", () => qrMocks);
+
+const bulkMocks = vi.hoisted(() => ({
+  resolveAssetIdsForBulkOperation: vi.fn(),
+}));
+
+// why: the advanced-filter SQL has its own coverage in
+// bulk-operations-helper.server.test.ts; here we pin that "select all"
+// delegates to it rather than building a simple-mode where clause.
+vi.mock("~/modules/asset/bulk-operations-helper.server", () => bulkMocks);
+
+// why: reads the member's saved index settings from the database; only the
+// mode matters here.
+vi.mock("~/modules/asset-index-settings/service.server", () => ({
+  getAssetIndexSettings: vi
+    .fn()
+    .mockResolvedValue({ mode: "ADVANCED", columns: [] }),
+}));
+
+// why: reads the member's format preferences from the database.
+vi.mock("~/utils/date-format.server", () => ({
+  resolveUserFormatPrefsById: vi.fn().mockResolvedValue({ timeZone: "UTC" }),
+}));
 
 // why: authorization and the select-all filter have their own coverage; here
 // they only need to resolve so the handler reaches the QR reads.
@@ -132,5 +155,68 @@ describe("bulk QR download", () => {
     expect(qrMocks.createQr).toHaveBeenCalledTimes(1);
     // Still no per-asset lookup: the batched read is authoritative.
     expect(qrMocks.getQrByAssetId).not.toHaveBeenCalled();
+  });
+});
+
+const runSelectAll = (query: string) =>
+  loader({
+    request: new Request(
+      "http://localhost/api/assets/get-assets-for-bulk-qr-download?assetIds=all-selected&" +
+        query
+    ),
+    params: {},
+    context: { getSession: () => ({ userId: "user-1" }) },
+  } as unknown as LoaderFunctionArgs);
+
+describe("bulk QR download select-all", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (db.qr.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      assets.map((asset) => qrFor(asset.id))
+    );
+  });
+
+  it("resolves advanced-mode filters through the bulk helper", async () => {
+    bulkMocks.resolveAssetIdsForBulkOperation.mockResolvedValue([
+      "asset-0",
+      "asset-1",
+    ]);
+    (db.asset.findMany as ReturnType<typeof vi.fn>).mockResolvedValue(
+      assets.slice(0, 2)
+    );
+
+    const response = (await runSelectAll("status=is:AVAILABLE")) as unknown as {
+      data: { error?: unknown };
+    };
+
+    expect(response.data.error).toBeFalsy();
+    expect(bulkMocks.resolveAssetIdsForBulkOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assetIds: ["all-selected"],
+        currentSearchParams: expect.stringContaining("status=is%3AAVAILABLE"),
+        settings: expect.objectContaining({ mode: "ADVANCED" }),
+      })
+    );
+    // The filter syntax never reaches Prisma: assets are read by resolved id.
+    expect(db.asset.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["asset-0", "asset-1"] }, organizationId: "org-1" },
+      })
+    );
+  });
+
+  it("refuses more than 100 codes as a 400 the user can act on", async () => {
+    bulkMocks.resolveAssetIdsForBulkOperation.mockResolvedValue(
+      Array.from({ length: 101 }, (_, index) => `asset-${index}`)
+    );
+
+    const response = (await runSelectAll("")) as unknown as {
+      data: { error?: { message?: string } };
+      init: { status?: number } | null;
+    };
+
+    expect(response.init?.status).toBe(400);
+    expect(response.data.error?.message).toMatch(/maximum 100 codes/);
+    expect(db.asset.findMany).not.toHaveBeenCalled();
   });
 });
