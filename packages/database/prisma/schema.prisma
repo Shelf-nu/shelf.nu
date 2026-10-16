@@ -821,8 +821,10 @@ model Scan {
   assetId        String?
   kit            Kit?          @relation(fields: [kitId], references: [id], onDelete: SetNull)
   kitId          String?
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  organizationId String?
+  // The workspace the code resolved in. Every scan has one: a code no
+  // workspace has claimed is not recorded.
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
 
   // Which surface recorded the scan. NULL on rows written before it was
   // tracked: their source cannot be told honestly.

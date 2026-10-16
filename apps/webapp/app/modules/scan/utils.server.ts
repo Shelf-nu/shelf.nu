@@ -1,4 +1,4 @@
-import type { Qr, Scan, User, UserOrganization } from "@prisma/client";
+import type { Scan, User, UserOrganization } from "@prisma/client";
 import { ScanCodeType } from "@prisma/client";
 import type { IResult } from "ua-parser-js";
 import parser from "ua-parser-js";
@@ -79,24 +79,23 @@ export function parseCompanionUserAgent(
 
 function isValidUser(
   userOrganizations: UserOrganization[] | null | undefined,
-  organizationId: string | null | undefined
+  organizationId: string
 ) {
-  if (!userOrganizations || !organizationId) {
+  if (!userOrganizations) {
     return false;
   }
   return userOrganizations.find((uo) => uo?.organizationId === organizationId);
 }
 
 /**
- * A scan row with the relations `parseScanData` needs: the scanning user
- * (with their org memberships, to decide whether to name them) and the QR
- * (whose organization stands in on a row that carries none). Named so tests
- * can build fixtures against the real shape instead of casting: a schema
- * change then fails typecheck.
+ * A scan row with the relation `parseScanData` needs: the scanning user, with
+ * their org memberships, to decide whether to name them. Named so tests can
+ * build fixtures against the real shape instead of casting: a schema change
+ * then fails typecheck.
  */
 export type ScanWithRelations = Scan & {
   user: (User & { userOrganizations: UserOrganization[] | null }) | null;
-} & { qr: Qr | null };
+};
 
 /**
  * The newest scan that carried a location, when it is older than the last
@@ -136,11 +135,9 @@ export function parseScanData({
     if (scan) {
       const user = scan.user;
       // The scanner is named only when they belong to the workspace the code
-      // resolved in. Every row written since scans record their workspace
-      // carries it; the QR's workspace is the fallback for any that do not.
-      const scanOrganizationId = scan.organizationId ?? scan.qr?.organizationId;
+      // resolved in.
       const scannedBy =
-        user && isValidUser(user.userOrganizations, scanOrganizationId)
+        user && isValidUser(user.userOrganizations, scan.organizationId)
           ? `${resolveUserDisplayName(user)} (${user.email})`
           : "Unknown";
       const hasOwnLocation = Boolean(scan.latitude && scan.longitude);
