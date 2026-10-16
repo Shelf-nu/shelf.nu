@@ -65,7 +65,7 @@ function useContentBounds(active: boolean) {
  * Renders the unsaved-changes pill while a form is dirty, and the leave
  * dialog while a navigation is blocked. Renders nothing on a clean form.
  *
- * Styled like Shelf's cards and toasts. Wide screens (`xl`): fixed near the
+ * A dark surface so it stands out from the page. Wide screens (`xl`): fixed near the
  * top, centred over the page content. Below `xl` the breadcrumb row is too
  * narrow to share with the form's header actions, so from `md` it floats at
  * the bottom instead. Below `md`: a full-width strip at the bottom, above
@@ -115,14 +115,20 @@ export function UnsavedChangesBar({
               : undefined
           }
         >
-          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 border-t border-gray-200 bg-white px-4 py-3 shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded md:border md:py-2.5 md:pl-4 md:pr-2.5 xl:slide-in-from-top-2">
-            <span className="text-sm font-medium text-gray-700">
+          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 bg-gray-900 px-4 py-3 text-white shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-full md:py-2 md:pl-5 md:pr-2 xl:slide-in-from-top-2">
+            <span className="flex items-center gap-2 text-sm font-medium text-white">
+              <span
+                aria-hidden="true"
+                className="size-2 shrink-0 rounded-full bg-warning-500"
+              />
               {isSaving ? "Saving..." : "Unsaved changes"}
             </span>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="secondary"
+                // why: a ghost button on the dark surface
+                className="border-white/30 bg-transparent text-white disabled:text-white/60 [&:is(button:enabled)]:hover:bg-white/10"
                 onClick={onDiscard}
                 disabled={disabled || isSaving}
               >
