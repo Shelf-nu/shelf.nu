@@ -55,18 +55,20 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { resolveCanImportAssets } from "~/utils/subscription.server";
 
 export async function loader({ context, request }: LoaderFunctionArgs) {
   const authSession = context.getSession();
   const { userId } = authSession;
 
   try {
-    const { organizationId, currentOrganization } = await requirePermission({
-      userId,
-      request,
-      entity: PermissionEntity.dashboard,
-      action: PermissionAction.read,
-    });
+    const { organizationId, currentOrganization, organizations, role } =
+      await requirePermission({
+        userId,
+        request,
+        entity: PermissionEntity.dashboard,
+        action: PermissionAction.read,
+      });
 
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
@@ -108,6 +110,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       checklistData,
       // Cookie
       cookieResult,
+      // Whether this member may import a spreadsheet (tier and role)
+      canImportAssets,
     ] = await Promise.all([
       // 1a. Asset count + total valuation
       // QT-aware: multiplies valuation × quantity so qty-tracked assets are not silently underreported.
@@ -381,6 +385,8 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
 
       // Cookie
       userPrefs.parse(request.headers.get("Cookie")).then((c: any) => c || {}),
+
+      resolveCanImportAssets({ organizationId, organizations, userId, role }),
     ]);
 
     const totalAssets = assetAggregation._count._all;
@@ -410,6 +416,7 @@ export async function loader({ context, request }: LoaderFunctionArgs) {
       valueKnownAssets,
       newAssets,
       skipOnboardingChecklist: cookieResult.skipOnboardingChecklist,
+      canImportAssets,
       custodiansData: getCustodiansOrderedByTotalCustodies({
         directCustodians,
         bookings: ongoingAndOverdueBookings as any,
