@@ -1,7 +1,8 @@
-import { AssetType, OrganizationRoles } from "@prisma/client";
+import { AssetType } from "@prisma/client";
 import { data, type ActionFunctionArgs } from "react-router";
 import { z } from "zod";
 import { db } from "~/database/db.server";
+import { findMobileArchivedRefusal } from "~/modules/api/mobile-archived.server";
 import {
   requireMobileAuth,
   requireMobilePermission,
@@ -13,14 +14,15 @@ import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
   addScannedAssetsToBooking,
   buildKitSlicesForBooking,
+  countArchivedKitMembers,
 } from "~/modules/booking/service.server";
-import { canUserManageBookingAssets } from "~/utils/bookings";
 import { makeShelfError, ShelfError } from "~/utils/error";
 import { assertAssetsBelongToOrg } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
+import { canManageBookingItems } from "~/utils/permissions/role-access";
 import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
@@ -34,9 +36,10 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * ready-made kit slices, while the phone sends kit ids and this route resolves
  * them, keeping the mobile client thin and the lookup org-scoped.
  *
- * Status/role gating mirrors the web (`canUserManageBookingAssets`):
- * COMPLETE / ARCHIVED / CANCELLED bookings reject; SELF_SERVICE users may
- * only modify their own DRAFT bookings.
+ * Status gating mirrors the web manage-items rule (`canManageBookingItems`):
+ * COMPLETE / ARCHIVED / CANCELLED bookings reject, and roles held to DRAFT
+ * may only add to a DRAFT booking. Callers who do not write every booking may
+ * only modify a booking they are the custodian of.
  *
  * Body: { bookingId: string, assetIds?: string[], kitIds?: string[] }
  *
@@ -46,7 +49,12 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  *       success: true,
  *       added:   { assets: number, kitSlices: number, kits: number },
  *       skipped: { assets: number, kits: number },
+ *       archivedKitMembersLeftOut: number,
  *     }
+ *
+ * `archivedKitMembersLeftOut` counts the archived members of the kits this
+ * scan added, which a kit add leaves out of the booking (memberships already
+ * on it excepted). A kit the scan skipped reports none.
  *
  * A scan can legitimately put nothing on the booking — every item scanned may
  * already be there — so `added` and `skipped` are what tell a client whether
@@ -135,17 +143,13 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     }
 
-    const { role } = await getMobileUserContext(user.id, organizationId);
-    // BASE is as restricted as SELF_SERVICE for managing booking assets: own
-    // bookings only, and DRAFT only, via `canUserManageBookingAssets`. Both
-    // roles hold `booking:update`, so the permission gate above lets them
-    // through and this is what narrows them.
-    const isSelfServiceOrBase =
-      role === OrganizationRoles.SELF_SERVICE ||
-      role === OrganizationRoles.BASE;
+    // `booking:update` lets SELF_SERVICE and BASE through the gate above; the
+    // caller's access narrows them to their own bookings, and the manage-items
+    // rule below to the statuses their policy allows.
+    const { access } = await getMobileUserContext(user.id, organizationId);
 
-    // Self-service / BASE users may only modify their own bookings.
-    if (isSelfServiceOrBase && booking.custodianUserId !== user.id) {
+    // A caller who does not write every booking may only modify their own.
+    if (!access.bookings.writeAll && booking.custodianUserId !== user.id) {
       throw new ShelfError({
         cause: null,
         message: "You can only modify your own bookings.",
@@ -155,7 +159,7 @@ export async function action({ request }: ActionFunctionArgs) {
       });
     }
 
-    if (!canUserManageBookingAssets(booking, isSelfServiceOrBase)) {
+    if (!canManageBookingItems({ access, bookingStatus: booking.status })) {
       throw new ShelfError({
         cause: null,
         title: "Action not allowed",
@@ -174,6 +178,16 @@ export async function action({ request }: ActionFunctionArgs) {
     // IDOR). Kit-derived asset ids are already org-scoped by the query below.
     await assertAssetsBelongToOrg({ assetIds, organizationId });
 
+    // Answer an archived scan by naming the archived rows, so the app marks
+    // only those (see mobile-archived.server.ts).
+    const archivedRefusal = await findMobileArchivedRefusal({
+      assetIds,
+      organizationId,
+    });
+    if (archivedRefusal) {
+      return data({ error: archivedRefusal }, { status: 400 });
+    }
+
     /**
      * Resolve each scanned kit into one slice per `AssetKit` membership.
      *
@@ -190,14 +204,15 @@ export async function action({ request }: ActionFunctionArgs) {
      * memberships. The mobile client sends kit ids only — the web drawer
      * resolves the same slices in the browser and posts them.
      */
+    const existingAssetKitIds = new Set(
+      booking.bookingAssets
+        .map((row) => row.assetKitId)
+        .filter((id): id is string => id !== null)
+    );
     const resolvedKitSlices = await buildKitSlicesForBooking({
       kitIds,
       organizationId,
-      existingAssetKitIds: new Set(
-        booking.bookingAssets
-          .map((row) => row.assetKitId)
-          .filter((id): id is string => id !== null)
-      ),
+      existingAssetKitIds,
     });
 
     /**
@@ -295,6 +310,17 @@ export async function action({ request }: ActionFunctionArgs) {
     // would write a note saying it had been added when nothing was.
     const kitIdsAdded = [...new Set(kitSlices.map((slice) => slice.kitId))];
 
+    // The archived members of the kits this scan added stay out of the
+    // booking; the phone's success message says how many, as the web's does.
+    // A kit the scan skipped added nothing, so it reports nothing. Read before
+    // the write, so a failed count can never report an error for a booking
+    // that did change.
+    const archivedKitMembersLeftOut = await countArchivedKitMembers({
+      kitIds: kitIdsAdded,
+      organizationId,
+      existingAssetKitIds,
+    });
+
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
@@ -302,6 +328,8 @@ export async function action({ request }: ActionFunctionArgs) {
       bookingId,
       organizationId,
       userId: user.id,
+      // Re-checks the add rule against the locked status inside the write.
+      access,
     });
 
     /**
@@ -333,6 +361,7 @@ export async function action({ request }: ActionFunctionArgs) {
         assets: skippedAssetIds.size,
         kits: skippedKitIds.size,
       },
+      archivedKitMembersLeftOut,
     });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });

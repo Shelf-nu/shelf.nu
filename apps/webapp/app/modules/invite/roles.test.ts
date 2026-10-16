@@ -1,9 +1,10 @@
 /**
  * Invite Roles
  *
- * Pins that OWNER can never be granted by an invite. Both the invite dialog's
- * Zod enum and the CSV import's runtime check read this list, so this test is
- * the single place that failure mode is caught for both paths.
+ * Pins that OWNER can never be granted by an invite, and that the
+ * policy-derived list still covers every other role. The invite dialog, the
+ * CSV import and resend all read this list, so this test is the single place
+ * that failure mode is caught for every path.
  *
  * @see {@link file://./roles.ts}
  */
@@ -11,7 +12,7 @@
 import { OrganizationRoles } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
-import { INVITABLE_ROLES, isInvitableRole } from "./roles";
+import { INVITABLE_ROLES, isInvitableRole, parseInvitableRole } from "./roles";
 
 // @vitest-environment node
 
@@ -48,5 +49,27 @@ describe("isInvitableRole", () => {
     ["null", null],
   ])("rejects %s", (_label, value) => {
     expect(isInvitableRole(value)).toBe(false);
+  });
+});
+
+describe("parseInvitableRole", () => {
+  it.each([
+    ["the key", "MANAGER", "MANAGER"],
+    ["the key in lower case", "self_service", "SELF_SERVICE"],
+    ["the label", "Manager", "MANAGER"],
+    ["a label with a space", "Self service", "SELF_SERVICE"],
+    ["a label that differs from the key", "Administrator", "ADMIN"],
+    ["surrounding spaces", "  base  ", "BASE"],
+  ])("reads %s", (_label, value, expected) => {
+    expect(parseInvitableRole(value)).toBe(expected);
+  });
+
+  it.each([
+    ["the owner key", "OWNER"],
+    ["the owner label", "Owner"],
+    ["an unknown role", "Superuser"],
+    ["an empty cell", ""],
+  ])("refuses %s", (_label, value) => {
+    expect(parseInvitableRole(value)).toBeNull();
   });
 });

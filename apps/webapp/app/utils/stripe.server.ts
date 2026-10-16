@@ -442,6 +442,25 @@ export const getCustomerSubscriptionsWithProducts = async (
 };
 
 /**
+ * Reads a customer's subscriptions at most once.
+ *
+ * `getCustomerSubscriptionsWithProducts` lists the subscriptions and then
+ * retrieves each one, so one webhook event that asks several questions about
+ * them (an add-on still paid elsewhere, the plan still granted) shares a single
+ * read through this loader. The first call starts the read; later calls get
+ * the same promise.
+ *
+ * @param customerId - The Stripe customer whose subscriptions to read
+ * @returns A function resolving to the subscriptions, products expanded
+ */
+export function createCustomerSubscriptionsLoader(
+  customerId: string
+): () => Promise<Stripe.Subscription[]> {
+  let pending: Promise<Stripe.Subscription[]> | undefined;
+  return () => (pending ??= getCustomerSubscriptionsWithProducts(customerId));
+}
+
+/**
  * Whether another live subscription of this customer still carries the add-on
  * for the same workspace.
  *
@@ -461,6 +480,9 @@ export const getCustomerSubscriptionsWithProducts = async (
  * @param args.organizationId - The workspace whose add-on flag is at stake
  * @param args.addonType - Which add-on to look for
  * @param args.exceptSubscriptionId - The subscription that raised the event
+ * @param args.loadSubscriptions - Reads the customer's subscriptions; pass the
+ *   webhook's shared loader (`createCustomerSubscriptionsLoader`) so one event
+ *   lists them once. Defaults to a fresh read.
  * @returns `true` if another active or trialing subscription linked to the
  *   workspace carries the add-on
  */
@@ -469,13 +491,15 @@ export async function customerHasOtherActiveAddonSubscription({
   organizationId,
   addonType,
   exceptSubscriptionId,
+  loadSubscriptions = () => getCustomerSubscriptionsWithProducts(customerId),
 }: {
   customerId: string;
   organizationId: string;
   addonType: AddonType;
   exceptSubscriptionId: string;
+  loadSubscriptions?: () => Promise<Stripe.Subscription[]>;
 }): Promise<boolean> {
-  const subscriptions = await getCustomerSubscriptionsWithProducts(customerId);
+  const subscriptions = await loadSubscriptions();
 
   return subscriptions.some(
     (sub) =>
@@ -875,6 +899,28 @@ export async function getCustomerOpenInvoices(customerId: string) {
 }
 
 /**
+ * Whether a subscription in this status still grants its plan.
+ *
+ * Active and trialing subscriptions do, and so does a `past_due` one: a failed
+ * renewal is a grace period, not a lapse (see `validateSubscriptionIsActive`).
+ * Page-load access and every webhook decision about the plan a customer keeps
+ * read this, so they agree on which subscriptions count.
+ *
+ * Raising a user to a higher plan on a subscription update asks more: the
+ * update's subscription must be `active`. A plan is granted once it is paid
+ * for and kept through a grace period, so a switch to Team whose first invoice
+ * fails (`past_due`) does not open Team.
+ *
+ * @param status - The subscription's Stripe status
+ * @returns `true` for `active`, `trialing` and `past_due`
+ */
+export function subscriptionStatusGrantsPlan(
+  status: Stripe.Subscription.Status
+): boolean {
+  return status === "active" || status === "trialing" || status === "past_due";
+}
+
+/**
  * Downgrades a user to Free when their Stripe customer holds no subscription
  * that still grants access.
  *
@@ -898,11 +944,8 @@ export async function validateSubscriptionIsActive({
 }) {
   if (user.skipSubscriptionCheck) return;
 
-  const hasAccess = customer?.subscriptions?.data.some(
-    (sub) =>
-      sub.status === "active" ||
-      sub.status === "trialing" ||
-      sub.status === "past_due"
+  const hasAccess = customer?.subscriptions?.data.some((sub) =>
+    subscriptionStatusGrantsPlan(sub.status)
   );
 
   if (!hasAccess && user.tierId !== "free") {

@@ -63,6 +63,24 @@ Advisory by default — findings print, the commit proceeds. Opt in to blocking 
 
 📖 Full documentation: [apps/docs/security-review-agent.md](./apps/docs/security-review-agent.md).
 
+### PR Review
+
+`/pr-review` gives the first review of the PR for the current branch (or
+`/pr-review <number>`): intent vs. actual change, bugs, tests, conventions and
+reuse, security, consumers, performance and deploy safety. Every finding is
+verified, and the report is a plain-language verdict with numbered findings.
+Read-only (except a "prove N" you request); it never posts unless you ask.
+
+- Skill: `.claude/skills/pr-review/SKILL.md`
+- Agents: `.claude/agents/shelf-pr-reviewer-{tests,conventions,impact,security}.md`,
+  `.claude/agents/shelf-pr-finding-validator.md` (read-only, no Bash or network).
+  Security runs on opus with `Skill` and loads skills only when the diff
+  touches their area. The bugs pass runs the built-in `/code-review`, which has Bash.
+- Setup script: `scripts/pr-review-context.mjs`
+- Tests: `pnpm test:tooling`
+
+📖 Full documentation: [apps/docs/pr-review.md](./apps/docs/pr-review.md).
+
 ### PR Review Loop
 
 `/pr-review-loop` automates the review-response cycle on a PR: it watches for
@@ -112,13 +130,13 @@ This is a **pnpm workspaces + Turborepo** monorepo. All packages are defined in 
 
 ### Packages
 
-| Package                   | Path                         | Description                                                                                                                                                                                                                                                                                                                 |
-| ------------------------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@shelf/database`         | `packages/database/`         | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package — it does **not** run Prisma commands directly in production. |
-| `@shelf/permissions`      | `packages/permissions/`      | **Owns RBAC**: the `PermissionAction`/`PermissionEntity` vocabulary, the role → permission matrix, and `roleHasPermission()` — the resolver **including** the ADMIN/OWNER allow-all short-circuit. Every authorization decision in both apps resolves here.                                                                 |
-| `@shelf/datetime`         | `packages/datetime/`         | Pure, preference-aware date/time formatting shared by both apps so their date rendering never drifts.                                                                                                                                                                                                                       |
-| `@shelf/quantity-control` | `packages/quantity-control/` | Pure quantity/availability domain for `QUANTITY_TRACKED` assets, shared by both apps so their availability math never drifts.                                                                                                                                                                                               |
-| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                  |
+| Package                   | Path                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@shelf/database`         | `packages/database/`         | **Owns all database concerns**: Prisma schema (`prisma/schema.prisma`), migrations (`prisma/migrations/`), and the `createDatabaseClient()` factory (`src/client.ts`). All `db:*` root scripts delegate to this package. The webapp imports from this package and does **not** run Prisma commands directly in production.                                                                                                                                                                                                    |
+| `@shelf/permissions`      | `packages/permissions/`      | **Owns authorization**: the `PermissionAction`/`PermissionEntity` vocabulary, the role → permission matrix and `roleHasPermission()` (with the ADMIN/OWNER allow-all short-circuit), **and** the role policy table `ROLE_POLICIES` with `resolveRoleAccess()`: how far each role reaches (booking/custody/audit scope, limits, notification audience, membership rules). Every authorization decision in both apps resolves here; the webapp imports it only through `~/utils/permissions/role-access` and `permission.data`. |
+| `@shelf/datetime`         | `packages/datetime/`         | Pure, preference-aware date/time formatting shared by both apps so their date rendering never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `@shelf/quantity-control` | `packages/quantity-control/` | Pure quantity/availability domain for `QUANTITY_TRACKED` assets, shared by both apps so their availability math never drifts.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `@shelf/labels`           | `packages/labels/`           | Canonical user-facing label strings shared by both apps so their terminology never drifts.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Except for `@shelf/database`, these are **pure, dependency-free, no-build**
 packages: their `exports` point straight at `src/index.ts` and consumers
@@ -269,6 +287,18 @@ const disabled = useDisabled(fetcher);
 ### Deprecated Components
 
 - **DropdownMenu** (`apps/webapp/app/components/shared/dropdown.tsx`): Do not use for new features. Instead, use `Popover` from `@radix-ui/react-popover` with custom select behavior. See `apps/webapp/app/components/assets/assets-index/advanced-filters/field-selector.tsx` for a good example implementation.
+
+### Authorization (roles and permissions)
+
+Two questions, both answered by `@shelf/permissions`:
+
+- **May this role do X on Y?** → the matrix: `requirePermission` / `requireMobilePermission` on the server, `userHasPermission({ roles, entity, action })` on the client (`roles` from `useOrganizationRoles()`).
+- **How far does this role reach?** (whose bookings, whose custody, which audits, limits, who is notified) → `access`: `requirePermission(...).access`, `getMobileUserContext(...).access`, `useRoleAccess()` in components and in the companion.
+- Owner-only → `isWorkspaceOwner(roles)` / `access.ownsWorkspace`. Prisma role audiences → `rolesWhere(policy => …)`.
+
+**Never compare roles directly** (`role === "ADMIN"`, `roles.includes(...)`, `roles[0]`): `local-rules/no-direct-role-checks` blocks it in the webapp and the companion. A new reach question gets a `RolePolicy` field with a value for every role. Webapp code imports the package only via `~/utils/permissions/role-access` (TS instantiation ceiling).
+
+📖 Full documentation: [apps/docs/roles-and-permissions.md](./apps/docs/roles-and-permissions.md). Rule: [.claude/rules/role-checks-go-through-permissions.md](./.claude/rules/role-checks-go-through-permissions.md)
 
 ### Scanner Blockers
 

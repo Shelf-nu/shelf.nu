@@ -169,3 +169,50 @@ describe("getBookings — count companion query", () => {
     expect(countMock).not.toHaveBeenCalled();
   });
 });
+
+describe("getBookings — search through booked assets", () => {
+  /** The asset condition of the booked-assets branch for the first term. */
+  async function bookedAssetSearchCondition() {
+    await captureFindManyArgs({ search: "hyde" });
+    const { where } = findManyMock.mock.calls[0][0] as {
+      where: Prisma.BookingWhereInput;
+    };
+    const termBranches = (where.OR?.[0] as Prisma.BookingWhereInput).OR ?? [];
+    const bookedAssets = termBranches.find(
+      (branch) => "bookingAssets" in branch
+    ) as { bookingAssets: { some: { asset: Prisma.AssetWhereInput } } };
+    return bookedAssets.bookingAssets.some.asset;
+  }
+
+  it("scopes the asset match to the workspace", async () => {
+    // Without the workspace on the asset itself, Postgres evaluates the
+    // title / QR / barcode match against every workspace's assets before
+    // joining back to these bookings.
+    expect(await bookedAssetSearchCondition()).toMatchObject({
+      organizationId: "org-1",
+    });
+  });
+
+  it("still matches a booked asset by title, QR id or barcode", async () => {
+    const condition = await bookedAssetSearchCondition();
+
+    expect(condition.OR).toEqual([
+      { title: { contains: "hyde", mode: "insensitive" } },
+      { qrCodes: { some: { id: { contains: "hyde", mode: "insensitive" } } } },
+      {
+        barcodes: {
+          some: { value: { contains: "hyde", mode: "insensitive" } },
+        },
+      },
+    ]);
+  });
+
+  it("uses the same scoped condition for the count", async () => {
+    await captureFindManyArgs({ search: "hyde" });
+    const findWhere = (findManyMock.mock.calls[0][0] as { where: unknown })
+      .where;
+    const countWhere = (countMock.mock.calls[0][0] as { where: unknown }).where;
+
+    expect(countWhere).toEqual(findWhere);
+  });
+});

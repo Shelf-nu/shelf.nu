@@ -4,7 +4,8 @@
  * Code confirmation: a new account records the signup link's intent on its
  * signup event, and the cookie is handed on to onboarding. `redirectTo` only
  * decides where an onboarded account lands; every other account lands on
- * `/assets`, whose layout sends it to onboarding. A login ignores the intent.
+ * `/`, whose role landing page sits inside the layout that sends it to
+ * onboarding. A login ignores the intent.
  *
  * @see {@link file://./../../../app/routes/_auth+/otp.tsx}
  * @see {@link file://./../../../app/modules/signup-intent/cookie.server.ts}
@@ -23,7 +24,7 @@ import {
   readSignupIntent,
   serializeSignupIntent,
 } from "~/modules/signup-intent/cookie.server";
-import { createUser, findUserByEmail } from "~/modules/user/service.server";
+import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { action } from "~/routes/_auth+/otp";
 
@@ -36,7 +37,7 @@ vi.mock("~/modules/auth/service.server", () => ({
 // it is reached, not what it writes.
 vi.mock("~/modules/user/service.server", () => ({
   createUser: vi.fn(),
-  findUserByEmail: vi.fn(),
+  findUserById: vi.fn(),
 }));
 // why: username generation queries the database for collisions
 vi.mock("~/modules/user/utils.server", () => ({
@@ -102,7 +103,7 @@ describe("otp action — confirming the code", () => {
       userId: USER_ID,
       email: USER_EMAIL,
     } as never);
-    vi.mocked(findUserByEmail).mockResolvedValue(null);
+    vi.mocked(findUserById).mockResolvedValue(null);
     vi.mocked(generateUniqueUsername).mockResolvedValue("new-person");
     vi.mocked(createUser).mockResolvedValue({ id: USER_ID } as never);
     vi.mocked(getSelectedOrganization).mockResolvedValue({
@@ -113,11 +114,11 @@ describe("otp action — confirming the code", () => {
     );
   });
 
-  it("lands on the assets page and sets only the workspace cookie without an intent", async () => {
+  it("lands on the role landing page and sets only the workspace cookie without an intent", async () => {
     const response = (await action(confirmArgs())) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toEqual([
       "selected-organization-id=org",
     ]);
@@ -134,7 +135,7 @@ describe("otp action — confirming the code", () => {
     )) as Response;
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()[0]).toBe(
       "selected-organization-id=org"
     );
@@ -147,7 +148,7 @@ describe("otp action — confirming the code", () => {
   });
 
   it("sends an onboarded account to the link's in-app redirectTo", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);
@@ -160,12 +161,12 @@ describe("otp action — confirming the code", () => {
     expect(createUser).not.toHaveBeenCalled();
   });
 
-  it("sends a new account to /assets, and so to onboarding, whatever the redirectTo", async () => {
+  it("sends a new account to /, and so to onboarding, whatever the redirectTo", async () => {
     const response = (await action(
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(createUser).toHaveBeenCalledTimes(1);
     // The intent still travels on for onboarding to consume.
     await expect(signupIntentSetBy(response)).resolves.toEqual({
@@ -173,8 +174,8 @@ describe("otp action — confirming the code", () => {
     });
   });
 
-  it("sends an account that has not onboarded to /assets, whatever the redirectTo", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+  it("sends an account that has not onboarded to /, whatever the redirectTo", async () => {
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: false,
     } as never);
@@ -183,12 +184,12 @@ describe("otp action — confirming the code", () => {
       confirmArgs(await intentCookie({ redirectTo: "/qr/abc" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(createUser).not.toHaveBeenCalled();
   });
 
   it("ignores a leftover intent when the code is for a login", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);
@@ -200,15 +201,15 @@ describe("otp action — confirming the code", () => {
       )
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
     expect(response.headers.getSetCookie()).toEqual([
       "selected-organization-id=org",
     ]);
   });
 
   it("never follows a redirectTo off our origin", async () => {
-    // Onboarded, so the only thing keeping it on /assets is safeRedirect.
-    vi.mocked(findUserByEmail).mockResolvedValue({
+    // Onboarded, so the only thing keeping it on / is safeRedirect.
+    vi.mocked(findUserById).mockResolvedValue({
       id: USER_ID,
       onboarded: true,
     } as never);
@@ -217,6 +218,6 @@ describe("otp action — confirming the code", () => {
       confirmArgs(await intentCookie({ redirectTo: "https://evil.example/x" }))
     )) as Response;
 
-    expect(response.headers.get("Location")).toBe("/assets");
+    expect(response.headers.get("Location")).toBe("/");
   });
 });

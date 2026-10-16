@@ -81,7 +81,6 @@ vi.mock("~/modules/note/service.server", () => ({
 // stub the imports we actually use.
 vi.mock("~/modules/kit/service.server", () => ({
   deleteKit: vi.fn(),
-  deleteKitImage: vi.fn(),
   // why: removeAsset action calls these helpers to coordinate with the
   // kit→booking cascade. They no-op in this unit test — the cascade
   // semantics are covered separately by kit/service.server.test.ts.
@@ -145,7 +144,6 @@ vi.mock("~/utils/http.server", () => ({
     const result: Record<string, unknown> = {};
     if (formData.get("intent")) result.intent = formData.get("intent");
     if (formData.get("assetId")) result.assetId = formData.get("assetId");
-    if (formData.get("image")) result.image = formData.get("image");
     return result;
   }),
   getParams: vi.fn().mockImplementation((params: any) => ({

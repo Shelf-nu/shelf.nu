@@ -30,9 +30,9 @@ const ITEMS: Array<ProcessItem> = [
   {
     id: "admin-review",
     icon: InfoIcon,
-    title: "Admin Review",
+    title: "Review",
     description:
-      "Your booking will be shown as reserved, however the admin can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
+      "Your booking will be shown as reserved, however an administrator or manager can choose to revert it back to draft or cancel it at any point, if there are any conflicts with other bookings.",
     iconClassName: "bg-warning-100 text-warning-500",
   },
   {
@@ -40,7 +40,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowRight,
     title: "Check-Out",
     description:
-      "On the start date of your booking, an administrator will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
+      "On the start date of your booking, an administrator or manager will check out the equipment on your behalf. You'll be responsible for the equipment during your booking period.",
     iconClassName: "bg-violet-100 text-violet-500",
   },
   {
@@ -48,7 +48,7 @@ const ITEMS: Array<ProcessItem> = [
     icon: ArrowLeft,
     title: "Check-In",
     description:
-      "At the end of you booking period, return the equipment to the administrator who will perform the check in action.",
+      "At the end of your booking period, return the equipment to the administrator or manager who will perform the check in action.",
     iconClassName: "bg-indigo-100 text-indigo-500",
   },
 ];
@@ -85,9 +85,9 @@ export default function BookingProcessSidebar({
 
         <div className="p-4">
           <p className="mb-8 border-b-2 border-blue-500 bg-blue-50 p-2 text-blue-500">
-            Base users reserve bookings that require admin approval and can be
+            Base users reserve bookings that require approval and can be
             cancelled at any time if there are conflicts with other bookings.
-            Admins handle equipment check-out and check-in.
+            Administrators and managers handle equipment check-out and check-in.
           </p>
 
           <div className="mb-8 flex flex-col gap-4">
@@ -122,12 +122,12 @@ export default function BookingProcessSidebar({
                 out.
               </li>
               <li>
-                If you need to extend your booking, contact an administrator
-                before your booking end date.
+                If you need to extend your booking, contact an administrator or
+                manager before your booking end date.
               </li>
               <li>
-                Administrators have final say on booking approvals based on
-                equipment availability and priorities.
+                Administrators and managers have final say on booking approvals
+                based on equipment availability and priorities.
               </li>
             </ul>
           </div>

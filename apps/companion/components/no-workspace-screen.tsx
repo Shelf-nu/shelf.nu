@@ -31,6 +31,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/lib/auth-context";
 import { borderRadius, fontSize, spacing } from "@/lib/constants";
 import { createStyles } from "@/lib/create-styles";
+import { FORM_MAX_WIDTH } from "@/lib/content-column";
 import { useOrg } from "@/lib/org-context";
 import { useTheme } from "@/lib/theme-context";
 
@@ -129,6 +130,11 @@ const useStyles = createStyles((colors, shadows) => ({
     alignItems: "center",
     paddingHorizontal: spacing.xl,
     gap: spacing.md,
+    // Renders in place of the tab navigator, so no `screenLayout` column
+    // reaches it: it keeps the sign-in screen's width on a tablet itself.
+    width: "100%",
+    maxWidth: FORM_MAX_WIDTH,
+    alignSelf: "center",
   },
   title: {
     fontSize: fontSize.xxxl,

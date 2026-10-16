@@ -19,15 +19,25 @@ import { useIsFocused } from "@react-navigation/native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Ionicons } from "@expo/vector-icons";
 import { api, getApiBaseUrl } from "@/lib/api";
+import { BOOKING_METHOD } from "@/lib/booking-method";
 import { useOrg } from "@/lib/org-context";
 import { openShelfWebUrl, pushIntoTab } from "@/lib/navigation";
 import { resolveSelfTeamMember } from "@/lib/self-team-member";
 import { TeamMemberPicker } from "@/components/team-member-picker";
 import { LocationPicker } from "@/components/location-picker";
-import type { TeamMember, Location as LocationType } from "@/lib/api";
+import { QuantityInputSheet } from "@/components/quantity-input-sheet";
+import { CheckoutSourceSheet } from "@/components/checkout-source-sheet";
+import { questionsForCheckouts } from "@/lib/custody-source-options";
 import type {
+  AssetQuantityFields,
+  TeamMember,
+  Location as LocationType,
+} from "@/lib/api";
+import type {
+  AssetType,
   BookingAsset,
   BookingDetailResponse,
+  CheckoutSourceQuestion,
   QrResolveFailureReason,
   ScannedKit,
 } from "@/lib/api/types";
@@ -42,11 +52,35 @@ import { announce } from "@/lib/a11y";
 import { playScanSound } from "@/lib/scan-sound";
 import { userHasPermission } from "@/lib/permissions";
 import {
+  ARCHIVED_BADGE_STATUS,
+  archivedIdsFromError,
+  archivedLeftOutNote,
+  archivedScanNote,
+  assetBadgeStatus,
+  isArchivedAsset,
+  markArchivedRows,
+} from "@/lib/archived-assets";
+import {
   computeBlockers,
   blockedQrIds,
+  kitBlockerFacts,
   type BatchScanAction,
   type BlockerGroup,
 } from "@/lib/batch-blockers";
+import {
+  buildQuantityFacts,
+  bulkAssetRequest,
+  chosenQuantity,
+  describeCustodyConfirm,
+  planCustodySubmit,
+  summarizeCustodySubmit,
+  unitsFor,
+  type CustodyAudience,
+  type CustodyScanMode,
+  type CustodySubmitPlan,
+  type ScanQuantityFacts,
+} from "@/lib/custody-scan-quantities";
+import { formatQuantity } from "@/lib/quantity-format";
 import { markBookingDirty, markBookingsListDirty } from "@/lib/booking-refresh";
 import {
   countBookingBatch,
@@ -73,6 +107,7 @@ import {
 import { ScannerErrorBoundary } from "@/components/scanner-error-boundary";
 import { useScanLineAnimation } from "@/hooks/use-scan-line-animation";
 import { useInactivityTimer } from "@/hooks/use-inactivity-timer";
+import { useRoleAccess } from "@/hooks/use-role-access";
 import { useScanCooldown } from "@/hooks/use-scan-cooldown";
 import { useScannerGestures } from "@/hooks/use-scanner-gestures";
 import { useScanProcessing } from "@/hooks/use-scan-processing";
@@ -147,6 +182,11 @@ type ScannedItem = {
   /** Assets only: false when the asset is marked unavailable to book. */
   availableToBook?: boolean;
   /**
+   * Assets only: the asset is archived (read-only, cannot be booked). The row
+   * shows "Archived" and raises the "asset-archived" blocker.
+   */
+  archived?: boolean;
+  /**
    * Assets only: the model this asset belongs to, or null. Fulfil mode matches
    * it against the booking's outstanding reservations, so progress counts only
    * units that genuinely fulfil one instead of counting every scan.
@@ -154,11 +194,34 @@ type ScannedItem = {
   assetModelId?: string | null;
   /** Kits only: true when any contained asset is unavailable to book. */
   hasUnavailableAssets?: boolean;
-  /** Kits only: number of contained assets (shown in the drawer row). */
+  /** Kits only: number of active members (shown in the drawer row). */
   assetCount?: number;
+  /**
+   * Kits only: archived members, left out of `assetCount`. A kit with some
+   * and no active member raises the "kit-only-archived" blocker.
+   */
+  archivedAssetCount?: number;
   /** Kits only: true when any contained asset is individually in custody. */
   hasAssetsInCustody?: boolean;
+  /** Assets only: the asset's type. Absent on servers that predate it. */
+  assetType?: AssetType;
+  /**
+   * Quantity-tracked assets in the custody modes: the units this row can move
+   * and who holds them. The row submits a number of units, never the asset.
+   */
+  quantityFacts?: ScanQuantityFacts;
+  /** Quantity rows: the units the operator set. Absent means the default. */
+  chosenQuantity?: number;
+  /** Why the last submit did not move this row, as the server said it. */
+  submitError?: string;
 };
+
+/** The custody mode for an action, or null for the other scanner actions. */
+function custodyModeOf(action: ScannerAction): CustodyScanMode | null {
+  return action === "assign_custody" || action === "release_custody"
+    ? action
+    : null;
+}
 
 // ── Scanner Content ─────────────────────────────────────
 
@@ -226,9 +289,10 @@ function ScannerContent() {
     [currentOrg?.roles]
   );
 
-  // Self-service users may only assign custody to themselves (mirrors the
+  const access = useRoleAccess();
+  // Custody this member may only take for themselves: no picker (mirrors the
   // web scanner, which pre-selects self and disables the custodian picker).
-  const isSelfService = currentOrg?.roles?.includes("SELF_SERVICE") ?? false;
+  const takesCustodyForSelfOnly = access.custody.assign === "self";
 
   // Native claim / link-existing is gated on qr:update — effectively
   // ADMIN/OWNER only (the server short-circuits those roles to allow-all;
@@ -278,12 +342,24 @@ function ScannerContent() {
   // Pickers
   const [showCustodyPicker, setShowCustodyPicker] = useState(false);
   const [showLocationPicker, setShowLocationPicker] = useState(false);
+  // The scan-list row whose quantity sheet is open (by qrId), or null.
+  const [quantityEditQrId, setQuantityEditQrId] = useState<string | null>(null);
 
   // Booking check-in items (separate from batch scan)
   const [bookingCheckinItems, setBookingCheckinItems] = useState<ScannedItem[]>(
     []
   );
   const [isBookingSubmitting, setIsBookingSubmitting] = useState(false);
+  // Synchronous twin of `isBookingSubmitting` for the check-out sends: a
+  // second tap on the source sheet's Confirm lands before the state re-render
+  // disables it, and the check-out must not go out twice.
+  const bookingSubmitLock = useRef(false);
+  // "Where do the units come from?", when open: the pools it asks about and
+  // the send its answers ride on. Stays open until the server accepts.
+  const [sourcePrompt, setSourcePrompt] = useState<{
+    questions: CheckoutSourceQuestion[];
+    onConfirm: (sourceLocations: Record<string, string | null>) => void;
+  } | null>(null);
 
   /**
    * Clear the measured height once no drawer can be showing. The drawer host
@@ -319,6 +395,10 @@ function ScannerContent() {
     // True when the workspace requires explicit check-out for this operator's
     // role: only scanned units go out, so a check-out needs at least one scan.
     requireExplicitCheckout: boolean;
+    // Pools on the booking kept at two or more locations that have not gone
+    // out yet: a check-out reaching one asks where its units come from. Empty
+    // when nothing needs asking, or from a server that does not send it.
+    checkoutSourceQuestions: CheckoutSourceQuestion[];
   } | null>(null);
 
   // Also called from the scan paths when a code arrives before the first
@@ -348,6 +428,7 @@ function ScannerContent() {
           data.booking.modelRequests
         ),
         requireExplicitCheckout: !canOfferQuickCheckout(data),
+        checkoutSourceQuestions: data.checkoutSourceQuestions ?? [],
       });
     },
     []
@@ -368,14 +449,15 @@ function ScannerContent() {
   }, [fetchBookingCtx]);
 
   // Blockers for the add-to-booking list (the check-in flow has its own
-  // eligibility rule at scan time and no blockers).
+  // eligibility rule at scan time and no blockers). Computed before the
+  // booking loads too: an archived row is blocked without it.
   const bookingBlockers = useMemo<BlockerGroup[]>(
     () =>
-      isBookingAddMode && bookingCtx
+      isBookingAddMode
         ? computeBlockers(
             isBookingFulfilMode ? "booking_fulfil" : "booking_add",
             bookingCheckinItems,
-            bookingCtx
+            bookingCtx ?? undefined
           )
         : [],
     [isBookingAddMode, isBookingFulfilMode, bookingCtx, bookingCheckinItems]
@@ -716,26 +798,30 @@ function ScannerContent() {
         const qrLookupId = qrId ?? samId;
         let codeId: string;
         let codeOrgId: string | null;
-        let asset: {
-          id: string;
-          title: string;
-          status: string;
-          mainImage: string | null;
-          // The kit the ASSET belongs to (distinct from the `kitId` local
-          // below, which is the kit a kit-linked QR points at directly).
-          kitId: string | null;
-          availableToBook: boolean;
-          /**
-           * Model this asset belongs to, or null. Fulfil mode matches it
-           * against the booking's outstanding reservations so progress counts
-           * only units that actually fulfil one. Optional: an older server
-           * omits it, and the client then treats the match as unknown rather
-           * than claiming false progress.
-           */
-          assetModelId?: string | null;
-          category: { name: string } | null;
-          location: { name: string } | null;
-        } | null;
+        let asset:
+          | ({
+              id: string;
+              title: string;
+              status: string;
+              mainImage: string | null;
+              // The kit the ASSET belongs to (distinct from the `kitId` local
+              // below, which is the kit a kit-linked QR points at directly).
+              kitId: string | null;
+              availableToBook: boolean;
+              /** Set when the asset is archived. Absent on older servers. */
+              archivedAt?: string | null;
+              /**
+               * Model this asset belongs to, or null. Fulfil mode matches it
+               * against the booking's outstanding reservations so progress counts
+               * only units that actually fulfil one. Optional: an older server
+               * omits it, and the client then treats the match as unknown rather
+               * than claiming false progress.
+               */
+              assetModelId?: string | null;
+              category: { name: string } | null;
+              location: { name: string } | null;
+            } & AssetQuantityFields)
+          | null;
         // The kit a kit-linked code resolves to (full object for batch ops).
         let kit: ScannedKit | null = null;
         // A QR can be asset-less but still linked to a kit. We track kitId
@@ -1189,11 +1275,7 @@ function ScannerContent() {
               mainImage: kit.image,
               category: null,
               kitId: null,
-              assetCount: kit._count.assets,
-              hasAssetsInCustody: kit.assets.some(
-                (a) => a.status === "IN_CUSTODY"
-              ),
-              hasUnavailableAssets: kit.assets.some((a) => !a.availableToBook),
+              ...kitBlockerFacts(kit),
             };
 
             setBookingCheckinItems((prev) => [kitItem, ...prev]);
@@ -1267,10 +1349,7 @@ function ScannerContent() {
             mainImage: kit.image,
             category: null,
             kitId: null,
-            assetCount: kit._count.assets,
-            hasAssetsInCustody: kit.assets.some(
-              (a) => a.status === "IN_CUSTODY"
-            ),
+            ...kitBlockerFacts(kit),
           };
 
           setScannedItems((prev) => [newKitItem, ...prev]);
@@ -1442,6 +1521,7 @@ function ScannerContent() {
             category: asset.category?.name || null,
             kitId: asset.kitId ?? null,
             availableToBook: asset.availableToBook,
+            archived: isArchivedAsset(asset),
             assetModelId: asset.assetModelId ?? null,
           };
 
@@ -1449,6 +1529,24 @@ function ScannerContent() {
           // ineligible items with one-tap fixes (web parity).
           if (isBookingAddMode) {
             setBookingCheckinItems((prev) => [newItem, ...prev]);
+            // An archived asset joins the list flagged, so the card says so
+            // now rather than "added" and leaving the blocker to explain.
+            if (newItem.archived) {
+              flashFrame("error");
+              Haptics.notificationAsync(
+                Haptics.NotificationFeedbackType.Warning
+              );
+              setScanResult({
+                type: "error",
+                title: asset.title,
+                message: archivedScanNote(
+                  isBookingFulfilMode ? "booking_fulfil" : "booking_add"
+                ),
+              });
+              setTimeout(() => setScanResult(null), 1800);
+              finalizeScan();
+              return;
+            }
             flashFrame("success");
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
@@ -1590,7 +1688,8 @@ function ScannerContent() {
           // only swaps underscores — so a CHECKED_OUT asset flashed
           // "CHECKED OUT" here and then "Checked out" on the detail screen it
           // navigates to 950ms later.
-          const statusLabel = formatStatus(asset.status);
+          // An archived asset reads "Archived", as on the screen it opens.
+          const statusLabel = formatStatus(assetBadgeStatus(asset));
 
           flashFrame("success");
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1629,6 +1728,28 @@ function ScannerContent() {
           return;
         }
 
+        // In the custody modes a quantity-tracked row moves a number of units,
+        // so it carries what it can move. Assign reads the free count from the
+        // asset detail (the asset screen's own cap); release reads the holders
+        // the resolve already sent.
+        let quantityFacts: ScanQuantityFacts | undefined;
+        const custodyMode = custodyModeOf(action);
+        if (custodyMode && asset.type === "QUANTITY_TRACKED") {
+          let detail = null;
+          if (custodyMode === "assign_custody" && currentOrg) {
+            const { data: detailData } = await api.asset(
+              asset.id,
+              currentOrg.id
+            );
+            if (isStaleScan()) {
+              finalizeScan();
+              return;
+            }
+            detail = detailData?.asset ?? null;
+          }
+          quantityFacts = buildQuantityFacts({ scanned: asset, detail });
+        }
+
         const newItem: ScannedItem = {
           type: "asset",
           qrId: codeId,
@@ -1638,9 +1759,26 @@ function ScannerContent() {
           mainImage: asset.mainImage,
           category: asset.category?.name || null,
           kitId: asset.kitId ?? null,
+          archived: isArchivedAsset(asset),
+          assetType: asset.type,
+          quantityFacts,
         };
 
         setScannedItems((prev) => [newItem, ...prev]);
+        // An archived asset joins the list flagged by its blocker; the card
+        // says why at once instead of "added".
+        if (newItem.archived && isBatchAction(action)) {
+          flashFrame("error");
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setScanResult({
+            type: "error",
+            title: asset.title,
+            message: archivedScanNote(action as BatchScanAction),
+          });
+          setTimeout(() => setScanResult(null), 1800);
+          finalizeScan();
+          return;
+        }
         flashFrame("success");
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         playScanSound();
@@ -1730,20 +1868,27 @@ function ScannerContent() {
     if (scannedItems.length === 0 || blockers.length > 0) return;
 
     if (action === "assign_custody") {
-      if (isSelfService) {
-        // Self-service: no picker — resolve own team-member record and assign.
+      if (takesCustodyForSelfOnly) {
+        // Self-only custody: no picker; resolve own team-member record and assign.
         void assignCustodyToSelf();
       } else {
         setShowCustodyPicker(true);
       }
     } else if (action === "release_custody") {
-      // Blockers guarantee every item in the list is IN_CUSTODY here.
-      Alert.alert("Release Custody", `Release custody of ${batchLabel()}?`, [
+      // Blockers guarantee every whole asset and kit here is in custody, and
+      // every quantity row has exactly one holder with units to give back.
+      const plan = planCustodySubmit("release_custody", scannedItems);
+      const audience: CustodyAudience = {
+        isSelfService: takesCustodyForSelfOnly,
+      };
+      const confirm = describeCustodyConfirm("release_custody", plan, audience);
+      Alert.alert(confirm.title, confirm.message, [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Release",
+          text: confirm.confirmLabel,
           style: "destructive",
-          onPress: () => performBulkRelease(),
+          onPress: () =>
+            void runCustodySubmit("release_custody", plan, audience),
         },
       ]);
     } else if (action === "update_location") {
@@ -1752,9 +1897,9 @@ function ScannerContent() {
   };
 
   /**
-   * Self-service custody assignment: the mobile team-members endpoint returns
-   * only the caller's own record for SELF_SERVICE roles, so resolve it and go
-   * straight to the confirm dialog — no picker.
+   * Self-only custody assignment: the mobile team-members endpoint returns
+   * only the caller's own record when their custody scope is self, so resolve
+   * it and go straight to the confirm dialog, with no picker.
    */
   const assignCustodyToSelf = async () => {
     if (!currentOrg) return;
@@ -1768,7 +1913,7 @@ function ScannerContent() {
     performBulkAssign(member);
   };
 
-  const performBulkAssign = async (member: TeamMember) => {
+  const performBulkAssign = (member: TeamMember) => {
     setShowCustodyPicker(false);
     if (!currentOrg) return;
 
@@ -1778,104 +1923,119 @@ function ScannerContent() {
           .join(" ") || member.name
       : member.name;
 
-    const confirmLabel = batchLabel();
-    Alert.alert(
-      isSelfService ? "Take Custody" : "Assign Custody",
-      isSelfService
-        ? `Take custody of ${confirmLabel}?`
-        : `Assign ${confirmLabel} to ${displayName}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: isSelfService ? "Take" : "Assign",
-          onPress: async () => {
-            setIsSubmitting(true);
-            // Fan out per entity type — assets and kits have separate bulk
-            // endpoints wrapping their respective services (web parity).
-            const { assetIds, kitIds } = splitScannedIds();
-            const [assetResult, kitResult] = await Promise.all([
-              assetIds.length > 0
-                ? api.bulkAssignCustody(currentOrg.id, assetIds, member.id)
-                : Promise.resolve({ data: null, error: null }),
-              kitIds.length > 0
-                ? api.bulkAssignKitCustody(currentOrg.id, kitIds, member.id)
-                : Promise.resolve({ error: null }),
-            ]);
-            setIsSubmitting(false);
-
-            const error = assetResult.error || kitResult.error;
-            if (error) {
-              Alert.alert("Error", error);
-            } else {
-              Haptics.notificationAsync(
-                Haptics.NotificationFeedbackType.Success
-              );
-              playScanSound();
-              // Honest partial success: mixed batches skip QUANTITY_TRACKED
-              // assets server-side (their custody is per-unit), so say both
-              // numbers instead of implying everything was assigned. Absent
-              // field (older server) or all-INDIVIDUAL batches read 0 and the
-              // alert body is unchanged. All-QT batches error out server-side
-              // and never reach this branch.
-              const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-              const skippedNote =
-                skipped > 0
-                  ? `\n\n${skipped} quantity-tracked asset${
-                      skipped === 1 ? "" : "s"
-                    } skipped. Assign quantities from the asset's detail screen.`
-                  : "";
-              Alert.alert(
-                "Done",
-                isSelfService
-                  ? `You have custody of ${confirmLabel}.${skippedNote}`
-                  : `Assigned ${confirmLabel} to ${displayName}.${skippedNote}`
-              );
-              setScannedItems([]);
-              lastScanRef.current = "";
-            }
-          },
-        },
-      ]
-    );
+    const plan = planCustodySubmit("assign_custody", scannedItems);
+    const audience: CustodyAudience = {
+      custodianName: displayName,
+      isSelfService: takesCustodyForSelfOnly,
+    };
+    const confirm = describeCustodyConfirm("assign_custody", plan, audience);
+    Alert.alert(confirm.title, confirm.message, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: confirm.confirmLabel,
+        onPress: () =>
+          void runCustodySubmit("assign_custody", plan, audience, member.id),
+      },
+    ]);
   };
 
-  const performBulkRelease = async () => {
+  /**
+   * Sends a custody submit and reports it.
+   *
+   * One asset request carries the whole assets and the quantity rows (their
+   * units in `quantities`); the server checks every unit count before it
+   * writes anything, so it moves all of them or none. Kits go in their own
+   * request (web parity). Rows the server accepted leave the list; rows it
+   * refused stay, showing its reason, so the operator can fix them and submit
+   * again.
+   *
+   * @param mode - Assign or release.
+   * @param plan - The split built when the operator confirmed.
+   * @param audience - Who receives the custody, for the wording.
+   * @param custodianId - Assign only: the chosen team member.
+   */
+  const runCustodySubmit = async (
+    mode: CustodyScanMode,
+    plan: CustodySubmitPlan,
+    audience: CustodyAudience,
+    custodianId?: string
+  ) => {
     if (!currentOrg) return;
-    const releasedLabel = batchLabel();
+    if (mode === "assign_custody" && !custodianId) return;
+    const orgId = currentOrg.id;
+    const { assetIds, quantities } = bulkAssetRequest(plan);
+    const kitIds = plan.kits.map((row) => row.targetId);
+
     setIsSubmitting(true);
-    const { assetIds, kitIds } = splitScannedIds();
     const [assetResult, kitResult] = await Promise.all([
-      assetIds.length > 0
-        ? api.bulkReleaseCustody(currentOrg.id, assetIds)
-        : Promise.resolve({ data: null, error: null }),
-      kitIds.length > 0
-        ? api.bulkReleaseKitCustody(currentOrg.id, kitIds)
-        : Promise.resolve({ error: null }),
+      assetIds.length === 0
+        ? Promise.resolve({ data: null, error: null })
+        : mode === "assign_custody"
+        ? api.bulkAssignCustody(orgId, assetIds, custodianId!, quantities)
+        : api.bulkReleaseCustody(orgId, assetIds, quantities),
+      kitIds.length === 0
+        ? Promise.resolve({ error: null })
+        : mode === "assign_custody"
+        ? api.bulkAssignKitCustody(orgId, kitIds, custodianId!)
+        : api.bulkReleaseKitCustody(orgId, kitIds),
     ]);
     setIsSubmitting(false);
 
-    const error = assetResult.error || kitResult.error;
-    if (error) {
-      Alert.alert("Error", error);
-    } else {
+    // Assets the server refused because they are archived: only these rows
+    // are marked, and they now read "Archived" and raise their blocker.
+    const archivedAssetIds = archivedIdsFromError(
+      "errorDetails" in assetResult ? assetResult.errorDetails : null
+    );
+    const archivedSet = new Set(archivedAssetIds);
+
+    const summary = summarizeCustodySubmit(
+      mode,
+      plan,
+      {
+        assetError: assetResult.error,
+        kitError: kitResult.error,
+        skippedQuantityTracked: assetResult.data?.skippedQuantityTracked ?? 0,
+        refusedQuantities: assetResult.data?.refusedQuantities,
+        movedQuantityAssetIds: assetResult.data?.movedQuantityAssetIds,
+        archivedAssetIds,
+      },
+      audience
+    );
+
+    if (summary.succeededQrIds.length > 0) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       playScanSound();
-      // Honest partial success — mirrors performBulkAssign: the server skips
-      // QUANTITY_TRACKED assets in mixed batches and reports the count.
-      const skipped = assetResult.data?.skippedQuantityTracked ?? 0;
-      const skippedNote =
-        skipped > 0
-          ? `\n\n${skipped} quantity-tracked asset${
-              skipped === 1 ? "" : "s"
-            } skipped. Release quantities from the asset's detail screen.`
-          : "";
-      Alert.alert(
-        "Done",
-        `Released custody of ${releasedLabel}.${skippedNote}`
-      );
-      setScannedItems([]);
-      lastScanRef.current = "";
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
+    Alert.alert(summary.title, summary.message);
+
+    // This submit's errors replace the last one's on every row left: a row
+    // it did not fault (one only waiting on an archived row) reads clean.
+    const succeeded = new Set(summary.succeededQrIds);
+    setScannedItems((prev) =>
+      prev
+        .filter((item) => !succeeded.has(item.qrId))
+        .map((item) => ({
+          ...item,
+          submitError: summary.rowErrors[item.qrId],
+          archived:
+            item.archived ||
+            (item.type === "asset" && archivedSet.has(item.targetId)),
+        }))
+    );
+    lastScanRef.current = "";
+  };
+
+  /** Stores the operator's quantity for a row and clears its old error. */
+  const setRowQuantity = (qrId: string, quantity: number) => {
+    setScannedItems((prev) =>
+      prev.map((item) =>
+        item.qrId === qrId
+          ? { ...item, chosenQuantity: quantity, submitError: undefined }
+          : item
+      )
+    );
   };
 
   const performBulkUpdateLocation = async (location: LocationType) => {
@@ -1902,6 +2062,12 @@ function ScannerContent() {
 
           const error = assetResult.error || kitResult.error;
           if (error) {
+            // An archived refusal names its rows: mark those, so the operator
+            // removes them and moves the rest.
+            const archivedAssetIds = archivedIdsFromError(
+              "errorDetails" in assetResult ? assetResult.errorDetails : null
+            );
+            setScannedItems((prev) => markArchivedRows(prev, archivedAssetIds));
             Alert.alert("Error", error);
           } else {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -1962,7 +2128,7 @@ function ScannerContent() {
           text: "Add",
           onPress: async () => {
             setIsBookingSubmitting(true);
-            const { error } = await api.addScannedToBooking(
+            const { data, error, errorDetails } = await api.addScannedToBooking(
               currentOrg.id,
               bookingId,
               assetIds,
@@ -1971,17 +2137,26 @@ function ScannerContent() {
             setIsBookingSubmitting(false);
 
             if (error) {
+              const archivedAssetIds = archivedIdsFromError(errorDetails);
+              setBookingCheckinItems((prev) =>
+                markArchivedRows(prev, archivedAssetIds)
+              );
               Alert.alert("Error", error);
               return;
             }
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             playScanSound();
+            // A kit is booked with its active members; say how many archived
+            // ones stayed out, as the web does, so the count does not look short.
+            const leftOutNote = archivedLeftOutNote(
+              data?.archivedKitMembersLeftOut
+            );
             Alert.alert(
               "Done",
               `Added ${count} item${count === 1 ? "" : "s"} to "${
                 bookingName || "the booking"
-              }".`,
+              }".${leftOutNote ? ` ${leftOutNote}` : ""}`,
               [
                 {
                   text: "OK",
@@ -2016,6 +2191,30 @@ function ScannerContent() {
   };
 
   /**
+   * Run a check-out send, first asking "Where do the units come from?" when
+   * `questions` is non-empty. The answers ride on the send; the sheet stays
+   * open until the send succeeds (the send closes it), so a refusal keeps
+   * every answer for a retry. No other sheet is open here: both callers run
+   * from the drawer's submit, through an Alert.
+   *
+   * @param questions The source questions this check-out reaches.
+   * @param send The request, given the sheet's answers when it asked.
+   */
+  const askSourcesThen = (
+    questions: CheckoutSourceQuestion[],
+    send: (sourceLocations?: Record<string, string | null>) => Promise<void>
+  ) => {
+    if (questions.length === 0) {
+      void send();
+      return;
+    }
+    setSourcePrompt({
+      questions,
+      onConfirm: (sourceLocations) => void send(sourceLocations),
+    });
+  };
+
+  /**
    * Send a confirmed fulfil-and-check-out, report what went out, and return to
    * the booking.
    *
@@ -2025,13 +2224,17 @@ function ScannerContent() {
    * @param assigned How many of `assetIds` assign a reserved unit, measured
    *   against the reservations as they stood when the operator confirmed. The
    *   rest are extras, and the report names the two separately.
+   * @param sourceLocations The source sheet's answers, when it asked.
    */
   const submitBookingFulfil = async (
     assetIds: string[],
     kitIds: string[],
-    assigned: number
+    assigned: number,
+    sourceLocations?: Record<string, string | null>
   ) => {
     if (!bookingId || !currentOrg) return;
+    if (bookingSubmitLock.current) return;
+    bookingSubmitLock.current = true;
 
     setIsBookingSubmitting(true);
     const timeZone = (() => {
@@ -2042,23 +2245,38 @@ function ScannerContent() {
       }
     })();
 
-    const { data, error } = await api.fulfilAndCheckoutBooking(
-      currentOrg.id,
-      bookingId,
-      assetIds,
-      kitIds,
-      timeZone
-    );
-    setIsBookingSubmitting(false);
+    const { data, error, errorDetails } = await api
+      .fulfilAndCheckoutBooking(
+        currentOrg.id,
+        bookingId,
+        assetIds,
+        kitIds,
+        timeZone,
+        sourceLocations,
+        // Every unit here came through the Scan tab.
+        BOOKING_METHOD.scanned
+      )
+      .finally(() => {
+        bookingSubmitLock.current = false;
+        setIsBookingSubmitting(false);
+      });
 
     if (error) {
       // A refusal after the assignment step leaves the scanned units on the
       // booking. Re-reading the booking lets the add blockers flag them as
-      // already in this booking.
+      // already in this booking. The source sheet, if open, keeps its answers.
       fetchBookingCtx();
+      // An archived refusal names its rows: mark those, so the operator
+      // removes them and checks out the rest.
+      const archivedAssetIds = archivedIdsFromError(errorDetails);
+      setBookingCheckinItems((prev) =>
+        markArchivedRows(prev, archivedAssetIds)
+      );
       Alert.alert("Couldn't check out", error);
       return;
     }
+
+    setSourcePrompt(null);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
@@ -2157,15 +2375,32 @@ function ScannerContent() {
       applyBookingCtx(fresh, currentOrg.id);
     }
 
+    // The "From location" questions this check-out reaches, mirroring the web
+    // fulfil drawer: every pool on the booking when the whole booking goes
+    // out, only the scanned ones when only scanned units leave. Read from the
+    // fresh response when it arrived, since `bookingCtx` here is this render's.
+    const allQuestions = fresh
+      ? fresh.checkoutSourceQuestions ?? []
+      : bookingCtx.checkoutSourceQuestions;
+    const scannedOnly = fresh
+      ? !canOfferQuickCheckout(fresh)
+      : bookingCtx.requireExplicitCheckout;
+    const questions = scannedOnly
+      ? questionsForCheckouts(
+          allQuestions,
+          assetIds.map((assetId) => ({ assetId }))
+        )
+      : allQuestions;
+    const send = () =>
+      askSourcesThen(questions, (sourceLocations) =>
+        submitBookingFulfil(assetIds, kitIds, match.matched, sourceLocations)
+      );
+
     const unassignedConfirm = unassignedCheckoutConfirm(match.unassigned);
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        {
-          text: unassignedConfirm.confirmLabel,
-          onPress: () =>
-            void submitBookingFulfil(assetIds, kitIds, match.matched),
-        },
+        { text: unassignedConfirm.confirmLabel, onPress: send },
       ]);
       return;
     }
@@ -2177,11 +2412,7 @@ function ScannerContent() {
       } on "${bookingName || "this booking"}"?`,
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check out",
-          onPress: () =>
-            void submitBookingFulfil(assetIds, kitIds, match.matched),
-        },
+        { text: "Check out", onPress: send },
       ]
     );
   };
@@ -2275,7 +2506,10 @@ function ScannerContent() {
               currentOrg.id,
               bookingId,
               assetIds,
-              timeZone
+              timeZone,
+              undefined,
+              // Every row here came through the Scan tab.
+              BOOKING_METHOD.scanned
             );
             setIsBookingSubmitting(false);
 
@@ -2342,12 +2576,19 @@ function ScannerContent() {
    * @param batch What the drawer and its confirm named, counted from the list
    *   before the submit: the request carries member asset ids, so the server's
    *   reply cannot tell a scanned kit from its assets.
+   * @param assetIds The scanned asset ids, as the confirm named them.
+   * @param sourceLocations The source sheet's answers, when it asked.
    */
-  const submitBookingCheckout = async (batch: SelectionCounts) => {
-    if (!bookingId || !currentOrg || bookingCheckinItems.length === 0) return;
+  const submitBookingCheckout = async (
+    batch: SelectionCounts,
+    assetIds: string[],
+    sourceLocations?: Record<string, string | null>
+  ) => {
+    if (!bookingId || !currentOrg || assetIds.length === 0) return;
+    if (bookingSubmitLock.current) return;
+    bookingSubmitLock.current = true;
 
     setIsBookingSubmitting(true);
-    const assetIds = bookingCheckinItems.map((i) => i.targetId);
     const timeZone = (() => {
       try {
         return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -2359,18 +2600,29 @@ function ScannerContent() {
     // No per-asset quantities: a bare id checks out every remaining unit of a
     // quantity-tracked asset, which is the default the scanner offers. Picking
     // a smaller count is the booking screen's "Select to Check Out" flow.
-    const { data: result, error } = await api.partialCheckoutBooking(
-      currentOrg.id,
-      bookingId,
-      assetIds,
-      timeZone
-    );
-    setIsBookingSubmitting(false);
+    const { data: result, error } = await api
+      .partialCheckoutBooking(
+        currentOrg.id,
+        bookingId,
+        assetIds,
+        timeZone,
+        undefined,
+        sourceLocations,
+        // Every row here came through the Scan tab.
+        BOOKING_METHOD.scanned
+      )
+      .finally(() => {
+        bookingSubmitLock.current = false;
+        setIsBookingSubmitting(false);
+      });
 
     if (error) {
+      // The source sheet, if open, stays up with its answers for a retry.
       Alert.alert("Error", error);
       return;
     }
+
+    setSourcePrompt(null);
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     playScanSound();
@@ -2393,6 +2645,11 @@ function ScannerContent() {
                       : {}),
                   }
                 : a
+            ),
+            // A bare id sends every remaining unit, so these pools' questions
+            // are answered and must not be asked again by the next batch.
+            checkoutSourceQuestions: prev.checkoutSourceQuestions.filter(
+              (question) => !submittedIds.has(question.assetId)
             ),
           }
         : prev
@@ -2455,24 +2712,41 @@ function ScannerContent() {
     // opened, and a scanning session runs for minutes. The response also
     // refreshes the scan-time gates, the way the fulfil submit does.
     let unassignedConfirm = null;
+    // The source questions the send reads: this render's context, replaced by
+    // the fresh read below when one is taken.
+    let allQuestions = bookingCtx?.checkoutSourceQuestions ?? [];
     if (bookingCtx?.bookingStatus === "RESERVED") {
       setIsBookingSubmitting(true);
       const { data: fresh } = await api.booking(bookingId, currentOrg.id);
       setIsBookingSubmitting(false);
-      if (fresh) applyBookingCtx(fresh, currentOrg.id);
+      if (fresh) {
+        applyBookingCtx(fresh, currentOrg.id);
+        allQuestions = fresh.checkoutSourceQuestions ?? [];
+      }
       unassignedConfirm = unassignedCheckoutConfirm(
         fresh
           ? toOutstandingReservations(fresh.booking.modelRequests)
           : bookingCtx.outstandingModelRequests
       );
     }
+
+    // Bare ids: each scanned pool sends every unit it still has to go out, so
+    // a pool kept at two or more locations is asked where they come from
+    // after the confirm and before the send.
+    const assetIds = bookingCheckinItems.map((i) => i.targetId);
+    const questions = questionsForCheckouts(
+      allQuestions,
+      assetIds.map((assetId) => ({ assetId }))
+    );
+    const send = () =>
+      askSourcesThen(questions, (sourceLocations) =>
+        submitBookingCheckout(batch, assetIds, sourceLocations)
+      );
+
     if (unassignedConfirm) {
       Alert.alert(unassignedConfirm.title, unassignedConfirm.message, [
         { text: "Cancel", style: "cancel" },
-        {
-          text: unassignedConfirm.confirmLabel,
-          onPress: () => void submitBookingCheckout(batch),
-        },
+        { text: unassignedConfirm.confirmLabel, onPress: send },
       ]);
       return;
     }
@@ -2486,10 +2760,7 @@ function ScannerContent() {
       }),
       [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Check Out",
-          onPress: () => void submitBookingCheckout(batch),
-        },
+        { text: "Check Out", onPress: send },
       ]
     );
   };
@@ -2542,7 +2813,42 @@ function ScannerContent() {
 
   const showBatchDrawer =
     !isBookingMode && isBatchAction(action) && scannedItems.length > 0;
+
+  // Rows as the batch drawer shows them: a quantity row in a custody mode
+  // carries its units and cap, and any row the last submit refused carries
+  // the server's reason.
+  const custodyMode = custodyModeOf(action);
+  const batchDrawerItems = scannedItems.map((item) => {
+    const facts = item.quantityFacts;
+    const cap = custodyMode && facts ? unitsFor(custodyMode, facts) : 0;
+    return {
+      ...item,
+      // The row reads "Archived", never the status it is frozen in.
+      status: item.archived ? ARCHIVED_BADGE_STATUS : item.status,
+      quantity:
+        custodyMode && facts && cap > 0
+          ? {
+              value: chosenQuantity(custodyMode, facts, item.chosenQuantity),
+              max: cap,
+              unitOfMeasure: facts.unitOfMeasure,
+            }
+          : undefined,
+      error: item.submitError,
+    };
+  });
+
+  // The row whose quantity sheet is open, with its cap and current value.
+  const quantityEditItem = quantityEditQrId
+    ? batchDrawerItems.find((item) => item.qrId === quantityEditQrId) ?? null
+    : null;
   const showBookingDrawer = isBookingMode && bookingCheckinItems.length > 0;
+  // The booking list as its drawer shows it: an archived row reads
+  // "Archived", and a row the last submit refused carries the reason.
+  const bookingDrawerItems = bookingCheckinItems.map((item) => ({
+    ...item,
+    status: item.archived ? ARCHIVED_BADGE_STATUS : item.status,
+    error: item.submitError,
+  }));
 
   // Instruction text
   const instructionMap: Record<ScannerAction, string> = {
@@ -2556,7 +2862,9 @@ function ScannerContent() {
   const submitLabelMap: Record<ScannerAction, string> = {
     view: "",
     // Self-service users can only take custody themselves — no picker step.
-    assign_custody: isSelfService ? "Take Custody" : "Choose Custodian",
+    assign_custody: takesCustodyForSelfOnly
+      ? "Take Custody"
+      : "Choose Custodian",
     release_custody: "Release All",
     update_location: "Choose Location",
   };
@@ -2891,7 +3199,7 @@ function ScannerContent() {
           {/* ── Batch Drawer ──────────────────────────── */}
           {showBatchDrawer && (
             <BatchDrawer
-              items={scannedItems}
+              items={batchDrawerItems}
               keyField="qrId"
               title={`${scannedItems.length} item${
                 scannedItems.length > 1 ? "s" : ""
@@ -2909,13 +3217,14 @@ function ScannerContent() {
               blockers={blockers}
               onResolveBlocker={resolveBlocker}
               onResolveAllBlockers={resolveAllBlockers}
+              onEditQuantity={setQuantityEditQrId}
             />
           )}
 
           {/* ── Booking Drawer (check-in / scan-to-add) ── */}
           {showBookingDrawer && (
             <BatchDrawer
-              items={bookingCheckinItems}
+              items={bookingDrawerItems}
               keyField="targetId"
               title={
                 isBookingAddMode
@@ -2995,6 +3304,49 @@ function ScannerContent() {
           />
         </>
       )}
+
+      {/* Units for one quantity row. Setting a number only edits the list;
+          nothing is sent until the drawer's submit. */}
+      <QuantityInputSheet
+        visible={quantityEditItem?.quantity != null}
+        title={
+          custodyMode === "release_custody"
+            ? "Units to release"
+            : "Units to assign"
+        }
+        // The holder is not named: the scan payload is not filtered by the
+        // caller's custody visibility, so names stay off this screen.
+        subtitle={
+          quantityEditItem?.quantity
+            ? `"${quantityEditItem.title}": ${formatQuantity(
+                quantityEditItem.quantity.max,
+                quantityEditItem.quantity.unitOfMeasure
+              )} ${custodyMode === "release_custody" ? "held" : "free"}`
+            : undefined
+        }
+        max={quantityEditItem?.quantity?.max ?? 1}
+        defaultValue={quantityEditItem?.quantity?.value}
+        unitOfMeasure={quantityEditItem?.quantity?.unitOfMeasure}
+        confirmLabel="Set"
+        onSubmit={(quantity) => {
+          if (quantityEditQrId) setRowQuantity(quantityEditQrId, quantity);
+          setQuantityEditQrId(null);
+        }}
+        onClose={() => setQuantityEditQrId(null)}
+      />
+
+      {/* "Where do the units come from?": asked after the check-out confirm
+          for scanned pools kept at two or more locations. Stays open until
+          the server accepts. */}
+      <CheckoutSourceSheet
+        visible={sourcePrompt != null}
+        questions={sourcePrompt?.questions ?? []}
+        isSubmitting={isBookingSubmitting}
+        onConfirm={(sourceLocations) =>
+          sourcePrompt?.onConfirm(sourceLocations)
+        }
+        onClose={() => setSourcePrompt(null)}
+      />
     </View>
   );
 }

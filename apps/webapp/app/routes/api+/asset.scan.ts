@@ -5,6 +5,7 @@ import { getAsset } from "~/modules/asset/service.server";
 import { recordScan } from "~/modules/scan/service.server";
 import { makeShelfError } from "~/utils/error";
 import { payload, error, parseData } from "~/utils/http.server";
+import { assertAssetsAreNotArchived } from "~/utils/org-validation.server";
 import {
   PermissionAction,
   PermissionEntity,
@@ -39,6 +40,17 @@ export async function action({ context, request }: ActionFunctionArgs) {
           .transform((val) => (val === "yes" ? true : false)),
       })
     );
+
+    // The detail-page "Update GPS coordinates" action posts here with
+    // manuallyGenerated=yes. Archived assets are frozen (issue #382), so block
+    // that deliberate update (regular auto scans keep working).
+    if (manuallyGenerated) {
+      await assertAssetsAreNotArchived({
+        assetIds: [assetId],
+        organizationId,
+        actorUserId: userId,
+      });
+    }
 
     const asset = await getAsset({
       id: assetId,
