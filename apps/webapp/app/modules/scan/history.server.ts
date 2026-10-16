@@ -10,7 +10,10 @@
  * @see {@link file://./../../components/scan/scan-history-sheet.tsx}
  */
 import type { IResult } from "ua-parser-js";
+import { db } from "~/database/db.server";
+import { ShelfError } from "~/utils/error";
 import { describeScannedCodeLabel, describeScanSourceLabel } from "./labels";
+import type { ScanTarget } from "./service.server";
 import type { ScanWithRelations } from "./utils.server";
 import { describeScanner, parseScanUserAgent } from "./utils.server";
 
@@ -66,4 +69,67 @@ export function toScanHistoryRow(scan: ScanWithRelations): ScanHistoryRow {
         : null,
     device: describeDevice(parseScanUserAgent(scan.userAgent)),
   };
+}
+
+/** How many scans one page of the sheet shows. */
+export const SCAN_HISTORY_PAGE_SIZE = 25;
+
+/** One page of scan history, and where the next one starts. */
+export type ScanHistoryPage = {
+  scans: ScanHistoryRow[];
+  /** The id to continue after, or null on the last page */
+  nextCursor: string | null;
+};
+
+/**
+ * Reads one page of an asset's or kit's scans, newest first.
+ *
+ * Scoped to `organizationId`, the caller's workspace. Every scan carries the
+ * workspace its code resolved in, so this is the whole tenancy guard: an id
+ * from another workspace reads nothing. One row past the page is read to tell
+ * whether another page exists.
+ *
+ * @param args.target - The asset or kit
+ * @param args.organizationId - The caller's workspace
+ * @param args.cursor - The id of the last scan already shown, for the next page
+ * @returns The page of rows and the cursor to the next one
+ * @throws {ShelfError} If the read fails
+ */
+export async function getScanHistory({
+  target,
+  organizationId,
+  cursor,
+}: {
+  target: ScanTarget;
+  organizationId: string;
+  cursor?: string | null;
+}): Promise<ScanHistoryPage> {
+  try {
+    const scans = await db.scan.findMany({
+      where:
+        "assetId" in target
+          ? { assetId: target.assetId, organizationId }
+          : { kitId: target.kitId, organizationId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: SCAN_HISTORY_PAGE_SIZE + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      include: { user: { include: { userOrganizations: true } } },
+    });
+
+    const hasMore = scans.length > SCAN_HISTORY_PAGE_SIZE;
+    const page = scans.slice(0, SCAN_HISTORY_PAGE_SIZE);
+    const last = page[page.length - 1];
+
+    return {
+      scans: page.map(toScanHistoryRow),
+      nextCursor: hasMore && last ? last.id : null,
+    };
+  } catch (cause) {
+    throw new ShelfError({
+      cause,
+      message: "Something went wrong while loading the scan history.",
+      additionalData: { target, cursor },
+      label: "Scan",
+    });
+  }
 }
