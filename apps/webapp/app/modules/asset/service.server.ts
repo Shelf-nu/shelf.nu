@@ -197,6 +197,11 @@ import { setCustodyDrivenAssetStatus } from "./custody-status.server";
 import { assetIndexFields } from "./fields";
 import { removeImageFilesOfDeletedAssets } from "./image-files.server";
 import { validateContentImportRows } from "./import-preflight.server";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+} from "./last-audit-date-access";
+import type { LastAuditDateAccess } from "./last-audit-date-access";
 import type {
   MoveAssetLocationUnitsArgs,
   MoveUnitsResult,
@@ -1086,6 +1091,8 @@ export async function getAdvancedPaginatedAndFilterableAssets({
   timeZone = "UTC",
   honorArchivedView = false,
   archivedFilter,
+  lastAuditDateAccess = "hidden",
+  includeHiddenColumns = false,
 }: {
   request: LoaderFunctionArgs["request"];
   organizationId: Organization["id"];
@@ -1119,6 +1126,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
    * archived rows included, whatever view the request came from.
    */
   archivedFilter?: ArchivedFilter;
+  /**
+   * How the last audit date column is exposed to the caller. Anything other
+   * than `available` never reaches the database: its filter and sort are
+   * dropped. Defaults to `hidden`.
+   */
+  lastAuditDateAccess?: LastAuditDateAccess;
+  /**
+   * Compute the last audit date even when the column is hidden in the
+   * caller's settings (exports include every column). Still requires
+   * `available` access.
+   */
+  includeHiddenColumns?: boolean;
 }) {
   const currentFilterParams = new URLSearchParams(filters || "");
   const searchParams = filters
@@ -1149,13 +1168,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
     // advertises pages that come back empty.
     const take = Math.min(Math.max(perPage, 1), 100);
     const skip = page > 1 ? (page - 1) * take : 0;
-    const parsedFilters =
+    const canQueryAuditDate = canQueryLastAuditDate(lastAuditDateAccess);
+    const allParsedFilters =
       preParsedFilters ??
       (await parseFiltersWithHierarchy(
         filters,
         settingColumns,
         organizationId
       ));
+    // Without queryable access the audit date filter must not reach SQL.
+    const parsedFilters = canQueryAuditDate
+      ? allParsedFilters
+      : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
     const whereClause = generateWhereClause(
       organizationId,
@@ -1172,9 +1196,18 @@ export async function getAdvancedPaginatedAndFilterableAssets({
           ? getArchivedFilterFromParams(searchParams)
           : "active")
     );
-    const sortByValues = searchParams.getAll("sortBy");
+    // Without queryable access the audit date sort must not reach SQL either.
+    const sortByValues = searchParams
+      .getAll("sortBy")
+      .filter(
+        (spec) =>
+          canQueryAuditDate || spec.split(":")[0] !== LAST_AUDIT_DATE_COLUMN
+      );
     const { orderByInner, customFieldSortings } =
       parseSortingOptions(sortByValues);
+    const isLastAuditDateColumnVisible = settingColumns?.some(
+      (col) => col.name === LAST_AUDIT_DATE_COLUMN && col.visible
+    );
     // Modify query to conditionally include LIMIT/OFFSET
     const paginationClause = takeAll
       ? Prisma.empty
@@ -1191,7 +1224,9 @@ export async function getAdvancedPaginatedAndFilterableAssets({
       parsedFilters,
       withBookings: getBookings || isUpcomingBookingsColumnVisible,
       withBarcodes: canUseBarcodes,
-      withLastAuditDate: false,
+      withLastAuditDate:
+        canQueryAuditDate &&
+        (Boolean(isLastAuditDateColumnVisible) || includeHiddenColumns),
       paginationClause,
     });
 

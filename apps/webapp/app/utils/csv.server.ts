@@ -548,6 +548,17 @@ export const buildCsvExportDataFromAssets = ({
             }
             break;
           }
+          case "lastAuditDate": {
+            // Absent for never-audited assets; guard against unparseable values.
+            const lastAudit = asset.lastAuditDate
+              ? new Date(asset.lastAuditDate)
+              : null;
+            value =
+              lastAudit && !isNaN(lastAudit.getTime())
+                ? formatDateForCsv(lastAudit)
+                : "";
+            break;
+          }
           case "upcomingBookings": {
             value = asset.bookings
               ? asset.bookings.map((b) => b.name).join(", ")

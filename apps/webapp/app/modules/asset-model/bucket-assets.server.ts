@@ -28,6 +28,7 @@ import { AssetType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import { data } from "react-router";
 import { db } from "~/database/db.server";
+import { resolveLastAuditDateAccess } from "~/modules/asset/last-audit-date-access";
 import {
   bookableListScopeWhere,
   resolveBookableListScope,
@@ -50,6 +51,7 @@ import {
   PermissionEntity,
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
+import { canUseAudits } from "~/utils/subscription.server";
 import { applyAssetModelBucketFilters } from "./bucket";
 import type { AssetModelBucket } from "./bucket";
 import {
@@ -160,13 +162,18 @@ export async function loadAssetModelBucketAssets({
   request: Request;
 }) {
   try {
-    const { organizationId, role, canUseBarcodes, access } =
-      await requirePermission({
-        userId,
-        request,
-        entity: PermissionEntity.asset,
-        action: PermissionAction.read,
-      });
+    const {
+      organizationId,
+      role,
+      canUseBarcodes,
+      access,
+      currentOrganization,
+    } = await requirePermission({
+      userId,
+      request,
+      entity: PermissionEntity.asset,
+      action: PermissionAction.read,
+    });
 
     // A model id is request input, so prove it belongs to the caller's
     // organization before it reaches a query. A cross-org id 404s rather than
@@ -244,6 +251,12 @@ export async function loadAssetModelBucketAssets({
         timeZone,
         bookableScope,
         honorArchivedView,
+        // Same rule as the index loader, so a forwarded `lastAuditDate`
+        // filter is honoured only where the index itself would honour it.
+        lastAuditDateAccess: resolveLastAuditDateAccess({
+          seeAllAudits: access.audits.seeAll,
+          auditsUsable: canUseAudits(currentOrganization),
+        }),
       });
 
     // Only an empty sheet has a use for this, and only an empty sheet pays for

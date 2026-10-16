@@ -9,6 +9,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { isSafeSqlIdentifier } from "~/utils/sql";
 import { parseFilters } from "./filter-parsing";
+import { LAST_AUDIT_DATE_COLUMN } from "./last-audit-date-access";
 import { bookableListScopeSql } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { expandLocationHierarchyFilters } from "./location-filter.server";
@@ -152,7 +153,11 @@ export function generateWhereClause(
         whereClause = addBooleanFilter(whereClause, filter);
         break;
       case "date":
-        whereClause = addDateFilter(whereClause, filter, timeZone);
+        // `lastAuditDate` is a computed subquery, not an `Asset` column.
+        whereClause =
+          filter.name === LAST_AUDIT_DATE_COLUMN
+            ? addDateFilter(whereClause, filter, timeZone, LAST_AUDIT_DATE_SQL)
+            : addDateFilter(whereClause, filter, timeZone);
         break;
       case "enum":
         whereClause = addEnumFilter(whereClause, filter);
@@ -475,24 +480,32 @@ function addBooleanFilter(whereClause: Prisma.Sql, filter: Filter): Prisma.Sql {
  * @param timeZone - IANA timezone name the day should be resolved in (the
  *   acting user's resolved pref tz). Bound as a SQL parameter, never
  *   string-interpolated, so it stays injection-safe.
+ * @param columnSql - Optional SQL expression replacing `a."<filter.name>"`,
+ *   for computed columns such as `lastAuditDate`.
  * @returns The extended WHERE clause.
  */
 function addDateFilter(
   whereClause: Prisma.Sql,
   filter: Filter,
-  timeZone: string
+  timeZone: string,
+  columnSql?: Prisma.Sql
 ): Prisma.Sql {
+  // Computed columns (e.g. `lastAuditDate`) pass their own SQL expression; the
+  // default is the `Asset` column named by the filter.
+  const column = columnSql ?? Prisma.sql`a."${Prisma.raw(filter.name)}"`;
+
   // The UTC-stored `timestamp` column truncated to a calendar date in the
   // user's tz. `AT TIME ZONE 'UTC'` reinterprets the bare wall clock as a UTC
   // instant; the second `AT TIME ZONE ${timeZone}` converts it to the user's
   // wall clock before `::date` (see the two-step rationale above). `'UTC'` is a
   // fixed literal; `timeZone` is a bound parameter (`AT TIME ZONE $n`), not raw
   // SQL, so it stays injection-safe.
-  const localDate = Prisma.sql`(a."${Prisma.raw(
-    filter.name
-  )}" AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
+  const localDate = Prisma.sql`(${column} AT TIME ZONE 'UTC' AT TIME ZONE ${timeZone})::date`;
 
   switch (filter.operator) {
+    case "isEmpty":
+      // No value: matches rows where the column is NULL (e.g. never audited).
+      return Prisma.sql`${whereClause} AND ${column} IS NULL`;
     case "is":
       return Prisma.sql`${whereClause} AND ${localDate} = ${filter.value}::date`;
     case "isNot":
@@ -1675,6 +1688,10 @@ export function parseSortingOptions(sortBy: string[]): {
         // Use regular sorting for non-text columns
         orderByParts.push(`"${columnName}" ${field.direction}`);
       }
+    } else if (field.name === LAST_AUDIT_DATE_COLUMN) {
+      // Never-audited assets have a NULL date; keep them last in both
+      // directions so they do not crowd the top of a descending sort.
+      orderByParts.push(`"lastAuditDate" ${field.direction} NULLS LAST`);
     } else if (field.name === "qrId") {
       orderByParts.push(getNormalizedSortExpression(`"qrId"`, field.direction));
     } else if (field.name === "kit") {
@@ -2107,14 +2124,14 @@ export const assetQueryFragment = (options: AssetQueryOptions = {}) => {
     ) AS bookings`
     : Prisma.sql``;
 
-  // Everything between the backticks below is a template literal, so a stray
-  // backtick or dollar-brace anywhere in it — SQL comments included — ends the
-  // literal and reinterprets the rest of the query as JavaScript.
   const lastAuditDateSelect = withLastAuditDate
     ? Prisma.sql`,
     ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
     : Prisma.sql``;
 
+  // Everything between the backticks below is a template literal, so a stray
+  // backtick or dollar-brace anywhere in it (SQL comments included) ends the
+  // literal and reinterprets the rest of the query as JavaScript.
   const barcodesSelect = withBarcodes
     ? Prisma.sql`,
     (
@@ -2775,6 +2792,7 @@ function detectActiveSortKeys(sortBy: string[]): {
   categoryName: boolean;
   assetModelName: boolean;
   locationName: boolean;
+  lastAuditDate: boolean;
 } {
   let qrId = false;
   let custody = false;
@@ -2783,6 +2801,7 @@ function detectActiveSortKeys(sortBy: string[]): {
   let categoryName = false;
   let assetModelName = false;
   let locationName = false;
+  let lastAuditDate = false;
   for (const spec of sortBy) {
     const name = spec.split(":")[0] ?? "";
     if (name === "qrId") qrId = true;
@@ -2794,6 +2813,7 @@ function detectActiveSortKeys(sortBy: string[]): {
     else if (name === "category") categoryName = true;
     else if (name === "assetModel") assetModelName = true;
     else if (name === "location") locationName = true;
+    else if (name === LAST_AUDIT_DATE_COLUMN) lastAuditDate = true;
   }
   return {
     qrId,
@@ -2803,6 +2823,7 @@ function detectActiveSortKeys(sortBy: string[]): {
     categoryName,
     assetModelName,
     locationName,
+    lastAuditDate,
   };
 }
 
@@ -2868,6 +2889,7 @@ export function buildAdvancedAssetsQuery({
     categoryName: categoryNameSort,
     assetModelName: assetModelNameSort,
     locationName: locationNameSort,
+    lastAuditDate: lastAuditDateSort,
   } = detectActiveSortKeys(sortBy);
 
   // Custody joins are needed when EITHER a custody filter (WHERE references
@@ -2914,6 +2936,12 @@ export function buildAdvancedAssetsQuery({
     ? Prisma.sql`,
       ${BARCODE_SORT_KEY_SELECTS}`
     : Prisma.empty;
+  // The ORDER BY references the "lastAuditDate" alias, so the slim CTE must
+  // emit it whenever that sort is active.
+  const lastAuditDateSortSelect = lastAuditDateSort
+    ? Prisma.sql`,
+      ${LAST_AUDIT_DATE_SQL} AS "lastAuditDate"`
+    : Prisma.empty;
   const custodyJoins = custodyJoinsActive ? CHEAP_CUSTODY_JOINS : Prisma.empty;
 
   const kitJoin = needKitJoin ? CHEAP_KIT_JOIN : Prisma.empty;
@@ -2952,7 +2980,7 @@ export function buildAdvancedAssetsQuery({
           a.status AS "assetStatus",
           a.type AS "assetType",
           a.description AS "assetDescription",
-          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${customFieldSelect}
+          a."availableToBook" AS "assetAvailableToBook"${kitNameSelect}${categoryNameSelect}${assetModelNameSelect}${locationNameSelect}${qrIdSortSelect}${custodySortSelect}${barcodeSortSelects}${lastAuditDateSortSelect}${customFieldSelect}
         ${baseJoins}
         ${custodyJoins}
         ${whereClause}

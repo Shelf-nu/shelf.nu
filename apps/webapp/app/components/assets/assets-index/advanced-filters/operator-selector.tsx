@@ -47,6 +47,7 @@ export const operatorsMap: Record<FilterOperator, string[]> = {
   inDates: ["∈", "In dates"],
   excludeAny: ["⊄", "Exclude any of"], // New operator with clear meaning for tag exclusion
   withinHierarchy: ["↳", "Is in (incl. sub-locations)"],
+  isEmpty: ["∅", "Never audited"],
 };
 
 // Define the allowed operators for each field type

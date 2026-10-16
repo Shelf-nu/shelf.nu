@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 import { describe, expect, it, vi, vitest, beforeEach } from "vitest";
 import { extractStoragePath } from "~/components/assets/asset-image/utils";
+import type { Filter } from "~/components/assets/assets-index/advanced-filters/schema";
 import { db } from "~/database/db.server";
 import { getSupabaseAdmin } from "~/integrations/supabase/client";
 import {
@@ -62,6 +63,7 @@ import {
   setKitCustodyAfterAssetImport,
   getActiveCustomFieldsForAsset,
   moveAssetLocationUnits,
+  getAdvancedPaginatedAndFilterableAssets,
   getAssets,
   parseAssetValuation,
   placeUnplacedUnits,
@@ -7435,5 +7437,88 @@ describe("bulkUpdateAssetLocation — location activity notes", () => {
       expect(content).toContain("asset-individual");
       expect(content).not.toContain("asset-qty");
     }
+  });
+});
+
+describe("getAdvancedPaginatedAndFilterableAssets - lastAuditDate gating", () => {
+  // why: the advanced index runs as one raw query; capturing the SQL it sends
+  // is the only way to prove which parts reach the database without a real DB.
+  const queryRawMock = vi.mocked(db.$queryRaw);
+
+  const columns = (visible: boolean) => [
+    { name: "lastAuditDate", visible, position: 0 },
+  ];
+
+  const settingsWith = (visible: boolean): AssetIndexSettings => ({
+    ...ASSET_INDEX_SETTINGS,
+    mode: "ADVANCED",
+    columns: columns(visible),
+  });
+
+  const auditFilter: Filter = {
+    name: "lastAuditDate",
+    type: "date",
+    operator: "before",
+    value: "2026-01-01",
+  };
+
+  /** Runs the loader function and returns the SQL text it sent to the db. */
+  async function runAndCaptureSql(
+    args: Partial<Parameters<typeof getAdvancedPaginatedAndFilterableAssets>[0]>
+  ) {
+    await getAdvancedPaginatedAndFilterableAssets({
+      request: new Request("http://localhost/assets"),
+      organizationId: "org-1",
+      settings: settingsWith(true),
+      filters: "sortBy=lastAuditDate%3Aasc",
+      preParsedFilters: [auditFilter],
+      ...args,
+    });
+    const query = queryRawMock.mock.calls[0][0] as unknown as {
+      strings: string[];
+    };
+    return query.strings.join("?");
+  }
+
+  beforeEach(() => {
+    queryRawMock
+      .mockReset()
+      .mockResolvedValue([{ total_count: 0, assets: [] }]);
+  });
+
+  it("drops lastAuditDate filter and sort when hidden", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "hidden" });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("drops lastAuditDate filter and sort when locked", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "locked" });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("queries lastAuditDate when available and visible", async () => {
+    const sql = await runAndCaptureSql({ lastAuditDateAccess: "available" });
+    expect(sql).toContain('"completedAt"');
+  });
+
+  it("skips the projection when the column is hidden in settings", async () => {
+    const sql = await runAndCaptureSql({
+      lastAuditDateAccess: "available",
+      settings: settingsWith(false),
+      filters: "",
+      preParsedFilters: [],
+    });
+    expect(sql).not.toContain('"completedAt"');
+  });
+
+  it("computes the date for hidden columns with includeHiddenColumns", async () => {
+    const sql = await runAndCaptureSql({
+      lastAuditDateAccess: "available",
+      settings: settingsWith(false),
+      includeHiddenColumns: true,
+      filters: "",
+      preParsedFilters: [],
+    });
+    expect(sql).toContain('"completedAt"');
   });
 });

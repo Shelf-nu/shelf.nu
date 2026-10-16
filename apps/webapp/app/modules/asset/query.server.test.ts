@@ -1650,6 +1650,7 @@ describe("custodian display name", () => {
       parsedFilters: [],
       withBookings: false,
       withBarcodes: false,
+      withLastAuditDate: false,
       paginationClause: Prisma.sql`LIMIT ${100} OFFSET ${0}`,
     }).strings.join("?");
 
@@ -1696,5 +1697,89 @@ describe("lastAuditDate", () => {
       "'lastAuditDate'"
     );
     expect(text(assetReturnFragment())).not.toContain("'lastAuditDate'");
+  });
+});
+
+describe("lastAuditDate filter and sort", () => {
+  const orgId = "org-1";
+  const lastAuditFilter = (
+    operator: Filter["operator"],
+    value: Filter["value"]
+  ): Filter => ({
+    name: "lastAuditDate",
+    type: "date",
+    operator,
+    value,
+  });
+
+  it("filters lastAuditDate in the user's timezone", () => {
+    const result = generateWhereClause(
+      orgId,
+      null,
+      [lastAuditFilter("is", "2026-07-21")],
+      undefined,
+      null,
+      "Asia/Tokyo"
+    );
+    const sql = getSqlString(result);
+
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain("AT TIME ZONE 'UTC' AT TIME ZONE");
+    expect(result.values).toContain("Asia/Tokyo");
+  });
+
+  it("matches never-audited assets with isEmpty", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [lastAuditFilter("isEmpty", "")])
+    );
+
+    expect(sql).toContain('MAX(s."completedAt")');
+    expect(sql).toContain(") IS NULL");
+  });
+
+  it("excludes never-audited assets with before", () => {
+    const sql = getSqlString(
+      generateWhereClause(orgId, null, [
+        lastAuditFilter("before", "2026-01-01"),
+      ])
+    );
+
+    expect(sql).toContain("< ");
+    // The base clause and the subquery carry their own IS NULL checks; what
+    // must be absent is the never-audited predicate on the subquery itself.
+    expect(sql).not.toContain(") IS NULL");
+  });
+
+  it("sorts lastAuditDate with NULLS LAST in both directions", () => {
+    const asc = parseSortingOptions(["lastAuditDate:asc"]).orderByInner;
+    const desc = parseSortingOptions(["lastAuditDate:desc"]).orderByInner;
+
+    expect(asc).toContain('"lastAuditDate" asc NULLS LAST');
+    expect(desc).toContain('"lastAuditDate" desc NULLS LAST');
+    // The stable id tiebreaker still applies.
+    expect(asc).toContain('"assetId" ASC');
+  });
+
+  it("selects the sort key in the slim CTE only when sorting by it", () => {
+    const base = {
+      whereClause: Prisma.sql`WHERE a."organizationId" = 'org-1'`,
+      customFieldSortings: [],
+      parsedFilters: [],
+      withBookings: false,
+      withBarcodes: false,
+      withLastAuditDate: false,
+      paginationClause: Prisma.sql`LIMIT 10 OFFSET 0`,
+    };
+    const slimCte = (sortBy: string[]) => {
+      const sql = buildAdvancedAssetsQuery({
+        ...base,
+        sortBy,
+        orderByInner: parseSortingOptions(sortBy).orderByInner,
+      }).strings.join("?");
+      return sql.slice(0, sql.indexOf("sorted_asset_query AS"));
+    };
+
+    expect(slimCte(["lastAuditDate:asc"])).toContain('AS "lastAuditDate"');
+    expect(slimCte(["name:asc"])).not.toContain('AS "lastAuditDate"');
   });
 });

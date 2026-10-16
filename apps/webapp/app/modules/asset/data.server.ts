@@ -36,9 +36,15 @@ import {
 } from "~/utils/permissions/permission.data";
 import { hasPermission } from "~/utils/permissions/permission.validator.server";
 import type { RoleAccess } from "~/utils/permissions/role-access";
-import { canImportAssets } from "~/utils/subscription.server";
+import { canImportAssets, canUseAudits } from "~/utils/subscription.server";
 import type { UserNameFields } from "~/utils/user";
 import { resolveUserDisplayName } from "~/utils/user";
+import {
+  LAST_AUDIT_DATE_COLUMN,
+  canQueryLastAuditDate,
+  resolveLastAuditDateAccess,
+  stripHiddenAuditColumns,
+} from "./last-audit-date-access";
 import { resolveBookableListScope } from "./list-scope.server";
 import type { BookableListScope } from "./list-scope.server";
 import { getStillOutBookingRowsByAsset } from "./quantity-breakdown.server";
@@ -700,11 +706,26 @@ export async function advancedModeLoader({
   role,
   currentOrganization,
   user,
-  settings,
+  settings: loadedSettings,
   canSeeAllCustody,
   access,
 }: Props) {
   const { locale, timeZone } = getClientHint(request);
+
+  // The last audit date follows audit visibility and availability. Strip the
+  // column before anything parses filters or renders columns from the settings.
+  const lastAuditDateAccess = resolveLastAuditDateAccess({
+    seeAllAudits: access.audits.seeAll,
+    auditsUsable: canUseAudits(currentOrganization),
+  });
+  const settings: AssetIndexSettings = {
+    ...loadedSettings,
+    columns: stripHiddenAuditColumns(
+      loadedSettings.columns as Column[],
+      lastAuditDateAccess
+    ),
+  };
+
   const assignsSelfOnly = access.custody.assign === "self";
   const honorArchivedView = canViewArchivedAssets(access);
 
@@ -749,11 +770,16 @@ export async function advancedModeLoader({
   // Parse and expand location hierarchy filters ONCE — this avoids redundant
   // DB calls that were previously happening in both getAllSelectedValuesFromFilters
   // and getAdvancedPaginatedAndFilterableAssets independently.
-  const parsedFilters = await parseFiltersWithHierarchy(
+  const allParsedFilters = await parseFiltersWithHierarchy(
     filters ?? "",
     settings.columns as Column[],
     organizationId
   );
+  // A locked column keeps its header but must never be queried, so its filter
+  // is dropped here for every consumer (asset query and model rollup).
+  const parsedFilters = canQueryLastAuditDate(lastAuditDateAccess)
+    ? allParsedFilters
+    : allParsedFilters.filter((f) => f.name !== LAST_AUDIT_DATE_COLUMN);
 
   const {
     selectedTags,
@@ -844,6 +870,7 @@ export async function advancedModeLoader({
           bookableScope: resolveBookableListScope({ access, userId }),
           preParsedFilters: parsedFilters,
           honorArchivedView,
+          lastAuditDateAccess,
           // Both arms carry the same keys so the caller reads them directly.
           // Discriminating a union by `in` here degrades to `unknown` at this
           // file's type complexity, and the failure lands on unrelated
@@ -1033,6 +1060,7 @@ export async function advancedModeLoader({
       timeZone,
       currentOrganization,
       settings,
+      lastAuditDateAccess,
       modelRollup,
       totalRollupAssets,
       modelSortBy,
