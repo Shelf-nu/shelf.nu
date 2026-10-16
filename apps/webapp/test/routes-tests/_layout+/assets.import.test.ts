@@ -57,7 +57,13 @@ vi.mock("~/modules/import-mapping/client.server", () => ({
   getImportMappingClient: vi.fn(),
 }));
 
+// why: analytics goes to PostHog over the network; tests assert what is sent.
+vi.mock("~/integrations/posthog/client.server", () => ({
+  captureServerEvent: vi.fn(),
+}));
+
 import { db } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { getImportMappingClient } from "~/modules/import-mapping/client.server";
 import type { ColumnMapping } from "~/modules/import-mapping/types";
@@ -179,6 +185,74 @@ describe("assets import route", () => {
       ]);
       const result = body(await action(importArgs({ intent: "analyze" })));
       expect(result.alreadyMatches).toBe(true);
+    });
+  });
+
+  describe("analytics", () => {
+    it("reports the proposal as counts only", async () => {
+      await action(importArgs({ intent: "analyze" }));
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: USER_ID,
+        event: "import_mapping_proposed",
+        properties: {
+          organizationId: ORG_ID,
+          columns: 3,
+          lowConfidence: 1,
+          source: "rules",
+        },
+      });
+    });
+
+    it("reports the confirmed mapping and the finished import", async () => {
+      const withNewField = MAPPING.map((column) =>
+        column.source === "Legacy ID"
+          ? {
+              ...column,
+              target: {
+                kind: "customField" as const,
+                name: "Legacy id",
+                type: "TEXT" as const,
+              },
+            }
+          : column
+      );
+      await action(
+        importArgs({
+          intent: "content",
+          mapping: JSON.stringify(withNewField),
+          mappingSource: "model",
+          mappingChanged: "1",
+        })
+      );
+
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: USER_ID,
+        event: "import_mapping_confirmed",
+        properties: {
+          organizationId: ORG_ID,
+          columns: 3,
+          changedByUser: 1,
+          newCustomFields: 1,
+          source: "model",
+        },
+      });
+      expect(captureServerEvent).toHaveBeenCalledWith({
+        distinctId: USER_ID,
+        event: "import_completed",
+        properties: { organizationId: ORG_ID, rows: 2, source: "model" },
+      });
+    });
+
+    it("reports a legacy import with source none", async () => {
+      vi.mocked(csvDataFromRequest).mockResolvedValue([["title"], ["Camera"]]);
+      await action(importArgs({ intent: "content" }));
+      expect(captureServerEvent).toHaveBeenCalledTimes(1);
+      expect(captureServerEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "import_completed",
+          properties: { organizationId: ORG_ID, rows: 1, source: "none" },
+        })
+      );
     });
   });
 

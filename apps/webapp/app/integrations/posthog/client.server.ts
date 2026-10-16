@@ -119,7 +119,47 @@ export type ServerAnalyticsEvent =
         /** Which report, for `sheet: "report"` only. */
         reportId?: string;
       };
+    }
+  | {
+      /** The asset importer proposed a column mapping for an uploaded file. */
+      event: "import_mapping_proposed";
+      properties: {
+        organizationId: string;
+        /** Columns in the file. */
+        columns: number;
+        /** Columns proposed with low confidence. */
+        lowConfidence: number;
+        /** Which proposer produced the mapping. */
+        source: ImportMappingSource;
+      };
+    }
+  | {
+      /** The user confirmed a reviewed mapping and started the import. */
+      event: "import_mapping_confirmed";
+      properties: {
+        organizationId: string;
+        columns: number;
+        /** Columns whose destination the user changed in the review. */
+        changedByUser: number;
+        /** Custom fields the mapping will create. */
+        newCustomFields: number;
+        source: ImportMappingSource;
+      };
+    }
+  | {
+      /** An asset content import finished and created its assets. */
+      event: "import_completed";
+      properties: {
+        organizationId: string;
+        /** Assets created. */
+        rows: number;
+        /** The mapping's proposer, or `none` when no mapping was posted. */
+        source: ImportMappingSource | "none";
+      };
     };
+
+/** Which proposer produced an import column mapping. */
+export type ImportMappingSource = "rules" | "model";
 
 /**
  * Emit a server-side analytics event to PostHog. Best-effort: it does not

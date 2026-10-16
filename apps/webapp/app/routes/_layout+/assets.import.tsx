@@ -8,6 +8,7 @@ import { z } from "zod";
 import { ImportContent } from "~/components/assets/import-content";
 import Header from "~/components/layout/header";
 import { db } from "~/database/db.server";
+import { captureServerEvent } from "~/integrations/posthog/client.server";
 import { createAssetsFromContentImport } from "~/modules/asset/service.server";
 import { ASSET_CSV_HEADERS } from "~/modules/asset/utils.server";
 import { applyMapping } from "~/modules/import-mapping/apply";
@@ -32,6 +33,7 @@ import {
 } from "~/utils/permissions/permission.data";
 import { requirePermission } from "~/utils/roles.server";
 import { assertUserCanImportAssets } from "~/utils/subscription.server";
+import { optionalNumberFromString } from "~/utils/zod-numeric";
 
 export const action = async ({ context, request }: ActionFunctionArgs) => {
   const authSession = context.getSession();
@@ -48,12 +50,18 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
 
     await assertUserCanImportAssets({ organizationId, organizations });
 
-    const { intent, mapping } = parseData(
+    const { intent, mapping, mappingSource, mappingChanged } = parseData(
       await request.clone().formData(),
       z.object({
         intent: z.enum(["analyze", "content"]),
         /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
         mapping: z.string().max(200_000).optional(),
+        /** Which proposer the reviewed mapping started from (analytics only). */
+        mappingSource: z.enum(["rules", "model"]).optional(),
+        /** Columns the user changed in the review (analytics only). */
+        mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
+          z.number().int().min(0).max(1000).optional()
+        ),
       })
     );
 
@@ -81,10 +89,8 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         });
       }
 
-      const existingCustomFields = await db.customField.findMany({
-        where: { organizationId, deletedAt: null },
-        select: { name: true, type: true },
-      });
+      const existingCustomFields =
+        await loadExistingCustomFields(organizationId);
       const rowCount = csvData.length - 1;
       const proposal = await proposeMapping({
         organizationId,
@@ -95,6 +101,19 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
         canUseBarcodes: Boolean(canUseBarcodes),
       });
 
+      captureServerEvent({
+        distinctId: userId,
+        event: "import_mapping_proposed",
+        properties: {
+          organizationId,
+          columns: proposal.columns.length,
+          lowConfidence: proposal.columns.filter(
+            (column) => column.confidence === "low"
+          ).length,
+          source: proposal.source,
+        },
+      });
+
       return payload({
         proposal,
         rowCount,
@@ -102,9 +121,32 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       });
     }
 
-    const mappedCsvData = mapping
-      ? applyMapping(csvData, parseMapping(mapping))
-      : csvData;
+    let mappedCsvData: string[][] = csvData;
+    if (mapping) {
+      const columns = parseMapping(mapping);
+      mappedCsvData = applyMapping(csvData, columns);
+
+      const existingNames = new Set(
+        (await loadExistingCustomFields(organizationId)).map((field) =>
+          field.name.trim().toLowerCase()
+        )
+      );
+      captureServerEvent({
+        distinctId: userId,
+        event: "import_mapping_confirmed",
+        properties: {
+          organizationId,
+          columns: columns.length,
+          changedByUser: mappingChanged ?? 0,
+          newCustomFields: columns.filter(
+            ({ target }) =>
+              target.kind === "customField" &&
+              !existingNames.has(target.name.trim().toLowerCase())
+          ).length,
+          source: mappingSource ?? "rules",
+        },
+      });
+    }
 
     const contentData = extractCSVDataFromContentImport(
       mappedCsvData,
@@ -117,12 +159,36 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       organizationId,
       canUseBarcodes,
     });
+
+    captureServerEvent({
+      distinctId: userId,
+      event: "import_completed",
+      properties: {
+        organizationId,
+        rows: contentData.length,
+        source: mapping ? mappingSource ?? "rules" : "none",
+      },
+    });
     return payload({ success: true });
   } catch (cause) {
     const reason = makeShelfError(cause, { userId });
     return data(error(reason), { status: reason.status });
   }
 };
+
+/**
+ * Loads the workspace's custom field names and types, matching the
+ * importer's own lookup (non-deleted, active or not).
+ *
+ * @param organizationId - The caller's workspace
+ * @returns Name and type of every non-deleted custom field
+ */
+function loadExistingCustomFields(organizationId: string) {
+  return db.customField.findMany({
+    where: { organizationId, deletedAt: null },
+    select: { name: true, type: true },
+  });
+}
 
 /**
  * Reads the reviewed mapping posted with the `content` intent.
