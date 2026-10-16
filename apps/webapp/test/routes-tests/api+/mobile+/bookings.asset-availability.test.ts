@@ -4,19 +4,24 @@
  * The loader answers "how many units of each quantity-tracked asset may this
  * booking still book?" for the companion's scanner and booking screens. These
  * tests pin the response shape, that the shared availability primitive is
- * asked about the booking's own window with the booking itself excluded, that
- * ids outside the workspace are silently dropped, and the 400/404 refusals.
+ * asked about the booking's own window with the booking itself excluded, what
+ * the booking already holds, that ids outside the workspace are silently
+ * dropped, that a booking the caller may not see answers like one that does not
+ * exist, and the 400/404 refusals.
  *
  * @see {@link file://./bookings.asset-availability.ts} route under test
  */
 
+import { OrganizationRoles } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createLoaderArgs } from "@mocks/remix";
 
 import { db } from "~/database/db.server";
 import type * as MobileAuthServer from "~/modules/api/mobile-auth.server";
 import {
+  getMobileUserContext,
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
 } from "~/modules/api/mobile-auth.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
@@ -24,20 +29,29 @@ import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import { loader } from "~/routes/api+/mobile+/bookings.asset-availability";
 
 import { assertIsDataWithResponseInit } from "@helpers/assertions";
+import { mobileUserContext } from "@helpers/mobile-user-context";
 
 // @vitest-environment node
 
 // why: db is the integration boundary — the route resolves the booking's
-// window and the set of owned quantity-tracked ids from it. Mock only those.
+// window and custody links, the set of owned quantity-tracked ids, and what the
+// booking already holds from it. Mock only those.
 vi.mock("~/database/db.server", () => ({
   db: {
     booking: { findFirst: vi.fn() },
     asset: { findMany: vi.fn() },
+    bookingAsset: { findMany: vi.fn() },
   },
 }));
 
-// why: auth + entitlement are out of scope for these shape tests — stub them
-// to resolve to a fixed user + org. The real module is otherwise preserved.
+// why: rate limiting is infra, not the behaviour under test — no-op it.
+vi.mock("~/utils/rate-limit.server", () => ({
+  enforceUserRateLimit: vi.fn().mockResolvedValue(undefined),
+}));
+
+// why: auth, the permission gate and entitlement are out of scope — stub them
+// to resolve to a fixed user + org, and keep `getMobileUserContext` a spy so a
+// test can pick the caller's role. The real module is otherwise preserved.
 vi.mock("~/modules/api/mobile-auth.server", async () => {
   const actual = await vi.importActual<typeof MobileAuthServer>(
     "~/modules/api/mobile-auth.server"
@@ -46,7 +60,9 @@ vi.mock("~/modules/api/mobile-auth.server", async () => {
     ...actual,
     requireMobileAuth: vi.fn(),
     requireOrganizationAccess: vi.fn(),
+    requireMobilePermission: vi.fn(),
     assertMobileCanUseBookings: vi.fn(),
+    getMobileUserContext: vi.fn(),
   };
 });
 
@@ -61,6 +77,7 @@ const assetFindManyMock = vi.mocked(db.asset.findMany);
 const requireMobileAuthMock = vi.mocked(requireMobileAuth);
 const requireOrganizationAccessMock = vi.mocked(requireOrganizationAccess);
 const availabilityBatchMock = vi.mocked(getAssetAvailabilityBatch);
+const bookingAssetFindManyMock = vi.mocked(db.bookingAsset.findMany);
 
 const CALLER_ID = "user-self";
 const ORG_ID = "org-1";
@@ -96,12 +113,19 @@ beforeEach(() => {
   } as Awaited<ReturnType<typeof requireMobileAuth>>);
   requireOrganizationAccessMock.mockResolvedValue(ORG_ID);
 
+  vi.mocked(getMobileUserContext).mockResolvedValue(
+    mobileUserContext({ roles: [OrganizationRoles.ADMIN] })
+  );
+
   bookingFindFirstMock.mockResolvedValue({
     id: BOOKING_ID,
     from: BOOKING_FROM,
     to: BOOKING_TO,
+    custodianUserId: "someone-else",
+    custodianTeamMember: { userId: "someone-else" },
   } as never);
   assetFindManyMock.mockResolvedValue([]);
+  bookingAssetFindManyMock.mockResolvedValue([]);
   availabilityBatchMock.mockResolvedValue(new Map());
 });
 
@@ -137,6 +161,7 @@ describe("GET /api/mobile/bookings/asset-availability", () => {
           bookable: 7,
           reserved: 3,
           inCustody: 0,
+          bookedQuantity: null,
         },
         {
           assetId: "asset-2",
@@ -144,6 +169,7 @@ describe("GET /api/mobile/bookings/asset-availability", () => {
           bookable: 0,
           reserved: 2,
           inCustody: 2,
+          bookedQuantity: null,
         },
       ],
     });
@@ -215,5 +241,72 @@ describe("GET /api/mobile/bookings/asset-availability", () => {
     expect(response.init?.status).toBe(404);
     expect(assetFindManyMock).not.toHaveBeenCalled();
     expect(availabilityBatchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports what the booking's standalone slice already holds", async () => {
+    assetFindManyMock.mockResolvedValue([{ id: "asset-1" }] as never);
+    bookingAssetFindManyMock.mockResolvedValue([
+      { assetId: "asset-1", quantity: 5 },
+    ] as never);
+
+    const response = await loader(
+      makeArgs({ bookingId: BOOKING_ID, assetIds: "asset-1" })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.data).toMatchObject({
+      availability: [{ assetId: "asset-1", bookedQuantity: 5 }],
+    });
+    expect(bookingAssetFindManyMock).toHaveBeenCalledWith({
+      where: {
+        bookingId: BOOKING_ID,
+        assetKitId: null,
+        assetId: { in: ["asset-1"] },
+      },
+      select: { assetId: true, quantity: true },
+    });
+  });
+
+  it("gates on booking read permission", async () => {
+    await loader(makeArgs({ bookingId: BOOKING_ID, assetIds: "asset-1" }));
+
+    expect(requireMobilePermission).toHaveBeenCalledWith(
+      expect.objectContaining({ entity: "booking", action: "read" })
+    );
+  });
+
+  it("404s on a colleague's booking for a caller who sees only their own", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+
+    const response = await loader(
+      makeArgs({ bookingId: BOOKING_ID, assetIds: "asset-1" })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status).toBe(404);
+    expect(availabilityBatchMock).not.toHaveBeenCalled();
+    expect(bookingAssetFindManyMock).not.toHaveBeenCalled();
+  });
+
+  it("answers a restricted caller about a booking they hold", async () => {
+    vi.mocked(getMobileUserContext).mockResolvedValue(
+      mobileUserContext({ roles: [OrganizationRoles.SELF_SERVICE] })
+    );
+    bookingFindFirstMock.mockResolvedValue({
+      id: BOOKING_ID,
+      from: BOOKING_FROM,
+      to: BOOKING_TO,
+      custodianUserId: CALLER_ID,
+      custodianTeamMember: { userId: CALLER_ID },
+    } as never);
+
+    const response = await loader(
+      makeArgs({ bookingId: BOOKING_ID, assetIds: "asset-1" })
+    );
+
+    assertIsDataWithResponseInit(response);
+    expect(response.init?.status ?? 200).toBe(200);
   });
 });

@@ -12,8 +12,10 @@ import {
 } from "~/modules/api/mobile-auth.server";
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import {
-  noteBookedQuantityChange,
-  setStandaloneBookedQuantity,
+  assertBookedQuantitiesChangeable,
+  noteBookedQuantityChanges,
+  setStandaloneBookedQuantities,
+  type BookedQuantityChange,
 } from "~/modules/booking/booked-quantity.server";
 import {
   addScannedAssetsToBooking,
@@ -384,6 +386,28 @@ export async function action({ request }: ActionFunctionArgs) {
       );
     });
 
+    const window =
+      booking.from && booking.to
+        ? { from: booking.from, to: booking.to }
+        : null;
+    const resizes: BookedQuantityChange[] = slicesToResize.map((slice) => ({
+      bookingAssetId: slice.id,
+      assetId: slice.assetId,
+      quantity: quantities[slice.assetId],
+      assetTitle: slice.asset.title,
+      unitOfMeasure: slice.asset.unitOfMeasure ?? null,
+    }));
+
+    // Refuse a resize that cannot pass BEFORE anything is written, so a scan
+    // never inserts its new assets and then fails on a held one. The locked
+    // check below still decides; this only closes the common case.
+    await assertBookedQuantitiesChangeable({
+      bookingId,
+      organizationId,
+      window,
+      changes: resizes,
+    });
+
     await addScannedAssetsToBooking({
       assetIds: standaloneAssetIds,
       kitSlices,
@@ -396,35 +420,22 @@ export async function action({ request }: ActionFunctionArgs) {
       access,
     });
 
-    const window =
-      booking.from && booking.to
-        ? { from: booking.from, to: booking.to }
-        : null;
-    const resizedAssetIds = new Set<string>();
-    for (const slice of slicesToResize) {
-      const quantity = quantities[slice.assetId];
-      const { previousQuantity } = await setStandaloneBookedQuantity({
-        bookingAssetId: slice.id,
-        assetId: slice.assetId,
-        bookingId,
-        organizationId,
-        window,
-        quantity,
-        assetTitle: slice.asset.title,
-        unitOfMeasure: slice.asset.unitOfMeasure ?? null,
-      });
-      await noteBookedQuantityChange({
-        userId: user.id,
-        organizationId,
-        bookingId,
-        bookingName: booking.name,
-        assetId: slice.assetId,
-        assetTitle: slice.asset.title,
-        previousQuantity,
-        quantity,
-      });
-      resizedAssetIds.add(slice.assetId);
-    }
+    // Every resize in one transaction: all of them land or none does.
+    const appliedResizes = await setStandaloneBookedQuantities({
+      bookingId,
+      organizationId,
+      window,
+      changes: resizes,
+    });
+    await noteBookedQuantityChanges({
+      userId: user.id,
+      organizationId,
+      bookingId,
+      bookingName: booking.name,
+      changes: appliedResizes,
+      source: "mobile",
+    });
+    const resizedAssetIds = new Set(appliedResizes.map((c) => c.assetId));
 
     /**
      * What the scan did NOT put on the booking, because the booking already

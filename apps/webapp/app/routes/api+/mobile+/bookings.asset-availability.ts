@@ -3,11 +3,19 @@ import { z } from "zod";
 import { db } from "~/database/db.server";
 import {
   requireMobileAuth,
+  requireMobilePermission,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError, ShelfError } from "~/utils/error";
+import {
+  PermissionAction,
+  PermissionEntity,
+} from "~/utils/permissions/permission.data";
+import { enforceUserRateLimit } from "~/utils/rate-limit.server";
 
 /**
  * GET /api/mobile/bookings/asset-availability
@@ -27,10 +35,15 @@ import { makeShelfError, ShelfError } from "~/utils/error";
  * `bookable` is computed by the shared `getAssetAvailabilityBatch` with the
  * booking itself excluded, so a booking that already holds units of the asset
  * is offered those units back rather than seeing them as taken by itself.
- * Asset ids outside the workspace are dropped, not reported.
+ * `bookedQuantity` is what the booking's standalone slice already holds of the
+ * asset (null when it holds none), so a re-scan can open the quantity sheet on
+ * the current total instead of on 1.
+ *
+ * Asset ids outside the workspace are dropped, not reported. A booking the
+ * caller may not see answers 404, exactly like one in another workspace.
  *
  * Query: ?orgId & bookingId & assetIds=<id>,<id>,...
- * Response: { availability: Array<{ assetId, total, bookable, reserved, inCustody }> }
+ * Response: { availability: Array<{ assetId, total, bookable, reserved, inCustody, bookedQuantity }> }
  *
  * @see {@link file://./../bookings.$bookingId.adjust-asset-quantity.ts} the web cap
  * @see {@link file://./bookings.available-assets.ts} the picker's per-row counterpart
@@ -59,7 +72,14 @@ const MAX_ASSET_IDS = 100;
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
+    await enforceUserRateLimit(user.id, "bulk");
     const organizationId = await requireOrganizationAccess(request, user.id);
+    await requireMobilePermission({
+      userId: user.id,
+      organizationId,
+      entity: PermissionEntity.booking,
+      action: PermissionAction.read,
+    });
     await assertMobileCanUseBookings(organizationId);
 
     const url = new URL(request.url);
@@ -79,12 +99,20 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const { bookingId } = parsed.data;
     const assetIds = parsed.data.assetIds.slice(0, MAX_ASSET_IDS);
 
-    // Org-scoped booking lookup — a foreign-org booking id 404s here.
+    // Org-scoped booking lookup: a foreign-org booking id 404s here, and so
+    // does one the caller may not see, so its holdings cannot be probed.
     const booking = await db.booking.findFirst({
       where: { id: bookingId, organizationId },
-      select: { id: true, from: true, to: true },
+      select: {
+        id: true,
+        from: true,
+        to: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
+      },
     });
-    if (!booking) {
+    const { access } = await getMobileUserContext(user.id, organizationId);
+    if (!booking || !canSeeBooking({ access, booking, userId: user.id })) {
       return data(
         { error: { message: "Booking not found in this workspace." } },
         { status: 404 }
@@ -105,14 +133,29 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
     const ownedIds = ownedQtyAssets.map((a) => a.id);
 
-    const availabilityByAsset = await getAssetAvailabilityBatch(ownedIds, {
-      organizationId,
-      window:
-        booking.from && booking.to
-          ? { from: booking.from, to: booking.to }
-          : null,
-      excludeBookingId: booking.id,
-    });
+    const [availabilityByAsset, bookedRows] = await Promise.all([
+      getAssetAvailabilityBatch(ownedIds, {
+        organizationId,
+        window:
+          booking.from && booking.to
+            ? { from: booking.from, to: booking.to }
+            : null,
+        excludeBookingId: booking.id,
+      }),
+      ownedIds.length > 0
+        ? db.bookingAsset.findMany({
+            where: {
+              bookingId: booking.id,
+              assetKitId: null,
+              assetId: { in: ownedIds },
+            },
+            select: { assetId: true, quantity: true },
+          })
+        : Promise.resolve([]),
+    ]);
+    const bookedByAssetId = new Map(
+      bookedRows.map((row) => [row.assetId, row.quantity])
+    );
 
     return data({
       availability: ownedIds.map((assetId) => {
@@ -123,6 +166,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
           bookable: a?.bookable ?? 0,
           reserved: a?.reserved ?? 0,
           inCustody: a?.inCustody ?? 0,
+          bookedQuantity: bookedByAssetId.get(assetId) ?? null,
         };
       }),
     });

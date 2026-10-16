@@ -11,8 +11,10 @@
  * Quantity-tracked assets book a NUMBER of units, not a scan per unit — the
  * web picker's rule. Selecting one opens the quantity sheet, capped at the
  * units the booking's window has free (`availableQuantity`, this booking
- * excluded), defaulting to 1 as the web input does. The chosen amounts travel
- * with the add call as `quantities`; the server re-checks them.
+ * excluded), opening on what the booking already holds or else 1. The chosen
+ * amounts travel with the add call as `quantities`, each one the booking's new
+ * total; the server re-checks them. A quantity-tracked row with nothing free
+ * is shown but cannot be selected.
  *
  * The non-availability path (scan a physical label) lives on the scanner; this
  * is the "browse and pick" complement. Reached via
@@ -50,6 +52,10 @@ import { useTheme } from "@/lib/theme-context";
 import { createStyles } from "@/lib/create-styles";
 import { QuantityInputSheet } from "@/components/quantity-input-sheet";
 import {
+  bookingQuantityCap,
+  bookingQuantityDefault,
+} from "@/lib/booking-quantity";
+import {
   canCancelModelReservation,
   modelReservationBounds,
 } from "@/lib/booking-model-reservation";
@@ -72,12 +78,15 @@ const isQuantityTracked = (item: AvailableAsset) =>
   item.type === "QUANTITY_TRACKED";
 
 /**
- * Upper bound for the quantity sheet: the units free in the window (this
- * booking excluded), which is what the web picker caps its input at. Falls
- * back to the pool for a server that predates `availableQuantity`.
+ * The most units the booking may hold of a row; 0 when it can take none.
+ * See {@link bookingQuantityCap}.
  */
 const qtyCap = (item: AvailableAsset) =>
-  Math.max(1, item.availableQuantity ?? item.quantity ?? 1);
+  bookingQuantityCap({
+    available: item.availableQuantity,
+    booked: item.bookedQuantity,
+    pool: item.quantity,
+  });
 
 /**
  * The picker screen itself: three tabs over one paginated loader.
@@ -363,7 +372,7 @@ export default function AddBookingAssetsScreen() {
       // A quantity-tracked asset is selected THROUGH the sheet: the amount is
       // part of the choice, so the row only joins the selection on confirm.
       if (isQuantityTracked(item)) {
-        setActiveQtyAsset(item);
+        if (qtyCap(item) > 0) setActiveQtyAsset(item);
         return;
       }
       setSelectedAssetIds((prev) => new Set(prev).add(item.id));
@@ -511,12 +520,19 @@ export default function AddBookingAssetsScreen() {
       const qtyTracked = isQuantityTracked(item);
       const bookedQty = qtyTracked ? quantities[item.id] : undefined;
       const unit = item.unitOfMeasure || "units";
+      // Nothing free for these dates and none held: shown, never selectable.
+      const unavailable = qtyTracked && !selected && qtyCap(item) <= 0;
       return (
         <TouchableOpacity
-          style={[styles.row, selected && styles.rowSelected]}
+          style={[
+            styles.row,
+            selected && styles.rowSelected,
+            unavailable && styles.rowUnavailable,
+          ]}
           onPress={() => toggleAsset(item)}
+          disabled={unavailable}
           accessibilityRole="button"
-          accessibilityState={{ selected }}
+          accessibilityState={{ selected, disabled: unavailable }}
           accessibilityLabel={`${item.title}${
             item.displayCode
               ? `, ${item.displayCode.label} ${item.displayCode.value}`
@@ -536,6 +552,8 @@ export default function AddBookingAssetsScreen() {
               ? bookedQty
                 ? `, selected, ${bookedQty} ${unit}, tap to deselect`
                 : ", selected"
+              : unavailable
+              ? ", none free for these dates"
               : qtyTracked
               ? ", tap to choose a quantity"
               : ""
@@ -583,11 +601,15 @@ export default function AddBookingAssetsScreen() {
                 the operator knows a number is coming, not a unit scan. */}
             {qtyTracked ? (
               <Text style={styles.modelMeta} numberOfLines={1}>
-                Qty tracked · {item.availableQuantity ?? 0} of{" "}
-                {item.quantity ?? 0} {unit} available
-                {item.bookedQuantity
-                  ? ` · ${item.bookedQuantity} booked here`
-                  : ""}
+                {unavailable
+                  ? "Qty tracked · none free for these dates"
+                  : `Qty tracked · ${item.availableQuantity ?? 0} of ${
+                      item.quantity ?? 0
+                    } ${unit} available${
+                      item.bookedQuantity
+                        ? ` · ${item.bookedQuantity} booked here`
+                        : ""
+                    }`}
               </Text>
             ) : null}
           </View>
@@ -896,12 +918,11 @@ export default function AddBookingAssetsScreen() {
               } ${activeQtyAsset.unitOfMeasure || "units"} available`
             : undefined
         }
-        max={activeQtyAsset ? qtyCap(activeQtyAsset) : 1}
+        max={activeQtyAsset ? Math.max(1, qtyCap(activeQtyAsset)) : 1}
         defaultValue={
           activeQtyAsset
             ? quantities[activeQtyAsset.id] ??
-              activeQtyAsset.bookedQuantity ??
-              1
+              bookingQuantityDefault({ booked: activeQtyAsset.bookedQuantity })
             : 1
         }
         unitOfMeasure={activeQtyAsset?.unitOfMeasure ?? null}
@@ -1020,6 +1041,9 @@ const useStyles = createStyles((colors, shadows) => ({
     borderWidth: 1,
     borderColor: colors.border,
     gap: spacing.sm,
+  },
+  rowUnavailable: {
+    opacity: 0.5,
   },
   rowSelected: {
     borderColor: colors.primary,

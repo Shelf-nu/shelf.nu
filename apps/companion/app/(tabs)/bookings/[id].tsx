@@ -107,6 +107,10 @@ import {
   type SelectionCounts,
 } from "@/lib/booking-kit-rows";
 import { filterBookingAssets } from "@/lib/booking-search";
+import {
+  bookingQuantityCap,
+  canEditBookedQuantity,
+} from "@/lib/booking-quantity";
 
 /**
  * Segment colours for the booking lifecycle progress bar. Fixed hues matched to
@@ -1038,12 +1042,19 @@ function BookingDetailScreen({ id }: { id: string }) {
         booking.id,
         [item.id]
       );
-      const bookable = data?.availability?.[0]?.bookable;
+      const facts = data?.availability?.[0];
       setQtyEdit({
         assetId: item.id,
         title: item.title,
         current,
-        max: Math.max(1, bookable ?? current),
+        max: Math.max(
+          1,
+          bookingQuantityCap({
+            available: facts?.bookable,
+            booked: current,
+            pool: current,
+          })
+        ),
         unitOfMeasure: item.unitOfMeasure ?? null,
       });
     },
@@ -1229,14 +1240,12 @@ function BookingDetailScreen({ id }: { id: string }) {
         !inKit && isBookingAssetSelectable(item, selectMode, checkedInAssetIds);
 
       // Web parity: the booked amount of a standalone quantity-tracked slice
-      // can be changed under the same rule that lets items be added. A
-      // kit-driven slice takes its amount from the kit.
+      // that has not gone out can be changed under the same rule that lets
+      // items be added. See `canEditBookedQuantity` for the row rules.
       const canEditQuantity =
-        item.type === "QUANTITY_TRACKED" &&
+        canEditBookedQuantity(item) &&
         !selectMode &&
         !inKit &&
-        !item.kit &&
-        !(item.slices && item.slices.length > 1) &&
         !!booking &&
         canAddItemsToBooking(access, booking.status, currentOrg?.roles);
 

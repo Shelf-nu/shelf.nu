@@ -11,7 +11,7 @@ import {
 import { parseMobileBody } from "~/modules/api/mobile-body.server";
 import { isQuantityTracked } from "~/modules/asset/utils";
 import {
-  noteBookedQuantityChange,
+  noteBookedQuantityChanges,
   setStandaloneBookedQuantity,
 } from "~/modules/booking/booked-quantity.server";
 import { validateBookingOwnership } from "~/utils/booking-authorization.server";
@@ -35,6 +35,7 @@ import { enforceUserRateLimit } from "~/utils/rate-limit.server";
  * - A reduction always passes, even when the pool is already over-committed
  *   by other bookings; only an increase is measured against what is free in
  *   the booking's own `[from, to]` window, with this booking excluded.
+ * - A slice whose units have been checked out keeps its amount (400).
  * - The asset row is locked for the read-then-write, so two concurrent edits
  *   cannot both pass the guard and oversubscribe the pool.
  * - The status rule is the add-items one (`canManageBookingItems`):
@@ -183,15 +184,20 @@ export async function action({ request }: ActionFunctionArgs) {
       unitOfMeasure: bookingAsset.asset.unitOfMeasure ?? null,
     });
 
-    await noteBookedQuantityChange({
+    await noteBookedQuantityChanges({
       userId: user.id,
       organizationId,
       bookingId,
       bookingName: bookingAsset.booking.name,
-      assetId,
-      assetTitle: bookingAsset.asset.title,
-      previousQuantity,
-      quantity,
+      changes: [
+        {
+          assetId,
+          assetTitle: bookingAsset.asset.title,
+          previousQuantity,
+          quantity,
+        },
+      ],
+      source: "mobile",
     });
 
     return data({ success: true, quantity, previousQuantity });

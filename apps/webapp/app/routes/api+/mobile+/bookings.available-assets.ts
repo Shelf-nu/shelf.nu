@@ -21,6 +21,7 @@ import {
   requireMobileAuth,
   requireOrganizationAccess,
   assertMobileCanUseBookings,
+  getMobileUserContext,
 } from "~/modules/api/mobile-auth.server";
 import { getAssetAvailabilityBatch } from "~/modules/asset/availability.server";
 import {
@@ -36,6 +37,7 @@ import {
   resolveDisplayCode,
   labelForPreference,
 } from "~/modules/barcode/display";
+import { canSeeBooking } from "~/utils/booking-authorization.server";
 import { makeShelfError } from "~/utils/error";
 
 /**
@@ -72,14 +74,57 @@ const MOBILE_PICKER_MAX_PAGE_SIZE = 100;
  * `unitOfMeasure` and `availableQuantity`: the units free to book in the
  * requested window, computed by the same `getAssetAvailabilityBatch` the web
  * picker uses, excluding the booking named in `unhideAssetsBookigIds` so its
- * own reservation does not shrink what it may re-book. A quantity-tracked
- * asset with nothing free is dropped from the page, exactly as the web picker
- * drops it — the phone then never offers a row the server would refuse.
- * `bookedQuantity` is what the excluded booking already holds of the row.
+ * own reservation does not shrink what it may re-book. `bookedQuantity` is what
+ * that booking already holds of the row. Both use the named booking only when
+ * the caller may see it; otherwise availability excludes nothing and
+ * `bookedQuantity` is null, so another member's holdings cannot be probed.
+ *
+ * A quantity-tracked asset with nothing free stays on the page with
+ * `availableQuantity: 0`, and the app shows it as unavailable. Rows are never
+ * removed after the service paginates: `page`, `totalCount` and `totalPages`
+ * describe the rows the service returned, so a page this route thinned could
+ * come back short or empty while later pages still hold bookable assets.
+ *
  * INDIVIDUAL rows report `type: "INDIVIDUAL"` and null for the counts.
  *
  * @see {@link file://../../_layout+/bookings.$bookingId.overview.manage-assets.tsx} web twin
  */
+/**
+ * The booking named by the picker, when the caller may see it.
+ *
+ * Its own units are excluded from availability and reported as
+ * `bookedQuantity`, which reveals what it holds, so a booking the caller may
+ * not see (or that is in another workspace) is treated as not named.
+ *
+ * @returns the booking id, or `undefined` when absent or not visible
+ */
+async function resolveVisibleBookingId({
+  bookingId,
+  organizationId,
+  userId,
+}: {
+  bookingId: string | undefined;
+  organizationId: string;
+  userId: string;
+}): Promise<string | undefined> {
+  const id = bookingId?.trim();
+  if (!id) return undefined;
+  const [booking, { access }] = await Promise.all([
+    db.booking.findFirst({
+      where: { id, organizationId },
+      select: {
+        id: true,
+        custodianUserId: true,
+        custodianTeamMember: { select: { userId: true } },
+      },
+    }),
+    getMobileUserContext(userId, organizationId),
+  ]);
+  return booking && canSeeBooking({ access, booking, userId })
+    ? booking.id
+    : undefined;
+}
+
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const { user } = await requireMobileAuth(request);
@@ -93,21 +138,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // self-service custody — any bookable asset is selectable, and the
     // self-service restriction is enforced on the mutation, not the read.
     /**
-     * The companion's picker has NO pagination UI — `add-assets.tsx` renders a
-     * FlatList with no `onEndReached` and no page state, so whatever this one
-     * response contains is the entire set the operator can ever browse. The
-     * client never sends a `per_page`, so the size comes from
-     * `updateCookieWithPerPage`, whose default is 20 for a request with no
-     * cookie — and mobile never sends one. Every live 1.1.0 install was
-     * therefore capped at 20 assets: a workspace holding exactly 20
-     * tablecloths could reach nothing else except via search.
-     *
-     * Until the app ships real infinite scroll (which needs a store release,
-     * and there is no OTA channel), request the service's maximum page size
-     * whenever the client didn't ask for a specific one. This reaches existing
-     * installs with a plain webapp deploy. Rebuilding the params and passing
-     * them as `filters` keeps every other query param (booking window,
-     * hideUnavailable, search) intact while overriding only the page size.
+     * A client that sends no `per_page` reads a single response as the whole
+     * list, so it gets the service's maximum page size rather than the cookie
+     * default of 20. Clients that page send their own size. Passing the
+     * rebuilt params as `filters` keeps every other query param (booking
+     * window, hideUnavailable, search) intact while overriding only the size.
      */
     const pickerParams = new URL(request.url).searchParams;
     if (!pickerParams.get("per_page")) {
@@ -175,9 +210,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
     // not count against what it may re-book.
     const bookingFrom = pickerParams.get("bookingFrom");
     const bookingTo = pickerParams.get("bookingTo");
-    const excludeBookingId =
-      pickerParams.get("unhideAssetsBookigIds")?.split(",")[0]?.trim() ||
-      undefined;
+    const excludeBookingId = await resolveVisibleBookingId({
+      bookingId: pickerParams.get("unhideAssetsBookigIds")?.split(",")[0],
+      organizationId,
+      userId: user.id,
+    });
     const qtyAssetIds = codeRows
       .filter((r) => r.type === "QUANTITY_TRACKED")
       .map((r) => r.id);
@@ -247,9 +284,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
             ),
           };
         })(),
-        // Kit linkage moved to the AssetKit pivot (quantities restructure);
-        // the pivot row's `kitId` FK is the legacy single-kit id the companion
-        // contract expects.
+        // The companion expects one kit id per asset: the first `AssetKit`
+        // membership's `kitId`.
         kitId: asset.assetKits?.[0]?.kitId ?? null,
         // The label the operator reads off the physical tag (e.g.
         // "QR Code ID": "w7l4c42u01"). Null when the asset has no resolvable
@@ -276,13 +312,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     });
 
     return data({
-      // A quantity-tracked asset with no free unit in the window is not
-      // bookable; hide it like the web picker does instead of offering a row
-      // whose confirm can only fail.
-      assets: rows.filter(
-        (row) =>
-          row.type !== "QUANTITY_TRACKED" || (row.availableQuantity ?? 0) > 0
-      ),
+      assets: rows,
       page,
       perPage,
       totalCount: totalAssets,

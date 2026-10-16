@@ -117,6 +117,10 @@ import type { IoniconName } from "@/components/scanner/scan-result-card";
 import { ActionPills, ModeDots } from "@/components/scanner/action-pills";
 import { ActionPillsCoachmark } from "@/components/scanner/action-pills-coachmark";
 import { BatchDrawer } from "@/components/scanner/batch-drawer";
+import {
+  bookingQuantityCap,
+  bookingQuantityDefault,
+} from "@/lib/booking-quantity";
 
 // ── Action Types ────────────────────────────────────────
 
@@ -222,6 +226,11 @@ type ScannedItem = {
    */
   bookingQuantity?: number;
   bookingQuantityMax?: number;
+  /**
+   * Booking add mode: what the booking's standalone slice already holds of
+   * the asset. `bookingQuantity` replaces it, so the sheet opens on it.
+   */
+  bookingQuantityHeld?: number;
   unitOfMeasure?: string | null;
 };
 
@@ -2138,6 +2147,8 @@ function ScannerContent() {
    * Open the quantity sheet for a freshly scanned quantity-tracked asset.
    * The cap comes from the server so the sheet cannot offer units the add
    * call would refuse; the pool size is the fallback for an older server.
+   * The number chosen becomes the booking's total for the asset, so an asset
+   * the booking already holds opens on what it holds.
    */
   const promptQuantityForScan = async (
     item: ScannedItem,
@@ -2149,8 +2160,14 @@ function ScannerContent() {
       bookingId,
       [item.targetId]
     );
-    const bookable = data?.availability?.[0]?.bookable ?? poolQuantity ?? 0;
-    if (bookable <= 0) {
+    const facts = data?.availability?.[0];
+    const held = facts?.bookedQuantity ?? undefined;
+    const cap = bookingQuantityCap({
+      available: facts?.bookable,
+      booked: held,
+      pool: poolQuantity,
+    });
+    if (cap <= 0) {
       flashFrame("error");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       setScanResult({
@@ -2161,8 +2178,8 @@ function ScannerContent() {
       return;
     }
     setQtyPrompt({
-      item: { ...item, bookingQuantityMax: bookable },
-      max: bookable,
+      item: { ...item, bookingQuantityMax: cap, bookingQuantityHeld: held },
+      max: cap,
       editing: false,
     });
   };
@@ -2188,7 +2205,9 @@ function ScannerContent() {
     setScanResult({
       type: "success",
       title: item.title,
-      message: `Added ${quantity} ${item.unitOfMeasure || "units"} to list`,
+      message: item.bookingQuantityHeld
+        ? `Booking will hold ${quantity} ${item.unitOfMeasure || "units"}`
+        : `Added ${quantity} ${item.unitOfMeasure || "units"} to list`,
     });
     setTimeout(() => setScanResult(null), 1200);
   };
@@ -3450,14 +3469,29 @@ function ScannerContent() {
                 qtyPrompt.editing ? "edit" : "add"
               }`}
               visible
+              // The number is the booking's new total, so an asset it already
+              // holds opens on that amount and says so.
               title={
-                qtyPrompt.editing ? "Change quantity" : "How many to book?"
+                qtyPrompt.item.bookingQuantityHeld
+                  ? "Units on this booking"
+                  : qtyPrompt.editing
+                  ? "Change quantity"
+                  : "How many to book?"
               }
-              subtitle={`${qtyPrompt.item.title} · ${qtyPrompt.max} ${
+              subtitle={`${qtyPrompt.item.title} · ${
+                qtyPrompt.item.bookingQuantityHeld
+                  ? `${qtyPrompt.item.bookingQuantityHeld} booked now, up to `
+                  : ""
+              }${qtyPrompt.max} ${
                 qtyPrompt.item.unitOfMeasure || "units"
               } available`}
               max={qtyPrompt.max}
-              defaultValue={qtyPrompt.item.bookingQuantity ?? 1}
+              defaultValue={
+                qtyPrompt.item.bookingQuantity ??
+                bookingQuantityDefault({
+                  booked: qtyPrompt.item.bookingQuantityHeld,
+                })
+              }
               unitOfMeasure={qtyPrompt.item.unitOfMeasure ?? null}
               confirmLabel={qtyPrompt.editing ? "Update" : "Add"}
               onSubmit={handleQtyPromptSubmit}
