@@ -9,7 +9,7 @@ export function NameField({
   disabled,
   error,
   onChange,
-  autoFocus = true,
+  focusOnMount = true,
 }: {
   name: string | undefined;
   fieldName?: string;
@@ -23,9 +23,9 @@ export function NameField({
    * not take keystrokes (the `[` / `]` record shortcuts, or a stray key that
    * would edit the name).
    */
-  autoFocus?: boolean;
+  focusOnMount?: boolean;
 }) {
-  const inputRef = useAutoFocus<HTMLInputElement>({ when: autoFocus });
+  const inputRef = useAutoFocus<HTMLInputElement>({ when: focusOnMount });
   return (
     <FormRow
       rowLabel={"Name"}
