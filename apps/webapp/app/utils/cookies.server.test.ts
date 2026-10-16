@@ -371,7 +371,7 @@ describe("expireListPreferenceCookies", () => {
   });
 });
 
-const { initializePerPageCookieOnLayout, updateCookieWithPerPage, userPrefs } =
+const { initializePerPageCookieOnLayout, updateCookieWithPerPage } =
   await import("./cookies.server");
 
 /**
