@@ -12,6 +12,7 @@
 
 import { renderHook } from "@testing-library/react";
 import Cookies from "js-cookie";
+import { createCookie } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // why: renderHook re-invokes the hook body on every render, so instead of a
@@ -148,7 +149,7 @@ describe("destroyCookieValues", () => {
     Cookies.remove("org-1_bookingFilter_v2", { path: "/" });
   });
 
-  it("rewrites the cookie without the typed search", () => {
+  it("rewrites the cookie without the typed search", async () => {
     // The page's current filters include a search; removing one column
     // filter rewrites the cookie from them, and the search must not ride
     // along into the remembered copy.
@@ -159,7 +160,9 @@ describe("destroyCookieValues", () => {
       "/"
     );
 
-    expect(Cookies.get("org-1_bookingFilter_v2")).toBe("status=ONGOING");
+    expect(await rememberedByServer("org-1_bookingFilter_v2")).toBe(
+      "status=ONGOING"
+    );
   });
 
   it("deletes the cookie when only a search would be left", () => {
@@ -173,6 +176,25 @@ describe("destroyCookieValues", () => {
     );
 
     expect(Cookies.get("org-1_bookingFilter_v2")).toBeUndefined();
+  });
+});
+
+describe("a filter cookie the browser rewrites", () => {
+  beforeEach(() => {
+    Cookies.remove("org-1_assetFilter_v2", { path: "/" });
+  });
+
+  it("is read back by the server with every remaining filter", async () => {
+    destroyCookieValues(
+      "org-1_assetFilter_v2",
+      ["category"],
+      new URLSearchParams("status=AVAILABLE&tag=caf%C3%A9&category=c-1"),
+      "/"
+    );
+
+    expect(await rememberedByServer("org-1_assetFilter_v2")).toBe(
+      "status=AVAILABLE&tag=caf%C3%A9"
+    );
   });
 });
 
@@ -195,3 +217,13 @@ describe("what a list remembers", () => {
     expect(current.toString()).toBe(params);
   });
 });
+
+/**
+ * Reads a filter cookie the way the list loaders do: the raw Cookie header,
+ * parsed by react-router's `createCookie`.
+ *
+ * @param name - The filter cookie name
+ */
+function rememberedByServer(name: string) {
+  return createCookie(name).parse(document.cookie);
+}

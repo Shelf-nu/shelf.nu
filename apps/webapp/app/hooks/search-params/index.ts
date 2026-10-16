@@ -318,6 +318,19 @@ export function deleteKeysInSearchParams(
 }
 
 /**
+ * Encodes a filter cookie value the way the server's `createCookie` writes
+ * and reads it: JSON, as UTF-8 bytes, in base64. A raw query string would not
+ * decode on the server, which then restores no filters at all.
+ *
+ * @param value - The params string to remember
+ * @returns The cookie value the server can parse back to `value`
+ */
+export function encodeFilterCookieValue(value: string) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  return btoa(String.fromCharCode(...bytes));
+}
+
+/**
  * Function to delete specific keys from the cookie search parameters and update the cookie.
  *
  * @param {string} cookieName - The name of the cookie to update.
@@ -360,7 +373,7 @@ export function destroyCookieValues(
     Cookies.remove(cookieName, { path: "/bookings", ...cookieOptions });
     Cookies.remove(cookieName, { path: "/kits", ...cookieOptions });
   } else {
-    Cookies.set(cookieName, finalCookieValue, {
+    Cookies.set(cookieName, encodeFilterCookieValue(finalCookieValue), {
       path,
       ...cookieOptions,
       expires: 365, // 1 year
