@@ -521,8 +521,8 @@ export function ImportConfirmDialog({
                     }>
                   ).map((conflict) => (
                     <tr
-                      // Compose a stable key from the conflict fields —
-                      // the backend can surface the same asset twice
+                      // Compose a stable key from the conflict fields. The
+                      // backend can surface the same asset twice
                       // for different issues, so include `issue` too.
                       key={`${conflict.asset}-${conflict.kit}-${conflict.custodian}-${conflict.issue}`}
                       className="border-b"

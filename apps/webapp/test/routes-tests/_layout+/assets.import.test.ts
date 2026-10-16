@@ -213,6 +213,7 @@ describe("assets import route", () => {
           intent: "content",
           mapping: JSON.stringify(withNewField),
           mappingChanged: "1",
+          mappingNewCustomFields: "1",
         })
       );
 

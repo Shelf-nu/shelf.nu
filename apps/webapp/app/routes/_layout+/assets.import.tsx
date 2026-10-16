@@ -55,18 +55,23 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
     await assertUserCanImportAssets({ organizationId, organizations });
     gatedOrganizationId = organizationId;
 
-    const { intent, mapping, mappingChanged } = parseData(
-      await request.clone().formData(),
-      z.object({
-        intent: z.enum(["analyze", "content"]),
-        /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
-        mapping: z.string().max(200_000).optional(),
-        /** Columns the user changed in the review (analytics only). */
-        mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
-          z.number().int().min(0).max(1000).optional()
-        ),
-      })
-    );
+    const { intent, mapping, mappingChanged, mappingNewCustomFields } =
+      parseData(
+        await request.clone().formData(),
+        z.object({
+          intent: z.enum(["analyze", "content"]),
+          /** JSON of the reviewed ColumnMapping[]; absent on the legacy path. */
+          mapping: z.string().max(200_000).optional(),
+          /** Columns the user changed in the review (analytics only). */
+          mappingChanged: optionalNumberFromString({ blank: undefined }).pipe(
+            z.number().int().min(0).max(1000).optional()
+          ),
+          /** Custom fields the reviewed mapping creates (analytics only). */
+          mappingNewCustomFields: optionalNumberFromString({
+            blank: undefined,
+          }).pipe(z.number().int().min(0).max(1000).optional()),
+        })
+      );
 
     const csvData = await csvDataFromRequest({ request });
     if (csvData.length < 2) {
@@ -142,11 +147,6 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
       const columns = parseMapping(mapping);
       mappedCsvData = applyMapping(csvData, columns);
 
-      const existingNames = new Set(
-        (await loadExistingCustomFields(organizationId)).map((field) =>
-          field.name.trim().toLowerCase()
-        )
-      );
       captureServerEvent({
         distinctId: userId,
         event: "import_mapping_confirmed",
@@ -154,11 +154,7 @@ export const action = async ({ context, request }: ActionFunctionArgs) => {
           organizationId,
           columns: columns.length,
           changedByUser: mappingChanged ?? 0,
-          newCustomFields: columns.filter(
-            ({ target }) =>
-              target.kind === "customField" &&
-              !existingNames.has(target.name.trim().toLowerCase())
-          ).length,
+          newCustomFields: mappingNewCustomFields ?? 0,
         },
       });
     }

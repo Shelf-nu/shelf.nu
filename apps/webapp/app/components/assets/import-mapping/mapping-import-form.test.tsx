@@ -191,7 +191,12 @@ describe("MappingImportForm", () => {
 
     await waitFor(() => expect(posts).toHaveLength(2));
     const imported = posts[1];
-    expect(imported).toMatchObject({ intent: "content", mappingChanged: "1" });
+    // Serial number is not in the workspace yet, so it counts as new.
+    expect(imported).toMatchObject({
+      intent: "content",
+      mappingChanged: "1",
+      mappingNewCustomFields: "1",
+    });
     // The picked file is still on the mounted input the import form posts.
     expect(fileInput(container).files?.[0]?.name).toBe("export.csv");
     const mapping = JSON.parse(imported.mapping) as ColumnMapping[];

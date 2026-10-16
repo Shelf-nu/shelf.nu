@@ -53,9 +53,10 @@ export type ColumnSamples = {
  */
 export function buildColumnSamples(csvData: string[][]): ColumnSamples {
   const headers = (csvData[0] ?? []).map((header) => header.trim());
+  const rows = csvData.slice(1);
   const samples = headers.map((_, columnIndex) => {
     const cells: string[] = [];
-    for (const row of csvData.slice(1)) {
+    for (const row of rows) {
       if (cells.length >= MAX_SAMPLES_PER_COLUMN) break;
       const cell = (row[columnIndex] ?? "").trim();
       if (cell !== "") cells.push(cell.slice(0, MAX_SAMPLE_LENGTH));

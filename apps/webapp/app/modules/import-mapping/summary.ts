@@ -37,10 +37,11 @@ export function buildColumnStats(
   const categories = new Set(existing.categories.map(nameKey));
   const locations = new Set(existing.locations.map(nameKey));
   const columnCount = (csvData[0] ?? []).length;
+  const rows = csvData.slice(1);
 
   return Array.from({ length: columnCount }, (_, index) => {
     const values = new Set<string>();
-    for (const row of csvData.slice(1)) {
+    for (const row of rows) {
       const key = nameKey(row[index] ?? "");
       if (key) values.add(key);
     }

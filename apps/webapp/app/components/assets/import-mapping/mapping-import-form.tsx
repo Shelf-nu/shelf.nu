@@ -157,8 +157,20 @@ export function MappingImportForm() {
   const allSkipped =
     columns.length > 0 && columns.every(({ target }) => target.kind === "skip");
 
+  const summary =
+    state.stage === "review"
+      ? summarizeMapping({
+          columns: state.columns,
+          stats: state.analysis.columnStats,
+          rowCount: state.analysis.rowCount,
+          existingCustomFieldNames: state.analysis.existingCustomFields.map(
+            ({ name }) => name
+          ),
+        })
+      : null;
+
   const submitImport = () => {
-    if (state.stage !== "review" || !formRef.current) return;
+    if (state.stage !== "review" || !summary || !formRef.current) return;
     const original = state.analysis.proposal.columns;
     const changed = state.columns.filter(
       (column, index) =>
@@ -170,6 +182,12 @@ export function MappingImportForm() {
     formData.set("intent", "content");
     formData.set("mapping", JSON.stringify(state.columns));
     formData.set("mappingChanged", String(changed));
+    // The review already knows which custom fields are new; the server only
+    // reports the count, so it need not load the workspace's fields again.
+    formData.set(
+      "mappingNewCustomFields",
+      String(summary.newCustomFields.length)
+    );
     void contentFetcher.submit(formData, {
       method: "post",
       encType: "multipart/form-data",
@@ -214,7 +232,7 @@ export function MappingImportForm() {
 
       {/* Outside the form on purpose: Enter in any review input must never
           submit the analyze form, which would re-run it and drop every edit. */}
-      {state.stage === "review" ? (
+      {state.stage === "review" && summary ? (
         <section aria-labelledby="mapping-review-title">
           <h4 id="mapping-review-title">Check how your columns map</h4>
           <p className="text-[14px] text-gray-600">
@@ -235,14 +253,7 @@ export function MappingImportForm() {
             // column it warns about is remapped.
             notes={buildFormatNotes(state.columns)}
             alreadyMatches={isAlreadyShelfFormat(state.columns)}
-            summary={summarizeMapping({
-              columns: state.columns,
-              stats: state.analysis.columnStats,
-              rowCount: state.analysis.rowCount,
-              existingCustomFieldNames: state.analysis.existingCustomFields.map(
-                ({ name }) => name
-              ),
-            })}
+            summary={summary}
           />
 
           {duplicateRows.size > 0 ? (

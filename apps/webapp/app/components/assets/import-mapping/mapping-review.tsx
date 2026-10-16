@@ -197,6 +197,7 @@ export function MappingReview({
                     <div className="flex items-center gap-2">
                       <div className="min-w-0 flex-1">
                         <TargetSelect
+                          id={rowId}
                           source={column.source}
                           value={column.target}
                           onChange={(target) => onChange(index, target)}

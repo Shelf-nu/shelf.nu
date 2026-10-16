@@ -72,6 +72,8 @@ export function describeTarget(target: ColumnTarget): string {
 /**
  * Picks where one spreadsheet column goes.
  *
+ * @param props.id - Unique id prefix for this row, so duplicate or empty
+ *   headings never share element ids
  * @param props.source - The column's heading, used for the accessible name
  *   and as the suggested name of a new custom field
  * @param props.value - The current destination
@@ -81,6 +83,7 @@ export function describeTarget(target: ColumnTarget): string {
  * @param props.describedBy - Id of the row's error text, if any
  */
 export function TargetSelect({
+  id,
   source,
   value,
   onChange,
@@ -88,6 +91,7 @@ export function TargetSelect({
   invalid,
   describedBy,
 }: {
+  id: string;
   source: string;
   value: ColumnTarget;
   onChange: (target: ColumnTarget) => void;
@@ -163,7 +167,7 @@ export function TargetSelect({
     }
   };
 
-  const listId = `target-options-${source.replace(/[^a-zA-Z0-9]/g, "-")}`;
+  const listId = `${id}-options`;
 
   return (
     <Popover
