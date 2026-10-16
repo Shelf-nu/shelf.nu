@@ -82,6 +82,7 @@ export function getUIFieldType({
       break;
     case "createdAt":
     case "updatedAt":
+    case "lastAuditDate":
       fieldType = "date";
       break;
     case "tags":
