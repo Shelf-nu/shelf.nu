@@ -115,7 +115,7 @@ export function UnsavedChangesBar({
               : undefined
           }
         >
-          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 bg-gray-900 px-4 py-3 text-white shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-full md:py-2 md:pl-5 md:pr-2 xl:slide-in-from-top-2">
+          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 bg-gray-900 px-4 py-3 text-white shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-xl md:py-2 md:pl-4 md:pr-2 xl:slide-in-from-top-2">
             <span className="flex items-center gap-2 text-sm font-medium text-white">
               <span
                 aria-hidden="true"
