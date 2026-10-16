@@ -17,7 +17,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
   context.destroySession();
   // The next person on this browser starts with clean lists.
   return redirect(redirectTo || "/login", {
-    headers: await expireListPreferenceCookies(request),
+    headers: await expireListPreferenceCookies(request, { event: "sign-out" }),
   });
 }
 

@@ -242,7 +242,7 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
         headers: [
           // A new session: whatever lists this browser remembers belong to
           // whoever used it last.
-          ...(await expireListPreferenceCookies(request)),
+          ...(await expireListPreferenceCookies(request, { event: "sign-in" })),
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
           ),

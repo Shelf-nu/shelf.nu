@@ -172,7 +172,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect(landing, {
           headers: [
-            ...(await expireListPreferenceCookies(request)),
+            ...(await expireListPreferenceCookies(request, {
+              event: "sign-in",
+            })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
             ...(await signupIntentHeaders(signupIntent)),
           ],

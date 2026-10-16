@@ -53,7 +53,12 @@ vi.mock("react-router", async () => {
   };
 });
 
-import { destroyCookieValues, useSearchParams } from "./index";
+import {
+  cleanParamsForCookie,
+  cleanParamsForFilterCookie,
+  destroyCookieValues,
+  useSearchParams,
+} from "./index";
 
 describe("useSearchParams", () => {
   beforeEach(() => {
@@ -168,5 +173,25 @@ describe("destroyCookieValues", () => {
     );
 
     expect(Cookies.get("org-1_bookingFilter_v2")).toBeUndefined();
+  });
+});
+
+describe("what a list remembers", () => {
+  const params = "s=ZZ+Test&status=ONGOING&page=2";
+
+  it("a saved preset keeps the typed search", () => {
+    expect(cleanParamsForCookie(params)).toBe("s=ZZ+Test&status=ONGOING");
+  });
+
+  it("a filter cookie drops the typed search", () => {
+    expect(cleanParamsForFilterCookie(params)).toBe("status=ONGOING");
+  });
+
+  it("does not change the params it is given", () => {
+    const current = new URLSearchParams(params);
+
+    cleanParamsForFilterCookie(current);
+
+    expect(current.toString()).toBe(params);
   });
 });

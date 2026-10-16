@@ -113,8 +113,10 @@ export async function action({ request, context }: ActionFunctionArgs) {
         // Set the auth session and redirect to the role's landing page
         context.setSession(authSession);
         // Whatever lists this browser remembers belong to whoever used it last.
-        const listPreferenceExpiries =
-          await expireListPreferenceCookies(request);
+        const listPreferenceExpiries = await expireListPreferenceCookies(
+          request,
+          { event: "sign-in" }
+        );
 
         // If org exists (SCIM SSO case), redirect to that org
         if (org?.id) {

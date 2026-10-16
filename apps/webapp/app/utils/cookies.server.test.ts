@@ -68,6 +68,7 @@ const {
   expireListPreferenceCookies,
   getAdvancedFiltersFromRequest,
   getFiltersFromRequest,
+  userPrefs,
 } = await import("./cookies.server");
 
 /**
@@ -160,6 +161,34 @@ describe("filter cookies never keep a typed search", () => {
     expect(redirectNeeded).toBe(false);
   });
 
+  it("forgets the remembered filters when the URL holds only a search", async () => {
+    const cookie = SIMPLE_LISTS[1];
+    const filterCookie = createFilterCookie({ orgId: "org-1", ...cookie });
+    const remembered = storedValue(
+      await filterCookie.serialize("status=ONGOING")
+    );
+
+    const { serializedCookie } = await getFiltersFromRequest(
+      listRequest("http://localhost/bookings?s=foo", [remembered]),
+      "org-1",
+      cookie
+    );
+
+    // Otherwise the next plain visit restores a status the URL dropped.
+    expect(serializedCookie).toMatch(/^org-1_bookingFilter_v2=;.*Max-Age=0/);
+    expect(serializedCookie).toMatch(/Path=\//);
+  });
+
+  it("writes nothing for a search-only URL when nothing is remembered", async () => {
+    const { serializedCookie } = await getFiltersFromRequest(
+      listRequest("http://localhost/bookings?s=foo"),
+      "org-1",
+      SIMPLE_LISTS[1]
+    );
+
+    expect(serializedCookie).toBeNull();
+  });
+
   // Advanced mode: no configured columns, so `status` passes through as a
   // plain param and the test needs no column-format validation.
   const settings = { columns: [] } as never;
@@ -195,6 +224,24 @@ describe("filter cookies never keep a typed search", () => {
     expect(redirectNeeded).toBe(true);
     expect(filters).toBe("status=is%3AAVAILABLE");
   });
+
+  it("the Advanced assets cookie is forgotten when the URL holds only a search", async () => {
+    const remembered = storedValue(
+      await createAdvancedAssetFilterCookie("org-1").serialize(
+        "status=is:AVAILABLE"
+      )
+    );
+
+    const { serializedCookie } = await getAdvancedFiltersFromRequest(
+      listRequest("http://localhost/assets?s=laptop", [remembered]),
+      "org-1",
+      settings
+    );
+
+    expect(serializedCookie).toMatch(
+      /^org-1_advancedAssetFilter_v2=;.*Max-Age=0/
+    );
+  });
 });
 
 describe("expireListPreferenceCookies", () => {
@@ -223,7 +270,8 @@ describe("expireListPreferenceCookies", () => {
         "user-prefs=eyJwZXJQYWdlIjoyfQ%3D%3D",
         "__session=keep-me",
         "selected-organization-id=org-1",
-      ])
+      ]),
+      { event: "sign-out" }
     );
 
     expect(headers.every(([name]) => name === "Set-Cookie")).toBe(true);
@@ -247,7 +295,8 @@ describe("expireListPreferenceCookies", () => {
     envMock.COOKIE_DOMAIN = ".shelf.nu";
 
     const headers = await expireListPreferenceCookies(
-      listRequest("http://localhost/logout", ["user-prefs=x"])
+      listRequest("http://localhost/logout", ["user-prefs=x"]),
+      { event: "sign-out" }
     );
 
     // One expiry for the real cookie, one for the host-only leftover.
@@ -256,9 +305,68 @@ describe("expireListPreferenceCookies", () => {
 
   it("sends nothing when the browser remembers no list settings", async () => {
     const headers = await expireListPreferenceCookies(
-      listRequest("http://localhost/logout", ["__session=keep-me"])
+      listRequest("http://localhost/logout", ["__session=keep-me"]),
+      { event: "sign-out" }
     );
 
     expect(headers).toEqual([]);
+  });
+
+  /**
+   * Reads the user prefs a `Set-Cookie` value stores.
+   *
+   * @param headers - The `Set-Cookie` tuples returned by the helper
+   */
+  async function storedUserPrefs(headers: Array<[string, string]>) {
+    const header = headers.find(([, value]) => value.startsWith("user-prefs="));
+    return userPrefs.parse(storedValue(header?.[1] ?? ""));
+  }
+
+  it("on sign-in keeps the person's own UI choices and forgets the page size", async () => {
+    const prefs = storedValue(
+      await userPrefs.serialize({
+        perPage: 2,
+        minimizedSidebar: true,
+        skipOnboardingChecklist: "skipped",
+      })
+    );
+
+    const headers = await expireListPreferenceCookies(
+      listRequest("http://localhost/login", [
+        "org-1_bookingFilter_v2=YQ%3D%3D",
+        prefs,
+      ]),
+      { event: "sign-in" }
+    );
+
+    expect(expiredNames(headers)).toEqual(["org-1_bookingFilter_v2"]);
+    expect(await storedUserPrefs(headers)).toEqual({
+      minimizedSidebar: true,
+      skipOnboardingChecklist: "skipped",
+    });
+  });
+
+  it("on sign-in expires the user prefs when the page size was all they held", async () => {
+    const prefs = storedValue(await userPrefs.serialize({ perPage: 2 }));
+
+    const headers = await expireListPreferenceCookies(
+      listRequest("http://localhost/login", [prefs]),
+      { event: "sign-in" }
+    );
+
+    expect(expiredNames(headers)).toEqual(["user-prefs"]);
+  });
+
+  it("on sign-out expires the person's UI choices too", async () => {
+    const prefs = storedValue(
+      await userPrefs.serialize({ perPage: 2, minimizedSidebar: true })
+    );
+
+    const headers = await expireListPreferenceCookies(
+      listRequest("http://localhost/logout", [prefs]),
+      { event: "sign-out" }
+    );
+
+    expect(expiredNames(headers)).toEqual(["user-prefs"]);
   });
 });

@@ -4,6 +4,7 @@ import { createCookie } from "react-router"; // or cloudflare/deno
 import type { Cookie } from "react-router";
 import type { AllowedPathname } from "~/hooks/search-params";
 import {
+  ADVANCED_ASSET_FILTER_COOKIE_SUFFIX,
   ALLOWED_FILTER_PATHNAMES,
   cleanParamsForFilterCookie,
 } from "~/hooks/search-params";
@@ -152,6 +153,19 @@ export async function initializePerPageCookieOnLayout(request: Request) {
 }
 
 /**
+ * Attributes every list filter cookie is written with. Expiring one must use
+ * the same path, so {@link expireFilterCookie} reads them from here too.
+ *
+ * No secrets: filter cookies are UI preferences, and unsigned cookies work
+ * with RR7 single fetch.
+ */
+const FILTER_COOKIE_OPTIONS = {
+  sameSite: "lax",
+  secure: process.env.NODE_ENV === "production",
+  maxAge: 60 * 60 * 24 * 365, // 1 year
+} as const;
+
+/**
  * Index FILTER COOKIE
  * This cookie is used to store the current search params for an index page.
  * It is used to persist filters across page loads. It never holds the typed
@@ -173,15 +187,54 @@ export const createFilterCookie = ({
   orgId: string;
   name: string;
   path: string;
-}) =>
-  createCookie(`${orgId}_${name}`, {
-    path,
-    sameSite: "lax",
-    // No secrets - filter cookies don't need signing (just UI preferences)
-    // This ensures they work correctly in RR7 single fetch mode
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-  });
+}) => createCookie(`${orgId}_${name}`, { ...FILTER_COOKIE_OPTIONS, path });
+
+/**
+ * Serializes the expiry of a root-path list filter cookie.
+ *
+ * @param name - The full cookie name (`<orgId>_<suffix>`)
+ * @returns The `Set-Cookie` value that deletes it
+ */
+function expireFilterCookie(name: string) {
+  return createCookie(name, { ...FILTER_COOKIE_OPTIONS, path: "/" }).serialize(
+    "",
+    { maxAge: 0 }
+  );
+}
+
+/**
+ * Names of the cookies a request carries.
+ *
+ * @param cookieHeader - The request's Cookie header
+ */
+function getCookieNames(cookieHeader: string | null) {
+  return new Set(
+    (cookieHeader ?? "").split(";").map((pair) => pair.trim().split("=")[0])
+  );
+}
+
+/**
+ * The `Set-Cookie` value for a list whose URL has params: the cleaned filters
+ * to remember, or an expiry when nothing is left to remember (a URL holding
+ * only a search), so an older cookie cannot bring back filters the URL dropped.
+ *
+ * @param filterCookie - The list's filter cookie
+ * @param cleanedFilters - The URL params after {@link cleanParamsForFilterCookie}
+ * @param cookieHeader - The request's Cookie header
+ * @returns The value to send, or null when there is nothing to write
+ */
+async function serializeFilterCookieForUrl(
+  filterCookie: Cookie,
+  cleanedFilters: string,
+  cookieHeader: string | null
+) {
+  if (cleanedFilters) {
+    return filterCookie.serialize(cleanedFilters);
+  }
+  return getCookieNames(cookieHeader).has(filterCookie.name)
+    ? expireFilterCookie(filterCookie.name)
+    : null;
+}
 
 type FilterCookieConfig = {
   [K in AllowedPathname]: {
@@ -217,11 +270,11 @@ export async function getFiltersFromRequest(
   // Save them to cookie and return (no redirect needed, URL already has filters)
   if (filters) {
     // Remove pagination, one-off keys and the typed search before saving
-    const cleanedFilters = cleanParamsForFilterCookie(filters);
-    // Serialize to Set-Cookie header if we have filters after cleaning
-    const serializedCookie = cleanedFilters
-      ? await filterCookie.serialize(cleanedFilters)
-      : null;
+    const serializedCookie = await serializeFilterCookieForUrl(
+      filterCookie,
+      cleanParamsForFilterCookie(filters),
+      cookieHeader
+    );
 
     // Return original filters for current request, cleaned version for cookie
     return { filters, serializedCookie };
@@ -248,13 +301,9 @@ export async function getFiltersFromRequest(
 
 /** ASSET FILTER COOKIE - ADVANCED MODE */
 export const createAdvancedAssetFilterCookie = (orgId: string) =>
-  createCookie(`${orgId}_advancedAssetFilter_v2`, {
+  createCookie(`${orgId}_${ADVANCED_ASSET_FILTER_COOKIE_SUFFIX}`, {
+    ...FILTER_COOKIE_OPTIONS,
     path: "/", // Use root path so cookie is sent with RR7 single fetch .data requests
-    sameSite: "lax",
-    // No secrets - filter cookies don't need signing (just UI preferences)
-    // This ensures they work correctly in RR7 single fetch mode
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
   });
 
 /**
@@ -328,14 +377,16 @@ export async function getAdvancedFiltersFromRequest(
   if (filters) {
     const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
-    const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);
+    const serializedCookie = await serializeFilterCookieForUrl(
+      advancedAssetFilterCookie,
+      cleanParamsForFilterCookie(validatedParamsString),
+      cookieHeader
+    );
 
     return {
       filters: validatedParamsString,
       // Save validated filters to cookie for next visit
-      serializedCookie: cleanedFilters
-        ? await advancedAssetFilterCookie.serialize(cleanedFilters)
-        : undefined,
+      serializedCookie: serializedCookie ?? undefined,
       // Redirect needed if validation changed the params
       redirectNeeded: validatedParamsString !== filters,
     };
@@ -376,7 +427,7 @@ export async function getAdvancedFiltersFromRequest(
 /** Name suffixes of every list filter cookie, simple and Advanced. */
 const LIST_FILTER_COOKIE_SUFFIXES = [
   ...Object.values(ALLOWED_FILTER_PATHNAMES),
-  "advancedAssetFilter_v2",
+  ADVANCED_ASSET_FILTER_COOKIE_SUFFIX,
 ];
 
 /**
@@ -391,46 +442,59 @@ function isListFilterCookieName(name: string) {
 }
 
 /**
- * Expires every list preference this browser remembers: the filter cookies of
- * the assets (simple and Advanced), bookings and kits lists for every
- * workspace, and the `user-prefs` cookie (page size and other per-person UI
- * choices).
+ * Expires the list preferences this browser remembers, which are not tied to
+ * an account: the filter cookies of the assets (simple and Advanced), bookings
+ * and kits lists for every workspace, and the page size in `user-prefs`.
  *
- * None of these cookies is tied to an account, so the sign-out and every
- * sign-in response send this. The next person on the same browser, or the same
- * person after a session that ended without a sign-out, opens clean lists.
+ * - **Sign-out** expires the whole `user-prefs` cookie: the next person on the
+ *   browser also gets the default sidebar, scanner camera, onboarding
+ *   checklist and banners.
+ * - **Sign-in** drops only `perPage` from `user-prefs` and keeps the other UI
+ *   choices, so a person signing in again keeps their own. It still resets the
+ *   lists, which covers a session that ended without a sign-out.
  *
- * Only cookies the request carries are expired. Filter cookies are named per
+ * Only cookies the request carries are touched. Filter cookies are named per
  * workspace, so the Cookie header is where they are found; they all live on the
  * root path, which every request carries.
  *
  * @param request - The sign-out or sign-in request
+ * @param options.event - Whether the response signs a person out or in
  * @returns `Set-Cookie` tuples to spread into the response headers
  */
 export async function expireListPreferenceCookies(
-  request: Request
+  request: Request,
+  { event }: { event: "sign-in" | "sign-out" }
 ): Promise<Array<[string, string]>> {
-  const cookieNames = new Set(
-    (request.headers.get("Cookie") ?? "")
-      .split(";")
-      .map((pair) => pair.trim().split("=")[0])
+  const cookieHeader = request.headers.get("Cookie");
+  const cookieNames = getCookieNames(cookieHeader);
+
+  const filterExpiries = await Promise.all(
+    [...cookieNames]
+      .filter(isListFilterCookieName)
+      .map(async (name) => setCookie(await expireFilterCookie(name)))
   );
 
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  const filterExpiries = [...cookieNames]
-    .filter(isListFilterCookieName)
-    .map((name) =>
-      setCookie(`${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`)
-    );
+  if (!cookieNames.has(userPrefs.name)) {
+    return filterExpiries;
+  }
+
+  const prefs: unknown = await userPrefs.parse(cookieHeader);
+  const keptPrefs =
+    event === "sign-in" && prefs && typeof prefs === "object"
+      ? { ...(prefs as Record<string, unknown>) }
+      : {};
+  delete keptPrefs.perPage;
+
+  // Rewriting keeps the deployment's cookie domain from `userPrefs`
+  if (Object.keys(keptPrefs).length > 0) {
+    return [...filterExpiries, setCookie(await userPrefs.serialize(keptPrefs))];
+  }
 
   // `userPrefs` carries the deployment's cookie domain, so this expiry reaches
   // the domain-scoped cookie; the shim clears a host-only leftover.
-  const userPrefsExpiries = cookieNames.has(userPrefs.name)
-    ? [
-        setCookie(await userPrefs.serialize({}, { maxAge: 0 })),
-        ...expireHostOnlyUserPrefsCookie(),
-      ]
-    : [];
-
-  return [...filterExpiries, ...userPrefsExpiries];
+  return [
+    ...filterExpiries,
+    setCookie(await userPrefs.serialize({}, { maxAge: 0 })),
+    ...expireHostOnlyUserPrefsCookie(),
+  ];
 }

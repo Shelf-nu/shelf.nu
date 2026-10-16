@@ -69,10 +69,13 @@ export const FREE_TEXT_SEARCH_KEYS = ["s"] as const;
 export function cleanParamsForFilterCookie(
   params: URLSearchParams | string
 ): string {
-  const searchParams = new URLSearchParams(cleanParamsForCookie(params));
-  FREE_TEXT_SEARCH_KEYS.forEach((key) => {
-    searchParams.delete(key);
-  });
+  // Copy, so a caller's URLSearchParams is never mutated
+  const searchParams = new URLSearchParams(params);
+  [...SEARCH_PARAMS_KEYS_TO_EXCLUDE, ...FREE_TEXT_SEARCH_KEYS].forEach(
+    (key) => {
+      searchParams.delete(key);
+    }
+  );
   return searchParams.toString();
 }
 
@@ -82,6 +85,12 @@ export const ALLOWED_FILTER_PATHNAMES = {
   bookings: "bookingFilter_v2",
   kits: "kitFilter_v2",
 } as const;
+
+/**
+ * Name suffix of the Advanced assets filter cookie (`<orgId>_<suffix>`).
+ * The simple lists' suffixes are in {@link ALLOWED_FILTER_PATHNAMES}.
+ */
+export const ADVANCED_ASSET_FILTER_COOKIE_SUFFIX = "advancedAssetFilter_v2";
 
 export type AllowedPathname = keyof typeof ALLOWED_FILTER_PATHNAMES;
 type CookieNameSuffix = (typeof ALLOWED_FILTER_PATHNAMES)[AllowedPathname];
@@ -119,7 +128,7 @@ export function getCookieName(
   pathname: string
 ): string {
   if (modeIsAdvanced) {
-    return `${organizationId}_advancedAssetFilter_v2`;
+    return `${organizationId}_${ADVANCED_ASSET_FILTER_COOKIE_SUFFIX}`;
   }
 
   const validatedPathname = getValidatedPathname(pathname);

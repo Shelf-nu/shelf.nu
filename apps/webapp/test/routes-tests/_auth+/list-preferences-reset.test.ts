@@ -7,7 +7,8 @@
  * choices. None of these cookies is tied to an account, so a browser handed to
  * a different person would open their lists with the previous person's
  * filters. Sign-out expires them, and so does every sign-in, which covers a
- * session that ended without a sign-out.
+ * session that ended without a sign-out. A sign-in keeps the person's other UI
+ * choices in `user-prefs` and forgets only the page size.
  *
  * @see {@link file://./../../../app/routes/_auth+/logout.tsx}
  * @see {@link file://./../../../app/routes/_auth+/login.tsx}
@@ -56,6 +57,16 @@ vi.mock("~/modules/organization/context.server", () => ({
   setSelectedOrganizationIdCookie: vi.fn(),
 }));
 
+// why: an SSO sign-in without a provisioned workspace reads the person's
+// memberships to pick the landing page; the tests pick each answer.
+vi.mock("~/modules/organization/service.server", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("~/modules/organization/service.server")
+  >()),
+  getUserOrganizations: vi.fn(),
+  isSsoUser: vi.fn(),
+}));
+
 const logout = await import("~/routes/_auth+/logout");
 const login = await import("~/routes/_auth+/login");
 const oauthCallback = await import("~/routes/_auth+/oauth.callback");
@@ -66,6 +77,9 @@ const { getSsoClaimsForAuthUser, resolveUserAndOrgForSsoCallback } =
   await import("~/utils/sso.server");
 const { getSelectedOrganization, setSelectedOrganizationIdCookie } =
   await import("~/modules/organization/context.server");
+const { getUserOrganizations, isSsoUser } = await import(
+  "~/modules/organization/service.server"
+);
 
 /** What the previous person's browser still carries. */
 const LEFTOVER_COOKIES = [
@@ -182,35 +196,83 @@ describe("signing in", () => {
   });
 
   it("with SSO expires the previous person's list settings", async () => {
-    vi.mocked(refreshAccessToken).mockResolvedValue(authSession);
-    vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue({
-      groups: [],
-      firstName: "Sam",
-      lastName: "Member",
-      contactInfo: {
-        phone: "",
-        street: "",
-        city: "",
-        stateProvince: "",
-        zipPostalCode: "",
-        countryRegion: "",
-      },
-    });
+    mockSsoClaims();
     vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
       org: { id: "org-1" },
     } as never);
 
-    const result = await oauthCallback.action(
-      createActionArgs({
-        request: postWithLeftovers("http://localhost/oauth/callback", {
-          refreshToken: "client-refresh-token",
-        }),
-        context: { setSession: vi.fn() } as never,
-      })
-    );
+    const result = await ssoCallback();
 
     expect(expiredCookieNames(result)).toEqual(
       expect.arrayContaining(EXPECTED_EXPIRED)
     );
   });
+
+  it("with SSO and no team workspace yet expires them on the way to the pending page", async () => {
+    mockSsoClaims();
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      org: null,
+    } as never);
+    vi.mocked(getUserOrganizations).mockResolvedValue([
+      { organization: { type: "PERSONAL" } },
+    ] as never);
+    vi.mocked(isSsoUser).mockResolvedValue(true);
+
+    const result = await ssoCallback();
+
+    expect((result as Response).headers.get("Location")).toBe(
+      "/sso-pending-assignment"
+    );
+    expect(expiredCookieNames(result)).toEqual(
+      expect.arrayContaining(EXPECTED_EXPIRED)
+    );
+  });
+
+  it("with SSO and an existing team workspace expires them on the default landing", async () => {
+    mockSsoClaims();
+    vi.mocked(resolveUserAndOrgForSsoCallback).mockResolvedValue({
+      org: null,
+    } as never);
+    vi.mocked(getUserOrganizations).mockResolvedValue([
+      { organization: { type: "TEAM" } },
+    ] as never);
+    vi.mocked(isSsoUser).mockResolvedValue(true);
+
+    const result = await ssoCallback();
+
+    expect((result as Response).headers.get("Location")).toBe("/");
+    expect(expiredCookieNames(result)).toEqual(
+      expect.arrayContaining(EXPECTED_EXPIRED)
+    );
+  });
 });
+
+/** Makes the SSO callback's Supabase refresh and claims lookup succeed. */
+function mockSsoClaims() {
+  vi.mocked(refreshAccessToken).mockResolvedValue(authSession);
+  vi.mocked(getSsoClaimsForAuthUser).mockResolvedValue({
+    groups: [],
+    firstName: "Sam",
+    lastName: "Member",
+    contactInfo: {
+      phone: "",
+      street: "",
+      city: "",
+      stateProvince: "",
+      zipPostalCode: "",
+      countryRegion: "",
+    },
+  });
+}
+
+/** Posts the SSO callback from a browser carrying the leftover cookies. */
+function ssoCallback() {
+  return oauthCallback.action(
+    createActionArgs({
+      request: postWithLeftovers("http://localhost/oauth/callback", {
+        refreshToken: "client-refresh-token",
+      }),
+      context: { setSession: vi.fn() } as never,
+    })
+  );
+}

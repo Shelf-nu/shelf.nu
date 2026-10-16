@@ -168,7 +168,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect(safeRedirect(redirectTo || "/"), {
           headers: [
-            ...(await expireListPreferenceCookies(request)),
+            ...(await expireListPreferenceCookies(request, {
+              event: "sign-in",
+            })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],
         });
