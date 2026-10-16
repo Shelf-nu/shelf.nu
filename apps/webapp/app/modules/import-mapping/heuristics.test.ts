@@ -1,6 +1,7 @@
 import { CustomFieldType } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 import {
+  QUANTITY_WITHOUT_TYPE_NOTE,
   buildColumnSamples,
   isAlreadyShelfFormat,
   proposeByRules,
@@ -140,9 +141,16 @@ describe("proposeByRules", () => {
     });
   });
 
-  it("warns when quantities above 1 have no type column", () => {
-    const proposal = propose([["Qty"], ["12"]]);
-    expect(proposal.notes.join(" ")).toContain("QUANTITY_TRACKED");
+  it("warns that quantities above 1 need a type column", () => {
+    expect(propose([["Qty"], ["1"]]).notes).toContain(
+      QUANTITY_WITHOUT_TYPE_NOTE
+    );
+    expect(
+      propose([
+        ["Qty", "type"],
+        ["12", "QUANTITY_TRACKED"],
+      ]).notes
+    ).not.toContain(QUANTITY_WITHOUT_TYPE_NOTE);
   });
 
   it("keeps cf: headers and refuses malformed ones", () => {

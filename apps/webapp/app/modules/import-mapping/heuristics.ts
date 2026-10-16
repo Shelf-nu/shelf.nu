@@ -178,6 +178,10 @@ function proposeColumn(
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Shown when a column maps to quantity and none maps to type. */
+export const QUANTITY_WITHOUT_TYPE_NOTE =
+  "Rows with a quantity above 1 need a type column set to QUANTITY_TRACKED (and a consumptionType). Without it the importer rejects those rows.";
+
 /**
  * Short warnings about values the importer will refuse or drop under the
  * proposed mapping. Facts about formats only; nothing is rewritten.
@@ -213,15 +217,14 @@ export function buildFormatNotes(columns: ColumnMapping[]): string[] {
         );
       }
     }
+    // Samples cannot prove every row holds 1, so the note shows whenever a
+    // quantity column has no type column beside it.
     if (
       target.kind === "field" &&
       target.name === "quantity" &&
-      !hasTypeColumn &&
-      sample.some((cell) => Number(cell) > 1)
+      !hasTypeColumn
     ) {
-      notes.push(
-        `"${source}" has quantities above 1. Those rows import only with a type column set to QUANTITY_TRACKED and a consumptionType column; otherwise skip "${source}".`
-      );
+      notes.push(QUANTITY_WITHOUT_TYPE_NOTE);
     }
   }
 
