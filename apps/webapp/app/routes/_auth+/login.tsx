@@ -33,7 +33,7 @@ import {
   setSelectedOrganizationIdCookie,
 } from "~/modules/organization/context.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
-import { setCookie } from "~/utils/cookies.server";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import {
   ShelfError,
   isLikeShelfError,
@@ -168,6 +168,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect(safeRedirect(redirectTo || "/"), {
           headers: [
+            ...(await expireListPreferenceCookies(request, {
+              event: "sign-in",
+            })),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
           ],
         });
