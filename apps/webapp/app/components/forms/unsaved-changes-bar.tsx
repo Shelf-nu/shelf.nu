@@ -90,6 +90,12 @@ export function UnsavedChangesBar({
    * dialog, and that close must not cancel the navigation it just allowed.
    */
   const leavingRef = useRef(false);
+  const isBlocked = state.status === "blocked";
+  useEffect(() => {
+    // why: a Leave page whose navigation does not unmount the form (an
+    // error boundary, a redirect back) must not swallow later dialog closes
+    if (!isBlocked) leavingRef.current = false;
+  }, [isBlocked]);
 
   if (!visible || typeof document === "undefined") return null;
 

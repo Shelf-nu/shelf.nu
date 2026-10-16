@@ -1,3 +1,30 @@
+/**
+ * Unsaved Changes Tracking
+ *
+ * Tells a create or edit form whether it differs from the values it loaded
+ * with, and guards leaving the page while it does.
+ *
+ * Dirty state is a diff of two `FormData` snapshots: a baseline read one
+ * frame after mount (and again after a successful save or a Discard), and
+ * the current values, re-read after any input/change/click/keyup and on a
+ * one-second interval. Widgets that submit through hidden inputs are
+ * covered without per-input wiring. Comparisons pause while a navigation
+ * runs, because forms disable their inputs meanwhile and `FormData` leaves
+ * disabled fields out.
+ *
+ * Leave guard: while dirty, a navigation is blocked unless it stays on the
+ * form's page (its resolved `action` pathname) or one of its child routes,
+ * such as a booking's manage-assets modal. This form's own submission is
+ * never blocked, and closing or reloading the tab shows the browser prompt.
+ *
+ * Every mounted instance registers a `useBlocker`, and React Router honours
+ * only the most recently registered one. Mount the hook only where tracking
+ * applies (render `UnsavedChangesGuard` conditionally); never mount it in a
+ * dialog that sits on another form's page.
+ *
+ * @see {@link file://./../components/forms/unsaved-changes-bar.tsx}
+ * @see {@link file://./use-discard-remount.ts}
+ */
 import {
   useCallback,
   useEffect,
@@ -100,8 +127,6 @@ type UseUnsavedChangesOptions = {
    * so pass `undefined` for a failed save and the form stays dirty.
    */
   savedToken?: unknown;
-  /** When false the hook tracks nothing and never blocks. Default true. */
-  enabled?: boolean;
   /**
    * Puts every field back to the loaded values. Forms remount themselves
    * here (a `key` bump), which resets widget state that lives in React.
@@ -119,13 +144,15 @@ type UseUnsavedChangesOptions = {
  * navigations are not) and closing or reloading the tab shows the browser's
  * own prompt. This form's own submission is never blocked.
  *
+ * Mount it only where tracking applies: a mounted instance always
+ * registers a blocker, which overrides any guard registered before it.
+ *
  * @returns The current state, plus `discard`, `save` and `markClean`
  */
 export function useUnsavedChanges({
   formRef,
   ignore,
   savedToken,
-  enabled = true,
   onDiscard,
 }: UseUnsavedChangesOptions) {
   const [isDirty, setIsDirty] = useState(false);
@@ -173,7 +200,7 @@ export function useUnsavedChanges({
 
   useEffect(() => {
     const form = formRef.current;
-    if (!enabled || !form) return;
+    if (!form) return;
     // why: one frame after mount, so widgets that rewrite their own hidden
     // value on mount (EditorV2) are already in the DOM when the baseline is
     // read.
@@ -202,7 +229,7 @@ export function useUnsavedChanges({
       );
       clearInterval(interval);
     };
-  }, [enabled, formRef, check, markClean]);
+  }, [formRef, check, markClean]);
 
   const lastSavedToken = useRef(savedToken);
   useEffect(() => {
@@ -251,7 +278,7 @@ export function useUnsavedChanges({
     if (location.key !== startKey) requestAnimationFrame(markClean);
   }, [isSubmitting, location.key, markClean]);
 
-  const shouldGuard = enabled && isDirty && !isSubmitting;
+  const shouldGuard = isDirty && !isSubmitting;
 
   const blocker = useBlocker(
     useCallback(
@@ -283,7 +310,7 @@ export function useUnsavedChanges({
       proceed: () => blocker.proceed(),
       stay: () => blocker.reset(),
     };
-  } else if (!enabled || !isDirty) {
+  } else if (!isDirty) {
     state = { status: "clean" };
   } else if (isSubmitting) {
     state = { status: "submitting" };
@@ -316,7 +343,7 @@ export function useUnsavedChanges({
 
   return {
     state,
-    isDirty: enabled && isDirty,
+    isDirty,
     discard,
     save,
     markClean,

@@ -149,13 +149,6 @@ type BookingFormData = {
   action?: string;
 };
 
-/** The header Save button of the booking edit form, if rendered. */
-function getSaveButton() {
-  return document.querySelector<HTMLButtonElement>(
-    '#edit-booking-form button[name="intent"][value="save"]'
-  );
-}
-
 /**
  * Edit form on the booking overview, with the unsaved-changes bar.
  *
@@ -302,6 +295,8 @@ function EditBookingFormInner({
    * resolved when the user opens check-in/check-out dialogs. Using zo.form
    * (which reads a ref) can return null on the first render cycle. */
   const [formElement, setFormElement] = useState<HTMLFormElement | null>(null);
+  /** The header Save button; the unsaved-changes bar submits through it. */
+  const saveButtonRef = useRef<HTMLButtonElement>(null);
   /** The same element as a ref, for the unsaved-changes tracking. */
   const formElementRef = useRef<HTMLFormElement | null>(null);
   const formRef = useCallback(
@@ -409,7 +404,7 @@ function EditBookingFormInner({
           onDiscard={onDiscard}
           // why: the action routes on `intent`, so the bar submits through
           // the header Save button to send intent=save
-          getSubmitter={getSaveButton}
+          getSubmitter={() => saveButtonRef.current}
         />
       ) : null}
       {/* Render the actions on top only when the form is in edit mode */}
@@ -445,6 +440,7 @@ function EditBookingFormInner({
                   (e.g. Reserve) override this default without any client-side JS.
                 */}
                 <Button
+                  ref={saveButtonRef}
                   type="submit"
                   disabled={disabled || isLoadingWorkingHours}
                   variant="secondary"
