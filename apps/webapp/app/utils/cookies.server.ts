@@ -2,11 +2,11 @@ import type { AssetIndexSettings } from "@prisma/client";
 import { createCookie } from "react-router"; // or cloudflare/deno
 
 import type { Cookie } from "react-router";
-import type {
+import type { AllowedPathname } from "~/hooks/search-params";
+import {
   ALLOWED_FILTER_PATHNAMES,
-  AllowedPathname,
+  cleanParamsForFilterCookie,
 } from "~/hooks/search-params";
-import { cleanParamsForCookie } from "~/hooks/search-params";
 import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { COOKIE_DOMAIN } from "./env";
@@ -154,7 +154,8 @@ export async function initializePerPageCookieOnLayout(request: Request) {
 /**
  * Index FILTER COOKIE
  * This cookie is used to store the current search params for an index page.
- * It is used to persist filters across page loads and sessions.
+ * It is used to persist filters across page loads. It never holds the typed
+ * search, and signing out or in expires it (see {@link expireListPreferenceCookies}).
  * It is created with a 1 year max age and is stored in the root path of the organization.
  * The cookie is created with the organization ID and filter name to avoid conflicts between different organizations.
  * IMPORTANT: When using this to add new cookies, make sure to update ALLOWED_FILTER_PATHNAMES in useSearchParams hook
@@ -202,7 +203,7 @@ export async function getFiltersFromRequest(
   organizationId: string,
   cookie: FilterCookieConfig
 ) {
-  // Get filters from URL query parameters (e.g., "status=AVAILABLE&search=laptop")
+  // Get filters from URL query parameters (e.g., "status=AVAILABLE&s=laptop")
   let filters = getCurrentSearchParams(request).toString();
   const cookieHeader = request.headers.get("Cookie");
 
@@ -215,8 +216,8 @@ export async function getFiltersFromRequest(
   // CASE 1: URL has filters
   // Save them to cookie and return (no redirect needed, URL already has filters)
   if (filters) {
-    // Remove sensitive params (page, getAll, etc.) before saving to cookie
-    const cleanedFilters = cleanParamsForCookie(filters);
+    // Remove pagination, one-off keys and the typed search before saving
+    const cleanedFilters = cleanParamsForFilterCookie(filters);
     // Serialize to Set-Cookie header if we have filters after cleaning
     const serializedCookie = cleanedFilters
       ? await filterCookie.serialize(cleanedFilters)
@@ -230,8 +231,8 @@ export async function getFiltersFromRequest(
   else if (cookieHeader) {
     // Parse cookie to get saved filters
     filters = (await filterCookie.parse(cookieHeader)) || {};
-    // Remove sensitive params before applying
-    const cleanedFilters = cleanParamsForCookie(filters);
+    // Apply the same rule to what an older cookie may still hold
+    const cleanedFilters = cleanParamsForFilterCookie(filters);
 
     // Redirect to add filters to URL if we have any
     return {
@@ -327,7 +328,7 @@ export async function getAdvancedFiltersFromRequest(
   if (filters) {
     const validatedParams = normalizeAdvancedFilterParams(filters, columnNames);
     const validatedParamsString = validatedParams.toString();
-    const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+    const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);
 
     return {
       filters: validatedParamsString,
@@ -351,7 +352,7 @@ export async function getAdvancedFiltersFromRequest(
         columnNames
       );
       const validatedParamsString = validatedParams.toString();
-      const cleanedFilters = cleanParamsForCookie(validatedParamsString);
+      const cleanedFilters = cleanParamsForFilterCookie(validatedParamsString);
 
       return {
         filters: cleanedFilters || undefined,
@@ -370,4 +371,66 @@ export async function getAdvancedFiltersFromRequest(
     serializedCookie: undefined,
     redirectNeeded: false,
   };
+}
+
+/** Name suffixes of every list filter cookie, simple and Advanced. */
+const LIST_FILTER_COOKIE_SUFFIXES = [
+  ...Object.values(ALLOWED_FILTER_PATHNAMES),
+  "advancedAssetFilter_v2",
+];
+
+/**
+ * Whether a cookie name is a list filter cookie (`<orgId>_<suffix>`).
+ *
+ * @param name - A cookie name from the request
+ */
+function isListFilterCookieName(name: string) {
+  return LIST_FILTER_COOKIE_SUFFIXES.some((suffix) =>
+    name.endsWith(`_${suffix}`)
+  );
+}
+
+/**
+ * Expires every list preference this browser remembers: the filter cookies of
+ * the assets (simple and Advanced), bookings and kits lists for every
+ * workspace, and the `user-prefs` cookie (page size and other per-person UI
+ * choices).
+ *
+ * None of these cookies is tied to an account, so the sign-out and every
+ * sign-in response send this. The next person on the same browser, or the same
+ * person after a session that ended without a sign-out, opens clean lists.
+ *
+ * Only cookies the request carries are expired. Filter cookies are named per
+ * workspace, so the Cookie header is where they are found; they all live on the
+ * root path, which every request carries.
+ *
+ * @param request - The sign-out or sign-in request
+ * @returns `Set-Cookie` tuples to spread into the response headers
+ */
+export async function expireListPreferenceCookies(
+  request: Request
+): Promise<Array<[string, string]>> {
+  const cookieNames = new Set(
+    (request.headers.get("Cookie") ?? "")
+      .split(";")
+      .map((pair) => pair.trim().split("=")[0])
+  );
+
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const filterExpiries = [...cookieNames]
+    .filter(isListFilterCookieName)
+    .map((name) =>
+      setCookie(`${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`)
+    );
+
+  // `userPrefs` carries the deployment's cookie domain, so this expiry reaches
+  // the domain-scoped cookie; the shim clears a host-only leftover.
+  const userPrefsExpiries = cookieNames.has(userPrefs.name)
+    ? [
+        setCookie(await userPrefs.serialize({}, { maxAge: 0 })),
+        ...expireHostOnlyUserPrefsCookie(),
+      ]
+    : [];
+
+  return [...filterExpiries, ...userPrefsExpiries];
 }

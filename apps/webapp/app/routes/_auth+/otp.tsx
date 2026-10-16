@@ -32,7 +32,7 @@ import { createUser, findUserById } from "~/modules/user/service.server";
 import { generateUniqueUsername } from "~/modules/user/utils.server";
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
-import { setCookie } from "~/utils/cookies.server";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { ShelfError, makeShelfError, notAllowedMethod } from "~/utils/error";
 import { isFormProcessing } from "~/utils/form";
 import {
@@ -172,6 +172,7 @@ export async function action({ context, request }: ActionFunctionArgs) {
 
         return redirect(landing, {
           headers: [
+            ...(await expireListPreferenceCookies(request)),
             setCookie(await setSelectedOrganizationIdCookie(organizationId)),
             ...(await signupIntentHeaders(signupIntent)),
           ],

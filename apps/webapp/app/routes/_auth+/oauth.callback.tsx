@@ -22,7 +22,7 @@ import {
 import { appendToMetaTitle } from "~/utils/append-to-meta-title";
 import { createSSOFormData } from "~/utils/auth";
 import { detectFormatPrefsForPersistence } from "~/utils/client-hints";
-import { setCookie } from "~/utils/cookies.server";
+import { expireListPreferenceCookies, setCookie } from "~/utils/cookies.server";
 import { makeShelfError, notAllowedMethod, ShelfError } from "~/utils/error";
 import {
   payload,
@@ -112,11 +112,17 @@ export async function action({ request, context }: ActionFunctionArgs) {
 
         // Set the auth session and redirect to the role's landing page
         context.setSession(authSession);
+        // Whatever lists this browser remembers belong to whoever used it last.
+        const listPreferenceExpiries =
+          await expireListPreferenceCookies(request);
 
         // If org exists (SCIM SSO case), redirect to that org
         if (org?.id) {
           return redirect(safeRedirect(redirectTo || "/"), {
-            headers: [setCookie(await setSelectedOrganizationIdCookie(org.id))],
+            headers: [
+              ...listPreferenceExpiries,
+              setCookie(await setSelectedOrganizationIdCookie(org.id)),
+            ],
           });
         }
 
@@ -135,10 +141,14 @@ export async function action({ request, context }: ActionFunctionArgs) {
         );
 
         if (isSSO && !hasTeamOrgs) {
-          return redirect("/sso-pending-assignment");
+          return redirect("/sso-pending-assignment", {
+            headers: listPreferenceExpiries,
+          });
         }
 
-        return redirect(safeRedirect(redirectTo || "/"));
+        return redirect(safeRedirect(redirectTo || "/"), {
+          headers: listPreferenceExpiries,
+        });
       }
     }
 

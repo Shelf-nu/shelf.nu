@@ -43,6 +43,39 @@ export function cleanParamsForCookie(params: URLSearchParams | string): string {
   return searchParams.toString();
 }
 
+/**
+ * Free-text search keys of the lists that remember their filters (assets in
+ * both modes, bookings, kits). Each of them types its search into `s`.
+ *
+ * A typed search answers one question at one moment, so a filter cookie never
+ * stores it and a later visit never restores it. Column filters, sorting and
+ * the page size are deliberate choices and stay remembered. Saved filter
+ * presets are a different thing: a person names and saves them on purpose, so
+ * they keep the search (they use {@link cleanParamsForCookie}).
+ */
+export const FREE_TEXT_SEARCH_KEYS = ["s"] as const;
+
+/**
+ * Reduces a list's params to what its filter cookie may remember: no
+ * pagination or one-off keys, and no typed search.
+ *
+ * Every reader and writer of a list filter cookie goes through this, on the
+ * server and in the browser, so an older cookie that still holds a search is
+ * not restored either.
+ *
+ * @param params - The list's current params, or a stored cookie value
+ * @returns The params string to store or restore
+ */
+export function cleanParamsForFilterCookie(
+  params: URLSearchParams | string
+): string {
+  const searchParams = new URLSearchParams(cleanParamsForCookie(params));
+  FREE_TEXT_SEARCH_KEYS.forEach((key) => {
+    searchParams.delete(key);
+  });
+  return searchParams.toString();
+}
+
 // Allowed pathnames for cookie naming
 export const ALLOWED_FILTER_PATHNAMES = {
   assets: "assetFilter_v2",
@@ -289,17 +322,14 @@ export function destroyCookieValues(
   cookieSearchParams: URLSearchParams,
   cookiePath?: string
 ) {
-  // Always remove excluded keys and the specifically requested keys
+  // Remove the specifically requested keys
   keys.forEach((key) => {
     cookieSearchParams.delete(key);
   });
 
-  // Ensure all excluded keys are removed
-  SEARCH_PARAMS_KEYS_TO_EXCLUDE.forEach((key) => {
-    cookieSearchParams.delete(key);
-  });
-
-  const finalCookieValue = cookieSearchParams.toString();
+  // The rewritten cookie follows the same rule as the server: no pagination,
+  // no one-off keys and no typed search.
+  const finalCookieValue = cleanParamsForFilterCookie(cookieSearchParams);
 
   // Always use root path to ensure cookies are sent with RR7 single fetch .data requests
   // Client-side must match server-side cookie path

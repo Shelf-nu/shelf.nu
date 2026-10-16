@@ -53,7 +53,7 @@ vi.mock("react-router", async () => {
   };
 });
 
-import { useSearchParams } from "./index";
+import { destroyCookieValues, useSearchParams } from "./index";
 
 describe("useSearchParams", () => {
   beforeEach(() => {
@@ -135,5 +135,38 @@ describe("useSearchParams", () => {
     );
     // The cookie had only "status", so removing it deletes the cookie entirely.
     expect(Cookies.get("org-1_assetFilter_v2")).toBeUndefined();
+  });
+});
+
+describe("destroyCookieValues", () => {
+  beforeEach(() => {
+    Cookies.remove("org-1_bookingFilter_v2", { path: "/" });
+  });
+
+  it("rewrites the cookie without the typed search", () => {
+    // The page's current filters include a search; removing one column
+    // filter rewrites the cookie from them, and the search must not ride
+    // along into the remembered copy.
+    destroyCookieValues(
+      "org-1_bookingFilter_v2",
+      ["custodian"],
+      new URLSearchParams("s=ZZ+Test&status=ONGOING&custodian=tm-1&page=2"),
+      "/"
+    );
+
+    expect(Cookies.get("org-1_bookingFilter_v2")).toBe("status=ONGOING");
+  });
+
+  it("deletes the cookie when only a search would be left", () => {
+    Cookies.set("org-1_bookingFilter_v2", "status=ONGOING", { path: "/" });
+
+    destroyCookieValues(
+      "org-1_bookingFilter_v2",
+      ["status"],
+      new URLSearchParams("s=ZZ+Test&status=ONGOING"),
+      "/"
+    );
+
+    expect(Cookies.get("org-1_bookingFilter_v2")).toBeUndefined();
   });
 });
