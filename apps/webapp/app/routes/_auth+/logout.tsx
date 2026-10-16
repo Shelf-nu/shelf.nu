@@ -3,7 +3,7 @@ import { redirect } from "react-router";
 import { z } from "zod";
 
 import { expireListPreferenceCookies } from "~/utils/cookies.server";
-import { assertIsPost, parseData } from "~/utils/http.server";
+import { assertIsPost, parseData, safeRedirect } from "~/utils/http.server";
 
 export async function action({ context, request }: ActionFunctionArgs) {
   assertIsPost(request);
@@ -15,8 +15,9 @@ export async function action({ context, request }: ActionFunctionArgs) {
   );
 
   context.destroySession();
-  // The next person on this browser starts with clean lists.
-  return redirect(redirectTo || "/login", {
+  // The next person on this browser starts with clean lists. The target comes
+  // from the form, so only same-origin paths are followed.
+  return redirect(safeRedirect(redirectTo, "/login"), {
     headers: await expireListPreferenceCookies(request, { event: "sign-out" }),
   });
 }
