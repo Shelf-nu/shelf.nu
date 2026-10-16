@@ -48,7 +48,7 @@ function ArrowButton({
 }) {
   const disabled =
     navigation.status === "no-context"
-      ? { reason: NO_LIST_CONTEXT_REASON }
+      ? { title: "Not opened from a list", reason: NO_LIST_CONTEXT_REASON }
       : !neighbour;
 
   return (

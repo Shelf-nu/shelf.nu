@@ -174,11 +174,16 @@ export default function AssetDetailsPage() {
               </div>
             }
             slots={{
-              "right-of-title": <AddToCalendar booking={booking} />,
+              // The overview's action bar sits over the breadcrumb row, so
+              // the record arrows live in the title row with Add to calendar.
+              "right-of-title": (
+                <div className="absolute right-4 top-3 flex items-center gap-2">
+                  <AddToCalendar booking={booking} />
+                  <RecordNavigation navigation={recordNavigation} />
+                </div>
+              ),
             }}
-          >
-            <RecordNavigation navigation={recordNavigation} />
-          </Header>
+          />
           <HorizontalTabs items={items} />
         </>
       )}
@@ -198,7 +203,7 @@ const AddToCalendar = ({
   const disabled = useDisabled();
   const isArchived = booking.status === BookingStatus.ARCHIVED;
   return (
-    <div className="absolute right-4 top-3">
+    <div>
       <TooltipProvider delayDuration={100}>
         <Tooltip>
           <TooltipTrigger asChild>

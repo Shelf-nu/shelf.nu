@@ -589,6 +589,7 @@ export function EditBookingForm({ booking, action }: BookingFormData) {
               <div>
                 <NameField
                   key={id}
+                  autoFocus={false}
                   name={name || undefined}
                   fieldName={zo.fields.name()}
                   disabled={
