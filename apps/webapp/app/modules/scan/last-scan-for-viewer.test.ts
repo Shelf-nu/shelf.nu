@@ -39,7 +39,6 @@ const scanRow = {
   code: "BC-0042",
   organizationId: "org-1",
   createdAt: new Date("2026-07-01T10:00:00Z"),
-  qr: null,
   user: {
     id: "user-9",
     firstName: "Dana",

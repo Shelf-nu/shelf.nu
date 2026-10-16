@@ -300,7 +300,7 @@ export async function updateScan(params: {
     }
 
     return await db.scan.update({
-      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: callers pass a scan id they just created (public QR loader) or one `updateScanGeolocation` has bound to the URL's QR and a 5-minute window; a scan may have no org (unclaimed QR).
+      // eslint-disable-next-line local-rules/require-org-scope-on-id-queries -- idor-safe: callers pass a scan id they just created (public QR loader) or one `updateScanGeolocation` has bound to the URL's QR and a 5-minute window.
       where: { id },
       data,
     });
@@ -475,7 +475,6 @@ export async function getLastScanForTarget(target: ScanTarget) {
             userOrganizations: true,
           },
         },
-        qr: true,
       },
     });
 

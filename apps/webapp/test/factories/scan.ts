@@ -10,13 +10,13 @@ const SCAN_AT = new Date("2026-08-12T13:10:00.000Z");
  * the mobile QR resolve route writes — so callers override only what their
  * assertion is about (e.g. `userAgent`).
  *
- * The `user` and `qr` relations default to `null` and have no helper of their
- * own on purpose: building them would mean either listing every required
+ * The `user` relation defaults to `null` and has no helper of its own on
+ * purpose: building them would mean either listing every required
  * Prisma column or casting, and casting is exactly what this factory exists
  * to avoid. A test that needs them should pass fully-typed objects, so a
  * schema change fails the build rather than the assertion.
  *
- * @param overrides - partial scan fields, including the `user` and `qr` relations
+ * @param overrides - partial scan fields, including the `user` relation
  * @returns a fully typed scan; a `Scan` schema change breaks this at compile time
  */
 export function createScanWithRelations(
@@ -41,7 +41,6 @@ export function createScanWithRelations(
     createdAt: SCAN_AT,
     updatedAt: SCAN_AT,
     user: null,
-    qr: null,
     ...overrides,
   };
 }

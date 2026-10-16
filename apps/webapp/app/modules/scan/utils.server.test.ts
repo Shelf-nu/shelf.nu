@@ -179,30 +179,6 @@ describe("parseScanData", () => {
     expect(result?.scannedBy).toBe("Unknown");
   });
 
-  it("falls back to the QR's workspace on a row that has none", () => {
-    const result = parseScanData({
-      scan: createScanWithRelations({
-        organizationId: null,
-        qr: {
-          id: "qr-1",
-          version: 0,
-          errorCorrection: "L",
-          assetId: "asset-1",
-          kitId: null,
-          userId: "user-1",
-          organizationId: "org-1",
-          batchId: null,
-          createdAt: new Date("2026-01-01"),
-          updatedAt: new Date("2026-01-01"),
-        },
-        user: scannerIn("org-1"),
-      }),
-      userId: "user-1",
-    });
-
-    expect(result?.scannedBy).toBe("Dana Reeves (dana@example.com)");
-  });
-
   it("exposes the scanned value for a barcode or SAM ID, never for a QR", () => {
     const barcode = parseScanData({
       scan: createScanWithRelations({ codeType: "BARCODE", code: "BC-0042" }),
