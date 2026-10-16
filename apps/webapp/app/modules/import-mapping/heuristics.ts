@@ -15,6 +15,7 @@ import { CustomFieldType } from "@prisma/client";
 import { getDefinitionFromCsvHeader } from "~/utils/custom-fields";
 import type { AssetCsvHeader } from "./fields";
 import { IMPORT_FIELDS, getImportField, isAssetCsvHeader } from "./fields";
+import { lookupSynonym, normalizeHeader } from "./synonyms";
 import type { ColumnMapping, ColumnTarget, MappingProposal } from "./types";
 import {
   MAX_PROPOSAL_NOTES,
@@ -64,170 +65,10 @@ export function buildColumnSamples(csvData: string[][]): ColumnSamples {
   return { headers, samples };
 }
 
-/**
- * Lowercases a header and folds every run of punctuation or whitespace into
- * one space, so "Serial No.", "serial_no" and "SERIAL-NO" compare equal.
- *
- * @param text - Header text
- * @returns The comparable form
- */
-export function normalizeHeader(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
 /** Same as {@link normalizeHeader} with the spaces removed. */
 function compactHeader(text: string): string {
   return normalizeHeader(text).replace(/ /g, "");
 }
-
-/** A synonym's destination before workspace fields are taken into account. */
-type SynonymTarget =
-  | { kind: "field"; name: AssetCsvHeader }
-  | { kind: "customField"; name: string; type: CustomFieldType };
-
-/**
- * Common spreadsheet headings and the Shelf destination they mean. Keys are in
- * {@link normalizeHeader} form. Barcode destinations are dropped when the
- * workspace has no barcode add-on.
- */
-const SYNONYMS: Record<string, SynonymTarget> = {};
-
-/** Registers several headings for one destination. */
-function synonyms(target: SynonymTarget, headings: string[]) {
-  for (const heading of headings) SYNONYMS[normalizeHeader(heading)] = target;
-}
-
-const field = (name: AssetCsvHeader): SynonymTarget => ({
-  kind: "field",
-  name,
-});
-
-synonyms(field("title"), [
-  "name",
-  "item",
-  "item name",
-  "asset",
-  "asset name",
-  "product",
-  "product name",
-  "equipment",
-  "equipment name",
-  "device",
-  "device name",
-]);
-synonyms(field("description"), [
-  "notes",
-  "note",
-  "comments",
-  "comment",
-  "details",
-  "remarks",
-  "item description",
-  "asset description",
-]);
-synonyms(field("category"), [
-  "categories",
-  "group",
-  "asset type",
-  "item type",
-  "equipment type",
-  "class",
-  "classification",
-  "folder",
-]);
-synonyms(field("tags"), ["tag", "labels", "keywords"]);
-synonyms(field("location"), [
-  "room",
-  "site",
-  "building",
-  "where",
-  "place",
-  "area",
-  "office",
-  "warehouse",
-  "storage",
-  "storage location",
-  "current location",
-]);
-synonyms(field("custodian"), [
-  "owner",
-  "assigned to",
-  "assignee",
-  "holder",
-  "who has it",
-  "checked out to",
-  "employee",
-  "assigned user",
-]);
-synonyms(field("valuation"), [
-  "value",
-  "price",
-  "cost",
-  "purchase price",
-  "unit price",
-  "worth",
-  "current value",
-]);
-synonyms(field("quantity"), [
-  "qty",
-  "count",
-  "stock",
-  "on hand",
-  "quantity on hand",
-  "units",
-]);
-synonyms(field("minQuantity"), [
-  "min quantity",
-  "minimum",
-  "min level",
-  "min qty",
-  "reorder point",
-  "reorder level",
-  "low stock",
-]);
-synonyms(field("unitOfMeasure"), ["unit", "unit of measure", "uom"]);
-synonyms(field("imageUrl"), [
-  "image",
-  "image url",
-  "photo",
-  "photo url",
-  "picture",
-]);
-synonyms(field("assetModel"), [
-  "model",
-  "brand",
-  "manufacturer",
-  "make",
-  "model name",
-]);
-synonyms(field("qrId"), ["qr", "qr id", "qr code", "shelf qr"]);
-synonyms(field("barcode_Code128"), ["barcode", "bar code"]);
-synonyms(field("barcode_EAN13"), ["ean", "ean13", "ean 13", "upc"]);
-synonyms(field("barcode_Code39"), ["code39", "code 39"]);
-synonyms(field("barcode_DataMatrix"), ["datamatrix", "data matrix"]);
-synonyms(
-  { kind: "customField", name: "Serial number", type: CustomFieldType.TEXT },
-  ["serial", "serial number", "serial no", "serial nr", "s n", "sn"]
-);
-synonyms(
-  { kind: "customField", name: "Purchase date", type: CustomFieldType.DATE },
-  [
-    "purchase date",
-    "purchased",
-    "date purchased",
-    "bought",
-    "date bought",
-    "acquired",
-    "acquisition date",
-  ]
-);
-synonyms(
-  { kind: "customField", name: "Warranty expiry", type: CustomFieldType.DATE },
-  ["warranty", "warranty expiry", "warranty until", "warranty end"]
-);
 
 /** Values the importer accepts in enum-like columns, checked on samples. */
 const ALLOWED_VALUES: Partial<Record<AssetCsvHeader, Set<string>>> = {
@@ -311,7 +152,7 @@ function proposeColumn(
     };
   }
 
-  const synonym = SYNONYMS[normalizeHeader(header)];
+  const synonym = lookupSynonym(header);
   if (synonym) {
     if (synonym.kind === "field") {
       if (
