@@ -61,15 +61,43 @@ function useContentBounds(active: boolean) {
   return bounds;
 }
 
+/** Space kept between the bar and the content above it, in px. */
+const BAR_GAP_PX = 16;
+
+/**
+ * Pads the page's scroll container by the bar's height while the bar
+ * shows, so the last field and the form's own Save row can scroll clear of
+ * it. The padding is added on top of the container's own and removed when
+ * the bar goes away.
+ */
+function usePadContentFor(bar: HTMLElement | null) {
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!bar || !main) return;
+    const ownPadding = parseFloat(getComputedStyle(main).paddingBottom) || 0;
+    const previous = main.style.paddingBottom;
+    const apply = () => {
+      const height = bar.getBoundingClientRect().height;
+      main.style.paddingBottom = `${ownPadding + height + BAR_GAP_PX}px`;
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      main.style.paddingBottom = previous;
+    };
+  }, [bar]);
+}
+
 /**
  * Renders the unsaved-changes pill while a form is dirty, and the leave
  * dialog while a navigation is blocked. Renders nothing on a clean form.
  *
- * Wide screens (`xl`): a pill fixed near the top, centred over the page
- * content. Below `xl` the breadcrumb row is too narrow to share with the
- * form's header actions, so from `md` the pill floats at the bottom
- * instead. Below `md`: a full-width strip at the bottom, above the
- * safe-area inset.
+ * From `md`: a floating card fixed at the bottom, centred over the page
+ * content, styled like Shelf's cards and toasts. Below `md`: a full-width
+ * strip at the bottom, above the safe-area inset. While it shows, the page
+ * gets extra bottom padding so nothing ends up hidden under it.
  *
  * @param props - See {@link UnsavedChangesBarProps}
  */
@@ -90,6 +118,9 @@ export function UnsavedChangesBar({
    * dialog, and that close must not cancel the navigation it just allowed.
    */
   const leavingRef = useRef(false);
+  /** The bar's surface, measured to pad the page while it shows. */
+  const [barElement, setBarElement] = useState<HTMLDivElement | null>(null);
+  usePadContentFor(visible ? barElement : null);
   const isBlocked = state.status === "blocked";
   useEffect(() => {
     // why: a Leave page whose navigation does not unmount the form (an
@@ -105,7 +136,7 @@ export function UnsavedChangesBar({
         <div
           role="region"
           aria-label="Unsaved changes"
-          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-[env(safe-area-inset-bottom)] md:bottom-4 md:left-[var(--unsaved-bar-left)] md:right-auto md:w-[var(--unsaved-bar-width)] md:pb-0 xl:bottom-auto xl:top-3"
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center pb-[env(safe-area-inset-bottom)] md:bottom-4 md:left-[var(--unsaved-bar-left)] md:right-auto md:w-[var(--unsaved-bar-width)] md:pb-0"
           style={
             bounds
               ? ({
@@ -115,15 +146,17 @@ export function UnsavedChangesBar({
               : undefined
           }
         >
-          <div className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-4 bg-gray-900 px-4 py-3 text-white shadow-lg duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded-full md:py-2 md:pl-5 md:pr-2 xl:slide-in-from-top-2">
-            <span className="text-sm font-semibold">
+          <div
+            ref={setBarElement}
+            className="motion-reduce:animate-none pointer-events-auto flex w-full items-center justify-between gap-6 border-t border-gray-200 bg-white px-4 py-3 shadow-xl duration-200 animate-in fade-in slide-in-from-bottom-2 md:w-auto md:rounded md:border md:py-2.5 md:pl-4 md:pr-2.5"
+          >
+            <span className="text-sm font-medium text-gray-700">
               {isSaving ? "Saving..." : "Unsaved changes"}
             </span>
             <div className="flex items-center gap-2">
               <Button
                 type="button"
                 variant="secondary"
-                size="xs"
                 onClick={onDiscard}
                 disabled={disabled || isSaving}
               >
@@ -132,7 +165,6 @@ export function UnsavedChangesBar({
               <Button
                 type="button"
                 variant="primary"
-                size="xs"
                 onClick={onSave}
                 disabled={disabled || isSaving}
               >
