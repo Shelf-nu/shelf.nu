@@ -15,6 +15,7 @@
  *
  * @see {@link file://../../../../app/routes/api+/mobile+/qr.$qrId.ts}
  */
+import type { Scan } from "@prisma/client";
 import { loader } from "~/routes/api+/mobile+/qr.$qrId";
 import { mobileUserContext } from "@helpers/mobile-user-context";
 import { createLoaderArgs } from "@mocks/remix";
@@ -242,7 +243,9 @@ describe("GET /api/mobile/qr/:qrId", () => {
     (db.qr.findUnique as any).mockResolvedValue(mockQr);
     (db.userOrganization.findUnique as any).mockResolvedValue({ id: "uo-1" });
     (db.asset.findFirst as any).mockResolvedValue(mockAsset);
-    (recordScanNonFatal as any).mockResolvedValue({ id: "scan-1" });
+    vitest
+      .mocked(recordScanNonFatal)
+      .mockResolvedValue({ id: "scan-1" } as Scan);
     asViewer({ canSeeAllCustody: true });
   });
 
@@ -353,7 +356,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
   });
 
   it("records a SAM ID scan against the asset, with a note", async () => {
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    vitest.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
 
     const result = await run(
       createQrRequest(undefined, "sam-0001"),
@@ -375,19 +378,20 @@ describe("GET /api/mobile/qr/:qrId", () => {
   });
 
   it("records a SAM-shaped barcode as the barcode it is", async () => {
-    (requireOrganizationAccess as any).mockResolvedValue("org-1");
+    vitest.mocked(requireOrganizationAccess).mockResolvedValue("org-1");
     (db.asset.findFirst as any).mockResolvedValue(null);
-    (db.organization.findUnique as any).mockResolvedValue({
+    // why: the route reads only these fields off each result
+    vitest.mocked(db.organization.findUnique).mockResolvedValue({
       barcodesEnabled: true,
-    });
-    (getBarcodeByValue as any).mockResolvedValue({
+    } as Awaited<ReturnType<typeof db.organization.findUnique>>);
+    vitest.mocked(getBarcodeByValue).mockResolvedValue({
       id: "barcode-1",
       value: "SAM-0001",
       assetId: "asset-1",
       kitId: null,
       asset: mockAsset,
       kit: null,
-    });
+    } as unknown as Awaited<ReturnType<typeof getBarcodeByValue>>);
 
     const result = await run(
       createQrRequest(undefined, "SAM-0001"),
@@ -447,7 +451,7 @@ describe("GET /api/mobile/qr/:qrId", () => {
 
   it("still resolves the asset when recording yields nothing", async () => {
     // A failed record comes back as null from the non-fatal wrapper.
-    (recordScanNonFatal as any).mockResolvedValue(null);
+    vitest.mocked(recordScanNonFatal).mockResolvedValue(null);
 
     const result = await run(createQrRequest());
 

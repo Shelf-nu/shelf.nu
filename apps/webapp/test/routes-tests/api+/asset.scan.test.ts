@@ -99,6 +99,41 @@ describe("POST /api/asset/scan", () => {
     });
   });
 
+  it("records against the SAM ID of an asset that has no QR code", async () => {
+    mockGetAsset.mockResolvedValue({
+      id: "asset-1",
+      sequentialId: "SAM-0007",
+      qrCodes: [],
+    });
+
+    const { status } = await post(validForm);
+
+    expect(status).toBe(200);
+    expect(mockRecordScan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codeType: "SAM_ID",
+        code: "SAM-0007",
+        source: "GPS_UPDATE",
+        assetId: "asset-1",
+        organizationId: "org-1",
+      })
+    );
+    expect(mockRecordScan.mock.calls[0][0]).not.toHaveProperty("qrId");
+  });
+
+  it("refuses an asset with neither a QR code nor a SAM ID", async () => {
+    mockGetAsset.mockResolvedValue({
+      id: "asset-1",
+      sequentialId: null,
+      qrCodes: [],
+    });
+
+    const { status } = await post(validForm);
+
+    expect(status).toBe(400);
+    expect(mockRecordScan).not.toHaveBeenCalled();
+  });
+
   it("refuses an archived asset before recording anything", async () => {
     mockAssertNotArchived.mockRejectedValue(
       Object.assign(new Error("Archived"), { status: 400 })
