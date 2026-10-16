@@ -144,6 +144,7 @@ describe("POST /api/mobile/audits/record-scan", () => {
       assetId: "asset-1",
       userId: "user-1",
       organizationId: "org-1",
+      userAgent: null,
     });
 
     // why: an ADMIN is not limited to assigned audits, so admins can scan
