@@ -2,6 +2,7 @@ import { transporter } from "~/emails/transporter.server";
 import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { QueueNames, scheduler } from "~/utils/scheduler.server";
+import { parseRecipientList } from "./recipient-list";
 import { redactEmailPayloadForLog } from "./redact-email-payload";
 import type { EmailPayloadType } from "./types";
 import { SMTP_FROM, SUPPORT_EMAIL } from "../utils/env";
@@ -77,17 +78,13 @@ export const triggerEmail = async ({
 }: EmailPayloadType) => {
   /**
    * `to` can carry a comma separated list of addresses (in-app feedback goes
-   * to every inbox in FEEDBACK_EMAIL), so the soft-deleted check runs per
-   * address instead of on the whole string. Two things this fixes for lists:
-   * one soft-deleted recipient no longer drops the email for everybody else,
-   * and the outcome no longer depends on which address happens to be last.
-   * An empty/unparseable `to` is passed through untouched so it still fails
-   * loudly in nodemailer rather than being silently swallowed here.
+   * to every inbox in FEEDBACK_EMAIL). Each address is checked on its own:
+   * one soft-deleted recipient does not suppress the others, and the outcome
+   * does not depend on address order. An empty `to` is passed through
+   * untouched so it fails loudly in nodemailer rather than being silently
+   * swallowed here.
    */
-  const recipients = to
-    .split(",")
-    .map((address) => address.trim())
-    .filter(Boolean);
+  const recipients = parseRecipientList(to);
   const deliverableRecipients = recipients.filter(
     // Lower-cased first: domains are case-insensitive, so an address stored
     // as "@DELETED.SHELF.NU" is the same dead inbox and must not be mailed

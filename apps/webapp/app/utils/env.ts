@@ -224,8 +224,7 @@ export const ADMIN_EMAIL = getEnv("ADMIN_EMAIL", {
  * Internal inbox(es) that receive in-app feedback: issues, ideas and error
  * reports. Accepts a comma separated list so more than one person gets
  * notified (e.g. the support inbox plus whoever triages product feedback).
- * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone,
- * which is what every deployment did before this variable existed.
+ * Optional: when it is unset the feedback email goes to SUPPORT_EMAIL alone.
  *
  * Server side only, and deliberately absent from `getBrowserEnv()`: unlike
  * SUPPORT_EMAIL it is never shown to users, it only routes internal mail.

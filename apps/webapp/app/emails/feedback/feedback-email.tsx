@@ -13,6 +13,7 @@ import { ShelfError } from "~/utils/error";
 import { Logger } from "~/utils/logger";
 import { LogoForEmail } from "../logo";
 import { sendEmail } from "../mail.server";
+import { parseRecipientList } from "../recipient-list";
 import { styles } from "../styles";
 
 interface FeedbackEmailProps {
@@ -44,36 +45,23 @@ type DetailRow = { label: string; value: string; href?: string };
  * Resolves the internal recipients of the feedback email.
  *
  * `FEEDBACK_EMAIL` accepts a comma separated list so a report can land in
- * more than one inbox; when it is not set we fall back to `SUPPORT_EMAIL`,
- * which is where every deployment sent feedback before. Addresses are
- * trimmed and de-duplicated (case-insensitively) because nodemailer happily
- * delivers the same message twice when an address is repeated.
+ * more than one inbox; when it is blank or unset it falls back to
+ * `SUPPORT_EMAIL`. Addresses are trimmed and de-duplicated
+ * case-insensitively (see {@link parseRecipientList}).
  *
  * Pure and exported so the resolution can be tested without re-mocking the
  * env module for every case.
+ *
+ * @param feedbackEmail - The FEEDBACK_EMAIL value, possibly a list
+ * @param supportEmail - The SUPPORT_EMAIL value, used when FEEDBACK_EMAIL is blank
+ * @returns The recipients joined as a `to` header, or "" when none is configured
  */
 export function resolveFeedbackRecipients(
   feedbackEmail: string | undefined,
   supportEmail: string | undefined
 ) {
   const configured = feedbackEmail?.trim() ? feedbackEmail : supportEmail;
-  const seen = new Set<string>();
-
-  return (configured ?? "")
-    .split(",")
-    .map((address) => address.trim())
-    .filter((address) => {
-      if (!address) {
-        return false;
-      }
-      const key = address.toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    })
-    .join(", ");
+  return parseRecipientList(configured).join(", ");
 }
 
 /**
@@ -93,8 +81,8 @@ export const sendFeedbackEmail = async (props: FeedbackEmailProps) => {
 
     const to = resolveFeedbackRecipients(FEEDBACK_EMAIL, SUPPORT_EMAIL);
     if (!to) {
-      /* Neither variable is set: sending would fail inside nodemailer and
-       * burn 15 queue retries on a config problem, so say so once instead. */
+      /* Neither variable is set. Queueing would only fail inside nodemailer
+       * and retry 15 times on a config problem, so fail here instead. */
       throw new ShelfError({
         cause: null,
         message:
