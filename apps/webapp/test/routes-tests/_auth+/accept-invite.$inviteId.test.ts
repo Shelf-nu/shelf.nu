@@ -196,6 +196,31 @@ describe("accept-invite action", () => {
     );
   });
 
+  it("forgets the list settings the browser kept when it signs the invitee in", async () => {
+    vi.mocked(signInWithEmail).mockResolvedValueOnce({
+      userId: "user-1",
+    } as never);
+
+    const response = (await action({
+      request: new Request("https://app.shelf.nu/accept-invite/real-invite", {
+        method: "POST",
+        headers: {
+          Cookie: "org-9_bookingFilter_v2=cz1aWg%3D%3D; user-prefs=e30%3D",
+        },
+        body: new URLSearchParams({ token: tokenFor("real-invite") }),
+      }),
+      params: { inviteId: "real-invite" },
+      context: { isAuthenticated: false, setSession: vi.fn() },
+    } as unknown as Parameters<typeof action>[0])) as unknown as Response;
+
+    expect(response.headers.getSetCookie()).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^org-9_bookingFilter_v2=;.*Max-Age=0/),
+        expect.stringMatching(/^user-prefs=.*Max-Age=0/),
+      ])
+    );
+  });
+
   it("tells an invitee on an SSO domain to use SSO before creating anything", async () => {
     mockGetLegacyLoginDecision.mockResolvedValue({
       allowed: false,

@@ -202,7 +202,6 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
     if (context.isAuthenticated) {
       return redirect(safeRedirect("/"), {
         headers: [
-          ...(await expireListPreferenceCookies(request)),
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
           ),
@@ -241,6 +240,9 @@ export async function action({ context, params, request }: LoaderFunctionArgs) {
       ),
       {
         headers: [
+          // A new session: whatever lists this browser remembers belong to
+          // whoever used it last.
+          ...(await expireListPreferenceCookies(request)),
           setCookie(
             await setSelectedOrganizationIdCookie(updatedInvite.organizationId)
           ),
