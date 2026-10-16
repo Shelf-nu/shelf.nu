@@ -99,6 +99,16 @@ function parseCustomFieldHeader(
   return { kind: "customField", name: name.data, type: definition.type };
 }
 
+/**
+ * Whether the workspace may import into a Shelf field. Barcode fields need the
+ * barcode add-on; without it the importer refuses the whole file.
+ */
+function fieldAllowed(name: AssetCsvHeader, options: RulesOptions): boolean {
+  return (
+    !getImportField(name).requiresBarcodes || Boolean(options.canUseBarcodes)
+  );
+}
+
 /** One column's proposal before duplicate destinations are resolved. */
 type Candidate = Pick<ColumnMapping, "target" | "confidence">;
 
@@ -118,6 +128,7 @@ function proposeColumn(
   if (header === "") return skip;
 
   if (isAssetCsvHeader(header)) {
+    if (!fieldAllowed(header, options)) return skip;
     return { target: { kind: "field", name: header }, confidence: "high" };
   }
 
@@ -141,6 +152,7 @@ function proposeColumn(
     (candidate) => compactHeader(candidate.name) === compact
   );
   if (looseField) {
+    if (!fieldAllowed(looseField.name, options)) return skip;
     if (samplesFitField(looseField.name, sample)) {
       return {
         target: { kind: "field", name: looseField.name },
@@ -165,12 +177,7 @@ function proposeColumn(
   const synonym = lookupSynonym(header);
   if (synonym) {
     if (synonym.kind === "field") {
-      if (
-        getImportField(synonym.name).requiresBarcodes &&
-        !options.canUseBarcodes
-      ) {
-        return skip;
-      }
+      if (!fieldAllowed(synonym.name, options)) return skip;
       return { target: synonym, confidence: "high" };
     }
     // Prefer the workspace's own field of that name, with its stored type.

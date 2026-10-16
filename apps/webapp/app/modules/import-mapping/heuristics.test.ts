@@ -141,6 +141,25 @@ describe("proposeByRules", () => {
     });
   });
 
+  it("never proposes a barcode field without the add-on, however it is named", () => {
+    const rows = [
+      ["barcode_Code128", "Barcode EAN13", "barcode_datamatrix"],
+      ["ABC1234", "4006381333931", "DM1234"],
+    ];
+    expect(propose(rows).columns.map((column) => column.target)).toEqual([
+      { kind: "skip" },
+      { kind: "skip" },
+      { kind: "skip" },
+    ]);
+    expect(
+      propose(rows, [], true).columns.map((column) => column.target)
+    ).toEqual([
+      { kind: "field", name: "barcode_Code128" },
+      { kind: "field", name: "barcode_EAN13" },
+      { kind: "field", name: "barcode_DataMatrix" },
+    ]);
+  });
+
   it("warns that quantities above 1 need a type column", () => {
     expect(propose([["Qty"], ["1"]]).notes).toContain(
       QUANTITY_WITHOUT_TYPE_NOTE
