@@ -77,6 +77,12 @@ declare global {
       COOKIE_DOMAIN: string;
       POSTHOG_API_KEY: string;
       POSTHOG_HOST: string;
+      /**
+       * Optional. Enables the model-assisted column mapping in the asset
+       * importer. Server-only: read in `modules/import-mapping/client.server.ts`
+       * and nowhere else.
+       */
+      ANTHROPIC_API_KEY: string;
       COMPANION_SERVERS: string;
       INSTANCE_NAME: string;
       MIN_COMPANION_VERSION: string;
