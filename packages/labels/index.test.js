@@ -56,6 +56,7 @@ import {
   archivedAssetsRefusal,
   kitWithoutActiveAssetsReason,
   kitsWithoutActiveAssetsRefusal,
+  WITHHELD_CUSTODIAN_NAME,
 } from "./index.js";
 
 /** The tones both apps know how to resolve. Adding one means touching both. */
@@ -562,4 +563,11 @@ test("each delete consequence says it is permanent", () => {
     // House rule: no em or en dashes in user-facing strings.
     assert.doesNotMatch(text, /[\u2013\u2014]/);
   }
+});
+
+test("a withheld custodian is a name, never the empty answer", () => {
+  // Clients render `null` as "no custodian" and this string as "hidden", so it
+  // must stay a non-empty string a row can carry in the name slot.
+  assert.equal(typeof WITHHELD_CUSTODIAN_NAME, "string");
+  assert.ok(WITHHELD_CUSTODIAN_NAME.trim().length > 0);
 });

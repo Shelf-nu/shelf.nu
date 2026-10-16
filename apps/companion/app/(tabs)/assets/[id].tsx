@@ -70,6 +70,7 @@ import { QuickActions } from "@/components/asset-detail/quick-actions";
 import { NotesSection } from "@/components/asset-detail/notes-section";
 import { CodeSection } from "@/components/shared/code-section";
 import { CustomFieldsSection } from "@/components/asset-detail/custom-fields-section";
+import { AssetBookingsSection } from "@/components/asset-detail/asset-bookings-section";
 import { InfoRow } from "@/components/shared/info-row";
 import { ArchivedNotice } from "@/components/shared/archived-notice";
 import { assetBadgeStatus, isArchivedAsset } from "@/lib/archived-assets";
@@ -1137,6 +1138,14 @@ export default function AssetDetailScreen() {
               </View>
             </View>
           )}
+
+          {/* ── Bookings ────────────────────────────────── */}
+          <AssetBookingsSection
+            key={asset.id}
+            assetId={asset.id}
+            orgId={currentOrg?.id}
+            assetSnapshot={asset}
+          />
 
           {/* ── Codes ──────────────────────────────────── */}
           {/* Leads with the workspace's preferred code and offers the others.
