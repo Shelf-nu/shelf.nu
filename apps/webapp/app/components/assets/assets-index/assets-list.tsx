@@ -28,6 +28,10 @@ import { useAssetIndexView } from "~/hooks/use-asset-index-view";
 import { useCurrentOrganization } from "~/hooks/use-current-organization";
 import { useDisabled } from "~/hooks/use-disabled";
 import { useIsUserAssetsPage } from "~/hooks/use-is-user-assets-page";
+import {
+  type ListContextLinkState,
+  useListContextLinkState,
+} from "~/hooks/use-list-context";
 import { useOrganizationRoles } from "~/hooks/use-organization-roles";
 import { useViewportHeight } from "~/hooks/use-viewport-height";
 import type { AssetsFromViewItem } from "~/modules/asset/types";
@@ -35,6 +39,7 @@ import { getPrimaryLocation, isQuantityTracked } from "~/modules/asset/utils";
 import type { AssetModelRollupRow } from "~/modules/asset-model/rollup.server";
 import { resolveDisplayCode } from "~/modules/barcode/display";
 import { formatCustodyList } from "~/modules/custody/utils";
+import { LIST_DETAIL_PATH } from "~/modules/list-navigation/list-context";
 import type { AssetIndexLoaderData } from "~/routes/_layout+/assets._index";
 import { isPersonalOrg } from "~/utils/organization";
 import {
@@ -98,6 +103,7 @@ export const AssetsList = ({
   disableBulkActions,
   wrapperClassName,
   titleContent,
+  withListContext = false,
 }: {
   customEmptyStateContent?: ListProps["customEmptyStateContent"];
   disableTeamMemberFilter?: boolean;
@@ -109,6 +115,12 @@ export const AssetsList = ({
    * loader ignores `?archived=`, where that menu would change nothing.
    */
   titleContent?: ListProps["titleContent"];
+  /**
+   * Rows carry this list's search in history state, so the asset page they
+   * open can step through the list with its previous/next arrows. Only the
+   * asset index sets it: the neighbours lookup replays the index's own query.
+   */
+  withListContext?: boolean;
 }) => {
   const {
     items,
@@ -128,7 +140,16 @@ export const AssetsList = ({
   const columns = useAssetIndexColumns();
   // Memoize so the object reference stays stable across re-renders,
   // allowing React.memo on AdvancedAssetRow to work effectively.
-  const advancedExtraProps = useMemo(() => ({ columns }), [columns]);
+  const listContextLinkState = useListContextLinkState("asset");
+  const linkState = withListContext ? listContextLinkState : undefined;
+  const advancedExtraProps = useMemo(
+    () => ({ columns, linkState }),
+    [columns, linkState]
+  );
+  const simpleExtraProps = useMemo(
+    () => (linkState ? { linkState } : undefined),
+    [linkState]
+  );
   const { isMd } = useViewportHeight();
   const isUserPage = useIsUserAssetsPage();
   const roles = useOrganizationRoles();
@@ -539,7 +560,7 @@ export const AssetsList = ({
               titleContent={titleContent}
               headerChildren={headerChildren}
               extraItemComponentProps={
-                modeIsSimple ? undefined : advancedExtraProps
+                modeIsSimple ? simpleExtraProps : advancedExtraProps
               }
             />
           )}
@@ -553,10 +574,13 @@ export const ListAssetContent = ({
   item,
   bulkActions,
   isUserPage,
+  extraProps,
 }: {
   item: AssetsFromViewItem;
   bulkActions?: ReactNode;
   isUserPage?: boolean;
+  /** `linkState` makes the title link open the asset with this list's context. */
+  extraProps?: { linkState?: ListContextLinkState };
 }) => {
   const { category, tags, custody: custodyArray } = item;
   // Render only the single primary-location badge in the list column —
@@ -620,7 +644,12 @@ export const ListAssetContent = ({
             <div className="min-w-[130px]">
               <span className="word-break mb-1 block ">
                 <Button
-                  to={`/assets/${item.id}`}
+                  to={
+                    extraProps?.linkState
+                      ? LIST_DETAIL_PATH.asset(item.id)
+                      : `/assets/${item.id}`
+                  }
+                  state={extraProps?.linkState}
                   variant="link"
                   className="text-left font-medium text-gray-900 hover:text-gray-700"
                 >
