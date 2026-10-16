@@ -370,3 +370,60 @@ describe("expireListPreferenceCookies", () => {
     expect(expiredNames(headers)).toEqual(["user-prefs"]);
   });
 });
+
+const { initializePerPageCookieOnLayout, updateCookieWithPerPage, userPrefs } =
+  await import("./cookies.server");
+
+/**
+ * Builds a request whose `user-prefs` cookie holds the given page size.
+ *
+ * @param perPage - The stored page size, or undefined for no cookie
+ */
+async function prefsRequest(perPage?: number) {
+  const cookie =
+    perPage === undefined
+      ? []
+      : [storedValue(await userPrefs.serialize({ perPage }))];
+  return listRequest("http://localhost/locations", cookie);
+}
+
+describe("the remembered page size is always one the list offers", () => {
+  it("saves a size the per-page menu offers", async () => {
+    const cookie = await updateCookieWithPerPage(await prefsRequest(20), 50);
+
+    expect(cookie.perPage).toBe(50);
+  });
+
+  it("ignores a size from the URL the menu does not offer", async () => {
+    const cookie = await updateCookieWithPerPage(await prefsRequest(50), 3);
+
+    // The person's own choice stands.
+    expect(cookie.perPage).toBe(50);
+  });
+
+  it("puts a stuck unsupported size back to the default", async () => {
+    const cookie = await updateCookieWithPerPage(await prefsRequest(2), 0);
+
+    expect(cookie.perPage).toBe(20);
+  });
+
+  it("starts at the default when nothing is stored", async () => {
+    const cookie = await updateCookieWithPerPage(await prefsRequest(), 0);
+
+    expect(cookie.perPage).toBe(20);
+  });
+
+  it("the layout also puts a stuck size back to the default", async () => {
+    const cookie = await initializePerPageCookieOnLayout(await prefsRequest(2));
+
+    expect(cookie.perPage).toBe(20);
+  });
+
+  it("the layout keeps a supported size", async () => {
+    const cookie = await initializePerPageCookieOnLayout(
+      await prefsRequest(100)
+    );
+
+    expect(cookie.perPage).toBe(100);
+  });
+});

@@ -12,6 +12,7 @@ import { advancedFilterFormatSchema } from "~/modules/asset/utils.server";
 import type { Column } from "~/modules/asset-index-settings/helpers";
 import { COOKIE_DOMAIN } from "./env";
 import { getCurrentSearchParams } from "./http.server";
+import { DEFAULT_PER_PAGE, isPerPageOption } from "./per-page";
 
 // find cookie by name from request headers
 export function getCookie(name: string, headers: Headers) {
@@ -120,34 +121,44 @@ export function expireHostOnlyUserPrefsCookie(): Array<[string, string]> {
   return [["Set-Cookie", "user-prefs=; Path=/; Max-Age=0; SameSite=Lax"]];
 }
 
+/**
+ * Resolves the page size to remember for a list request.
+ *
+ * A `per_page` from the URL is remembered only when the per-page menu offers
+ * it. Otherwise the stored size stands, and a stored size the menu does not
+ * offer falls back to the default.
+ *
+ * @param request - The list request, carrying the `user-prefs` cookie
+ * @param perPageParam - `per_page` from the URL, 0 when absent
+ * @returns The `user-prefs` value to serialize back, with a supported `perPage`
+ */
 export async function updateCookieWithPerPage(
   request: Request,
   perPageParam: number
 ) {
-  /* Get the cookie header */
   const cookieHeader = request.headers.get("Cookie");
-
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  /** If the cookie doesn't have perPage, adding perPage attribute and setting it to its default value 20*/
-  if (!cookie.perPage) {
-    cookie.perPage = 20;
-  }
-  /** If the perPageParam is different from the cookie, we update the cookie */
-  if (cookie && perPageParam !== cookie.perPage && perPageParam !== 0) {
+
+  if (isPerPageOption(perPageParam)) {
     cookie.perPage = perPageParam;
+  } else if (!isPerPageOption(cookie.perPage)) {
+    cookie.perPage = DEFAULT_PER_PAGE;
   }
   return cookie;
 }
 
 /**
- * Used to set the perPage cookie on the first load of the page if it doesn't exist
+ * Makes sure `user-prefs` holds a supported page size on every page load, so
+ * a missing or unsupported value is replaced with the default.
  *
+ * @param request - The layout request, carrying the `user-prefs` cookie
+ * @returns The `user-prefs` value to serialize back
  */
 export async function initializePerPageCookieOnLayout(request: Request) {
   const cookieHeader = request.headers.get("Cookie");
   const cookie = (await userPrefs.parse(cookieHeader)) || {};
-  if (!cookie.perPage) {
-    cookie.perPage = 20;
+  if (!isPerPageOption(cookie.perPage)) {
+    cookie.perPage = DEFAULT_PER_PAGE;
   }
   return cookie;
 }
