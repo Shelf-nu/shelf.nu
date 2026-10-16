@@ -18,6 +18,10 @@ import { useEffect, useMemo, useReducer, useRef } from "react";
 import { useDisabled } from "~/hooks/use-disabled";
 import useFetcherWithReset from "~/hooks/use-fetcher-with-reset";
 import type { ExistingCustomField } from "~/modules/import-mapping/heuristics";
+import {
+  buildFormatNotes,
+  isAlreadyShelfFormat,
+} from "~/modules/import-mapping/heuristics";
 import type { ColumnStats } from "~/modules/import-mapping/summary";
 import { summarizeMapping } from "~/modules/import-mapping/summary";
 import type {
@@ -221,8 +225,10 @@ export function MappingImportForm() {
             duplicateRows={duplicateRows}
             existingCustomFields={state.analysis.existingCustomFields}
             canUseBarcodes={canUseBarcodes}
-            notes={state.analysis.proposal.notes}
-            alreadyMatches={state.analysis.alreadyMatches}
+            // Recomputed from the edited mapping, so a note goes away once the
+            // column it warns about is remapped.
+            notes={buildFormatNotes(state.columns)}
+            alreadyMatches={isAlreadyShelfFormat(state.columns)}
             summary={summarizeMapping({
               columns: state.columns,
               stats: state.analysis.columnStats,

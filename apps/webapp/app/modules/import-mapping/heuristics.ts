@@ -123,7 +123,17 @@ function proposeColumn(
 
   if (header.toLowerCase().startsWith("cf:")) {
     const target = parseCustomFieldHeader(header);
-    return target ? { target, confidence: "high" } : skip;
+    if (!target) return skip;
+    // The importer refuses a header whose type contradicts an existing field
+    // of the same name, so the stored type wins and the row asks for a check.
+    const stored = existingByName.get(normalizeHeader(target.name));
+    if (stored && stored.type !== target.type) {
+      return {
+        target: { kind: "customField", name: stored.name, type: stored.type },
+        confidence: "low",
+      };
+    }
+    return { target, confidence: "high" };
   }
 
   const compact = compactHeader(header);

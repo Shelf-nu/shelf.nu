@@ -167,6 +167,20 @@ describe("proposeByRules", () => {
   });
 });
 
+describe("cf: headers against existing custom fields", () => {
+  it("takes the stored type when the header's type contradicts it", () => {
+    const proposal = propose(
+      [["cf:Brand, type:option"], ["amd"]],
+      [{ name: "brand", type: CustomFieldType.TEXT }]
+    );
+    expect(proposal.columns[0]).toMatchObject({
+      target: { kind: "customField", name: "brand", type: "TEXT" },
+      confidence: "low",
+    });
+    expect(isAlreadyShelfFormat(proposal.columns)).toBe(false);
+  });
+});
+
 describe("isAlreadyShelfFormat", () => {
   it("is true for the Shelf template headers", () => {
     const proposal = propose([

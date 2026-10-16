@@ -144,13 +144,13 @@ export function MappingReview({
       ) : null}
 
       <div className="overflow-x-auto rounded border border-gray-200">
-        <table className="w-full min-w-[640px] text-left text-[14px]">
+        <table className="w-full min-w-[560px] table-fixed text-left text-[14px]">
           <thead className="bg-gray-50 text-xs text-gray-600">
             <tr>
-              <th scope="col" className="px-3 py-2 font-medium">
+              <th scope="col" className="w-1/4 px-3 py-2 font-medium">
                 Your column
               </th>
-              <th scope="col" className="px-3 py-2 font-medium">
+              <th scope="col" className="w-1/5 px-3 py-2 font-medium">
                 Sample
               </th>
               <th scope="col" className="px-3 py-2 font-medium">
@@ -181,12 +181,12 @@ export function MappingReview({
                     column.target.kind === "skip" && "text-gray-500"
                   )}
                 >
-                  <th scope="row" className="px-3 py-2 font-medium">
+                  <th scope="row" className="break-words px-3 py-2 font-medium">
                     {column.source || (
                       <span className="italic text-gray-500">No heading</span>
                     )}
                   </th>
-                  <td className="max-w-[220px] px-3 py-2 text-gray-600">
+                  <td className="px-3 py-2 text-gray-600">
                     <span className="block truncate">
                       {column.sample.join(", ") || (
                         <span className="italic">Empty</span>
